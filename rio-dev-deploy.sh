@@ -179,6 +179,9 @@ if {$fail} {
 	puts stderr "verify: $fail required package(s) missing"
 	exit 1
 }
+# With Tk loaded, tclsh would otherwise enter the event loop at stdin EOF
+# and hang. Exit explicitly.
+exit 0
 EOF
 	log "toolchain OK"
 }
