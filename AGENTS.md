@@ -12,10 +12,17 @@ below is built; this captures the agreed design direction.
 > **Sequencing (read this).** This is a **multi-phase** project and there is **no
 > application yet.** The full design space (agent, plugins, server) is mapped
 > below, but we build in order: first a working **core + GUI** that edits real
-> files, with the **Ck spike (O1)** to validate the TUI path. The **agent
-> subsystem (O4)** and the **plugin system (D16–D19)** are *designed but
-> deferred* — do **not** dive deep into their implementation before a working
-> core + GUI exists. Depth in this design log ≠ priority to build.
+> files, with the **Ck spike (O1)** to validate the TUI path.
+>
+> Mind the difference between **designing a seam** and **building a platform.**
+> The plugin/protocol **boundary** (D2, D11, D16) is designed in from **day one**
+> so nothing has to be bolted on later — but *building out* the full plugin
+> **platform** (contribution API, manifests, permissions, SDKs — D17–D19) and the
+> **agent subsystem (O4)** is **deferred**: do **not** dive deep into their
+> implementation before a working core + GUI exists. The agent's first providers
+> ride the *thin* protocol-participant transport (essentially D11), **not** the
+> full platform. The **marketplace** (O11) is deferred further still. Depth in
+> this design log ≠ priority to build.
 
 ---
 
@@ -85,8 +92,11 @@ Guiding qualities:
 - **GUI mode and TUI mode.**
 - **Optional** server mode (GUI/TUI connect to a headless core, like
   `emacs-server` / `vscode-server`). Optional — in-process is the default.
-- A **language-agnostic plugin/extension architecture from day one**
-  (D16–D19). The *marketplace* is deferred; the plugin system itself is not.
+- A **language-agnostic plugin/extension *seam* designed in from day one** (D16):
+  the protocol boundary is provided for up front so extensibility isn't bolted on
+  later. *Building out* the full plugin platform (contribution API, manifests,
+  permissions, SDKs — D17–D19) is **deferred** until core+GUI exist (see
+  Sequencing); the *marketplace* (O11) is deferred further still.
 
 ### Explicitly out of scope (at least for v1)
 
@@ -94,9 +104,10 @@ Guiding qualities:
 - **Any terminal pane or terminal emulator** — no PTY, no interactive shell, not
   even an opt-in one (D15). Use your own terminal.
 - TUI **mouse** support — keyboard-driven only (see Decisions).
-- Extension **marketplace** / in-app install (deferred; the plugin *system* is
-  in scope — D16–D19 — but manifest + permissions are designed now precisely so
-  the marketplace isn't bolted on later).
+- Extension **marketplace** / in-app install (deferred — O11). The plugin *seam*
+  is designed in now (D16) and manifest + permissions are specced (D19) so the
+  marketplace isn't bolted on later — but *building* the plugin platform is itself
+  deferred until after core+GUI (see Sequencing).
 - Remote/multi-user collaborative editing (the model permits it later, but it's
   not a goal).
 
@@ -230,6 +241,12 @@ are community plugins.
 and go. Isolating each behind a plugin means provider churn never touches core:
 core standardizes the *interface*, plugins absorb the *wire specifics*
 (HTTP/REST/JSON/SSE/…). See D20 for the full core-vs-plugin split of the agent.
+
+**Phasing note:** a provider is a protocol participant over the **thin** D11 seam
+— it does **not** require the full (deferred) plugin platform (D17–D19). So the
+in-box Claude / local-LLM providers can land *with* the agent subsystem without
+waiting on the contribution API, manifests, or SDKs. This is what keeps the agent
+buildable after core+GUI without first finishing the whole plugin platform.
 
 ### D9 — Responsive layout rule is a shared pure function
 
@@ -415,8 +432,9 @@ default store is just one entry in config, and pointing rio at *another* Forgejo
 self-hostable, no-special-infrastructure affair — fitting the not-chasing-reach
 stance — rather than a platform we have to run.
 
-**Why:** extensibility from day one without the trust/distribution burden up
-front; security-minded defaults (explicit capability declaration + consent); and
+**Why:** extensibility *designed in* from day one without the trust/distribution
+burden up front; security-minded defaults (explicit capability declaration +
+consent); and
 when distribution is needed, lean on git/Forgejo rather than building (and
 operating) a marketplace platform.
 
@@ -668,7 +686,8 @@ against the protocol (Perl/`Curses::UI` first candidate). Core is unaffected.
 
 ## 7. Documentation plan
 
-Professional, maintained for three audiences:
+Professional, maintained across four documents (three audiences — agents,
+contributors, users):
 
 - **AGENTS.md** (this file) — design & decision log for agents/contributors.
 - **CONTRIBUTING.md** — for **human programmers** who hack on rio: how to build,
