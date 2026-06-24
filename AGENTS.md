@@ -72,8 +72,10 @@ Guiding qualities:
 
 - Editing files (the core: a capable plain-text editing surface).
 - Git integration (status, diff view, stage/commit, branch awareness).
-- A simple **command/terminal runner** for build & debug commands (see Decisions
-  — this is *not* a full PTY terminal emulator in v1).
+- A headless **command-execution primitive** in the core (run a command, capture
+  output + exit code) — plumbing for git and the agent. **Not** a user-facing
+  terminal pane or emulator (D15); manual testing happens in the user's own
+  external terminal.
 - AI agent–assisted coding: chat window, diff view of proposed changes,
   apply/reject. Orchestration + review UX in core; **providers ship as plugins**
   — Claude **and** local LLMs (D20).
@@ -89,7 +91,8 @@ Guiding qualities:
 ### Explicitly out of scope (at least for v1)
 
 - Per-language IDE features (LSP, language-aware refactors, semantic completion).
-- A full interactive terminal emulator with PTY (see command-runner decision).
+- **Any terminal pane or terminal emulator** — no PTY, no interactive shell, not
+  even an opt-in one (D15). Use your own terminal.
 - TUI **mouse** support — keyboard-driven only (see Decisions).
 - Extension **marketplace** / in-app install (deferred; the plugin *system* is
   in scope — D16–D19 — but manifest + permissions are designed now precisely so
@@ -283,9 +286,9 @@ A VSCode-shaped layout with a fixed set of logical regions:
 - **`editor`** (center) — tabbed; splittable into **two editor groups** for
   side-by-side / diff viewing.
 - **`chat`** (right) — the agent/LLM conversation + input + inline proposed-edit
-  diffs (apply/reject).
-- **`runner`** (bottom) — command-runner output (D4 scope). **Hidden by
-  default**, opened on demand (D15).
+  diffs (apply/reject). Command output that the agent needs to show (e.g. a
+  failed test run) surfaces *here*, in the conversation flow — there is no
+  separate terminal pane (D15).
 - **`status`** (bottom, 1 line) — always present; the only permanent bottom
   element, a thin tmux/`screen`-style bar (D15).
 
@@ -305,12 +308,12 @@ reusable primitive keeps both frontends simple and visually consistent.
 
 The `(width, panes) → layout` function (D9) resolves to three tiers:
 
-- **Wide** — `nav | editor | chat` as columns; `status` at the bottom.
-  `runner` is absent unless toggled, then a row under `editor` (D15).
+- **Wide** — `nav | editor | chat` as columns; one-line `status` at the bottom.
+  No bottom pane (no terminal/runner region — D15).
 - **Mid** — keep one side column (the focused one); the other collapses to a
   toggle.
-- **Narrow** — single column; `nav`, `runner`, `chat` become **vertically
-  stacked collapsible sections** around `editor`; only expanded ones take height.
+- **Narrow** — single column; `nav` and `chat` become **vertically stacked
+  collapsible sections** around `editor`; only expanded ones take height.
 
 Editor split: two groups side-by-side when wide enough; **a side-by-side diff
 falls back to a unified diff when too narrow.** Breakpoints are tunable (initial
@@ -320,19 +323,28 @@ same tiers.
 **Why:** turns D9 into concrete policy; the diff fallback keeps diffs usable on
 small terminals (D5 keyboard-only world).
 
-### D15 — Bottom area: a thin status bar by default; `runner` is opt-in
+### D15 — No terminal pane; the bottom is a thin status bar only
 
-By default the only thing at the bottom is the one-line **`status`** bar — a
-dense, informational tmux/`screen`-style strip, no wasted rows. The **`runner`**
-pane is **hidden until the user toggles it**; when shown it takes a bottom row
-(wide tier) or a stacked section (narrow tier) and can be closed again to
-reclaim the space.
+rio ships **no terminal/runner pane at all** — not even an opt-in one. The only
+thing at the bottom is the one-line **`status`** bar: a dense, informational
+tmux/`screen`-style strip, no wasted rows. Manual testing and debugging happen
+in the user's **own external terminal** (xterm, xfce4-terminal, …); that is the
+documented, endorsed workflow.
 
-**Why:** the internal terminal/runner is genuinely optional for many workflows —
-debugging often happens in a real external terminal (xterm, xfce4-terminal). A
-general-purpose IDE shouldn't spend permanent vertical space on it. Off by
-default reclaims space in both GUI and TUI while keeping it one keystroke away:
-simple-by-default, available-on-demand.
+This does **not** remove command *execution* — it removes the terminal *UI*.
+A headless **command-execution primitive** stays in the core (run a command,
+capture stdout/stderr + exit code), because git (D7) and the agent (D20) both
+depend on it. When command output needs to be *seen*, it surfaces in the
+relevant flow (e.g. the agent's `chat` conversation reacting to a failed test),
+not in a dedicated terminal widget.
+
+**Why:** an interactive terminal emulator is the single nastiest cross-platform
+component — PTY handling, ANSI/cursor emulation, resize — and worst of all a
+terminal-inside-a-terminal under Ck. It's also the part the user least needs:
+real debugging happens in a real terminal. Cutting the *pane* (while keeping the
+headless run-command primitive the agent/git already require) removes a whole UI
+region, a major complexity sink, and an open question — losing nothing essential.
+Simple-by-default taken to its logical end: don't build the surface at all.
 
 ### D16 — Extensibility: a plugin is a protocol participant (any language)
 
@@ -439,20 +451,26 @@ extensions; we deliberately don't, for the security boundary — revisitable.)
 
 ## 4. "Simple debug/terminal" — scope decision
 
-v1 ships a **command runner** ("run this command, stream its output into a
-pane"), **not** a full interactive PTY terminal emulator.
+rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
+**headless command-execution primitive** in the core — run a command, capture
+stdout/stderr and exit code — but that is plumbing for git (D7) and the agent
+(D20), not a user-facing terminal. Manual testing and interactive debugging are
+done in the user's **own external terminal**; that's the endorsed workflow.
 
-**Why:** a cross-platform PTY emulator (esp. on Windows) is a large, fragile
-subsystem out of proportion to a "simple IDE." The command runner covers build/
-test/debug-invocation needs. A fuller terminal can be revisited later (Ck even
-has a terminal widget — see O1).
+**Why:** an interactive PTY emulator (esp. cross-platform, and worst of all
+terminal-in-terminal under Ck) is a large, fragile subsystem out of all
+proportion to a "simple IDE," and the user least needs it — real debugging
+happens in a real terminal. Keeping only the headless run-command primitive that
+git/agent already require gives us everything functional with none of the UI
+weight. (A fuller terminal could be revisited far later — Ck even has a terminal
+widget, see O1 — but it is explicitly *not* a v1 surface.)
 
 ---
 
 ## 5. UX sketch
 
 Wide (GUI window or full-screen terminal) — three columns, status-only bottom
-(runner hidden by default):
+(no terminal pane — D15):
 
 ```
 ┌─────────┬────────────────────────────┬───────────────┐
@@ -469,8 +487,8 @@ Wide (GUI window or full-screen terminal) — three columns, status-only bottom
    nav            editor (1–2 groups)        chat
 ```
 
-`runner` is absent above; toggling it adds a thin row just under the editor
-(D15) and closing it returns the space.
+There is no bottom pane to toggle — command output the agent produces appears
+inline in the `chat` column (D15).
 
 Narrow (small terminal) — single column; side panes become stacked collapsible
 sections; diff collapses to unified:
@@ -493,8 +511,8 @@ sections; diff collapses to unified:
 └──────────────────────────┘
 ```
 
-(`runner` is hidden by default here too; toggling it adds another stacked
-section.)
+(No terminal section exists in either tier — command output appears inline in
+the `AGENT` section; D15.)
 
 Both renderings come from the **same** region model (D13) and layout policy
 (D14); only the toolkit drawing differs (Tk geometry vs Ck geometry). The
@@ -599,9 +617,11 @@ Professional, maintained for three audiences:
 - **frontend** — a thin view layer (GUI or TUI) over core.
 - **server mode** — core running headless; frontends connect over a socket.
 - **Ck** — Tk-shaped toolkit rendering to curses; the TUI's toolkit.
-- **command runner** — the v1 "run a command, stream output" pane (not a PTY).
+- **command-execution primitive** — the headless core capability to run a
+  command and capture its output/exit code; feeds git and the agent. *Not* a
+  terminal pane (rio has none — D15).
 - **region** — a fixed logical area of the layout: `nav`, `editor`, `chat`,
-  `runner`, `status` (D13).
+  `status` (D13).
 - **editor group** — one tabbed editor column; the center holds one or two
   (two = side-by-side / diff).
 - **collapsible section stack** — the single reusable UI primitive (`▾`/`▸`
