@@ -164,6 +164,10 @@ proc check {name {require 1}} {
 			puts [format "  %-8s ok (installed; load note: %s)" $name $ver]
 		}
 	} else {
+		# Loading Tk creates the main window "." and it would map on exit,
+		# flashing an empty window. We only care that the package loads, so
+		# withdraw it immediately (before any event-loop turn maps it).
+		if {$name eq "Tk"} {catch {wm withdraw .}}
 		puts [format "  %-8s ok %s" $name $ver]
 	}
 }
