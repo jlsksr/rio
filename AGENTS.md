@@ -1,0 +1,625 @@
+# AGENTS.md — rio
+
+> Working notes for agents, contributors, and maintainers. This is a **living
+> decision log**: it records not just *what* we decided but *why*, so future
+> work doesn't re-litigate settled questions or lose the reasoning behind them.
+> Keep it current. When a decision changes, edit the decision and note the
+> change — don't silently overwrite history.
+
+Status: **brainstorming / pre-implementation.** No code written yet. Nothing
+below is built; this captures the agreed design direction.
+
+> **Sequencing (read this).** This is a **multi-phase** project and there is **no
+> application yet.** The full design space (agent, plugins, server) is mapped
+> below, but we build in order: first a working **core + GUI** that edits real
+> files, with the **Ck spike (O1)** to validate the TUI path. The **agent
+> subsystem (O4)** and the **plugin system (D16–D19)** are *designed but
+> deferred* — do **not** dive deep into their implementation before a working
+> core + GUI exists. Depth in this design log ≠ priority to build.
+
+---
+
+## 1. Vision
+
+**rio** is a simple, language-agnostic IDE built for a plain-text-editor +
+git + AI-agent workflow — nothing more. It is deliberately *not* a
+language-feature powerhouse (no per-language IntelliSense ambitions). It is "an
+advanced plain-text editor, with first-class git and AI-agent integration."
+
+**North star — say it in one line:** *VSCode's quality, with 90s
+productivity-software discipline, in a fraction of the code, written in Tcl/Tk.*
+
+Let's be honest about the model: VSCode — Electron bloat and its vendor aside —
+is genuinely **good** software. It's a high-quality, cross-platform IDE that
+delivers a first-class experience on **both** Windows and Linux. That bar — the
+*quality* and the *cross-platform parity* — is what we aim for. What we reject is
+the weight: the giant codebase, the runtime, the feature sprawl. rio takes the
+same ambition for craftsmanship, applies a much **smaller feature set** and a
+**far smaller, human-readable codebase**, and carries the spirit of lean 90s
+productivity software: fast, sharp, no wasted motion, something one person can
+hold in their head. A lightweight VSCode in spirit — not a clone, a distillation.
+
+We are **not** chasing reach or a thriving third-party ecosystem — there may
+never be a community writing extensions, and that's fine. The reason rio is
+extensible is *architectural*: a clean core that's cleanly supported by modern
+software (LLM providers, tools, the odd plugin) ages better and stays small. We
+build the extension seams because they keep the core honest, not because we
+expect a crowd to fill them.
+
+Inspiration: the spirit of small, personal, comprehensible editors — the kind
+one person can hold in their head and actually use daily.
+
+Guiding qualities:
+
+- **Simple** — only what the workflow needs; resist feature creep.
+- **Quality, the VSCode bar** — a genuinely first-class experience on Windows
+  *and* Linux (and the BSDs), GUI *and* terminal. Cross-platform parity isn't an
+  afterthought; it's the point.
+- **Efficient & human-readable code** — the source should be a pleasure to read.
+  90s-productivity discipline: do a lot with a little; every line earns its keep.
+- **Cross-platform** — Linux (Debian, Alpine), the BSDs, **and Windows**.
+- **Extensible by architecture, not by ambition** — a clean extension seam
+  (D16–D19) keeps the core small and honest and lets modern software plug in
+  cleanly. It's not a bet on a third-party crowd.
+- **Two faces, one brain** — a GUI and a TUI, like `emacs` and `emacs-nox`,
+  sharing all logic.
+
+---
+
+## 2. Scope
+
+### In scope (the product)
+
+- Editing files (the core: a capable plain-text editing surface).
+- Git integration (status, diff view, stage/commit, branch awareness).
+- A simple **command/terminal runner** for build & debug commands (see Decisions
+  — this is *not* a full PTY terminal emulator in v1).
+- AI agent–assisted coding: chat window, diff view of proposed changes,
+  apply/reject. Orchestration + review UX in core; **providers ship as plugins**
+  — Claude **and** local LLMs (D20).
+- Tabs + side panes: file tree, git, agent/LLM chat.
+- Responsive layout: side panes sit horizontally on wide screens; collapse into
+  vertically stacked sections on narrow terminals.
+- **GUI mode and TUI mode.**
+- **Optional** server mode (GUI/TUI connect to a headless core, like
+  `emacs-server` / `vscode-server`). Optional — in-process is the default.
+- A **language-agnostic plugin/extension architecture from day one**
+  (D16–D19). The *marketplace* is deferred; the plugin system itself is not.
+
+### Explicitly out of scope (at least for v1)
+
+- Per-language IDE features (LSP, language-aware refactors, semantic completion).
+- A full interactive terminal emulator with PTY (see command-runner decision).
+- TUI **mouse** support — keyboard-driven only (see Decisions).
+- Extension **marketplace** / in-app install (deferred; the plugin *system* is
+  in scope — D16–D19 — but manifest + permissions are designed now precisely so
+  the marketplace isn't bolted on later).
+- Remote/multi-user collaborative editing (the model permits it later, but it's
+  not a goal).
+
+---
+
+## 3. Architecture & Key Decisions
+
+Each decision records the reasoning. Numbered for reference.
+
+### D1 — Three layers: core / frontends / optional server
+
+```
+                 ┌────────────────────────────────────────┐
+                 │   rio-core  (pure Tcl, no UI)            │
+                 │   document model · undo · file I/O       │
+                 │   git · LLM/agent orchestration          │
+                 │   project/session state · command bus    │
+                 └───────────────┬────────────────┬─────────┘
+                                 │                │
+                  in-process call│        socket  │ (server mode)
+                                 │                │
+                 ┌───────────────┴──┐   ┌─────────┴───────────┐
+                 │ rio-gui (Tk)     │   │ rio-tui (Ck/curses) │
+                 │ thin view layer  │   │ thin view layer     │
+                 └──────────────────┘   └─────────────────────┘
+```
+
+- **`rio-core`**: pure Tcl, zero UI dependency. ~80% of the code and *all*
+  business logic. Document model, undo, file I/O, git (shell out to `git`,
+  parse porcelain), LLM/agent orchestration, project/session state, command
+  dispatch.
+- **Frontends** (`rio-gui`, `rio-tui`): thin. They render core state and turn
+  input into core commands. No business logic.
+
+**Why:** one separation solves three requirements at once — (a) GUI+TUI without
+duplicated logic, (b) optional server mode, (c) "simple, readable" by keeping UI
+toolkits out of the logic.
+
+### D2 — The core API is a *message protocol*, transport-independent (protocol-first)
+
+The core exposes a request/response + event-stream API designed as a protocol
+from day one, **independent of transport**:
+
+- **In-process** (default, no server): transport is a direct in-memory call.
+- **Server mode**: the *same* commands marshaled over a Unix socket / TCP.
+
+**Why:** server mode stops being a second codebase — it's the same core with a
+different transport. `emacs-server` semantics fall out for free, and "server is
+optional" becomes automatic. We will *ship* in-process first but design the API
+this way from the start to avoid a later rewrite.
+
+A further benefit — **the TUI risk insurance.** Because frontends *only* speak
+this protocol, a frontend can be written in *any* language. If the Ck TUI (O1)
+disappoints, the TUI can be reimplemented (Perl/`Curses::UI`, a Go/Rust TUI,
+etc.) against the same core without touching it. So O1 is a gate on **Ck
+specifically**, not on the project.
+
+### D3 — The core owns the canonical document; frontends are views
+
+The buffer/document model of record lives in **core**. Frontends are *views*
+onto it. Editing in a widget emits edit-commands → core applies → core
+broadcasts → all views update.
+
+In particular, the Tk `text` widget is a **display surface, not the source of
+truth**. (We still use its tags for highlighting/diff coloring — just not as the
+store.)
+
+**Why:** server mode *requires* this (the buffer lives on the server; clients
+are windows onto it). It also gives a single source of truth and is the only
+model where GUI + TUI + server coexist without duplicating buffer logic.
+
+### D4 — Stack: Tcl/Tk for core + GUI; **Ck** (curses) for the TUI
+
+- Core + GUI: **Tcl/Tk**. Chosen for genuine cross-platform reach, single-file
+  distribution (Tclkit/starpack, and the `vanillawish` build), and because the
+  Tk `text` widget is a strong editing surface (built-in undo, tags, marks). And
+  because the maintainer wants to build something real in Tcl/Tk.
+- TUI: **Ck** — a Tk-shaped toolkit that renders to curses (Tk-parallel
+  widgets: `text`, `listbox`, `entry`, `frame`, `menu`, `scrollbar`; `pack`/
+  `grid` geometry). This is the "emacs-nox" analogue at the toolkit level and
+  lets the TUI frontend share Tk idioms with the GUI, not just the core.
+  - Candidate builds: [`vzvca/ck8.6`](https://github.com/vzvca/ck8.6) (Tcl 8.6)
+    and Christian Werner's `vanillatclsh` (single-file, Linux/macOS/Windows).
+  - `vanillawish` (GUI) and `vanillatclsh` (TUI) are same-lineage single-file
+    executables — they double as our distribution vehicles.
+
+**Why not build a TUI from scratch:** Ck gives Tk-parallel widgets, raising the
+code-sharing ceiling and removing the riskiest custom work.
+
+**Fallback (not chosen):** Perl/Tk + `Curses::UI` — Perl has a more mature TUI
+library but the same dated Tk and weaker single-binary story. Only revisit if
+the Ck spike (O1) fails.
+
+### D5 — TUI is keyboard-driven only; no mouse
+
+**Why:** TUI mouse is terminal-dependent and perpetually slightly-off; dropping
+it removes the most platform-fragile part of Ck from our dependency surface. A
+simplification that also de-risks. Keyboard-first suits the target workflow.
+
+### D6 — Windows TUI path: Cygwin (primary), native PDCurses (fallback)
+
+Running `rio tui` under **Cygwin** uses *real ncurses* — the same code path as
+Linux/BSD — avoiding the less-proven native-Windows PDCurses path. Native
+PDCurses (via `vanillatclsh-win32`) remains a fallback; note it is BMP-only
+Unicode (fine for a code editor; no emoji). The GUI runs natively on Windows
+regardless.
+
+| Platform        | GUI (Tk)      | TUI (Ck)                         |
+|-----------------|---------------|----------------------------------|
+| Linux / BSD     | native Tk     | native ncurses ✓                 |
+| Windows native  | native Tk     | PDCurses (works, BMP-only)       |
+| Windows + Cygwin| —             | real ncurses, same as Linux ✓    |
+
+### D7 — Git via shelling out to `git`
+
+Parse `git` porcelain output; no libgit2 dependency.
+
+**Why:** portable, dependency-light, simple. Matches the "simple, efficient"
+ethos and works identically everywhere `git` is installed.
+
+### D8 — LLM access behind a stable provider interface (providers are plugins)
+
+Core defines a **stable provider interface** — the durable contract: given a
+conversation + available tools, stream assistant output and tool-call requests.
+**Concrete providers are plugins** (D16), not built-in modules: first-party
+**Claude** (HTTPS — needs `tcltls`) and **local-LLM** (OpenAI-compatible /
+Ollama / llama-server) providers ship in-box and dogfood the interface; others
+are community plugins.
+
+**Why:** specific services are *volatile* — APIs change, get renamed, SaaS come
+and go. Isolating each behind a plugin means provider churn never touches core:
+core standardizes the *interface*, plugins absorb the *wire specifics*
+(HTTP/REST/JSON/SSE/…). See D20 for the full core-vs-plugin split of the agent.
+
+### D9 — Responsive layout rule is a shared pure function
+
+The collapse rule — `(width, panes) → layout` (horizontal vs vertically
+stacked) — lives in core as a pure function both frontends render.
+
+**Why:** the *policy* is shared (no duplication); only the *rendering* differs
+per frontend (Tk geometry managers vs Ck geometry managers).
+
+### D10 — Async via Tcl's event loop / coroutines
+
+Long operations (LLM streaming, git, file watching) must never block the UI;
+use `fileevent` + coroutines (Tcl 8.6+) for readable async.
+
+**Why:** Tcl is single-threaded by default; coroutines keep streaming code
+linear and readable while staying responsive.
+
+### D11 — Wire protocol: newline-delimited JSON (JSONL), request/response + events
+
+Three message kinds:
+
+- **Request** (client → core): `{id, op, params}`
+- **Response** (core → client): `{id, ok: true, result}` or `{id, ok: false, error}`
+- **Event** (core → client, unsolicited): `{event, params}` — broadcast to all
+  attached views.
+
+Encoding is **JSON, one message per line** (JSONL framing) over the socket; the
+in-process path uses the same dict structure with no serialization cost.
+Streaming ops (`cmd.run`, `agent.send`) emit a sequence of events keyed by a
+`runId` / `sessionId`, terminated by a final event. Op namespaces:
+`buffer.*`, `fs.*` / `project.*`, `git.*`, `cmd.*`, `agent.*`, `session.*`.
+
+**Why:** JSON is language-neutral (supports the D2 any-language-frontend safety
+net), human-readable (debuggable by eye), and trivially mirrors a Tcl dict.
+JSONL framing is dead simple and stream-friendly.
+
+### D12 — Document model: list of lines, `line.col` coordinates
+
+A buffer is an **ordered list of line strings**. Positions and ranges use
+`line.col` (1-based line, 0-based column) — **the same index format as the Tk
+`text` widget** — so the GUI view layer maps near-free. Edits are **range
+replacements**: replace `[start, end)` with text; insert/delete are degenerate
+cases. Change events carry the replaced range + new text so other views resync.
+
+**Why:** for source-file sizes this is simple, readable, and fast enough; a gap
+buffer / rope is premature optimization. Sharing Tk's `line.col` convention
+keeps the GUI view thin (D3).
+
+### D13 — Layout regions + the "collapsible section stack" primitive
+
+A VSCode-shaped layout with a fixed set of logical regions:
+
+- **`nav`** (left) — Files + Git, as stacked collapsible sections.
+- **`editor`** (center) — tabbed; splittable into **two editor groups** for
+  side-by-side / diff viewing.
+- **`chat`** (right) — the agent/LLM conversation + input + inline proposed-edit
+  diffs (apply/reject).
+- **`runner`** (bottom) — command-runner output (D4 scope). **Hidden by
+  default**, opened on demand (D15).
+- **`status`** (bottom, 1 line) — always present; the only permanent bottom
+  element, a thin tmux/`screen`-style bar (D15).
+
+One UI primitive is reused everywhere: a **collapsible section stack**. It backs
+both the left nav (Files/Git) *and* the narrow-mode collapse of all side panes
+(D14). Build it once, well.
+
+Layout is **user-adjustable but not free-form** in v1: pane visibility and sizes
+can be toggled and are remembered per session; full drag-rearrangement is
+optional/later ("nice but not a must"). Chat defaults to the right (toggleable).
+Focus moves between regions by keyboard (keymap TBD, O6).
+
+**Why:** mirrors a familiar mental model; collapsing the whole layout to one
+reusable primitive keeps both frontends simple and visually consistent.
+
+### D14 — Responsive tiers (the D9 policy) + diff fallback
+
+The `(width, panes) → layout` function (D9) resolves to three tiers:
+
+- **Wide** — `nav | editor | chat` as columns; `status` at the bottom.
+  `runner` is absent unless toggled, then a row under `editor` (D15).
+- **Mid** — keep one side column (the focused one); the other collapses to a
+  toggle.
+- **Narrow** — single column; `nav`, `runner`, `chat` become **vertically
+  stacked collapsible sections** around `editor`; only expanded ones take height.
+
+Editor split: two groups side-by-side when wide enough; **a side-by-side diff
+falls back to a unified diff when too narrow.** Breakpoints are tunable (initial
+guess: wide ≥ ~100 cols-equiv, narrow < ~70); the GUI maps window width to the
+same tiers.
+
+**Why:** turns D9 into concrete policy; the diff fallback keeps diffs usable on
+small terminals (D5 keyboard-only world).
+
+### D15 — Bottom area: a thin status bar by default; `runner` is opt-in
+
+By default the only thing at the bottom is the one-line **`status`** bar — a
+dense, informational tmux/`screen`-style strip, no wasted rows. The **`runner`**
+pane is **hidden until the user toggles it**; when shown it takes a bottom row
+(wide tier) or a stacked section (narrow tier) and can be closed again to
+reclaim the space.
+
+**Why:** the internal terminal/runner is genuinely optional for many workflows —
+debugging often happens in a real external terminal (xterm, xfce4-terminal). A
+general-purpose IDE shouldn't spend permanent vertical space on it. Off by
+default reclaims space in both GUI and TUI while keeping it one keystroke away:
+simple-by-default, available-on-demand.
+
+### D16 — Extensibility: a plugin is a protocol participant (any language)
+
+A plugin attaches to the **same D11 protocol** as a frontend — it is just
+another participant. Two tiers, identical contribution API, differing only in
+transport (mirrors D2):
+
+- **Out-of-process, any language (primary).** Core spawns the plugin as a
+  subprocess speaking JSONL over stdio/socket. **Language-agnostic by
+  construction** and **isolated** — a crashing plugin cannot take down core
+  (serves the rock-solid goal).
+- **In-process Tcl (opt-in).** Loaded as a Tcl package; direct calls instead of
+  IPC, for trusted or performance-critical extensions.
+
+Consequence: rio does **not** "support Lua/Perl/Python" individually — it
+supports one protocol; any language that can read/write JSON works. Thin
+per-language **SDKs** live *outside* the core; the community can add a language
+without core changes. Core ships the Tcl SDK + one reference SDK.
+
+**Why:** reuses the language-neutral boundary we already have, so multi-language
+is nearly free; isolation improves robustness; the core stays small.
+
+### D17 — Contribution points (the extension API surface)
+
+What a plugin may register: **commands** (palette + bindable), **keybindings**,
+**event subscriptions** (buffer / save / git / …), **providers** (formatter,
+linter/diagnostics, syntax highlighter, LLM provider, VCS backend), and **UI
+contributions** (D18). Buffer/text manipulation reuses existing `buffer.*` ops.
+
+Stance: the core stays minimal; capabilities beyond the basics are plugins —
+even syntax highlighting or an LSP bridge can be plugins rather than core. rio
+ships some **first-party plugins built on the same API** to dogfood and keep it
+honest.
+
+**Why:** a small, comprehensible core where the plugin API *is* the
+extensibility story, not an afterthought.
+
+### D18 — UI contributions are declarative, rendered by both frontends
+
+Plugins contribute **structured/semantic UI** ("add a nav section showing this
+tree", "add a status item", "decorate these ranges", "add a panel with this
+list/text") — **never raw Tk or Ck widget code.** Both frontends render the
+same declarative contribution.
+
+**Why:** a plugin must not need to know Tk vs Ck; declarative contributions
+preserve GUI/TUI parity and keep plugins portable. This is the trickiest part of
+any cross-frontend plugin system, addressed by construction.
+
+### D19 — Plugin manifest + permissions; marketplace deferred
+
+Each plugin ships a **manifest**: identity, entry/run-command + language,
+declared contributions, and **declared permissions** (filesystem scope, network,
+run-command). The user consents to permissions on install. Out-of-process
+isolation makes real sandboxing *possible* later. A **marketplace / in-app
+install** (VSCode-style) is **not off the table but deferred** — designing
+manifest + permissions now means it isn't bolted on later (note: a marketplace
+raises trust / supply-chain / signing concerns to handle then).
+
+**Distribution leaning — git is the store.** When/if rio gets a "store," the
+direction is *not* a bespoke marketplace service. **git is already a solid
+distribution medium** for extensions, so a plugin is just a git repo (clone /
+pull to install and update). The default catalog can be a plain **Forgejo
+instance** that a single maintainer (e.g. rio's author) hosts — people upload
+their extensions there, others pull from it — e.g. a configurable default like
+`forge.example.org/rio/apps`. Crucially the underlying tech is **agnostic**: the
+default store is just one entry in config, and pointing rio at *another* Forgejo
+(or any git host) must be trivial. This keeps "distribution" a one-person,
+self-hostable, no-special-infrastructure affair — fitting the not-chasing-reach
+stance — rather than a platform we have to run.
+
+**Why:** extensibility from day one without the trust/distribution burden up
+front; security-minded defaults (explicit capability declaration + consent); and
+when distribution is needed, lean on git/Forgejo rather than building (and
+operating) a marketplace platform.
+
+### D20 — Agent architecture: orchestration in core, providers & tools as plugins
+
+The agent splits along a **security / volatility** line:
+
+- **Core (durable, security-critical):** the agent *orchestration loop* (the
+  conversation state machine, tool dispatch), the **diff/apply review UX** and
+  chat pane (first-party), and the **guardrails** around tool execution (file
+  writes, run-command — O4). The user reviews proposed changes the *same* way
+  regardless of provider, and every tool call is mediated by one permission
+  model.
+- **Plugins (volatile / extensible):** concrete **providers** (D8) and
+  **additional agent tools** beyond the built-ins (read/write/run/search), each
+  registered via D17 contribution points.
+
+The two durable interfaces to standardize — the **provider interface** and the
+**agent-tool/context interface** — are strong candidates to align with **MCP**
+(Model Context Protocol; JSON-RPC for exposing tools/resources to LLM apps)
+rather than inventing a bespoke contract that ages badly. rio as an **MCP
+client** would consume MCP servers as tools/providers for free (O12).
+
+**Why:** answers "should the agent be an extension?" precisely — *providers and
+extra tools* are plugins (isolating volatility exactly as desired), but the
+*tool-executing orchestration and review UX* stay core, because that is where
+security and cross-provider consistency live. Aligning the interfaces with MCP
+keeps them modern and non-proprietary. (Note: VSCode puts orchestration in
+extensions; we deliberately don't, for the security boundary — revisitable.)
+
+---
+
+## 4. "Simple debug/terminal" — scope decision
+
+v1 ships a **command runner** ("run this command, stream its output into a
+pane"), **not** a full interactive PTY terminal emulator.
+
+**Why:** a cross-platform PTY emulator (esp. on Windows) is a large, fragile
+subsystem out of proportion to a "simple IDE." The command runner covers build/
+test/debug-invocation needs. A fuller terminal can be revisited later (Ck even
+has a terminal widget — see O1).
+
+---
+
+## 5. UX sketch
+
+Wide (GUI window or full-screen terminal) — three columns, status-only bottom
+(runner hidden by default):
+
+```
+┌─────────┬────────────────────────────┬───────────────┐
+│ ▾ FILES │ main.tcl ×  diff: app.tcl ×│ ▾ AGENT       │
+│   app/  │             │              │  > refactor.. │
+│   core/ │  <editor>   │  <editor 2>  │  • proposed   │
+│ ▾ GIT   │             │  (side-by-   │    edit ▸diff │
+│  M app  │             │   side diff) │   [apply][x]  │
+│  + core │             │              │ ┌───────────┐ │
+│         │             │              │ │ ask rio…  │ │
+├─────────┴────────────────────────────┴─┴───────────┴─┤
+│ main ●2↑  utf-8  Tcl   ln 12 col 4        rio-core ◇ │  ← status only
+└──────────────────────────────────────────────────────┘
+   nav            editor (1–2 groups)        chat
+```
+
+`runner` is absent above; toggling it adds a thin row just under the editor
+(D15) and closing it returns the space.
+
+Narrow (small terminal) — single column; side panes become stacked collapsible
+sections; diff collapses to unified:
+
+```
+┌──────────────────────────┐
+│ ▸ FILES                  │  collapsed (header only)
+│ ▸ GIT                    │
+├──────────────────────────┤
+│ main.tcl ×               │  tabs
+│ <editor, full width>     │
+│   …                      │
+├──────────────────────────┤
+│ ▾ AGENT                  │  expanded (toggled)
+│  > refactor parser       │
+│  • proposed edit ▸diff   │  (unified diff inline)
+│  [ ask rio… ]            │
+├──────────────────────────┤
+│ main ●2↑  ln12 c4        │  status (always)
+└──────────────────────────┘
+```
+
+(`runner` is hidden by default here too; toggling it adds another stacked
+section.)
+
+Both renderings come from the **same** region model (D13) and layout policy
+(D14); only the toolkit drawing differs (Tk geometry vs Ck geometry). The
+`▾`/`▸` markers are the one collapsible-section primitive, reused throughout.
+
+---
+
+## 6. Open Questions
+
+- **O1 — The Ck spike (top priority, gates the TUI plan).** Validate
+  `ck8.6` / `vanillatclsh` against rio's actual needs:
+  - Responsive pane layout (D9) via Ck's geometry managers.
+  - A usable editing surface in Ck's `text` widget (it's a weaker cousin of
+    Tk's — no canvas, no embedded windows-in-text).
+  - Acceptable behavior under **Cygwin** (D6) and on Linux.
+  - Pin a specific build/version; treat Ck as a vetted dependency.
+- **O2 — Protocol details.** Core shape decided in D11 (JSONL,
+  request/response/event). Remaining: the full op vocabulary + params per
+  namespace, the error taxonomy, and version/capability negotiation in
+  `session.hello`.
+- **O3 — Document model details.** Representation decided in D12 (lines-list,
+  `line.col`). Remaining: undo/redo structure, large-file handling (lazy load?),
+  encoding & line-ending handling, and whether per-view cursor/selection stays
+  frontend-local (leaning yes — see O1 spec).
+- **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
+  orchestration.) Exact built-in tool set, how edits are previewed/applied,
+  guardrails for `run command`, and the permission model for plugin-contributed
+  tools.
+- **O5 — Config & session format.** Where settings/projects/sessions live;
+  format (likely Tcl or a simple key-value).
+- **O6 — Keybinding model.** Default scheme, configurability, GUI/TUI parity.
+- **O7 — Distribution & build.** Starpack/`vanillawish` packaging per platform;
+  how `tcltls` (for Claude HTTPS) is bundled.
+- **O8 — Extension API versioning.** Stability/versioning policy for the
+  contribution API once plugins exist; capability negotiation (ties to
+  `session.hello`, O2).
+- **O9 — Plugin performance tiering.** Threshold where chatty contributions
+  (e.g. per-keystroke highlight on large files) need the in-process tier or
+  batching (D16).
+- **O10 — SDK & declarative-UI specifics.** Which SDK languages ship first
+  (Tcl given; reference SDK — Python? Lua?) and the concrete schema/vocabulary
+  for declarative UI contributions (D18).
+- **O11 — Store / distribution architecture.** Leaning git-based (plugin = git
+  repo; default catalog a self-hosted Forgejo, configurable, host-agnostic — see
+  D19). Open: clone/pull install + update flow, version/compat pinning, how
+  trust/signing works without a central authority, and whether any in-app
+  install UI is worth it vs. a documented `git`-and-config convention (D19).
+- **O12 — MCP alignment.** Whether/how to map the provider and agent-tool
+  interfaces onto MCP; rio as MCP client (consume MCP servers) and possibly MCP
+  server (expose rio to other agents) (D20).
+
+---
+
+### O1 spike — detailed spec
+
+A **throwaway** probe (not rio code) to prove/disprove that Ck can carry the
+TUI before we commit. Time-boxed. Produces a written verdict that closes O1.
+
+**What it must prove (each is pass/fail):**
+
+1. **Build & run.** `ck8.6` (or `vanillatclsh`) builds/runs on Linux and under
+   Cygwin. Pin the exact build/version used.
+2. **Editing surface.** Ck's `text` widget works as a code editor: multiline
+   insert/delete, scroll/viewport over a ~5k-line file, an insert cursor/mark,
+   line navigation, and **tags for at least foreground color** (syntax / diff).
+   Catalogue what it *can't* do vs Tk's `text`.
+3. **Responsive layout (D9).** Build the real rio shell in Ck — editor pane +
+   collapsible side panes (tree/git/chat) via `grid`/`pack` — and confirm it
+   **reflows horizontal → vertically stacked on terminal resize** (SIGWINCH),
+   cleanly. This is the core UX risk.
+4. **Keyboard (D5).** Bindings incl. Ctrl/Alt modifiers and function keys work
+   and are consistent across xterm, tmux, and the Cygwin console / Windows
+   Terminal.
+5. **Unicode.** UTF-8 text renders (BMP at minimum; note wide/combining-char
+   behavior).
+6. **Redraw correctness & latency.** No flicker/garbage on resize, scroll, or
+   fast typing; input latency acceptable.
+
+**Pass bar:** editor pane usable for real editing; layout reflows correctly; no
+show-stopping redraw bug; keyboard coverage sufficient for our keymap.
+
+**On fail:** invoke the D2 safety net — reimplement the TUI in another language
+against the protocol (Perl/`Curses::UI` first candidate). Core is unaffected.
+
+## 7. Documentation plan
+
+Professional, maintained for three audiences:
+
+- **AGENTS.md** (this file) — design & decision log for agents/contributors.
+- **CONTRIBUTING.md** — for **human programmers** who hack on rio: how to build,
+  test, and contribute; code conventions. _Drafted_ (pre-impl); points here for
+  the "why", build/test sections provisional pending O7.
+- **README.md** — user-facing intro, install, quickstart.
+- **rio wiki** (separate `rio-wiki.git`) — comprehensive user documentation,
+  eventually with screenshots. *Hold screenshots until there's a UI to show.*
+
+---
+
+## 8. Glossary
+
+- **core / `rio-core`** — the UI-less Tcl library holding all logic.
+- **frontend** — a thin view layer (GUI or TUI) over core.
+- **server mode** — core running headless; frontends connect over a socket.
+- **Ck** — Tk-shaped toolkit rendering to curses; the TUI's toolkit.
+- **command runner** — the v1 "run a command, stream output" pane (not a PTY).
+- **region** — a fixed logical area of the layout: `nav`, `editor`, `chat`,
+  `runner`, `status` (D13).
+- **editor group** — one tabbed editor column; the center holds one or two
+  (two = side-by-side / diff).
+- **collapsible section stack** — the single reusable UI primitive (`▾`/`▸`
+  sections) backing both the left nav and narrow-mode pane collapse (D13/D14).
+- **layout tier** — wide / mid / narrow, chosen by the D9 policy function from
+  available width (D14).
+- **plugin** — a protocol participant that extends rio; out-of-process (any
+  language) or in-process Tcl (D16).
+- **contribution point** — a thing a plugin can register: command, keybinding,
+  event subscription, provider, or UI contribution (D17).
+- **SDK** — a thin per-language wrapper over the protocol for writing plugins;
+  lives outside the core (D16).
+- **manifest** — a plugin's declaration of identity, contributions, and
+  permissions (D19).
+- **first-party plugin** — a rio-shipped plugin built on the public extension
+  API, used to dogfood it (D17).
+- **provider** — a plugin implementing the core LLM provider interface (Claude,
+  local LLM, …); supplies the model, absorbs the wire specifics (D8, D20).
+- **MCP** — Model Context Protocol; a JSON-RPC standard for exposing
+  tools/resources to LLM apps. Candidate basis for rio's provider/tool
+  interfaces (D20, O12).
