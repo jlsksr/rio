@@ -447,6 +447,68 @@ security and cross-provider consistency live. Aligning the interfaces with MCP
 keeps them modern and non-proprietary. (Note: VSCode puts orchestration in
 extensions; we deliberately don't, for the security boundary — revisitable.)
 
+### D21 — Config & session: plain text, XDG locations, no executable config
+
+Two kinds of state, kept separate:
+
+- **User settings** (human-authored): a flat, human-readable **key-value** file
+  (INI/`key = value` style, UTF-8). Editable by hand in any editor, diff-friendly,
+  no surprises. It is **data, not code** — rio does *not* `source` a Tcl script as
+  config (no arbitrary code execution on startup).
+- **Session/workspace state** (machine-written): recent files, window/pane sizes,
+  open tabs, per-view cursor positions — written as **JSON** by rio, not meant for
+  hand-editing.
+
+**Locations** follow the **XDG Base Directory** spec on Unix:
+`$XDG_CONFIG_HOME/rio/` (config; default `~/.config/rio/`) and
+`$XDG_DATA_HOME/rio/` (session/state; default `~/.local/share/rio/`), with the
+documented fallbacks. Windows uses the native equivalents (`%APPDATA%` /
+`%LOCALAPPDATA%`). **Per-project** overrides live in a `.rio/` directory at the
+project root (settings + project-local session), so a repo can carry its own
+config without polluting global state.
+
+**Why:** matches rio's "simple, rock-solid, human-readable" spirit and a Unix
+purist's expectations; plain key-value is trivial to read, write, and diff;
+refusing to execute config removes a whole class of startup-fragility and
+security footguns; JSON for machine state reuses what we already parse for the
+protocol (D11); XDG + per-project `.rio/` is the least-surprising layout.
+
+### D22 — Encoding, line endings, and cursor locality
+
+Resolves the easy half of the document model (D12):
+
+- **Encoding:** **UTF-8 by default**, with detection of an existing file's
+  encoding on open and **preservation on save** (don't silently rewrite). A BOM,
+  if present, is preserved.
+- **Line endings:** **detect and preserve** the file's existing convention
+  (LF vs CRLF) per file; new files default to **LF**. Never normalize silently;
+  mixed-ending files keep their dominant style with the choice surfaced, not
+  forced.
+- **Cursor/selection are frontend-local.** The core owns the canonical document
+  (D3); each frontend keeps its *own* cursor/selection/viewport. The protocol
+  carries edits as range operations (D12), not "where the cursor is." (Promotes
+  the O3/O1 "leaning yes" to settled.)
+
+**Why:** encoding/line-ending preservation is table-stakes for an editor people
+trust with real repos (especially cross-platform, where CRLF churn is a classic
+diff-noise bug); keeping cursor state frontend-local keeps the protocol small and
+lets GUI and TUI (or two views of one buffer) move independently without round-
+trips. Undo/redo structure and large-file/lazy-load remain open (O3).
+
+### D23 — Keybindings are data, not hardcoded
+
+The **binding model** is decided even though the exact default keys aren't: rio
+maps keys through a **lookup table from key-chord → named command**, loaded as
+data and overridable via user config (D21). Frontends never hardcode behaviour to
+a key. GUI and TUI share **one logical command set**; the TUI's *achievable*
+chords are bounded by what terminals actually deliver (Ctrl/Alt/function-key
+coverage), which O1 validates. A default scheme ships; users can remap.
+
+**Why:** data-driven bindings give GUI/TUI parity for free, make remapping a
+config edit rather than a code change, and keep keymap churn out of the
+frontends. The concrete **default keymap** (and any modal-vs-modeless stance)
+stays open — that's the narrowed O6.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -522,6 +584,11 @@ Both renderings come from the **same** region model (D13) and layout policy
 
 ## 6. Open Questions
 
+> **Triage (per Sequencing).** *Active now* (core+GUI+TUI phase): O1 (spike),
+> O2, O3, O7. *Resolved:* O5 → D21, and parts of O3 → D22, O6 → D23. *Deferred*
+> (agent/plugin era — designed, not to be answered yet): O4, O8, O9, O10, O11,
+> O12. Don't burn effort on the deferred ones before a working core+GUI exists.
+
 - **O1 — The Ck spike (top priority, gates the TUI plan).** Validate
   `ck8.6` / `vanillatclsh` against rio's actual needs:
   - Responsive pane layout (D9) via Ck's geometry managers.
@@ -534,16 +601,18 @@ Both renderings come from the **same** region model (D13) and layout policy
   namespace, the error taxonomy, and version/capability negotiation in
   `session.hello`.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
-  `line.col`). Remaining: undo/redo structure, large-file handling (lazy load?),
-  encoding & line-ending handling, and whether per-view cursor/selection stays
-  frontend-local (leaning yes — see O1 spec).
+  `line.col`); encoding, line endings, and cursor locality now decided in D22.
+  **Remaining:** undo/redo structure and large-file handling (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
-  orchestration.) Exact built-in tool set, how edits are previewed/applied,
-  guardrails for `run command`, and the permission model for plugin-contributed
-  tools.
-- **O5 — Config & session format.** Where settings/projects/sessions live;
-  format (likely Tcl or a simple key-value).
-- **O6 — Keybinding model.** Default scheme, configurability, GUI/TUI parity.
+  orchestration; **deferred** per Sequencing.) Exact built-in tool set, how edits
+  are previewed/applied, guardrails for the headless run-command primitive (D15),
+  the permission model for plugin-contributed tools, and a truncation/scrollback
+  rule for long command output surfaced in `chat`.
+- **O5 — Config & session format.** ✅ **Resolved — D21** (plain key-value
+  settings + JSON session state, XDG locations, per-project `.rio/`).
+- **O6 — Default keymap.** Binding *model* decided in D23 (data-driven, GUI/TUI
+  parity). **Remaining:** the concrete default key scheme and whether any modal
+  editing is offered — pinned down once there's an editor to feel.
 - **O7 — Distribution & build.** Starpack/`vanillawish` packaging per platform;
   how `tcltls` (for Claude HTTPS) is bundled.
 - **O8 — Extension API versioning.** Stability/versioning policy for the
