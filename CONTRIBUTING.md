@@ -70,9 +70,23 @@ covered in [AGENTS.md](AGENTS.md).
 
 ## Getting started
 
-*Coming soon.* The build and toolchain aren't pinned down yet (rio doesn't have
-code to build at the time of writing). Once the core exists, this section will
-walk you through building and running both the GUI and the terminal version.
+There's no rio to build yet, but you can get the toolchain in place. rio is
+written in Tcl/Tk, so you'll need `tclsh` and Tk, plus a couple of small
+libraries — `tcltls` (for the agent's HTTPS) and `tcllib` (for JSON) — and
+`git`.
+
+The quickest way is the setup script in the repo root:
+
+    ./rio-dev-deploy.sh                # install the core toolchain
+    ./rio-dev-deploy.sh --verify-only  # just check what you already have
+
+It works on Debian/Ubuntu, Alpine, and OpenBSD, and finishes by loading the
+pieces through `tclsh` so you know they actually work. If you also want to hack
+on the terminal version, add `--with-ck` to build the curses toolkit from
+source — otherwise skip it; the GUI doesn't need it.
+
+Once there's real code, this section will grow build-and-run steps for both the
+desktop and terminal versions.
 
 ## Tests
 

@@ -201,6 +201,16 @@ code-sharing ceiling and removing the riskiest custom work.
 library but the same dated Tk and weaker single-binary story. Only revisit if
 the Ck spike (O1) fails.
 
+**Dev toolchain (concrete).** A contributor needs `tcl`, `tk`, `tcl-tls`
+(Claude HTTPS, D8), `tcllib` (`json` for the protocol), and `git` (D7).
+[`rio-dev-deploy.sh`](rio-dev-deploy.sh) installs these across apt / apk /
+`pkg_add`, and behind `--with-ck` builds Ck from source for the TUI path; it
+finishes by loading Tk, `tls`, and `json` through `tclsh` as a smoke test.
+*Lesson worth keeping (reinforces D1):* anything headless — that verify probe,
+the UI-less core, tests, a server — must stay Tk-free and `exit` explicitly.
+Once Tk is loaded, `tclsh` drops into the event loop at stdin EOF (hangs) and
+maps an empty window unless withdrawn. Only the GUI frontend touches Tk.
+
 ### D5 — TUI is keyboard-driven only; no mouse
 
 **Why:** TUI mouse is terminal-dependent and perpetually slightly-off; dropping
