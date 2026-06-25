@@ -1,0 +1,72 @@
+# Integration test for the socket transport (rio::server) — a real client over a
+# real socket, proving the SAME dispatch serves server mode (D2): response to the
+# requester, buffer.changed broadcast, and a follow-up read reflecting the edit.
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. server.tcl]
+
+test server-socket-roundtrip {edit then read over a socket; event is broadcast} -setup {
+	set ::port [rio::server::listen 0]
+	set ::buf  [rio::doc::new "" socktest]
+	set ::lines {}
+	set ::c [socket 127.0.0.1 $::port]
+	fconfigure $::c -buffering line -blocking 0 -translation lf -encoding utf-8
+	proc ::collect {chan} {
+		if {[gets $chan line] >= 0 && [string trim $line] ne ""} {
+			lappend ::lines $line
+			# stop once the final read's reply has arrived
+			set d [json::json2dict $line]
+			if {[dict exists $d id] && [dict get $d id] eq "final"} { set ::done 1 }
+		}
+	}
+	fileevent $::c readable [list ::collect $::c]
+} -body {
+	puts $::c "{\"id\":\"1\",\"op\":\"buffer.replace\",\"params\":{\"buffer\":\"$::buf\",\"start\":\"1.0\",\"end\":\"1.0\",\"text\":\"hi\"}}"
+	puts $::c "{\"id\":\"final\",\"op\":\"buffer.text\",\"params\":{\"buffer\":\"$::buf\"}}"
+	flush $::c
+	after 3000 {set ::done timeout}
+	vwait ::done
+	if {$::done eq "timeout"} { return "TIMEOUT after [llength $::lines] line(s): $::lines" }
+
+	# classify what came back
+	set sawEvent 0 ; set replaceOk 0 ; set finalText {}
+	foreach l $::lines {
+		set d [json::json2dict $l]
+		if {[dict exists $d event] && [dict get $d event] eq "buffer.changed"} {
+			if {[dict get $d params text] eq "hi"} { set sawEvent 1 }
+		} elseif {[dict exists $d id] && [dict get $d id] eq "1"} {
+			set replaceOk [dict get $d ok]
+		} elseif {[dict exists $d id] && [dict get $d id] eq "final"} {
+			set finalText [dict get $d result text]
+		}
+	}
+	list ok=$replaceOk event=$sawEvent text=$finalText
+} -cleanup {
+	catch {close $::c}
+	rename ::collect {}
+} -result {ok=true event=1 text=hi}
+
+test server-bad-json {a malformed line gets an error response, no crash} -setup {
+	set ::port2 [rio::server::listen 0]
+	set ::reply {}
+	set ::c2 [socket 127.0.0.1 $::port2]
+	fconfigure $::c2 -buffering line -blocking 0 -translation lf
+	fileevent $::c2 readable {
+		if {[gets $::c2 line] >= 0 && [string trim $line] ne ""} {
+			set ::reply $line ; set ::done2 1
+		}
+	}
+} -body {
+	puts $::c2 "this is not json"
+	flush $::c2
+	after 3000 {set ::done2 timeout}
+	vwait ::done2
+	set d [json::json2dict $::reply]
+	list [dict get $d ok] [dict get $d error]
+} -cleanup {
+	catch {close $::c2}
+} -result {false {bad json}}
+
+cleanupTests

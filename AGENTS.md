@@ -579,6 +579,32 @@ look people love without a theme file present. **Open:** the concrete role
 vocabulary (the full list of color/font slots) and how much rio leans on `ttk`
 vs classic widgets — both firm up once the GUI shell exists.
 
+### D25 — JSON value encoding is shape-aware, not value-sniffed
+
+The canonical internal form is plain Tcl dicts (D11: the in-process path uses
+them with no serialization), so JSON lives **only at the socket boundary**. A
+*generic* dict→JSON encoder is impossible there — Tcl can't tell the string
+`"hi there"` from the two-element list `{hi there}` — so the boundary encoder is
+**shape-aware**, never guessing types from values:
+
+- The **envelope shape is fixed**: `id` is a wire **string** (ids are opaque
+  tokens on the wire), `ok` is a bare `true`/`false`, and a reply carries either
+  `result` (object) or `error` (string).
+- `result` and event `params` are **flat objects whose leaf values encode as
+  JSON strings** — exact for every value the protocol carries today (text,
+  `line.col` indices, ids, removed text). Inbound parsing uses tcllib's
+  `json::json2dict`, which is unambiguous.
+- When an op eventually needs a non-string leaf (a number, nested object, or
+  array), **that op declares its shape**; we never sniff Tcl values for type.
+
+**Why:** value-sniffing is the classic Tcl→JSON footgun (a string that happens
+to look like a list or a number gets mis-typed); pinning the envelope and
+treating leaves as strings is total, debuggable, and correct for the current
+protocol, while leaving a clean path (per-op shape declarations) for richer
+payloads. Keeping JSON at the boundary preserves D11's zero-cost in-process path.
+Implemented in `rio-core/wire.tcl`; the socket transport (`server.tcl`) is the
+same dispatch as in-process (D2), proven by a real-socket round-trip test.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -667,8 +693,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   - Acceptable behavior under **Cygwin** (D6) and on Linux.
   - Pin a specific build/version; treat Ck as a vetted dependency.
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
-  request/response/event). Remaining: the full op vocabulary + params per
-  namespace, the error taxonomy, and version/capability negotiation in
+  request/response/event); **value encoding now decided in D25** (shape-aware,
+  string leaves, opaque-string ids). Remaining: the full op vocabulary + params
+  per namespace, the error taxonomy, and version/capability negotiation in
   `session.hello`.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality now decided in D22.
