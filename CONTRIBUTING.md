@@ -8,10 +8,11 @@ actually sit down and read — you'll feel at home here.
 This guide is for programmers who want to hack on rio itself. Welcome; we're glad
 you're here.
 
-> **Heads-up:** rio is still in early design — there isn't a working build yet,
-> so the *Getting started* and *Tests* sections below are placeholders for now.
-> The architecture is settled, though. If you want the full reasoning behind how
-> rio is put together, it's all written up in [AGENTS.md](AGENTS.md).
+> **Heads-up:** rio is in early days — the UI-less core has just started and
+> there's no runnable editor yet, so *Getting started* still stops at the
+> toolchain. The architecture is settled, though, and there are real tests to run
+> (below). The full reasoning behind how rio is put together is in
+> [AGENTS.md](AGENTS.md).
 
 ## What rio cares about
 
@@ -90,9 +91,15 @@ desktop and terminal versions.
 
 ## Tests
 
-*Coming soon.* One nice consequence of keeping all the logic in a UI-less core:
-most of it can be tested without spinning up an interface. We'll document the
-test setup alongside the first real code.
+One nice consequence of keeping all the logic in a UI-less core: most of it can
+be tested without spinning up an interface — which is exactly how we test it. The
+suite uses Tcl's own `tcltest`:
+
+    tclsh rio-core/tests/all.tcl
+
+Tests live in `rio-core/tests/`, one `.test` file per area. If you add behaviour
+to the core, add a case alongside it; a change to how editing works should show
+up as a test that would have failed before.
 
 ## Sending a change
 

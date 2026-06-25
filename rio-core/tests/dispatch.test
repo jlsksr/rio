@@ -1,0 +1,79 @@
+# Tests for the dispatch layer (rio::dispatch) and the buffer.* ops — the D11
+# request/response/event shapes, exercised through the in-process transport.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# Edit a fresh buffer in isolation so tests don't depend on each other.
+proc freshbuf {{text ""}} { return [rio::doc::new $text] }
+
+test dispatch-unknown-op {an unknown op yields ok:false with an error} -body {
+	set out [rio::core::call nope {}]
+	set r [dict get $out response]
+	list [dict get $r ok] [dict get $r error]
+} -result {false {unknown op: nope}}
+
+test dispatch-missing-op {a request without op is rejected} -body {
+	set r [rio::dispatch::handle {id 7} [list lappend ::ignore]]
+	list [dict get $r ok] [dict get $r error]
+} -result {false {missing op}}
+
+test dispatch-id-echoed {the response carries the request id} -body {
+	set r [rio::dispatch::handle {id 42 op buffer.text} [list lappend ::ignore]]
+	list [dict get $r id] [dict get $r ok]
+} -result {42 true}
+
+test buffer-text-result {buffer.text returns the document text} -body {
+	set b [freshbuf "hi\nthere"]
+	set out [rio::core::call buffer.text [dict create buffer $b]]
+	dict get [dict get $out response] result
+} -result {text {hi
+there}}
+
+test buffer-replace-response {buffer.replace responds ok with empty result} -body {
+	set b [freshbuf "abc"]
+	set out [rio::core::call buffer.replace \
+		[dict create buffer $b start 1.1 end 1.1 text X]]
+	set r [dict get $out response]
+	list [dict get $r ok] [dict get $r result]
+} -result {true {}}
+
+test buffer-replace-mutates {buffer.replace edits the document} -body {
+	set b [freshbuf "abc"]
+	rio::core::call buffer.replace [dict create buffer $b start 1.1 end 1.1 text X]
+	rio::doc::text $b
+} -result "aXbc"
+
+test buffer-replace-emits-event {buffer.replace emits one buffer.changed event} -body {
+	set b [freshbuf "abc"]
+	set out [rio::core::call buffer.replace \
+		[dict create buffer $b start 1.3 end 1.3 text Z]]
+	set evs [dict get $out events]
+	set ev [lindex $evs 0]
+	list [llength $evs] [dict get $ev event] \
+		[dict get $ev params text] [dict get $ev params start]
+} -result {1 buffer.changed Z 1.3}
+
+test buffer-changed-carries-removed {a deleting replace reports the removed text} -body {
+	set b [freshbuf "hello world"]
+	set out [rio::core::call buffer.replace \
+		[dict create buffer $b start 1.5 end 1.11 text ""]]
+	dict get [lindex [dict get $out events] 0] params removed
+} -result { world}
+
+test buffer-text-no-event {a pure read emits no events} -body {
+	set b [freshbuf "abc"]
+	set out [rio::core::call buffer.text [dict create buffer $b]]
+	llength [dict get $out events]
+} -result 0
+
+test buffer-handler-error-propagates {a doc error becomes ok:false} -body {
+	set b [freshbuf "abc"]
+	set out [rio::core::call buffer.replace \
+		[dict create buffer $b start 9.0 end 9.0 text x]]
+	set r [dict get $out response]
+	list [dict get $r ok] [string match {index out of range*} [dict get $r error]]
+} -result {false 1}
+
+cleanupTests
