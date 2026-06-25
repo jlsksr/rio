@@ -1,5 +1,9 @@
 # Spike: the core⟷frontend protocol seam
 
+> **Superseded.** The bet paid off and the real code now exists: `rio-core/` (the
+> UI-less core) and `rio-gui/` (a real Tk frontend on top of it, in-process).
+> This spike is kept only as the record of what it proved and how cheaply.
+
 **Throwaway.** This is not rio. It exists to de-risk the single most load-bearing
 bet in [AGENTS.md](../../AGENTS.md) *before* any real core code is written against
 it — the same instinct as the toolchain probes: prove the assumption with ~200

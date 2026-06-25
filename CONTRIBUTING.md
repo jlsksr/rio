@@ -8,11 +8,12 @@ actually sit down and read — you'll feel at home here.
 This guide is for programmers who want to hack on rio itself. Welcome; we're glad
 you're here.
 
-> **Heads-up:** rio is in early days — the UI-less core has just started and
-> there's no runnable editor yet, so *Getting started* still stops at the
-> toolchain. The architecture is settled, though, and there are real tests to run
-> (below). The full reasoning behind how rio is put together is in
-> [AGENTS.md](AGENTS.md).
+> **Heads-up:** rio is in early days. The UI-less core does real work now —
+> open/save with encoding and line-ending preservation, range-based editing, and
+> undo/redo — and there's a minimal but real Tk editor (`rio-gui`) wired on top of
+> it. It's far from a finished IDE, but you can open a file, edit it, undo, and
+> save. The architecture is settled and there are real tests to run (below). The
+> full reasoning behind how rio is put together is in [AGENTS.md](AGENTS.md).
 
 ## What rio cares about
 
@@ -86,8 +87,14 @@ pieces through `tclsh` so you know they actually work. If you also want to hack
 on the terminal version, add `--with-ck` to build the curses toolkit from
 source — otherwise skip it; the GUI doesn't need it.
 
-Once there's real code, this section will grow build-and-run steps for both the
-desktop and terminal versions.
+With the toolchain in place you can run the GUI editor — it embeds the core
+in-process, so there's nothing else to start:
+
+    wish rio-gui/rio-gui.tcl [file]
+
+Open a file with Ctrl+O, save with Ctrl+S, undo/redo with Ctrl+Z / Ctrl+Shift+Z.
+The terminal version (Ck) doesn't exist yet; build-and-run steps for it will land
+here when it does.
 
 ## Tests
 
@@ -100,6 +107,12 @@ suite uses Tcl's own `tcltest`:
 Tests live in `rio-core/tests/`, one `.test` file per area. If you add behaviour
 to the core, add a case alongside it; a change to how editing works should show
 up as a test that would have failed before.
+
+The GUI has a headless smoke that drives the real frontend (open / edit through
+the dumb-view proxy / save / undo) without ever showing a window — it needs a
+display but stays off-screen:
+
+    RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
 ## Sending a change
 
