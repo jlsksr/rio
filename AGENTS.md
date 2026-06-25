@@ -6,8 +6,13 @@
 > Keep it current. When a decision changes, edit the decision and note the
 > change — don't silently overwrite history.
 
-Status: **brainstorming / pre-implementation.** No code written yet. Nothing
-below is built; this captures the agreed design direction.
+Status: **early implementation.** A working UI-less core (`rio-core`) and a
+minimal real Tk editor (`rio-gui`) exist: open/save with encoding and
+line-ending preservation, range-based editing, undo/redo, and multiple buffers
+as tabs — all over the in-process protocol, with a socket (server-mode)
+transport sharing the same dispatch. The wider design space below (agent,
+plugins, server platform, TUI) is mapped but **not** built yet; see Sequencing.
+Decisions carry an *Implemented* note where code now backs them.
 
 > **Sequencing (read this).** This is a **multi-phase** project and there is **no
 > application yet.** The full design space (agent, plugins, server) is mapped
@@ -714,9 +719,20 @@ Both renderings come from the **same** region model (D13) and layout policy
   - Pin a specific build/version; treat Ck as a vetted dependency.
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
-  string leaves, opaque-string ids). Remaining: the full op vocabulary + params
-  per namespace, the error taxonomy, and version/capability negotiation in
-  `session.hello`.
+  string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
+  replace, new, close), `fs.*` (open, save), `edit.*` (undo, redo). Remaining:
+  the full op vocabulary + params per namespace, the error taxonomy, and
+  version/capability negotiation in `session.hello`.
+
+  **Next-step note (near-term candidates, none started):**
+  - **`buffer.list` + wire-array support.** Enumerating open buffers returns an
+    *array of nested objects* — the first non-flat shape, so it's the increment
+    that forces the shape-aware encoder (D25) to grow array/object leaves and to
+    pin down *how an op declares* a non-flat result. The in-process GUI doesn't
+    need it (it tracks what it opened), but a reattaching socket client or the
+    TUI will. This `buffer.list` + wire-array work is itself a natural next step,
+    alongside the earlier candidates (**`session.hello`** capability negotiation,
+    or the **theme applier** for D24).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

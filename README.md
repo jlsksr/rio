@@ -10,15 +10,20 @@ git and AI-agent integration — available both as a desktop **GUI** and in the
 
 ## Status
 
-**Pre-implementation.** rio is in the design phase — there is **no build yet**,
-so there's nothing to install or run today. The architecture is settled and
-written down; code comes next.
+**Early implementation.** The UI-less core and a minimal Tk editor work today:
+you can open files, edit them, undo/redo, work across several buffers as tabs,
+and save — with encoding and line-ending (LF/CRLF) preservation. It's a long way
+from the full IDE below, but it runs:
 
-- **What it will do:** edit files, integrate with git (status, diff, stage,
+    wish rio-gui/rio-gui.tcl [file ...]
+
+(needs `tclsh`/Tk + `tcllib`; see [CONTRIBUTING.md](CONTRIBUTING.md) for setup.)
+
+- **What it will do:** beyond editing — integrate with git (status, diff, stage,
   commit), and assist coding with an AI agent (Claude or a local LLM) via a chat
-  + propose-diff + apply/reject flow.
-- **Two faces, one brain:** a Tk GUI and a curses (Ck) TUI over a shared,
-  UI-less core — like `emacs` and `emacs-nox`.
+  + propose-diff + apply/reject flow. Not built yet.
+- **Two faces, one brain:** a Tk GUI (working) and a curses (Ck) TUI (not built
+  yet) over a shared, UI-less core — like `emacs` and `emacs-nox`.
 - **Cross-platform:** Linux, the BSDs, and Windows.
 
 ## Learn more
@@ -28,5 +33,5 @@ written down; code comes next.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — for programmers who want to hack on rio
   itself.
 
-Install instructions and a quickstart will land here once there's something to
-run.
+A polished install path and quickstart will land here as rio fills out; for now
+the run line above plus CONTRIBUTING's toolchain setup is the way in.
