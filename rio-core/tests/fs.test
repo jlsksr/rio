@@ -1,0 +1,150 @@
+# Tests for file I/O — encoding / BOM / line-ending detection and preservation
+# (rio::fs, AGENTS.md D22), plus the fs.* ops driven through the in-process core.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. fs.tcl]
+source [file join [file dirname [info script]] .. core.tcl]
+
+# Write raw bytes to a throwaway file; return its path.
+proc tmpbytes {bytes} {
+	set f [file tempfile path]
+	fconfigure $f -translation binary
+	puts -nonewline $f $bytes
+	close $f
+	return $path
+}
+# Read a file back as raw bytes.
+proc rawbytes {path} {
+	set f [open $path rb]
+	set b [::read $f]
+	close $f
+	return $b
+}
+
+# --- detection (rio::fs::read) ----------------------------------------------
+
+test fs-read-lf-utf8 {a plain LF UTF-8 file} -body {
+	set p [tmpbytes "alpha\nbeta\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d encoding] [dict get $d eol] [dict get $d bom] \
+		[dict get $d mixed] [dict get $d text]
+} -result {utf-8 lf {} 0 {alpha
+beta
+}}
+
+test fs-read-crlf {CRLF is detected and normalized to \n for the model} -body {
+	set p [tmpbytes "a\r\nb\r\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d eol] [dict get $d text]
+} -result {crlf {a
+b
+}}
+
+test fs-read-multibyte {valid multibyte UTF-8 is decoded, not byte-fallback} -body {
+	# "café" + a CJK char, UTF-8 bytes.
+	set p [tmpbytes "caf\xC3\xA9 \xE6\x97\xA5\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d encoding] [dict get $d text]
+} -result "utf-8 {café 日\n}"
+
+test fs-read-bom {a UTF-8 BOM is detected, stripped from text, and recorded} -body {
+	set p [tmpbytes "\xEF\xBB\xBFhi\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d bom] [dict get $d encoding] [dict get $d text]
+} -result "utf-8 utf-8 {hi\n}"
+
+test fs-read-invalid-utf8 {invalid UTF-8 falls back to lossless iso8859-1} -body {
+	# 0xFF is never valid UTF-8; iso8859-1 maps it to U+00FF.
+	set p [tmpbytes "x\xFFy\n"]
+	set d [rio::fs::read $p]
+	dict get $d encoding
+} -result iso8859-1
+
+test fs-read-mixed {mixed endings: dominant chosen and surfaced} -body {
+	set p [tmpbytes "a\r\nb\r\nc\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d eol] [dict get $d mixed]
+} -result {crlf 1}
+
+# --- round-trips (read -> write reproduces the original bytes) ---------------
+
+test fs-roundtrip-crlf {CRLF bytes survive read+write unchanged} -body {
+	set src "one\r\ntwo\r\n"
+	set p [tmpbytes $src]
+	set d [rio::fs::read $p]
+	set out [tmpbytes ""]
+	rio::fs::write $out [dict get $d text] \
+		[dict create encoding [dict get $d encoding] eol [dict get $d eol] bom [dict get $d bom]]
+	rawbytes $out
+} -result "one\r\ntwo\r\n"
+
+test fs-roundtrip-bom {a BOM is restored on save} -body {
+	set src "\xEF\xBB\xBFhi\n"
+	set p [tmpbytes $src]
+	set d [rio::fs::read $p]
+	set out [tmpbytes ""]
+	rio::fs::write $out [dict get $d text] \
+		[dict create encoding [dict get $d encoding] eol [dict get $d eol] bom [dict get $d bom]]
+	rawbytes $out
+} -result "\xEF\xBB\xBFhi\n"
+
+test fs-roundtrip-invalid-bytes {unknown bytes round-trip intact via iso8859-1} -body {
+	set src "x\xFFy\n"
+	set p [tmpbytes $src]
+	set d [rio::fs::read $p]
+	set out [tmpbytes ""]
+	rio::fs::write $out [dict get $d text] \
+		[dict create encoding [dict get $d encoding] eol [dict get $d eol] bom [dict get $d bom]]
+	rawbytes $out
+} -result "x\xFFy\n"
+
+test fs-roundtrip-no-trailing-newline {a missing final newline is preserved} -body {
+	set src "no newline at end"
+	set p [tmpbytes $src]
+	set d [rio::fs::read $p]
+	set out [tmpbytes ""]
+	rio::fs::write $out [dict get $d text] {}
+	rawbytes $out
+} -result {no newline at end}
+
+# --- the fs.* ops through the in-process core --------------------------------
+
+test fs-op-open {file.open creates a buffer and reports detected attributes} -body {
+	set p [tmpbytes "hello\nworld\n"]
+	set r [rio::core::call file.open [dict create path $p]]
+	set res [dict get $r response result]
+	list [dict get $r response ok] \
+		[expr {[dict get $res name] eq [file tail $p]}] \
+		[dict get $res eol] [dict get $res encoding] \
+		[dict get $res linecount] \
+		[rio::doc::text [dict get $res buffer]]
+} -result "true 1 lf utf-8 3 {hello\nworld\n}"
+
+test fs-op-edit-save {open, edit through buffer.replace, save preserves CRLF} -body {
+	set p [tmpbytes "a\r\nb\r\n"]
+	set buf [dict get [rio::core::call file.open [dict create path $p]] response result buffer]
+	# Insert "X" at the very start (1.0,1.0).
+	rio::core::call buffer.replace [dict create buffer $buf start 1.0 end 1.0 text X]
+	rio::core::call file.save [dict create buffer $buf]
+	rawbytes $p
+} -result "Xa\r\nb\r\n"
+
+test fs-op-save-as {file.save with a path writes there and retargets the buffer} -body {
+	set p [tmpbytes "data\n"]
+	set buf [dict get [rio::core::call file.open [dict create path $p]] response result buffer]
+	set p2 [tmpbytes ""]
+	rio::core::call file.save [dict create buffer $buf path $p2]
+	# A subsequent save with no path should now go to p2.
+	rio::core::call buffer.replace [dict create buffer $buf start 1.0 end 1.0 text Z]
+	rio::core::call file.save [dict create buffer $buf]
+	list [rawbytes $p] [rawbytes $p2]
+} -result "{data\n} {Zdata\n}"
+
+test fs-op-save-no-path {saving a buffer with no file errors cleanly} -body {
+	set buf [rio::doc::new "scratch" untitled]
+	set r [rio::core::call file.save [dict create buffer $buf]]
+	list [dict get $r response ok] [dict get $r response error]
+} -result {false {buffer has no associated file; supply a path}}
+
+cleanupTests

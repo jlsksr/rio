@@ -523,6 +523,14 @@ diff-noise bug); keeping cursor state frontend-local keeps the protocol small an
 lets GUI and TUI (or two views of one buffer) move independently without round-
 trips. Undo/redo structure and large-file/lazy-load remain open (O3).
 
+**Implemented** in `rio-core/fs.tcl` (detection/preservation) and the `fs.*` ops
+(`file.open`, `file.save`) in `rio-core/ops-fs.tcl`; the detected encoding/BOM/EOL
+ride along as opaque per-buffer metadata in the document model so a save
+reproduces the original on-disk form. Detection is honestly bounded: UTF-8
+(BOM-or-not, validated per RFC 3629) with a lossless iso8859-1 byte-fallback;
+LF/CRLF. UTF-16, bare-CR, and lazy-loading large files are explicitly out of
+scope for now (the latter is still O3).
+
 ### D23 — Keybindings are data, not hardcoded
 
 The **binding model** is decided even though the exact default keys aren't: rio
@@ -698,7 +706,8 @@ Both renderings come from the **same** region model (D13) and layout policy
   per namespace, the error taxonomy, and version/capability negotiation in
   `session.hello`.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
-  `line.col`); encoding, line endings, and cursor locality now decided in D22.
+  `line.col`); encoding, line endings, and cursor locality decided in D22 and now
+  *implemented* (`rio-core/fs.tcl`, `fs.*` ops).
   **Remaining:** undo/redo structure and large-file handling (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
   orchestration; **deferred** per Sequencing.) Exact built-in tool set, how edits

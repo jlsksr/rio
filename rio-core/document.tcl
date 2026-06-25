@@ -8,20 +8,35 @@
 # This module is pure logic — no Tk, no I/O, no protocol — so it tests headless.
 
 namespace eval rio::doc {
-	variable buffers {}   ;# dict: id -> {lines <list-of-strings> name <string>}
+	variable buffers {}   ;# dict: id -> {lines <list-of-strings> name <string> meta <dict>}
 	variable nextid 0
 }
 
 # Create a buffer from text (a document always has at least one line) and return
-# its id.
-proc rio::doc::new {{text ""} {name untitled}} {
+# its id. `meta` is an opaque per-buffer dict the model stores but never
+# interprets — fs.* uses it to carry file path / encoding / line-ending so a
+# save can preserve what an open detected (D22).
+proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	variable buffers
 	variable nextid
 	set lines [split $text "\n"]
 	if {$lines eq ""} { set lines [list ""] }
 	set id [incr nextid]
-	dict set buffers $id [dict create lines $lines name $name]
+	dict set buffers $id [dict create lines $lines name $name meta $meta]
 	return $id
+}
+
+# Read or update a buffer's opaque metadata dict (see `new`).
+proc rio::doc::meta {id} {
+	variable buffers
+	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	return [dict get $buffers $id meta]
+}
+
+proc rio::doc::setmeta {id key value} {
+	variable buffers
+	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	dict set buffers $id meta $key $value
 }
 
 proc rio::doc::exists {id} {
