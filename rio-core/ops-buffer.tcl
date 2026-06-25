@@ -14,6 +14,23 @@ proc rio::ops::_bufid {params} {
 	return $default
 }
 
+# buffer.new {?name?} -> {buffer, name} ; mints an empty buffer (a scratch tab).
+proc rio::ops::buffer_new {params} {
+	set name [expr {[dict exists $params name] ? [dict get $params name] : "untitled"}]
+	set id [rio::doc::new "" $name]
+	return [dict create result [dict create buffer $id name $name]]
+}
+rio::dispatch::register buffer.new rio::ops::buffer_new
+
+# buffer.close {?buffer?} -> {} ; forgets a buffer (closing its tab).
+proc rio::ops::buffer_close {params} {
+	set id [_bufid $params]
+	if {![rio::doc::exists $id]} { error "no such buffer: $id" }
+	rio::doc::close $id
+	return [dict create result {}]
+}
+rio::dispatch::register buffer.close rio::ops::buffer_close
+
 # buffer.text -> {text <whole document>}
 proc rio::ops::buffer_text {params} {
 	return [dict create result [dict create text [rio::doc::text [_bufid $params]]]]

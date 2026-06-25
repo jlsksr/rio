@@ -44,6 +44,14 @@ proc rio::doc::exists {id} {
 	return [dict exists $buffers $id]
 }
 
+# Forget a buffer entirely (its id is not reused). The doc model never calls the
+# builtin [close], so shadowing it here is safe.
+proc rio::doc::close {id} {
+	variable buffers
+	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	set buffers [dict remove $buffers $id]
+}
+
 proc rio::doc::text {id} {
 	return [join [lines $id] "\n"]
 }

@@ -90,11 +90,12 @@ source — otherwise skip it; the GUI doesn't need it.
 With the toolchain in place you can run the GUI editor — it embeds the core
 in-process, so there's nothing else to start:
 
-    wish rio-gui/rio-gui.tcl [file]
+    wish rio-gui/rio-gui.tcl [file ...]
 
-Open a file with Ctrl+O, save with Ctrl+S, undo/redo with Ctrl+Z / Ctrl+Shift+Z.
-The terminal version (Ck) doesn't exist yet; build-and-run steps for it will land
-here when it does.
+Open files with Ctrl+O (each lands in its own tab), New with Ctrl+N, switch tabs
+with Ctrl+Tab, close one with Ctrl+W, save with Ctrl+S, undo/redo with Ctrl+Z /
+Ctrl+Shift+Z. The terminal version (Ck) doesn't exist yet; build-and-run steps
+for it will land here when it does.
 
 ## Tests
 

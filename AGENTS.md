@@ -147,13 +147,16 @@ duplicated logic, (b) optional server mode, (c) "simple, readable" by keeping UI
 toolkits out of the logic.
 
 **Implemented (GUI):** `rio-gui/rio-gui.tcl` is a minimal but real Tk editor on
-the core — open/save (fs.*), range-edit (buffer.*), undo/redo (edit.*), with a
-menu and status line. It embeds the core **in-process** (D2's default path:
+the core — open/save (fs.*), range-edit (buffer.*), undo/redo (edit.*), and
+multiple buffers as tabs (buffer.new / buffer.close), with a menu, tab bar, and
+status line. It embeds the core **in-process** (D2's default path:
 `rio::core::call` returns the response and events synchronously) and stays a
 *dumb view* (D3): keystrokes become `buffer.replace` requests via a widget-command
 proxy, and the screen only changes when the core echoes `buffer.changed` back.
-A headless smoke (`rio-gui/tests/smoke.tcl`) drives it without showing a window.
-`rio-tui` does not exist yet (O1).
+The core owns the buffers; the frontend keeps only the per-buffer *view* state —
+tab order, the active tab, and each buffer's cursor/viewport (frontend-local per
+D22). A headless smoke (`rio-gui/tests/smoke.tcl`) drives it without showing a
+window. `rio-tui` does not exist yet (O1).
 
 ### D2 — The core API is a *message protocol*, transport-independent (protocol-first)
 

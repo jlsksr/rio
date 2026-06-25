@@ -34,20 +34,20 @@ proc widget {} { ::rio_real_t get 1.0 end-1c }
 # --- open an LF file ---------------------------------------------------------
 set p [tmpbytes "alpha\nbeta\n"]
 do_open $p
-ok "open: path recorded"        $::path           $p
-ok "open: not modified"         $::modified       0
-ok "open: core has file text"   [rio::doc::text $::cur] "alpha\nbeta\n"
-ok "open: widget mirrors core"  [widget]          "alpha\nbeta\n"
-ok "open: encoding detected"    [dict get $::meta encoding] utf-8
+ok "open: path recorded"        [bufget $::cur path]     $p
+ok "open: not modified"         [bufget $::cur modified] 0
+ok "open: core has file text"   [rio::doc::text $::cur]  "alpha\nbeta\n"
+ok "open: widget mirrors core"  [widget]                 "alpha\nbeta\n"
+ok "open: encoding detected"    [dict get [bufget $::cur meta] encoding] utf-8
 
 # --- edit through the dumb-view proxy, then save -----------------------------
 .t insert 1.0 "X"
-ok "edit: marked modified"      $::modified       1
-ok "edit: core updated"         [rio::doc::text $::cur] "Xalpha\nbeta\n"
-ok "edit: widget updated"       [widget]          "Xalpha\nbeta\n"
+ok "edit: marked modified"      [bufget $::cur modified] 1
+ok "edit: core updated"         [rio::doc::text $::cur]  "Xalpha\nbeta\n"
+ok "edit: widget updated"       [widget]                 "Xalpha\nbeta\n"
 do_save
-ok "save: not modified"         $::modified       0
-ok "save: bytes on disk"        [diskbytes $p]    "Xalpha\nbeta\n"
+ok "save: not modified"         [bufget $::cur modified] 0
+ok "save: bytes on disk"        [diskbytes $p]           "Xalpha\nbeta\n"
 
 # --- tricky characters survive the proxy (no %A breakage) --------------------
 .t insert 1.0 "\{\"z"
@@ -56,7 +56,7 @@ ok "edit: braces/quotes intact" [string range [rio::doc::text $::cur] 0 2] "\{\"
 # --- CRLF is preserved across open -> edit -> save ---------------------------
 set q [tmpbytes "a\r\nb\r\n"]
 do_open $q
-ok "crlf: eol detected"         [dict get $::meta eol] crlf
+ok "crlf: eol detected"         [dict get [bufget $::cur meta] eol] crlf
 .t insert 1.0 ">"
 do_save
 ok "crlf: preserved on save"    [diskbytes $q]    ">a\r\nb\r\n"
@@ -67,6 +67,39 @@ do_undo
 ok "undo: edit reverted"        [rio::doc::text $::cur] "a\nb\n"
 do_redo
 ok "redo: edit reapplied"       [rio::doc::text $::cur] ">a\nb\n"
+
+# --- multi-buffer / tabs -----------------------------------------------------
+set start [llength $::order]
+set f1 [tmpbytes "FILE ONE\n"]
+set f2 [tmpbytes "FILE TWO\n"]
+do_open $f1
+set b1 $::cur
+do_open $f2
+set b2 $::cur
+ok "tabs: two new buffers"      [llength $::order] [expr {$start + 2}]
+ok "tabs: active is f2"         [bufget $::cur path] $f2
+ok "tabs: distinct buffers"     [expr {$b1 ne $b2}] 1
+
+# Edit each independently; switching must not bleed content across tabs.
+.t insert 1.0 "2"                       ;# edit f2 (active)
+activate $b1
+.t insert 1.0 "1"                       ;# edit f1
+ok "tabs: f1 holds its own edit" [rio::doc::text $b1] "1FILE ONE\n"
+ok "tabs: f2 holds its own edit" [rio::doc::text $b2] "2FILE TWO\n"
+ok "tabs: switch shows f1"       [widget]            "1FILE ONE\n"
+
+# Reopening an already-open path switches rather than duplicating.
+set n [llength $::order]
+do_open $f2
+ok "tabs: reopen switches"      [bufget $::cur path] $f2
+ok "tabs: no duplicate tab"     [llength $::order] $n
+
+# Closing a tab drops it from the core too.
+set victim $::cur
+do_save                                  ;# avoid the discard prompt
+do_close
+ok "tabs: closed tab gone"      [lsearch -exact $::order $victim] -1
+ok "tabs: buffer freed in core" [rio::doc::exists $victim] 0
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -76,4 +76,27 @@ test buffer-handler-error-propagates {a doc error becomes ok:false} -body {
 	list [dict get $r ok] [string match {index out of range*} [dict get $r error]]
 } -result {false 1}
 
+test buffer-new-creates {buffer.new mints a fresh empty buffer} -body {
+	set out [rio::core::call buffer.new {}]
+	set id [dict get $out response result buffer]
+	list [dict get $out response ok] [rio::doc::exists $id] [rio::doc::text $id]
+} -result {true 1 {}}
+
+test buffer-new-name {buffer.new honours a name} -body {
+	set out [rio::core::call buffer.new [dict create name scratch]]
+	dict get $out response result name
+} -result scratch
+
+test buffer-close-forgets {buffer.close removes the buffer} -body {
+	set b [freshbuf "bye"]
+	set out [rio::core::call buffer.close [dict create buffer $b]]
+	list [dict get $out response ok] [rio::doc::exists $b]
+} -result {true 0}
+
+test buffer-close-unknown {closing a missing buffer errors cleanly} -body {
+	set out [rio::core::call buffer.close [dict create buffer 99999]]
+	set r [dict get $out response]
+	list [dict get $r ok] [dict get $r error]
+} -result {false {no such buffer: 99999}}
+
 cleanupTests
