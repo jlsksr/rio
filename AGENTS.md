@@ -537,6 +537,48 @@ config edit rather than a code change, and keep keymap churn out of the
 frontends. The concrete **default keymap** (and any modal-vs-modeless stance)
 stays open — that's the narrowed O6.
 
+### D24 — GUI theming: semantic roles in plain data files (themes are data, not code)
+
+The **GUI is themeable**, and a theme is a flat, human-readable data file — the
+same `key = value` / `[section]` style as config (D21), `#` comments, UTF-8.
+**Theme files are data, never executed** — rio does *not* `source` a theme as
+Tcl (same footgun-removal as D21). A theme names **semantic roles**, not widget
+paths, mapped onto the D13 regions:
+
+- **Colors by role:** `editor.bg`, `editor.fg`, `editor.selection`, `chat.bg`,
+  `chat.fg`, `ui.bg`, `ui.fg`, `gutter.fg`, `accent`, … solarized-light vs
+  solarized-dark then differ *only* in the values; the GUI wiring is identical.
+- **Fonts by role, via named fonts:** a small set (`RioEditorFont`,
+  `RioChatFont`, `RioUIFont`) that widgets reference *by name*, so the coding
+  surface and the agent chat can carry **different family/size**. Reconfiguring
+  a named font updates every widget using it **live**, so font-size and theme
+  switches need no restart.
+
+A thin **theme applier** in the GUI frontend reads the role table and pokes Tk:
+`font configure` for the named fonts, the **option database** for classic-widget
+defaults (the `text` editor, labels), and `ttk::style configure` for any themed
+widgets — plus explicit per-region re-config so switching is live (the option DB
+only affects widgets created after it's set). Keeping that Tk-specific mapping in
+code is what lets theme files stay dumb, portable, and safe.
+
+The shipped **default is the plain white-bg/black-text look** (the "90s
+productivity" aesthetic); themes are opt-in. `solarized-light` and
+`solarized-dark` ship as example files under `$XDG_CONFIG_HOME/rio/themes/`. A
+theme may optionally declare `base = <theme>` and override a few roles rather
+than copy the whole set.
+
+**Scope:** theming is a **GUI concern** (D1) — fonts have no meaning in a
+terminal. But the **color-role vocabulary is shared**, so a future TUI theme can
+map the same roles onto the terminal's 16/256-color palette without inventing a
+second model.
+
+**Why:** roles-not-paths make a new theme a pure value set; named fonts give
+per-section typography and instant, restart-free changes; refusing to execute
+theme files reuses D21's security/robustness stance; a built-in default keeps the
+look people love without a theme file present. **Open:** the concrete role
+vocabulary (the full list of color/font slots) and how much rio leans on `ttk`
+vs classic widgets — both firm up once the GUI shell exists.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
