@@ -59,6 +59,20 @@ tclsh core.tcl & sleep 1; tclsh probe.tcl
   degenerate `buffer.replace` calls; the core never needed more.
 - **Headless discipline holds.** The core is genuinely Tk-free and exits cleanly;
   the Tk-in-tclsh hazards live entirely on the frontend side of the seam.
+- **Keep the view dumb with a widget proxy, not key bindings.** Intercepting
+  `<Key>` and reading `%A` is a trap: Tk substitutes `%A` *textually*, so a code
+  editor's own characters — `[ " \ {` — break the binding script (and a bare
+  letter is an invalid bareword inside `expr`). Renaming the widget command and
+  proxying `insert`/`delete` instead catches typing, paste, and cut uniformly,
+  with the character arriving as a proper Tcl argument. That's the robust way to
+  realize "the frontend never edits itself."
+- **Index resolution lags the canonical doc by one round-trip.** A pure view
+  resolves indices (the `insert` mark, `line.col`) against its *local* widget,
+  which trails the core by one echo. Invisible for human typing — each keystroke
+  returns to the event loop and the echo applies before the next key — but it
+  means a frontend must not fire dependent edits ahead of the core's echoes. A
+  property the real core's frontend has to respect (or resolve indices
+  optimistically against a local shadow).
 
 ## Out of scope (deliberately)
 
