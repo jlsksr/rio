@@ -1,0 +1,115 @@
+# Tests for undo/redo (rio::doc::edit/undo/redo and the edit.* ops; AGENTS.md O3).
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# --- _advance geometry (the span an insertion occupies) ----------------------
+
+test undo-advance-empty {an empty insertion does not move the index} -body {
+	rio::doc::_advance 2.3 ""
+} -result 2.3
+
+test undo-advance-single {single-line text advances the column} -body {
+	rio::doc::_advance 1.0 hello
+} -result 1.5
+
+test undo-advance-multiline {multi-line text advances line and resets to last seg} -body {
+	rio::doc::_advance 2.3 "ab\ncd"
+} -result 3.2
+
+# --- model-level undo/redo ---------------------------------------------------
+
+test undo-insert {insert then undo restores the original} -body {
+	set b [rio::doc::new "hello"]
+	rio::doc::edit $b 1.0 1.0 "X "
+	set after [rio::doc::text $b]
+	rio::doc::undo $b
+	list $after [rio::doc::text $b]
+} -result {{X hello} hello}
+
+test undo-redo {undo then redo reapplies the edit} -body {
+	set b [rio::doc::new "hello"]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::doc::undo $b
+	rio::doc::redo $b
+	rio::doc::text $b
+} -result {hello!}
+
+test undo-delete {deleting then undoing brings the text back} -body {
+	set b [rio::doc::new "abcdef"]
+	# delete "cd" (cols 2..4)
+	set removed [rio::doc::edit $b 1.2 1.4 ""]
+	set mid [rio::doc::text $b]
+	rio::doc::undo $b
+	list $removed $mid [rio::doc::text $b]
+} -result {cd abef abcdef}
+
+test undo-multiline {a multi-line replacement undoes cleanly} -body {
+	set b [rio::doc::new "one\ntwo\nthree"]
+	# replace "two" (2.0..2.3) with "2\n2.5"
+	rio::doc::edit $b 2.0 2.3 "2\n2.5"
+	set after [rio::doc::text $b]
+	rio::doc::undo $b
+	list $after [rio::doc::text $b]
+} -result "{one\n2\n2.5\nthree} {one\ntwo\nthree}"
+
+test undo-stack-order {two edits undo in reverse order} -body {
+	set b [rio::doc::new ""]
+	rio::doc::edit $b 1.0 1.0 "a"
+	rio::doc::edit $b 1.1 1.1 "b"
+	set ab [rio::doc::text $b]
+	rio::doc::undo $b ; set a [rio::doc::text $b]
+	rio::doc::undo $b ; set e [rio::doc::text $b]
+	list $ab $a $e
+} -result {ab a {}}
+
+test undo-new-edit-clears-redo {a fresh edit drops the redo branch} -body {
+	set b [rio::doc::new ""]
+	rio::doc::edit $b 1.0 1.0 "a"
+	rio::doc::undo $b
+	rio::doc::edit $b 1.0 1.0 "z"
+	# redo must now be a no-op: text stays "z", not "az"/"a"
+	set r [rio::doc::redo $b]
+	list $r [rio::doc::text $b]
+} -result {{} z}
+
+test undo-empty {undo on a fresh buffer is a no-op} -body {
+	set b [rio::doc::new "x"]
+	rio::doc::undo $b
+} -result {}
+
+# --- through the core / edit.* ops -------------------------------------------
+
+test undo-op-roundtrip {edit via buffer.replace, then edit.undo emits buffer.changed} -body {
+	set b [rio::doc::new "hello"]
+	rio::core::call buffer.replace [dict create buffer $b start 1.0 end 1.0 text "> "]
+	set r [rio::core::call edit.undo [dict create buffer $b]]
+	set ev [lindex [dict get $r events] 0]
+	list [dict get $r response ok] \
+		[dict get $r response result changed] \
+		[dict get $ev event] \
+		[dict get $ev params start] [dict get $ev params end] \
+		[dict get $ev params text] \
+		[rio::doc::text $b]
+} -result {true true buffer.changed 1.0 1.2 {} hello}
+
+test undo-op-redo {edit.redo reapplies and emits the original change} -body {
+	set b [rio::doc::new "hi"]
+	rio::core::call buffer.replace [dict create buffer $b start 1.2 end 1.2 text "!"]
+	rio::core::call edit.undo [dict create buffer $b]
+	set r [rio::core::call edit.redo [dict create buffer $b]]
+	list [dict get $r response result changed] \
+		[dict get [lindex [dict get $r events] 0] params text] \
+		[rio::doc::text $b]
+} -result {true ! hi!}
+
+test undo-op-nothing {edit.undo with empty history succeeds with no event} -body {
+	set b [rio::doc::new "x"]
+	set r [rio::core::call edit.undo [dict create buffer $b]]
+	list [dict get $r response ok] \
+		[dict get $r response result changed] \
+		[llength [dict get $r events]]
+} -result {true false 0}
+
+cleanupTests

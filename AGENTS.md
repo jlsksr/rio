@@ -707,8 +707,13 @@ Both renderings come from the **same** region model (D13) and layout policy
   `session.hello`.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
-  *implemented* (`rio-core/fs.tcl`, `fs.*` ops).
-  **Remaining:** undo/redo structure and large-file handling (lazy load?).
+  *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
+  too: per-buffer undo/redo stacks in the document model with a recording `edit`
+  primitive distinct from the raw `replace`, surfaced as the `edit.undo`/
+  `edit.redo` ops (`rio-core/ops-undo.tcl`); each undo emits the same
+  `buffer.changed` event a normal edit would, so views resync through one path.
+  **Remaining:** keystroke coalescing into undo groups, and large-file handling
+  (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
   orchestration; **deferred** per Sequencing.) Exact built-in tool set, how edits
   are previewed/applied, guardrails for the headless run-command primitive (D15),

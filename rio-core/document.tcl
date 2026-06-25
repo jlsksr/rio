@@ -22,7 +22,7 @@ proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	set lines [split $text "\n"]
 	if {$lines eq ""} { set lines [list ""] }
 	set id [incr nextid]
-	dict set buffers $id [dict create lines $lines name $name meta $meta]
+	dict set buffers $id [dict create lines $lines name $name meta $meta undo {} redo {}]
 	return $id
 }
 
@@ -59,12 +59,82 @@ proc rio::doc::linecount {id} {
 }
 
 # Replace [start, end) with text. Returns the text that was removed (so callers
-# can build change events and, later, undo). Mutates the buffer in place.
+# can build change events and, later, undo). Mutates the buffer in place. This is
+# the RAW primitive: it does not touch the undo history, so undo/redo can use it
+# to reverse an edit without themselves being recorded.
 proc rio::doc::replace {id start end text} {
 	variable buffers
 	lassign [_splice [lines $id] $start $end $text] newlines removed
 	dict set buffers $id lines $newlines
 	return $removed
+}
+
+# --- undo/redo (AGENTS.md O3) -----------------------------------------------
+#
+# A recorded edit is a replace that remembers enough to reverse itself: the range
+# {start,end} and `text` it applied, plus the `removed` text it displaced. To
+# UNDO, replace [start, advance(start,text)) — the span the inserted text now
+# occupies — back with `removed`. To REDO, just replay the original replace, since
+# undo restored the pre-edit state exactly. Applying a fresh edit invalidates the
+# redo branch. (Coalescing consecutive keystrokes into one undo step is a later
+# refinement; for now each edit is its own step.)
+
+# A recording edit — what user-facing ops call. Returns the removed text.
+proc rio::doc::edit {id start end text} {
+	variable buffers
+	set removed [replace $id $start $end $text]
+	set rec [dict create start $start end $end text $text removed $removed]
+	dict update buffers $id b {
+		dict lappend b undo $rec
+		dict set b redo {}
+	}
+	return $removed
+}
+
+# Undo the most recent recorded edit. Returns a change dict {start end text
+# removed} describing the replacement applied (for a buffer.changed event), or ""
+# if there is nothing to undo.
+proc rio::doc::undo {id} {
+	variable buffers
+	set stack [dict get $buffers $id undo]
+	if {![llength $stack]} { return "" }
+	set rec [lindex $stack end]
+	dict set buffers $id undo [lrange $stack 0 end-1]
+	lassign [_recvals $rec] start end text removed
+	set iend [_advance $start $text]
+	replace $id $start $iend $removed
+	dict update buffers $id b { dict lappend b redo $rec }
+	return [dict create start $start end $iend text $removed removed $text]
+}
+
+# Redo the most recently undone edit. Returns a change dict or "".
+proc rio::doc::redo {id} {
+	variable buffers
+	set stack [dict get $buffers $id redo]
+	if {![llength $stack]} { return "" }
+	set rec [lindex $stack end]
+	dict set buffers $id redo [lrange $stack 0 end-1]
+	lassign [_recvals $rec] start end text removed
+	replace $id $start $end $text
+	dict update buffers $id b { dict lappend b undo $rec }
+	return [dict create start $start end $end text $text removed $removed]
+}
+
+proc rio::doc::_recvals {rec} {
+	return [list [dict get $rec start] [dict get $rec end] \
+		[dict get $rec text] [dict get $rec removed]]
+}
+
+# The index reached by inserting `text` starting at index `start` (D12 line.col).
+proc rio::doc::_advance {start text} {
+	lassign [_idx $start] sl sc
+	set segs [split $text "\n"]
+	if {$segs eq ""} { set segs [list ""] }
+	if {[llength $segs] == 1} {
+		return "$sl.[expr {$sc + [string length $text]}]"
+	}
+	set line [expr {$sl + [llength $segs] - 1}]
+	return "$line.[string length [lindex $segs end]]"
 }
 
 # --- pure helpers (no buffer registry; unit-testable on a bare line list) ----

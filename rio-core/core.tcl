@@ -12,7 +12,7 @@ namespace eval rio::core {
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]
-	foreach m {document.tcl dispatch.tcl fs.tcl ops-buffer.tcl ops-fs.tcl} {
+	foreach m {document.tcl dispatch.tcl fs.tcl ops-buffer.tcl ops-fs.tcl ops-undo.tcl} {
 		source [file join $dir $m]
 	}
 }}

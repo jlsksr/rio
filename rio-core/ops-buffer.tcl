@@ -26,7 +26,7 @@ proc rio::ops::buffer_replace {params} {
 	set start [dict get $params start]
 	set end   [dict get $params end]
 	set text  [dict get $params text]
-	set removed [rio::doc::replace $id $start $end $text]
+	set removed [rio::doc::edit $id $start $end $text]   ;# recorded for undo (O3)
 	set ev [dict create event buffer.changed params \
 		[dict create buffer $id start $start end $end text $text removed $removed]]
 	return [dict create result {} events [list $ev]]
