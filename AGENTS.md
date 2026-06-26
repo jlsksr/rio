@@ -734,18 +734,39 @@ Both renderings come from the **same** region model (D13) and layout policy
 
 ## 6. Open Questions
 
-> **Triage (per Sequencing).** *Active now* (core+GUI+TUI phase): O1 (spike),
-> O2, O3, O7. *Resolved:* O5 → D21, and parts of O3 → D22, O6 → D23. *Deferred*
+> **Triage (per Sequencing).** *Active now* (core+GUI+TUI phase): O2, O3, O7.
+> O1 (the Ck spike) stays in this phase but is **deferred to just before the
+> first rendering-heavy namespace** (agent chat / git diff), not run next — see
+> its Timing note. *Resolved:* O5 → D21, and parts of O3 → D22, O6 → D23. *Deferred*
 > (agent/plugin era — designed, not to be answered yet): O4, O8, O9, O10, O11,
 > O12. Don't burn effort on the deferred ones before a working core+GUI exists.
 
-- **O1 — The Ck spike (top priority, gates the TUI plan).** Validate
+- **O1 — The Ck spike (gates the TUI plan).** Validate
   `ck8.6` / `vanillatclsh` against rio's actual needs:
   - Responsive pane layout (D9) via Ck's geometry managers.
   - A usable editing surface in Ck's `text` widget (it's a weaker cousin of
     Tk's — no canvas, no embedded windows-in-text).
   - Acceptable behavior under **Cygwin** (D6) and on Linux.
   - Pin a specific build/version; treat Ck as a vetted dependency.
+
+  **Timing — the spike gates the TUI, but is not the immediate next task.** Two
+  things were being conflated: a *throwaway spike* (prove Ck can carry the
+  existing protocol; deliverable is a leak-list, then discard) vs. a *parallel
+  second frontend* (a real TUI kept in lockstep with the GUI). We reject the
+  latter now — two dumb views over a still-moving protocol doubles the working
+  set per change for no payoff yet. The spike (the former) is *cheapest now*
+  (tiny op surface) but also *lowest-signal now*: the one terminal-hostile seam,
+  theme fonts, is already consciously handled (the role table is data the GUI
+  *applier* maps — D24 — so a TUI maps the same colour roles to a palette), and
+  `line.col` (D12) already suits a cell grid. The spike earns its keep against
+  the first **rendering-heavy** namespace — the agent chat panel or a git diff
+  view — where the GUI-shape temptation is real and a terminal consumer would
+  catch a leak before it's baked in. **So: run the spike as a throwaway right
+  before designing the first rendering-heavy feature, not as the next task.**
+  Until then the GUI is a sufficient single consumer; keep the core honest by
+  *designing each new op with the terminal in mind* (thinking, not a parallel
+  build — that captures most of the "two consumers keep the abstraction honest"
+  benefit without the maintenance tax).
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
@@ -838,6 +859,9 @@ Both renderings come from the **same** region model (D13) and layout policy
 
 A **throwaway** probe (not rio code) to prove/disprove that Ck can carry the
 TUI before we commit. Time-boxed. Produces a written verdict that closes O1.
+**When to run it:** not next — just before designing the first rendering-heavy
+namespace (agent chat / git diff), where a terminal consumer has the most to
+catch. See O1's Timing note above.
 
 **What it must prove (each is pass/fail):**
 
