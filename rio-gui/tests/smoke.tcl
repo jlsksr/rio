@@ -126,6 +126,40 @@ ok "error: failure reported once"    [llength $::captured]          1
 ok "error: code is no_buffer"        [lindex $::captured 0 0]        no_buffer
 activate $b1                                              ;# back to a live buffer
 
+# --- file pane (project root + lazy fs.list navigator) -----------------------
+# Build a throwaway tree, open it as the project folder, and drive the pane the
+# way a double-click would (select a row, call nav_activate).
+proc nav_labels {} {
+	set out {}
+	for {set i 0} {$i < [.side.list size]} {incr i} { lappend out [.side.list get $i] }
+	return $out
+}
+proc nav_click {row} { .side.list selection clear 0 end ; .side.list selection set $row ; nav_activate }
+
+set tf [file tempfile tpath] ; close $tf
+set proj [file join [file dirname $tpath] riogui-nav-[clock clicks]]
+file mkdir [file join $proj sub]
+set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; close $zf
+
+ok "pane: empty before folder open" [nav_labels] {{  Open a folder…}}
+open_folder $proj
+ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
+ok "pane: header is project name" [.side.head cget -text] [file tail $proj]
+ok "pane: dirs then files"        [nav_labels]           {sub/ {  zeta.txt}}
+
+# Descend into the subdir (row 0 = sub/), then back up via "../".
+nav_click 0
+ok "pane: descended into sub"     $::nav_dir             [file normalize [file join $proj sub]]
+ok "pane: subdir shows .. first"  [lindex [nav_labels] 0] "../"
+nav_click 0
+ok "pane: ascended to root"       $::nav_dir             [file normalize $proj]
+
+# Activating a file row opens it in a tab (row 1 = zeta.txt, after sub/).
+nav_click 1
+ok "pane: file opened in a tab"   [bufget $::cur path]   [file join $proj zeta.txt]
+ok "pane: opened file's text"     [rio::doc::text $::cur] "ZETA\n"
+file delete -force $proj
+
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
 # fonts exist, and switching re-applies colours live.

@@ -43,8 +43,9 @@ proc bufset {id key val} { dict set ::buffers $id $key $val }
 proc rio_call {op params} {
 	set r [rio::core::call $op $params]
 	foreach ev [dict get $r events] {
-		if {[dict get $ev event] eq "buffer.changed"} {
-			apply_change [dict get $ev params]
+		switch -- [dict get $ev event] {
+			buffer.changed  { apply_change [dict get $ev params] }
+			project.opened  { on_project_opened [dict get $ev params] }
 		}
 	}
 	return [dict get $r response]
@@ -173,6 +174,86 @@ proc do_open {path} {
 			-message "Mixed line endings; the file will be saved as [dict get $res eol]."
 	}
 	return 1
+}
+
+# ---------------------------------------------------------------------------
+# The file pane (AGENTS.md: the file-tree pane; D9 a later reflow concern). A
+# lazy directory navigator over the core's project root: it lists ONE directory
+# per fs.list call and descends on demand, rather than the core walking a whole
+# repo. The core owns "which folder is open" (project.*); this pane is a dumb
+# view of it — opening a folder goes through project.open and the pane repaints
+# from the project.opened event (D3), the same event-driven path as buffer edits.
+# ::nav_dir is the directory currently shown (absolute); ::nav_rows is a parallel
+# list mapping each listbox row to {type abspath} so a click knows what it hit.
+# ---------------------------------------------------------------------------
+proc open_folder {path} {
+	set resp [rio_call project.open [dict create path $path]]
+	if {![dict get $resp ok]} {
+		report_error "Could not open folder $path:\n[dict get $resp error message]" \
+			[dict get $resp error code]
+		return 0
+	}
+	return 1   ;# the pane repaints via the project.opened event (on_project_opened)
+}
+
+proc on_project_opened {p} {
+	set ::nav_dir [dict get $p root]
+	populate_nav
+}
+
+# Repaint the pane with the entries of ::nav_dir: a ".." row (unless at the root),
+# then directories, then files — each group dictionary-sorted by the core already.
+proc populate_nav {} {
+	.side.list delete 0 end
+	set ::nav_rows {}
+	if {$::nav_dir eq ""} {
+		.side.head configure -text "(no folder)"
+		.side.list insert end "  Open a folder…"
+		lappend ::nav_rows [list none ""]
+		return
+	}
+	set root [dict get [rio_call project.get {}] result root]
+	.side.head configure -text [nav_header $::nav_dir $root]
+	if {$::nav_dir ne $root} {
+		.side.list insert end "../"
+		lappend ::nav_rows [list dir [file dirname $::nav_dir]]
+	}
+	set resp [rio_call fs.list [dict create path $::nav_dir]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	set entries [dict get $resp result entries]
+	foreach grp {dir file} {
+		foreach e $entries {
+			if {[dict get $e type] ne $grp} continue
+			set name [dict get $e name]
+			.side.list insert end [expr {$grp eq "dir" ? "$name/" : "  $name"}]
+			lappend ::nav_rows [list $grp [file join $::nav_dir $name]]
+		}
+	}
+}
+
+# Header: the project name, plus the path from the root when in a subdirectory.
+proc nav_header {dir root} {
+	if {$dir eq $root} { return [file tail $root] }
+	return "[file tail $root]/[string range $dir [expr {[string length $root] + 1}] end]"
+}
+
+# Double-click / Enter on a row: descend into a directory, or open a file in a tab.
+proc nav_activate {} {
+	set sel [.side.list curselection]
+	if {$sel eq ""} return
+	lassign [lindex $::nav_rows $sel] type path
+	switch -- $type {
+		dir  { set ::nav_dir $path ; populate_nav }
+		file { do_open $path }
+	}
+}
+
+proc open_folder_dialog {} {
+	set p [tk_chooseDirectory -title "Open folder"]
+	if {$p ne ""} { open_folder $p }
 }
 
 proc do_save_as {path} {
@@ -343,6 +424,15 @@ proc apply_theme {theme} {
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.tabs configure -background [dict get $c tab.bar.bg]
+	# File pane: reuse the UI role (no dedicated sidebar role yet); the active row
+	# borrows the editor's selection colour so the pane matches the surface.
+	.side configure -background [dict get $c ui.bg]
+	.side.head configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.side.list configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c editor.selection] \
+		-selectforeground [dict get $c ui.fg]
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
@@ -367,6 +457,20 @@ proc do_theme {name} {
 # look (D24), and the View menu switches it live.
 # ---------------------------------------------------------------------------
 frame .tabs -background "#bbbbbb"
+# The file pane (left): a header + a scrollable listbox the navigator fills.
+frame .side -background "#dddddd"
+label .side.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
+	-background "#dddddd" -foreground black
+scrollbar .side.sb -command {.side.list yview}
+listbox .side.list -width 26 -activestyle none -exportselection 0 \
+	-borderwidth 0 -highlightthickness 0 \
+	-background "#dddddd" -foreground black \
+	-yscrollcommand {.side.sb set}
+pack .side.head -side top -fill x
+pack .side.sb   -side right -fill y
+pack .side.list -side left -fill both -expand 1
+bind .side.list <Double-Button-1> nav_activate
+bind .side.list <Return>          nav_activate
 text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 	-background white -foreground black -insertbackground black \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2
@@ -374,7 +478,8 @@ label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .tabs   -side top -fill x
 pack .status -side bottom -fill x
-pack .t      -side top -fill both -expand 1
+pack .side   -side left -fill y
+pack .t      -side left -fill both -expand 1
 focus .t
 
 menu .m ; . configure -menu .m
@@ -382,6 +487,7 @@ menu .m.file -tearoff 0
 .m add cascade -label File -menu .m.file
 .m.file add command -label "New"       -accelerator Ctrl+N       -command do_new
 .m.file add command -label "Open…"    -accelerator Ctrl+O       -command open_dialog
+.m.file add command -label "Open Folder…" -accelerator Ctrl+Shift+O -command open_folder_dialog
 .m.file add command -label "Save"      -accelerator Ctrl+S       -command do_save
 .m.file add command -label "Save As…" -accelerator Ctrl+Shift+S -command save_as_dialog
 .m.file add separator
@@ -401,6 +507,7 @@ menu .m.view -tearoff 0
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
 bind .t <Control-n>         { do_new ; break }
 bind .t <Control-o>         { open_dialog ; break }
+bind .t <Control-O>         { open_folder_dialog ; break }
 bind .t <Control-s>         { do_save ; break }
 bind .t <Control-S>         { save_as_dialog ; break }
 bind .t <Control-w>         { do_close ; break }
@@ -450,11 +557,17 @@ proc .t {args} {
 # every widget — and the tab bar refresh_tabs builds — uses the role table.
 apply_theme [dict get [rio_call theme.get {}] result]
 
-# Start on the core's default buffer (an empty "untitled" tab), then open any
-# files named on the command line.
+# Start on the core's default buffer (an empty "untitled" tab), then process the
+# command line: a directory argument opens as the project folder, a file opens in
+# a tab. The file pane starts empty until a folder is opened.
+set ::nav_dir ""
+set ::nav_rows {}
 register_buffer $::rio::ops::default "" {}
 activate $::rio::ops::default
-foreach f $argv { do_open $f }
+populate_nav
+foreach f $argv {
+	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
+}
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }

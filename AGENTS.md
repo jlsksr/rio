@@ -920,9 +920,20 @@ Both renderings come from the **same** region model (D13) and layout policy
   hiding them is a frontend choice, not the data layer's. The list proc is
   `rio::fs::listdir`, deliberately *not* `list`: a proc named `list` would shadow
   the Tcl builtin for every unqualified `[list …]` in the `rio::fs` namespace.
-  `fs.list` registers a D25 result-encoder (its `entries` array). **Next** (#4):
-  default `git.*`'s `cwd` to the project root so the git pane stops leaning on
-  the process cwd; **then** the GUI file-tree pane consuming `fs.list`.
+  `fs.list` registers a D25 result-encoder (its `entries` array).
+
+  **GUI file pane — implemented.** The first non-editor pane: a left-hand
+  navigator (`rio-gui.tcl`) that is a *dumb view* of the project root (D3). "Open
+  Folder…" (Ctrl+Shift+O, or a directory argument on the command line) calls
+  `project.open`; the pane repaints from the **`project.opened` event** — the same
+  event-driven path as `buffer.changed`, not a direct return — so a second view
+  would stay in sync for free. It lists one directory via `fs.list` (lazy:
+  dirs-then-files, `..` to ascend, double-click/Enter to descend or open a file in
+  a tab), and is themed through the existing role applier (reusing the `ui.*`
+  role; a dedicated sidebar role can come later). A listbox navigator, not yet an
+  expandable indented tree — the simplest honest first cut; tree-style expansion
+  is a later enrichment. **Remaining** (#4): default `git.*`'s `cwd` to the
+  project root so the git pane stops leaning on the process cwd.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
