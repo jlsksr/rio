@@ -741,13 +741,31 @@ Both renderings come from the **same** region model (D13) and layout policy
 > (agent/plugin era — designed, not to be answered yet): O4, O8, O9, O10, O11,
 > O12. Don't burn effort on the deferred ones before a working core+GUI exists.
 
-- **O1 — The Ck spike (gates the TUI plan).** Validate
-  `ck8.6` / `vanillatclsh` against rio's actual needs:
-  - Responsive pane layout (D9) via Ck's geometry managers.
-  - A usable editing surface in Ck's `text` widget (it's a weaker cousin of
-    Tk's — no canvas, no embedded windows-in-text).
-  - Acceptable behavior under **Cygwin** (D6) and on Linux.
-  - Pin a specific build/version; treat Ck as a vetted dependency.
+- **O1 — The Ck spike (gates the TUI plan) — PASS on Linux; two human checks
+  open.** Validated `ck8.6` against rio's actual needs; see `spike/` (throwaway
+  probe harness) and `spike/probes/VERDICT.md` (the full verdict). Result:
+  - **Build & run:** vzvca/ck8.6 builds on Debian 13 / GCC 14, but only with
+    legacy-C flags (`-fcommon`, demote the now-default implicit-decl/implicit-int
+    *errors* back to warnings) passed via `make CFLAGS=` (its `configure` ignores
+    env `CFLAGS`). Built `--enable-shared`, so run with `LD_LIBRARY_PATH` at the
+    build dir. Captured in `deploy.sh`. **Pinned:** Ck `@1a991e3`, Tcl 8.6.16,
+    ncursesw 6.5.
+  - **Editing surface (D-risk):** Ck's `text` handles a 5000-line buffer with a
+    working `scrollbar`, typed editing, and `-foreground` tags — usable. ✓
+  - **Responsive layout (D9, the core UX risk):** ✓ — but Ck has **no
+    `<Configure>` event** (binding it errors). It handles SIGWINCH internally and
+    fires **`<Expose>`**, with `winfo width` updated; the collapse rule binds
+    `<Expose>` **and must guard on actual width change** (else
+    `<Expose>`→repack→`<Expose>` loops and blanks the screen). The TUI frontend
+    inherits this rule.
+  - **Unicode:** BMP renders incl. box-drawing (pane borders) and wide CJK;
+    astral/emoji are lost (ncursesw BMP limit) — rio needs none. ✓
+  - **Keyboard / redraw:** in tmux, Ctrl/Alt/Fn/nav chords all deliver and a
+    ~20 fps repaint loop is clean. **Still owed (human, can't be judged
+    headless):** chords across xterm/tmux/**Cygwin** (D6), and the *feel* of
+    redraw/latency. Until those settle O1 is PASS-on-Linux, not fully closed.
+  - **On fail (Cygwin/feel):** the D2 safety net stands — reimplement the TUI in
+    another language against the protocol; core is unaffected.
 
   **Timing — the spike gates the TUI, but is not the immediate next task.** Two
   things were being conflated: a *throwaway spike* (prove Ck can carry the
@@ -766,7 +784,11 @@ Both renderings come from the **same** region model (D13) and layout policy
   Until then the GUI is a sufficient single consumer; keep the core honest by
   *designing each new op with the terminal in mind* (thinking, not a parallel
   build — that captures most of the "two consumers keep the abstraction honest"
-  benefit without the maintenance tax).
+  benefit without the maintenance tax). **Update:** that trigger has now fired —
+  the `git.*` read layer is done, so git's UI is the next rendering-heavy work —
+  and the spike was run (toolkit-level, ahead of building the git UI). It
+  validated Ck itself (PASS on Linux, above); the *protocol leak-list* part of
+  the spike's intent still happens when the git UI is actually built against Ck.
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,

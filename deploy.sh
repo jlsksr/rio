@@ -56,10 +56,19 @@ echo "using --with-tcl=$tcldir"
 # --- 4. build Ck (into the source tree; no install) --------------------------
 log "building Ck"
 cd "$ck_src"
+# Ck is old K&R-ish C: it uses functions before they're defined (relying on
+# implicit declaration) and tentative globals. GCC 14 (Debian 13) makes both a
+# hard error by default, so demote them back to warnings — the GCC-14-documented
+# porting flags — and add -fcommon for the tentative-definition case. The
+# implicitly-declared functions here are all int-returning Tcl init helpers, so
+# the assumed `int` is correct (no 64-bit pointer truncation). This configure
+# ignores $CFLAGS and hardcodes `CFLAGS = -g3`, so override it on the make line
+# (CC_SWITCHES re-adds the -fPIC shlib flags, so we keep -g3 and add ours).
+ck_cflags="-g3 -fcommon -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion"
 # Prefer the shipped configure; regenerate from configure.in only if it's absent.
 [ -x ./configure ] || autoconf
 ./configure --with-tcl="$tcldir" --enable-shared
-make
+make CFLAGS="$ck_cflags"
 cd "$repo"
 
 # --- 5. verify ---------------------------------------------------------------
@@ -68,7 +77,7 @@ if [ -x "$ck_src/cwsh" ]; then
 	echo "OK: built $ck_src/cwsh"
 	echo
 	echo "Run a spike probe in YOUR terminal, e.g.:"
-	echo "  CK_LIBRARY=$ck_src/library $ck_src/cwsh $repo/spike/probes/01-build-run.tcl"
+	echo "  LD_LIBRARY_PATH=$ck_src CK_LIBRARY=$ck_src/library $ck_src/cwsh $repo/spike/probes/01-build-run.tcl"
 	echo "or drive the whole suite headlessly via tmux:"
 	echo "  $repo/spike/probes/run-all.sh"
 else
