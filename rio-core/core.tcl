@@ -12,8 +12,8 @@ namespace eval rio::core {
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]
-	foreach m {error.tcl document.tcl dispatch.tcl fs.tcl conf.tcl theme.tcl \
-			ops-buffer.tcl ops-fs.tcl ops-undo.tcl ops-session.tcl ops-theme.tcl} {
+	foreach m {error.tcl document.tcl dispatch.tcl fs.tcl conf.tcl theme.tcl exec.tcl \
+			ops-buffer.tcl ops-fs.tcl ops-undo.tcl ops-session.tcl ops-theme.tcl ops-exec.tcl} {
 		source [file join $dir $m]
 	}
 }}

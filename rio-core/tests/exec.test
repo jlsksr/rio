@@ -1,0 +1,88 @@
+# Tests for the command-execution primitive (rio::exec, AGENTS.md D15) and the
+# exec.run op driven through the in-process core. The subject under test is
+# tclsh itself (info nameofexecutable) so the suite needs no /bin/sh or coreutils
+# and runs the same on every platform: a script is fed on the child's stdin, or
+# written to a temp file when we also need to exercise stdin passthrough.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. exec.tcl]
+source [file join [file dirname [info script]] .. core.tcl]
+
+set ::tcl [info nameofexecutable]
+
+test exec-run-stdout {captures stdout and a zero exit} -body {
+	set r [rio::exec::run [list $::tcl] "" "puts hello"]
+	list [dict get $r exitcode] [dict get $r stdout] [dict get $r stderr]
+} -result {0 {hello
+} {}}
+
+test exec-run-exitcode {a non-zero exit is a successful op; the code is data} -body {
+	set r [rio::exec::run [list $::tcl] "" "exit 3"]
+	list [dict get $r exitcode] [dict get $r stdout]
+} -result {3 {}}
+
+test exec-run-stderr-separate {stdout and stderr are captured on separate streams} -body {
+	set r [rio::exec::run [list $::tcl] "" "puts out; puts stderr oops"]
+	list [dict get $r stdout] [dict get $r stderr]
+} -result {{out
+} {oops
+}}
+
+test exec-run-stdin {stdin is passed through to the child} -setup {
+	set ::sp [file join [::tcltest::temporaryDirectory] exec-stdin.tcl]
+	set f [open $::sp w] ; puts $f {puts [string toupper [read stdin]]} ; close $f
+} -body {
+	set r [rio::exec::run [list $::tcl $::sp] "" "abc"]
+	dict get $r stdout
+} -cleanup {
+	file delete $::sp
+} -result {ABC
+}
+
+test exec-run-cwd {the command runs in the requested working directory} -setup {
+	set ::wd [file join [::tcltest::temporaryDirectory] exec-cwd]
+	file mkdir $::wd
+} -body {
+	set r [rio::exec::run [list $::tcl] $::wd "puts \[pwd\]"]
+	expr {[file normalize [string trim [dict get $r stdout]]] eq [file normalize $::wd]}
+} -cleanup {
+	file delete -force $::wd
+} -result 1
+
+test exec-run-empty-argv {an empty argv is a bad_request} -body {
+	catch {rio::exec::run {}} e opts
+	list [rio::error::code_of $opts] $e
+} -result {bad_request {exec.run requires a non-empty argv}}
+
+test exec-run-bad-cwd {a missing working directory is an io_error} -body {
+	catch {rio::exec::run [list $::tcl] /no/such/dir/here "puts hi"} e opts
+	rio::error::code_of $opts
+} -result io_error
+
+test exec-run-launch-failure {failing to launch the command is an io_error} -body {
+	catch {rio::exec::run [list rio-no-such-command-xyzzy]} e opts
+	rio::error::code_of $opts
+} -result io_error
+
+# --- through the in-process core --------------------------------------------
+
+test exec-op-run {exec.run op returns the capture shape} -body {
+	set r [rio::core::call exec.run [dict create argv [list $::tcl] stdin "puts hi"]]
+	set resp [dict get $r response]
+	list [dict get $resp ok] [dict get $resp result exitcode] \
+		[dict get $resp result stdout]
+} -result {true 0 {hi
+}}
+
+test exec-op-missing-argv {exec.run without argv is a bad_request} -body {
+	set resp [dict get [rio::core::call exec.run {}] response]
+	list [dict get $resp ok] [dict get $resp error code]
+} -result {false bad_request}
+
+test exec-op-registered {exec.run shows up in the live op registry} -body {
+	expr {"exec.run" in [rio::dispatch::opnames]}
+} -result 1
+
+cleanupTests

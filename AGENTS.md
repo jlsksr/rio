@@ -771,9 +771,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
   replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
-  `session.hello` (version/capability negotiation), and `theme.get` (D24 role
-  table). The **error taxonomy is now decided** (below). Remaining: the full op
-  vocabulary + params per namespace.
+  `session.hello` (version/capability negotiation), `theme.get` (D24 role
+  table), and `exec.run` (the command-execution primitive, below). The **error
+  taxonomy is now decided** (below). Remaining: the full op vocabulary + params
+  per namespace.
 
   **Error taxonomy — implemented.** An error reply's `error` is a flat object
   `{code, message}`, not a bare string: a stable machine-readable `code` clients
@@ -814,6 +815,30 @@ Both renderings come from the **same** region model (D13) and layout policy
   Implemented since: `theme.get` (D24, nested-object result) — the *core* theme
   service — plus the GUI **theme applier** that consumes it (named fonts, live
   per-widget re-config, a View menu that switches themes with no restart).
+
+  **`exec.run` — the command-execution primitive — implemented.** The headless
+  capability git (D7) and the agent (D20) build on (D15; rio has no terminal
+  pane, so it never renders — output surfaces in the asking flow). `exec.run
+  {argv, ?cwd?, ?stdin?}` -> `{exitcode, stdout, stderr}`, with stdout/stderr
+  captured on separate streams (`rio-core/exec.tcl`, `rio-core/ops-exec.tcl`).
+  Decisions: the command is an **argument vector, never a shell string** — no
+  shell means no quoting/injection surface and identical behaviour on Windows
+  (no `/bin/sh`); that argv discipline is the baseline guardrail. A command that
+  **runs and exits non-zero is a successful op** whose `exitcode` is *data* (a
+  failed test/git is not a protocol error); only a failure to *launch* (no such
+  executable, missing cwd) raises — `io_error`. A signal-killed child reports
+  `exitcode -1`. Output is captured as **faithful bytes** (no EOL/encoding
+  translation, matching D22); an encoding policy can refine that later.
+
+  **Scope — synchronous now, streaming later.** This first cut blocks until the
+  child exits, which suits the pre-spike need: git `status`/`diff`/`log` are
+  short. **Streaming** a long-running command's output as events over time (build
+  output, the agent watching a test run) needs the event-loop/coroutine model
+  (D10) and a way to deliver events outside a single request — deferred to the
+  rendering-heavy era, alongside the O1 spike. Residual hardening (allow-lists,
+  agent confirmation, and closing Tcl `exec`'s redirection-token surface — an
+  argv element literally `>` is still reserved) is the **O4/D20** guardrail work,
+  also deferred; trusted internal callers (git/agent) construct argv today.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
@@ -825,9 +850,12 @@ Both renderings come from the **same** region model (D13) and layout policy
   (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
   orchestration; **deferred** per Sequencing.) Exact built-in tool set, how edits
-  are previewed/applied, guardrails for the headless run-command primitive (D15),
-  the permission model for plugin-contributed tools, and a truncation/scrollback
-  rule for long command output surfaced in `chat`.
+  are previewed/applied, guardrails for the headless run-command primitive (now
+  implemented as `exec.run` — see O2; its argv-not-shell discipline is the
+  baseline, but allow-lists, agent confirmation, and closing exec's
+  redirection-token surface remain here), the permission model for
+  plugin-contributed tools, and a truncation/scrollback rule for long command
+  output surfaced in `chat`.
 - **O5 — Config & session format.** ✅ **Resolved — D21** (plain key-value
   settings + JSON session state, XDG locations, per-project `.rio/`).
 - **O6 — Default keymap.** Binding *model* decided in D23 (data-driven, GUI/TUI
