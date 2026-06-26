@@ -55,7 +55,13 @@ proc rio::theme::load {name} {
 	if {$name eq "" || $name eq "default"} { return [default] }
 	set path [_find $name]
 	if {$path eq ""} { rio::error::raise bad_request "no such theme: $name" }
-	set part [from_conf [rio::conf::read_file $path]]
+	# A theme file is data on disk: a parse failure (or an unreadable file) is the
+	# client asking for a theme that can't be honoured, not a core bug — code it
+	# bad_request like "no such theme", with the parser's reason for context. conf
+	# stays a generic parser that knows nothing of the protocol's error taxonomy.
+	if {[catch {from_conf [rio::conf::read_file $path]} part]} {
+		rio::error::raise bad_request "theme $name is malformed: $part"
+	}
 	set base [expr {[dict get $part base] ne "" ? [load [dict get $part base]] : [default]}]
 	return [merge $base $part]
 }

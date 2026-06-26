@@ -40,10 +40,25 @@ test theme-load-shipped {a shipped example loads, overriding over the default} -
 	list [dict get $t fonts RioEditorFont family] [dict get $t colors editor.bg]
 } -result {monospace #002b36}
 
-test theme-load-missing {an unknown theme errors cleanly} -body {
-	catch {rio::theme::load no-such-theme} e
-	set e
-} -result {no such theme: no-such-theme}
+test theme-load-missing {an unknown theme errors cleanly, coded bad_request} -body {
+	catch {rio::theme::load no-such-theme} e opts
+	list [rio::error::code_of $opts] $e
+} -result {bad_request {no such theme: no-such-theme}}
+
+test theme-load-malformed {a malformed theme file is a clean bad_request, not internal} -setup {
+	set ::fixt [file join [::tcltest::temporaryDirectory] riothemes-bad]
+	file mkdir $::fixt
+	set f [open [file join $::fixt broken.theme] w]
+	puts $f "this line has no equals sign"      ;# not a section, comment, or key=value
+	close $f
+	set ::rio::theme::override_dirs [list $::fixt]
+} -body {
+	catch {rio::theme::load broken} e opts
+	list [rio::error::code_of $opts] [string match {theme broken is malformed:*} $e]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::fixt
+} -result {bad_request 1}
 
 test theme-load-base-chain {a theme inherits its declared base} -setup {
 	set ::themesdir [file normalize [file join [file dirname [info script]] .. .. themes]]
