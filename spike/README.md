@@ -7,15 +7,19 @@ be deleted once O1 is closed.
 
 ## Layout
 
-- `ck8.6/` — upstream Ck checkout + build (vzvca/ck8.6). **Git-ignored**; created
-  by `../deploy.sh`. Removable with `rm -rf ck8.6`.
+- `ck8.6/` — upstream Ck checkout + build (vzvca/ck8.6). **Git-ignored**.
+  Removable with `rm -rf ck8.6`. (The canonical Ck build lives in
+  `../../rio-dev-deploy.sh --with-ck`, which installs it system-wide; this local
+  copy is just what the spike was driven against.)
 - `probes/` — the probe scripts (one Ck program per O1 criterion), a tmux-driven
   headless runner, and the verdict checklist.
 
 ## Running
 
-1. From the repo root: `./deploy.sh` (installs build deps via apt — needs sudo —
-   and builds `ck8.6/cwsh` into a local prefix; nothing lands in /usr).
+1. From the repo root: `./rio-dev-deploy.sh --with-ck` (installs build deps and
+   builds Ck — needs sudo for package install). The probes below assume a local
+   `spike/ck8.6/` build; adjust `LD_LIBRARY_PATH`/`cwsh` paths if you used the
+   system install instead.
 2. Then either:
    - **By hand, in your terminal** (the real test — you judge redraw/feel):
      `CK_LIBRARY=spike/ck8.6/library spike/ck8.6/cwsh spike/probes/01-build-run.tcl`

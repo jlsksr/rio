@@ -1,6 +1,7 @@
 # Personal scratch / throwaway test files (not part of rio).
 /jka-test/
 
-# O1 Ck spike: the vendored Ck checkout + build (created by deploy.sh). The
-# probe harness under spike/probes/ is tracked; the upstream build is not.
+# O1 Ck spike: the vendored Ck checkout + build (from rio-dev-deploy.sh --with-ck
+# or a manual clone). The probe harness under spike/probes/ is tracked; the
+# upstream build is not.
 /spike/ck8.6/

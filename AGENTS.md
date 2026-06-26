@@ -734,21 +734,33 @@ Both renderings come from the **same** region model (D13) and layout policy
 
 ## 6. Open Questions
 
-> **Triage (per Sequencing).** *Active now* (core+GUI+TUI phase): O2, O3, O7.
-> O1 (the Ck spike) stays in this phase but is **deferred to just before the
-> first rendering-heavy namespace** (agent chat / git diff), not run next — see
-> its Timing note. *Resolved:* O5 → D21, and parts of O3 → D22, O6 → D23. *Deferred*
-> (agent/plugin era — designed, not to be answered yet): O4, O8, O9, O10, O11,
-> O12. Don't burn effort on the deferred ones before a working core+GUI exists.
+> **Triage (per Sequencing).** *Active now* (**core + GUI** phase): O2, O3, O7.
+> O1 (the Ck spike) is **DONE** — Ck is a viable TUI toolkit (the keyboard is the
+> real cost; see O1) — and the **TUI itself is now deferred** to a separable,
+> later (possibly outsourced) effort; it is **not** active work. The protocol
+> seam (D1/D2/D11) stays first-class so that TUI, or any third-party client, can
+> attach later without touching core. *Resolved:* O5 → D21, and parts of O3 →
+> D22, O6 → D23. *Deferred* (agent/plugin era — designed, not to be answered
+> yet): O4, O8, O9, O10, O11, O12. Don't burn effort on the deferred ones before
+> a working core+GUI exists.
 
-- **O1 — The Ck spike (gates the TUI plan) — PASS on Linux; two human checks
-  open.** Validated `ck8.6` against rio's actual needs; see `spike/` (throwaway
-  probe harness) and `spike/probes/VERDICT.md` (the full verdict). Result:
+- **O1 — The Ck spike — DONE; TUI deferred.** Validated `ck8.6` against rio's
+  actual needs; see `spike/` (throwaway probe harness) and
+  `spike/probes/VERDICT.md` (the full verdict). **Decision:** the spike did its
+  job — it proved the *toolkit* can carry a TUI (rendering/editing/reflow/colour/
+  Unicode all work) and surfaced the one real cost (**cross-terminal keyboard** —
+  only `Ctrl-a` reached the app on a bare Debian terminal). With that confidence
+  banked, **the TUI itself is deferred** to a separable, later, possibly
+  outsourced effort, and is not tracked as active work. Core + GUI is the focus;
+  the **D1/D2/D11 protocol seam stays the public contract** so a TUI (or any
+  client) attaches later without touching core. The spike + VERDICT are the
+  resume kit; the D2 safety net (a TUI in another language) is the fallback if
+  Ck's keyboard story can't be made good. Result detail:
   - **Build & run:** vzvca/ck8.6 builds on Debian 13 / GCC 14, but only with
     legacy-C flags (`-fcommon`, demote the now-default implicit-decl/implicit-int
     *errors* back to warnings) passed via `make CFLAGS=` (its `configure` ignores
     env `CFLAGS`). Built `--enable-shared`, so run with `LD_LIBRARY_PATH` at the
-    build dir. Captured in `deploy.sh`. **Pinned:** Ck `@1a991e3`, Tcl 8.6.16,
+    build dir. Captured in `rio-dev-deploy.sh --with-ck`. **Pinned:** Ck `@1a991e3`, Tcl 8.6.16,
     ncursesw 6.5.
   - **Editing surface (D-risk):** Ck's `text` handles a 5000-line buffer with a
     working `scrollbar`, typed editing, and `-foreground` tags — usable. ✓
@@ -784,11 +796,13 @@ Both renderings come from the **same** region model (D13) and layout policy
   Until then the GUI is a sufficient single consumer; keep the core honest by
   *designing each new op with the terminal in mind* (thinking, not a parallel
   build — that captures most of the "two consumers keep the abstraction honest"
-  benefit without the maintenance tax). **Update:** that trigger has now fired —
-  the `git.*` read layer is done, so git's UI is the next rendering-heavy work —
-  and the spike was run (toolkit-level, ahead of building the git UI). It
-  validated Ck itself (PASS on Linux, above); the *protocol leak-list* part of
-  the spike's intent still happens when the git UI is actually built against Ck.
+  benefit without the maintenance tax). **Update (superseded):** the spike was
+  run at the toolkit level and PASSED, and the **TUI is now deferred** (see O1) —
+  so the "run it right before the first rendering-heavy feature" timing is moot.
+  What carries forward is the *discipline*, not a near-term TUI build: keep
+  designing each op with a terminal client in mind so the protocol seam stays
+  honest. The *protocol leak-list* part of the spike's intent now happens
+  whenever the (deferred) TUI is actually built against the protocol.
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,

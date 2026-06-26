@@ -130,9 +130,23 @@ build_ck() {
 	log "building Ck from $CK_REPO"
 	rm -rf "$CK_SRC"
 	git clone --depth 1 "$CK_REPO" "$CK_SRC"
-	# Ck is a classic TEA-style build; configure picks up the system tclsh.
-	( cd "$CK_SRC" && ./configure && make )
+	# configure needs the dir holding tclConfig.sh (it otherwise assumes
+	# ../../tcl8.0 and fails to find Tcl).
+	tclconf=$(find /usr/lib /usr/lib64 /usr/local/lib -name tclConfig.sh 2>/dev/null | sort | tail -1)
+	[ -n "$tclconf" ] || die "tclConfig.sh not found — install the Tcl dev package"
+	# Ck is old K&R-ish C: it calls functions before they're declared and uses
+	# tentative globals. GCC 14+ makes both HARD ERRORS by default, so demote
+	# them back to warnings (+ -fcommon). This configure ignores env CFLAGS and
+	# hardcodes `CFLAGS = -g3`, so override on the make line (CC_SWITCHES re-adds
+	# the -fPIC shlib flags). The implicitly-declared funcs are int-returning Tcl
+	# init helpers, so the assumed `int` is correct. (Validated by the O1 spike;
+	# see spike/probes/VERDICT.md.)
+	ck_cflags="-g3 -fcommon -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion"
+	( cd "$CK_SRC" && ./configure --with-tcl="$(dirname "$tclconf")" --enable-shared \
+		&& make CFLAGS="$ck_cflags" )
 	run make -C "$CK_SRC" install
+	# Built --enable-shared: if `cwsh` later can't find libck8.6.so, either run
+	# ldconfig or set LD_LIBRARY_PATH to the install libdir / "$CK_SRC".
 }
 
 # --- verification -----------------------------------------------------------

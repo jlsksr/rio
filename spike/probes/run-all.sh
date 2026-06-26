@@ -7,7 +7,8 @@
 # (feel of redraw/latency #6, behaviour across terminals incl. Cygwin #4) are
 # not covered here — judge those by running the probes in your own terminal.
 #
-# Prereq: ../deploy.sh has built ck8.6/cwsh and installed tmux.
+# Prereq: ../../rio-dev-deploy.sh --with-ck has built ck8.6/cwsh, and tmux is
+# installed. (This expects the local spike/ck8.6 build.)
 set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -18,8 +19,8 @@ lib="$ck/library"
 # in the build dir — put it on the runtime search path.
 ckenv="LD_LIBRARY_PATH=$ck CK_LIBRARY=$lib"
 
-[ -x "$cwsh" ] || { echo "no $cwsh — run ./deploy.sh first" >&2; exit 1; }
-command -v tmux >/dev/null || { echo "tmux not installed — run ./deploy.sh" >&2; exit 1; }
+[ -x "$cwsh" ] || { echo "no $cwsh — run ./rio-dev-deploy.sh --with-ck first" >&2; exit 1; }
+command -v tmux >/dev/null || { echo "tmux not installed — run ./rio-dev-deploy.sh --with-ck" >&2; exit 1; }
 
 fails=0
 W=120 H=40

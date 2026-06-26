@@ -12,7 +12,7 @@ risky parts (editor surface, resize reflow) work.
 | Ck        | vzvca/ck8.6 @ `1a991e3e1af4137c96477b0b21375bd43a914e07` |
 | Tcl       | 8.6.16 |
 | ncursesw  | 6.5+20250216-2 (Debian) |
-| GCC       | 14.2.0 (needed the legacy-C flags in deploy.sh) |
+| GCC       | 14.2.0 (needed the legacy-C flags in rio-dev-deploy.sh --with-ck) |
 
 ## Criteria
 
@@ -21,9 +21,9 @@ risky parts (editor surface, resize reflow) work.
 | 1 | Build & run; pin version                      | deploy + tmux | PASS  | Builds with GCC-14 legacy flags (`-fcommon`, demote implicit-decl/int errors) + `make CFLAGS=` override (configure ignores env CFLAGS). Shared build → run with `LD_LIBRARY_PATH=spike/ck8.6`. |
 | 2 | `text` widget usable as a code editor + tags  | tmux + hand  | PASS  | 5000-line buffer scrolls; working `scrollbar`; typed input edits; `tag configure -foreground` colours. Colour confirmed via SGR codes (red/green/blue/…). |
 | 3 | Responsive layout reflows on SIGWINCH (D9)    | tmux resize  | PASS  | **Ck has NO `<Configure>`** (binding it errors). It handles SIGWINCH internally and fires **`<Expose>`**; `winfo width .` updates. Collapse rule works bound to `<Expose>` — **but guard it**: only re-lay-out when width actually changed, else `<Expose>`→repack→`<Expose>` feedback loops and blanks the UI. |
-| 4 | Keyboard incl. Ctrl/Alt/Fn across terminals   | tmux + **hand** | PARTIAL | In tmux: `Control-x`, `Alt-r`, `F1..F10`, arrows/Home/End/PgUp/PgDn all bind and deliver. **TODO (human):** confirm chords arrive in xterm, tmux, and the Cygwin console / Windows Terminal. |
+| 4 | Keyboard incl. Ctrl/Alt/Fn across terminals   | tmux + **hand** | **WEAK** | In **tmux** all chords delivered. But on the **real Debian host terminal only `Ctrl-a` was recognized** — most chords (other Ctrl, Alt, Fn) did not reach the app. Cross-terminal keyboard is the real soft spot (terminals/shells swallow chords; Alt needs meta-sends-escape; flow-control eats Ctrl-s/q). Needs deliberate keymap+terminal work; Cygwin untested. |
 | 5 | UTF-8 renders (note wide/combining)           | tmux + hand  | PASS  | BMP renders incl. Latin-1, **box-drawing** (pane borders), arrows, and **wide CJK**. Astral/emoji are lost (surrogate escapes shown) — expected for ncursesw; rio needs none. |
-| 6 | Redraw correctness & latency; no flicker      | **hand**     | TODO  | Automated: a ~20 fps full-repaint loop animates cleanly, no crash. **Feel/flicker/latency must be judged by eye** — run `06-redraw.tcl` in your terminals. |
+| 6 | Redraw correctness & latency; no flicker      | **hand**     | PASS  | Automated: a ~20 fps full-repaint loop animates cleanly. Confirmed good by eye on the Debian host — no flicker. |
 
 ## What remains (human, on your boxes)
 
@@ -38,9 +38,15 @@ LD_LIBRARY_PATH=spike/ck8.6 CK_LIBRARY=spike/ck8.6/library \
 
 ## Overall verdict
 
-☑ **PASS (Linux/Debian)** — Ck is viable; build it per `deploy.sh`, drive resize
-via `<Expose>` (width-guarded), accept BMP-only Unicode. Remaining: confirm
-keyboard #4 and feel #6 across your terminals incl. Cygwin. If those hold, close
-O1 as PASS and fold the build recipe into the real TUI plan; only invoke the D2
-safety net (reimplement the TUI in another language) if Cygwin keyboard/redraw
-proves unworkable.
+**Ck is viable for rendering, but the keyboard is a real soft spot.** Rendering,
+editing, resize-reflow (`<Expose>`, width-guarded), colour and BMP/CJK/box Unicode
+all work; redraw feels clean. The catch is **keyboard #4**: only `Ctrl-a` came
+through on the bare Debian terminal, so making rio's keymap actually work across
+terminals (let alone Cygwin) is non-trivial, deliberate work — not a free ride on
+Ck. Build Ck via `rio-dev-deploy.sh --with-ck`.
+
+**Conclusion:** the spike did its job — it proved the *toolkit* can carry a TUI
+and surfaced the real cost (cross-terminal keyboard). Per the project decision to
+**defer the TUI** (see AGENTS.md O1), this verdict is the durable reference for
+whoever resumes it; the D2 safety net (a TUI in another language against the same
+protocol) remains the fallback if Ck's keyboard story can't be made good.
