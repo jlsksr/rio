@@ -772,9 +772,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
   replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
   `session.hello` (version/capability negotiation), `theme.get` (D24 role
-  table), and `exec.run` (the command-execution primitive, below). The **error
-  taxonomy is now decided** (below). Remaining: the full op vocabulary + params
-  per namespace.
+  table), `exec.run` (the command-execution primitive, below), and `git.*`
+  (status, diff — the read layer, below). The **error taxonomy is now decided**
+  (below). Remaining: the full op vocabulary + params per namespace.
 
   **Error taxonomy — implemented.** An error reply's `error` is a flat object
   `{code, message}`, not a bare string: a stable machine-readable `code` clients
@@ -839,6 +839,21 @@ Both renderings come from the **same** region model (D13) and layout policy
   agent confirmation, and closing Tcl `exec`'s redirection-token surface — an
   argv element literally `>` is still reserved) is the **O4/D20** guardrail work,
   also deferred; trusted internal callers (git/agent) construct argv today.
+
+  **`git.*` read layer — implemented.** The first consumer of `exec.run`: git by
+  shelling out and parsing porcelain (D7, no libgit2). `git.status {?cwd?}` ->
+  `{branch, changes:[{x,y,path,?orig?}]}` parses `status --porcelain=v1 -b -z`
+  (NUL-terminated, so paths with spaces/newlines are safe; renames/copies carry
+  `orig`); `git.diff {?cwd?, ?path?, ?staged?}` -> `{diff}` returns the raw
+  unified diff for the worktree or the index (`--cached`). A non-zero git exit
+  (not a repo, bad path) becomes `bad_request` carrying git's stderr; git missing
+  is `io_error` from `exec.run`'s launch path. `git.status` registers a D25
+  result-encoder (`changes` is an array). Read-only and UI-less — the pre-spike
+  foundation git's UI and the agent build on (`rio-core/git.tcl`,
+  `rio-core/ops-git.tcl`). Tests build a throwaway real repo and skip cleanly if
+  `git` is absent (a `hasgit` constraint). **Remaining** (the rendering-heavy era,
+  with the spike): write ops (stage/unstage/commit), `git.log`, and surfacing all
+  this in a frontend.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

@@ -83,6 +83,14 @@ proc rio::wire::_result_session_hello {result} {
 }
 rio::wire::result_encoder session.hello rio::wire::_result_session_hello
 
+# git.status: `branch` is a string leaf; `changes` is an array of flat objects.
+proc rio::wire::_result_git_status {result} {
+	set items {}
+	foreach c [dict get $result changes] { lappend items [obj $c] }
+	return "{\"branch\":[str [dict get $result branch]],\"changes\":[arr $items]}"
+}
+rio::wire::result_encoder git.status rio::wire::_result_git_status
+
 # theme.get: `colors` is a flat object; `fonts` is an object OF flat objects.
 proc rio::wire::_result_theme_get {result} {
 	set parts {}
