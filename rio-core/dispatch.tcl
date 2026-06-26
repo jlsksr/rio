@@ -21,6 +21,13 @@ proc rio::dispatch::register {op handler} {
 	dict set ops $op $handler
 }
 
+# The names of every registered op, sorted. session.hello reports these so a
+# client learns what this core supports without a hand-maintained list (O2).
+proc rio::dispatch::opnames {} {
+	variable ops
+	return [lsort [dict keys $ops]]
+}
+
 # Handle one request. `emit` is a command prefix invoked once per event with the
 # event dict appended. Returns the response dict.
 proc rio::dispatch::handle {msg emit} {

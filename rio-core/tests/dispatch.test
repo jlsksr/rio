@@ -134,4 +134,21 @@ test buffer-list-no-event {listing buffers emits no events} -body {
 	llength [dict get [rio::core::call buffer.list {}] events]
 } -result 0
 
+# --- session.hello (capability / version negotiation) ------------------------
+
+test session-hello-identity {session.hello reports protocol version and name} -body {
+	set r [dict get [rio::core::call session.hello {}] response result]
+	list [dict get $r protocol] [dict get $r name]
+} -result {1 rio-core}
+
+test session-hello-ops {session.hello lists registered ops, sorted, including itself} -body {
+	set ops [dict get [rio::core::call session.hello {}] response result ops]
+	list [expr {"session.hello" in $ops}] [expr {"buffer.replace" in $ops}] \
+		[expr {"file.open" in $ops}] [expr {$ops eq [lsort $ops]}]
+} -result {1 1 1 1}
+
+test session-hello-no-event {session.hello is a pure query — no events} -body {
+	llength [dict get [rio::core::call session.hello {}] events]
+} -result 0
+
 cleanupTests

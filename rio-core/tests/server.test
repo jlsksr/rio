@@ -94,4 +94,27 @@ test server-buffer-list {buffer.list's array result crosses the socket intact} -
 	catch {close $::c3}
 } -result {true 1}
 
+test server-session-hello {session.hello negotiation crosses the socket} -setup {
+	set ::port4 [rio::server::listen 0]
+	set ::reply4 {}
+	set ::c4 [socket 127.0.0.1 $::port4]
+	fconfigure $::c4 -buffering line -blocking 0 -translation lf -encoding utf-8
+	fileevent $::c4 readable {
+		if {[gets $::c4 line] >= 0 && [string trim $line] ne ""} {
+			set ::reply4 $line ; set ::done4 1
+		}
+	}
+} -body {
+	puts $::c4 "{\"id\":\"H\",\"op\":\"session.hello\"}"
+	flush $::c4
+	after 3000 {set ::done4 timeout}
+	vwait ::done4
+	if {$::done4 eq "timeout"} { return TIMEOUT }
+	set d [json::json2dict $::reply4]
+	list [dict get $d ok] [dict get $d result name] \
+		[expr {"session.hello" in [dict get $d result ops]}]
+} -cleanup {
+	catch {close $::c4}
+} -result {true rio-core 1}
+
 cleanupTests

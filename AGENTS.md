@@ -725,9 +725,18 @@ Both renderings come from the **same** region model (D13) and layout policy
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
-  replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo).
-  Remaining: the full op vocabulary + params per namespace, the error taxonomy,
-  and version/capability negotiation in `session.hello`.
+  replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
+  and `session.hello` (version/capability negotiation). Remaining: the full op
+  vocabulary + params per namespace, and the error taxonomy.
+
+  **`session.hello` — implemented.** A client's first request; the core replies
+  `{protocol, name, ops}` — the wire protocol version (an integer that bumps on a
+  breaking change), the implementation identity (`rio-core`), and the ops it
+  actually has registered, read live from the dispatch registry so the list can
+  never go stale (`rio::dispatch::opnames`). The reply is the second non-flat
+  shape — `ops` is an array of *strings* — and reuses the result-encoder registry
+  from `buffer.list` (a new `rio::wire::strarr` leaf). Client capabilities sent as
+  params are accepted but not yet acted on; that negotiation can grow here.
 
   **`buffer.list` + wire-array — implemented.** `buffer.list` returns
   `{buffers <array of {buffer,name,path,linecount}>}` from `rio::doc::inventory`
@@ -742,12 +751,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   will reuse.
 
   **Next-step note (near-term candidates, none started):**
-  - **`session.hello`** — version/capability negotiation. Its result (a
-    capability list + scalars) is the next non-flat shape; it reuses the
-    `buffer.list` result-encoder pattern.
   - **theme applier** for D24 — the GUI reads the semantic role table and pokes
     Tk; pairs with a core op whose result is a nested object (same encoder
-    pattern).
+    pattern as `buffer.list` / `session.hello`).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

@@ -82,4 +82,25 @@ test wire-roundtrip-buffer-list {the encoded buffer.list survives json2dict} -bo
 		[dict get $b0 name] [dict get $b0 linecount]
 } -result {true 1 {a b} 2}
 
+test wire-strarr {strarr makes a JSON array of strings} -body {
+	rio::wire::strarr {a b c}
+} -result {["a","b","c"]}
+
+test wire-strarr-empty {an empty string array} -body {
+	rio::wire::strarr {}
+} -result {[]}
+
+test wire-result-session-hello {session.hello shapes scalars + an array of op strings} -body {
+	rio::wire::response [dict create id 2 ok true op session.hello \
+		result [dict create protocol 1 name rio-core ops {buffer.text file.open}]]
+} -result {{"id":"2","ok":true,"result":{"protocol":"1","name":"rio-core","ops":["buffer.text","file.open"]}}}
+
+test wire-roundtrip-session-hello {the encoded hello survives json2dict} -body {
+	set enc [rio::wire::response [dict create id 7 ok true op session.hello \
+		result [dict create protocol 1 name rio-core ops {a b c}]]]
+	set d [json::json2dict $enc]
+	list [dict get $d result protocol] [dict get $d result name] \
+		[dict get $d result ops]
+} -result {1 rio-core {a b c}}
+
 cleanupTests

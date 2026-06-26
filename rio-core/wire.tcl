@@ -36,6 +36,14 @@ proc rio::wire::arr {items} {
 	return "\[[join $items ,]\]"
 }
 
+# A JSON array of strings — the common case of arr, where each element is a
+# string leaf (the caller declares it's strings, so str applies to each).
+proc rio::wire::strarr {items} {
+	set out {}
+	foreach s $items { lappend out [str $s] }
+	return [arr $out]
+}
+
 # Result-shape registry. Almost every result is a flat object (obj), which is
 # exact for string leaves. The few ops with a richer result — an array, a nested
 # object — register an encoder here, keyed by op name (D25: the op declares its
@@ -55,6 +63,16 @@ proc rio::wire::_result_buffer_list {result} {
 	return "{\"buffers\":[arr $items]}"
 }
 rio::wire::result_encoder buffer.list rio::wire::_result_buffer_list
+
+# session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
+proc rio::wire::_result_session_hello {result} {
+	set parts {}
+	lappend parts "\"protocol\":[str [dict get $result protocol]]"
+	lappend parts "\"name\":[str [dict get $result name]]"
+	lappend parts "\"ops\":[strarr [dict get $result ops]]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder session.hello rio::wire::_result_session_hello
 
 # A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
 # ok replies) selects a shape-specific result encoder; without one, the result
