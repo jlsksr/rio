@@ -97,14 +97,19 @@ proc close_buffer {id} {
 }
 
 # Drop a leftover empty, unsaved, untitled scratch buffer (so opening a file from
-# a fresh launch reuses the slot instead of leaving a blank tab behind).
+# a fresh launch reuses the slot instead of leaving a blank tab behind). Refresh
+# the chrome if we dropped anything: close_buffer mutates ::order but doesn't
+# redraw, so a pruned tab would otherwise linger on screen, orphaned.
 proc prune_scratch {keep} {
+	set pruned 0
 	foreach id $::order {
 		if {$id eq $keep} continue
 		if {[bufget $id path] eq "" && ![bufget $id modified] && [rio::doc::text $id] eq ""} {
 			close_buffer $id
+			set pruned 1
 		}
 	}
+	if {$pruned} refresh_all
 }
 
 # ---------------------------------------------------------------------------

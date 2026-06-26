@@ -30,10 +30,19 @@ proc diskbytes {path} {
 	set f [open $path rb] ; set b [::read $f] ; close $f ; return $b
 }
 proc widget {} { ::rio_real_t get 1.0 end-1c }
+# The buffer ids currently backed by tab widgets (frames are named .tabs.b$id).
+proc tab_ids {} {
+	set ids {}
+	foreach w [winfo children .tabs] { lappend ids [string range [winfo name $w] 1 end] }
+	return [lsort $ids]
+}
 
 # --- open an LF file ---------------------------------------------------------
 set p [tmpbytes "alpha\nbeta\n"]
 do_open $p
+# Opening from a fresh launch prunes the empty scratch buffer; the tab bar must
+# not leave an orphan tab behind (regression: a stale × tab crashed on click).
+ok "open: tabs match order"     [tab_ids]                [lsort $::order]
 ok "open: path recorded"        [bufget $::cur path]     $p
 ok "open: not modified"         [bufget $::cur modified] 0
 ok "open: core has file text"   [rio::doc::text $::cur]  "alpha\nbeta\n"
