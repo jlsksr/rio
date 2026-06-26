@@ -8,16 +8,16 @@ source [file join [file dirname [info script]] .. core.tcl]
 # Edit a fresh buffer in isolation so tests don't depend on each other.
 proc freshbuf {{text ""}} { return [rio::doc::new $text] }
 
-test dispatch-unknown-op {an unknown op yields ok:false with an error} -body {
+test dispatch-unknown-op {an unknown op yields ok:false with a coded error} -body {
 	set out [rio::core::call nope {}]
 	set r [dict get $out response]
-	list [dict get $r ok] [dict get $r error]
-} -result {false {unknown op: nope}}
+	list [dict get $r ok] [dict get $r error code] [dict get $r error message]
+} -result {false unknown_op {unknown op: nope}}
 
-test dispatch-missing-op {a request without op is rejected} -body {
+test dispatch-missing-op {a request without op is rejected as bad_request} -body {
 	set r [rio::dispatch::handle {id 7} [list lappend ::ignore]]
-	list [dict get $r ok] [dict get $r error]
-} -result {false {missing op}}
+	list [dict get $r ok] [dict get $r error code] [dict get $r error message]
+} -result {false bad_request {missing op}}
 
 test dispatch-id-echoed {the response carries the request id} -body {
 	set r [rio::dispatch::handle {id 42 op buffer.text} [list lappend ::ignore]]
@@ -73,8 +73,9 @@ test buffer-handler-error-propagates {a doc error becomes ok:false} -body {
 	set out [rio::core::call buffer.replace \
 		[dict create buffer $b start 9.0 end 9.0 text x]]
 	set r [dict get $out response]
-	list [dict get $r ok] [string match {index out of range*} [dict get $r error]]
-} -result {false 1}
+	list [dict get $r ok] [dict get $r error code] \
+		[string match {index out of range*} [dict get $r error message]]
+} -result {false bad_index 1}
 
 test buffer-new-creates {buffer.new mints a fresh empty buffer} -body {
 	set out [rio::core::call buffer.new {}]
@@ -96,8 +97,8 @@ test buffer-close-forgets {buffer.close removes the buffer} -body {
 test buffer-close-unknown {closing a missing buffer errors cleanly} -body {
 	set out [rio::core::call buffer.close [dict create buffer 99999]]
 	set r [dict get $out response]
-	list [dict get $r ok] [dict get $r error]
-} -result {false {no such buffer: 99999}}
+	list [dict get $r ok] [dict get $r error code] [dict get $r error message]
+} -result {false no_buffer {no such buffer: 99999}}
 
 # --- buffer.list (inventory; the first non-flat result) ----------------------
 # The registry is shared across tests, so don't assert the whole list — locate
@@ -139,7 +140,7 @@ test buffer-list-no-event {listing buffers emits no events} -body {
 test session-hello-identity {session.hello reports protocol version and name} -body {
 	set r [dict get [rio::core::call session.hello {}] response result]
 	list [dict get $r protocol] [dict get $r name]
-} -result {1 rio-core}
+} -result {2 rio-core}
 
 test session-hello-ops {session.hello lists registered ops, sorted, including itself} -body {
 	set ops [dict get [rio::core::call session.hello {}] response result ops]
@@ -165,8 +166,8 @@ test theme-get-named {theme.get loads a named theme file} -body {
 
 test theme-get-missing {theme.get on an unknown theme is ok:false} -body {
 	set resp [dict get [rio::core::call theme.get {name nope}] response]
-	list [dict get $resp ok] [dict get $resp error]
-} -result {false {no such theme: nope}}
+	list [dict get $resp ok] [dict get $resp error code] [dict get $resp error message]
+} -result {false bad_request {no such theme: nope}}
 
 test theme-get-no-event {theme.get is a pure query — no events} -body {
 	llength [dict get [rio::core::call theme.get {}] events]

@@ -39,7 +39,8 @@ proc rio::server::on_readable {chan} {
 	if {$n < 0} { if {[eof $chan]} { drop $chan } ; return }
 	if {[string trim $line] eq ""} return
 	if {[catch {json::json2dict $line} msg]} {
-		catch {puts $chan [rio::wire::response {id {} ok false error {bad json}}]; flush $chan}
+		catch {puts $chan [rio::wire::response \
+			{id {} ok false error {code bad_request message {bad json}}}]; flush $chan}
 		return
 	}
 	# Same handler, same emit contract as the in-process path — events broadcast

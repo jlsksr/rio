@@ -6,7 +6,7 @@
 # "hi there" from the two-element list {hi there}. So encoding is SHAPE-AWARE:
 #
 #   - The envelope shape is fixed: id (wire string), ok (bare true/false),
-#     and either result (object) or error (string).
+#     and either result (object) or error (a flat {code, message} object, O2).
 #   - result and event params are flat objects whose leaf values are emitted as
 #     JSON strings. That is exact for every current message (text, line.col
 #     indices, ids-as-opaque-strings, removed text).
@@ -99,7 +99,8 @@ proc rio::wire::response {resp} {
 	variable results
 	set id [str [dict get $resp id]]
 	if {![dict get $resp ok]} {
-		return "{\"id\":$id,\"ok\":false,\"error\":[str [dict get $resp error]]}"
+		# error is a flat {code, message} object (the taxonomy, O2).
+		return "{\"id\":$id,\"ok\":false,\"error\":[obj [dict get $resp error]]}"
 	}
 	set r [dict get $resp result]
 	if {[dict exists $resp op] && [dict exists $results [dict get $resp op]]} {

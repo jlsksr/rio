@@ -29,13 +29,13 @@ proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 # Read or update a buffer's opaque metadata dict (see `new`).
 proc rio::doc::meta {id} {
 	variable buffers
-	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	return [dict get $buffers $id meta]
 }
 
 proc rio::doc::setmeta {id key value} {
 	variable buffers
-	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	dict set buffers $id meta $key $value
 }
 
@@ -48,7 +48,7 @@ proc rio::doc::exists {id} {
 # builtin [close], so shadowing it here is safe.
 proc rio::doc::close {id} {
 	variable buffers
-	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	set buffers [dict remove $buffers $id]
 }
 
@@ -58,7 +58,7 @@ proc rio::doc::text {id} {
 
 proc rio::doc::lines {id} {
 	variable buffers
-	if {![dict exists $buffers $id]} { error "no such buffer: $id" }
+	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	return [dict get $buffers $id lines]
 }
 
@@ -174,7 +174,7 @@ proc rio::doc::_splice {lines start end text} {
 	lassign [_idx $end]   el ec
 	set n [llength $lines]
 	if {$sl < 1 || $sl > $n || $el < 1 || $el > $n} {
-		error "index out of range: $start/$end (have $n line(s))"
+		rio::error::raise bad_index "index out of range: $start/$end (have $n line(s))"
 	}
 	set sli [expr {$sl - 1}]
 	set eli [expr {$el - 1}]
@@ -183,7 +183,7 @@ proc rio::doc::_splice {lines start end text} {
 	set sc [_clamp $sc 0 [string length $startLine]]
 	set ec [_clamp $ec 0 [string length $endLine]]
 	if {$sli > $eli || ($sli == $eli && $sc > $ec)} {
-		error "end before start: $start > $end"
+		rio::error::raise bad_index "end before start: $start > $end"
 	}
 	set prefix  [string range $startLine 0 [expr {$sc - 1}]]
 	set suffix  [string range $endLine $ec end]
@@ -222,7 +222,7 @@ proc rio::doc::_range {lines sli sc eli ec} {
 
 proc rio::doc::_idx {idx} {
 	if {![regexp {^([0-9]+)\.([0-9]+)$} $idx -> l c]} {
-		error "bad index: \"$idx\" (want line.col, e.g. 1.0)"
+		rio::error::raise bad_index "bad index: \"$idx\" (want line.col, e.g. 1.0)"
 	}
 	return [list $l $c]
 }

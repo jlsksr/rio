@@ -297,7 +297,9 @@ linear and readable while staying responsive.
 Three message kinds:
 
 - **Request** (client → core): `{id, op, params}`
-- **Response** (core → client): `{id, ok: true, result}` or `{id, ok: false, error}`
+- **Response** (core → client): `{id, ok: true, result}` or
+  `{id, ok: false, error}`, where `error` is a flat object `{code, message}` — a
+  stable machine-readable code plus a human message (the taxonomy, O2).
 - **Event** (core → client, unsolicited): `{event, params}` — broadcast to all
   attached views.
 
@@ -636,7 +638,7 @@ them with no serialization), so JSON lives **only at the socket boundary**. A
 
 - The **envelope shape is fixed**: `id` is a wire **string** (ids are opaque
   tokens on the wire), `ok` is a bare `true`/`false`, and a reply carries either
-  `result` (object) or `error` (string).
+  `result` (object) or `error` (a flat `{code, message}` object, O2).
 - `result` and event `params` are **flat objects whose leaf values encode as
   JSON strings** — exact for every value the protocol carries today (text,
   `line.col` indices, ids, removed text). Inbound parsing uses tcllib's
@@ -749,12 +751,27 @@ Both renderings come from the **same** region model (D13) and layout policy
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
   replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
   `session.hello` (version/capability negotiation), and `theme.get` (D24 role
-  table). Remaining: the full op vocabulary + params per namespace, and the
-  error taxonomy.
+  table). The **error taxonomy is now decided** (below). Remaining: the full op
+  vocabulary + params per namespace.
+
+  **Error taxonomy — implemented.** An error reply's `error` is a flat object
+  `{code, message}`, not a bare string: a stable machine-readable `code` clients
+  branch on, plus a human `message` for display/logging. The vocabulary is
+  deliberately small — `bad_request`, `unknown_op`, `no_buffer`, `no_path`,
+  `bad_index`, `io_error`, `internal` (the catch-all for any uncaught Tcl error,
+  so an overlooked failure still returns a clean reply, never a stack trace). An
+  op raises `rio::error::raise <code> <message>`, which rides the code on Tcl's
+  `-errorcode`; `dispatch` reads it back and shapes the reply (`rio-core/error.tcl`,
+  `rio-core/dispatch.tcl`). Making `error` an object **bumped the protocol to 2**
+  — the first breaking wire change since `session.hello` began reporting it. The
+  GUI now checks `ok` before reading `result` and surfaces failures through one
+  `report_error` seam, so a failed op shows a dialog instead of crashing (this
+  closed a real bug: switching to a pruned tab dereferenced a missing `result`).
 
   **`session.hello` — implemented.** A client's first request; the core replies
   `{protocol, name, ops}` — the wire protocol version (an integer that bumps on a
-  breaking change), the implementation identity (`rio-core`), and the ops it
+  breaking change; now **2**, see the error taxonomy), the implementation identity
+  (`rio-core`), and the ops it
   actually has registered, read live from the dispatch registry so the list can
   never go stale (`rio::dispatch::opnames`). The reply is the second non-flat
   shape — `ops` is an array of *strings* — and reuses the result-encoder registry

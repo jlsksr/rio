@@ -1,0 +1,32 @@
+# Tests for the error taxonomy (rio::error) — the {code, message} contract that
+# dispatch turns op failures into (AGENTS.md D11, O2).
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+
+test error-raise-message {raise raises a normal Tcl error carrying the message} -body {
+	catch {rio::error::raise no_buffer "no such buffer: 7"} msg
+	set msg
+} -result {no such buffer: 7}
+
+test error-raise-code {the taxonomy code rides on -errorcode and code_of reads it back} -body {
+	catch {rio::error::raise bad_index "out of range"} msg opts
+	rio::error::code_of $opts
+} -result bad_index
+
+test error-code-of-plain {a plain Tcl error (no rio code) is classed internal} -body {
+	catch {error "something unexpected"} msg opts
+	rio::error::code_of $opts
+} -result internal
+
+test error-code-of-runtime {a runtime fault (bad dict key) is classed internal} -body {
+	catch {dict get {a 1} nope} msg opts
+	rio::error::code_of $opts
+} -result internal
+
+test error-codes-vocabulary {the documented vocabulary is the published set} -body {
+	set rio::error::codes
+} -result {bad_request unknown_op no_buffer no_path bad_index io_error internal}
+
+cleanupTests

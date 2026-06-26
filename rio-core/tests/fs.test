@@ -141,10 +141,22 @@ test fs-op-save-as {file.save with a path writes there and retargets the buffer}
 	list [rawbytes $p] [rawbytes $p2]
 } -result "{data\n} {Zdata\n}"
 
+test fs-op-open-missing {opening a nonexistent file is an io_error, not a crash} -body {
+	set p [file join [temporaryDirectory] no-such-file-[pid].txt]
+	set r [dict get [rio::core::call file.open [dict create path $p]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
+test fs-op-open-no-path {file.open without a path is a bad_request} -body {
+	set r [dict get [rio::core::call file.open {}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
 test fs-op-save-no-path {saving a buffer with no file errors cleanly} -body {
 	set buf [rio::doc::new "scratch" untitled]
 	set r [rio::core::call file.save [dict create buffer $buf]]
-	list [dict get $r response ok] [dict get $r response error]
-} -result {false {buffer has no associated file; supply a path}}
+	list [dict get $r response ok] [dict get $r response error code] \
+		[dict get $r response error message]
+} -result {false no_path {buffer has no associated file; supply a path}}
 
 cleanupTests

@@ -54,7 +54,7 @@ proc rio::theme::default {} {
 proc rio::theme::load {name} {
 	if {$name eq "" || $name eq "default"} { return [default] }
 	set path [_find $name]
-	if {$path eq ""} { error "no such theme: $name" }
+	if {$path eq ""} { rio::error::raise bad_request "no such theme: $name" }
 	set part [from_conf [rio::conf::read_file $path]]
 	set base [expr {[dict get $part base] ne "" ? [load [dict get $part base]] : [default]}]
 	return [merge $base $part]

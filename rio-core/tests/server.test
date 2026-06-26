@@ -64,10 +64,10 @@ test server-bad-json {a malformed line gets an error response, no crash} -setup 
 	after 3000 {set ::done2 timeout}
 	vwait ::done2
 	set d [json::json2dict $::reply]
-	list [dict get $d ok] [dict get $d error]
+	list [dict get $d ok] [dict get $d error code] [dict get $d error message]
 } -cleanup {
 	catch {close $::c2}
-} -result {false {bad json}}
+} -result {false bad_request {bad json}}
 
 test server-buffer-list {buffer.list's array result crosses the socket intact} -setup {
 	set ::port3 [rio::server::listen 0]

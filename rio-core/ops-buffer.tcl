@@ -25,7 +25,7 @@ rio::dispatch::register buffer.new rio::ops::buffer_new
 # buffer.close {?buffer?} -> {} ; forgets a buffer (closing its tab).
 proc rio::ops::buffer_close {params} {
 	set id [_bufid $params]
-	if {![rio::doc::exists $id]} { error "no such buffer: $id" }
+	if {![rio::doc::exists $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	rio::doc::close $id
 	return [dict create result {}]
 }

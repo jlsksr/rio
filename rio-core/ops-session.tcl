@@ -10,7 +10,9 @@ namespace eval rio::ops {
 	# The wire protocol version. A single integer that bumps on a BREAKING change
 	# to the protocol (an op's params/result shape changing incompatibly, the
 	# envelope changing). This is the number a client checks for compatibility.
-	variable protocol 1
+	# v2: error replies carry a {code, message} object instead of a bare string
+	# (the taxonomy, O2).
+	variable protocol 2
 }
 
 # session.hello {?...?} -> {protocol, name, ops}

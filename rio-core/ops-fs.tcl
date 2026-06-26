@@ -7,8 +7,13 @@
 
 # file.open {path} -> {buffer, name, encoding, eol, bom, mixed, linecount}
 proc rio::ops::file_open {params} {
+	if {![dict exists $params path]} {
+		rio::error::raise bad_request "file.open requires a path"
+	}
 	set path [dict get $params path]
-	set info [rio::fs::read $path]
+	if {[catch {rio::fs::read $path} info]} {
+		rio::error::raise io_error $info
+	}
 	set name [file tail $path]
 	set meta [dict create path $path \
 		encoding [dict get $info encoding] \
@@ -35,8 +40,12 @@ proc rio::ops::file_save {params} {
 	set meta [rio::doc::meta $id]
 	set stored [expr {[dict exists $meta path] ? [dict get $meta path] : ""}]
 	set path [expr {[dict exists $params path] ? [dict get $params path] : $stored}]
-	if {$path eq ""} { error "buffer has no associated file; supply a path" }
-	rio::fs::write $path [rio::doc::text $id] $meta
+	if {$path eq ""} {
+		rio::error::raise no_path "buffer has no associated file; supply a path"
+	}
+	if {[catch {rio::fs::write $path [rio::doc::text $id] $meta} err]} {
+		rio::error::raise io_error $err
+	}
 	if {$stored ne $path} { rio::doc::setmeta $id path $path }
 	return [dict create result [dict create path $path]]
 }

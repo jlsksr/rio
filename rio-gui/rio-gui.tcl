@@ -50,6 +50,28 @@ proc rio_call {op params} {
 	return [dict get $r response]
 }
 
+# Surface a core error to the user (the {code, message} taxonomy, AGENTS.md O2).
+# One seam, so every failed op shows a dialog instead of crashing a caller that
+# assumed success — and the headless smoke can override it to capture errors
+# without a modal blocking the run.
+proc report_error {message {code ""}} {
+	tk_messageBox -icon error -type ok -title rio \
+		-message [expr {$code eq "" ? $message : "$message  ($code)"}]
+}
+
+# Run an op that is expected to succeed and return its result, or "" after
+# surfacing the error. For the internal "can't fail in normal use" calls (new,
+# undo/redo): a vanished buffer or a bug becomes a dialog, not a missing-`result`
+# crash. do_open/do_save inspect `ok` themselves — they have real recovery. (None
+# of these ops returns an empty result on success, so "" is an unambiguous fail.)
+proc rio_result {op params} {
+	set resp [rio_call $op $params]
+	if {[dict get $resp ok]} { return [dict get $resp result] }
+	set e [dict get $resp error]
+	report_error [dict get $e message] [dict get $e code]
+	return ""
+}
+
 # Apply a change through the REAL widget command (bypassing the proxy). .t
 # replace takes line.col indices directly — the payoff of D12 sharing the Tk
 # text-widget index format: the view layer is nearly free.
@@ -62,7 +84,12 @@ proc apply_change {p} {
 proc load_buffer {} {
 	set resp [rio_call buffer.text [dict create buffer $::cur]]
 	::rio_real_t delete 1.0 end
-	::rio_real_t insert 1.0 [dict get $resp result text]
+	if {[dict get $resp ok]} {
+		::rio_real_t insert 1.0 [dict get $resp result text]
+	} else {
+		set e [dict get $resp error]
+		report_error [dict get $e message] [dict get $e code]
+	}
 }
 
 # ---------------------------------------------------------------------------
@@ -117,7 +144,9 @@ proc prune_scratch {keep} {
 # scriptable and testable; the *_dialog wrappers add the file choosers.
 # ---------------------------------------------------------------------------
 proc do_new {} {
-	set id [dict get [rio_call buffer.new {}] result buffer]
+	set res [rio_result buffer.new {}]
+	if {$res eq ""} return
+	set id [dict get $res buffer]
 	register_buffer $id "" {}
 	activate $id
 }
@@ -130,7 +159,7 @@ proc do_open {path} {
 	set resp [rio_call file.open [dict create path $path]]
 	if {![dict get $resp ok]} {
 		tk_messageBox -icon error -type ok -title rio \
-			-message "Could not open $path:\n[dict get $resp error]"
+			-message "Could not open $path:\n[dict get $resp error message]"
 		return 0
 	}
 	set res [dict get $resp result]
@@ -150,7 +179,7 @@ proc do_save_as {path} {
 	set resp [rio_call file.save [dict create buffer $::cur path $path]]
 	if {![dict get $resp ok]} {
 		tk_messageBox -icon error -type ok -title rio \
-			-message "Could not save $path:\n[dict get $resp error]"
+			-message "Could not save $path:\n[dict get $resp error message]"
 		return 0
 	}
 	bufset $::cur path $path
@@ -163,7 +192,7 @@ proc do_save {} {
 	set resp [rio_call file.save [dict create buffer $::cur]]
 	if {![dict get $resp ok]} {
 		tk_messageBox -icon error -type ok -title rio \
-			-message "Could not save:\n[dict get $resp error]"
+			-message "Could not save:\n[dict get $resp error message]"
 		return 0
 	}
 	clear_modified
@@ -171,14 +200,12 @@ proc do_save {} {
 }
 
 proc do_undo {} {
-	if {[dict get [rio_call edit.undo [dict create buffer $::cur]] result changed]} {
-		mark_modified 1
-	}
+	set res [rio_result edit.undo [dict create buffer $::cur]]
+	if {$res ne "" && [dict get $res changed]} { mark_modified 1 }
 }
 proc do_redo {} {
-	if {[dict get [rio_call edit.redo [dict create buffer $::cur]] result changed]} {
-		mark_modified 1
-	}
+	set res [rio_result edit.redo [dict create buffer $::cur]]
+	if {$res ne "" && [dict get $res changed]} { mark_modified 1 }
 }
 
 # Close the active buffer; guard unsaved changes, and keep at least one tab.
@@ -328,8 +355,8 @@ proc do_theme {name} {
 	if {[dict get $resp ok]} {
 		apply_theme [dict get $resp result]
 	} else {
-		tk_messageBox -icon error -type ok -title rio \
-			-message "Theme '$name': [dict get $resp error]"
+		report_error "Theme '$name': [dict get $resp error message]" \
+			[dict get $resp error code]
 	}
 }
 

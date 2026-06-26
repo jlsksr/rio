@@ -110,6 +110,22 @@ do_close
 ok "tabs: closed tab gone"      [lsearch -exact $::order $victim] -1
 ok "tabs: buffer freed in core" [rio::doc::exists $victim] 0
 
+# --- error surfacing ---------------------------------------------------------
+# A failed op must reach the user through report_error, never crash a caller
+# that read `result` blindly (regression: an op on a vanished buffer threw
+# `key "result" not known`). Override report_error to capture instead of popping
+# a modal that would hang the headless run.
+set ::captured {}
+proc report_error {message {code ""}} { lappend ::captured [list $code $message] }
+set ghost [rio::doc::new "ghost"]
+rio::core::call buffer.close [dict create buffer $ghost]   ;# core drops it...
+set ::cur $ghost                                           ;# ...but a view still points at it
+set rc [catch {load_buffer} err]
+ok "error: load_buffer didn't crash" $rc                            0
+ok "error: failure reported once"    [llength $::captured]          1
+ok "error: code is no_buffer"        [lindex $::captured 0 0]        no_buffer
+activate $b1                                              ;# back to a live buffer
+
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
 # fonts exist, and switching re-applies colours live.

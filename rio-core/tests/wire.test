@@ -26,9 +26,9 @@ test wire-response-ok {an ok response carries a bare-true ok and an object resul
 	rio::wire::response {id 7 ok true result {text hi}}
 } -result {{"id":"7","ok":true,"result":{"text":"hi"}}}
 
-test wire-response-error {an error response carries bare-false ok and a string error} -body {
-	rio::wire::response {id 7 ok false error {unknown op: nope}}
-} -result {{"id":"7","ok":false,"error":"unknown op: nope"}}
+test wire-response-error {an error response carries bare-false ok and a {code,message} object} -body {
+	rio::wire::response {id 7 ok false error {code unknown_op message {unknown op: nope}}}
+} -result {{"id":"7","ok":false,"error":{"code":"unknown_op","message":"unknown op: nope"}}}
 
 test wire-event {an event encodes its name and params} -body {
 	rio::wire::event {event buffer.changed params {start 1.0 end 1.0 text X removed {}}}
