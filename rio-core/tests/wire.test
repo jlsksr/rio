@@ -47,4 +47,39 @@ test wire-roundtrip-tricky-text {text with quotes/newlines survives the round-tr
 	dict get [json::json2dict $enc] params text
 } -result "say \"hi\"\nline2\tend"
 
+# --- arrays / non-flat results (D25) -----------------------------------------
+
+test wire-arr {arr joins encoded fragments into a JSON array} -body {
+	rio::wire::arr [list [rio::wire::obj {a 1}] [rio::wire::obj {b 2}]]
+} -result {[{"a":"1"},{"b":"2"}]}
+
+test wire-arr-empty {an empty array} -body {
+	rio::wire::arr {}
+} -result {[]}
+
+test wire-result-buffer-list {buffer.list shapes its result as an array of objects} -body {
+	rio::wire::response [dict create id 3 ok true op buffer.list \
+		result [dict create buffers [list \
+			[dict create buffer 1 name a path "" linecount 2] \
+			[dict create buffer 2 name b path /x linecount 9]]]]
+} -result {{"id":"3","ok":true,"result":{"buffers":[{"buffer":"1","name":"a","path":"","linecount":"2"},{"buffer":"2","name":"b","path":"/x","linecount":"9"}]}}}
+
+test wire-result-flat-default {an op without a registered shape stays a flat object} -body {
+	rio::wire::response {id 4 ok true op buffer.text result {text hi}}
+} -result {{"id":"4","ok":true,"result":{"text":"hi"}}}
+
+test wire-result-no-op {a response without op falls back to a flat object} -body {
+	rio::wire::response {id 5 ok true result {text hi}}
+} -result {{"id":"5","ok":true,"result":{"text":"hi"}}}
+
+test wire-roundtrip-buffer-list {the encoded buffer.list survives json2dict} -body {
+	set enc [rio::wire::response [dict create id 9 ok true op buffer.list \
+		result [dict create buffers [list \
+			[dict create buffer 1 name {a b} path "" linecount 2]]]]]
+	set d [json::json2dict $enc]
+	set b0 [lindex [dict get $d result buffers] 0]
+	list [dict get $d ok] [llength [dict get $d result buffers]] \
+		[dict get $b0 name] [dict get $b0 linecount]
+} -result {true 1 {a b} 2}
+
 cleanupTests

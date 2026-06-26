@@ -619,8 +619,13 @@ them with no serialization), so JSON lives **only at the socket boundary**. A
   JSON strings** — exact for every value the protocol carries today (text,
   `line.col` indices, ids, removed text). Inbound parsing uses tcllib's
   `json::json2dict`, which is unambiguous.
-- When an op eventually needs a non-string leaf (a number, nested object, or
-  array), **that op declares its shape**; we never sniff Tcl values for type.
+- When an op needs a non-string leaf (a number, nested object, or array),
+  **that op declares its shape**; we never sniff Tcl values for type. *How* an op
+  declares it is now settled (first used by `buffer.list`): the op returns a
+  plain Tcl dict as always, `dispatch` carries the `op` name on the reply, and
+  `rio::wire` keys a **result-encoder registry** by op — so the encoder is told
+  the shape. Unregistered ops use the flat-object encoder; `rio::wire::arr` builds
+  arrays from already-encoded fragments. The in-process path is untouched.
 
 **Why:** value-sniffing is the classic Tcl→JSON footgun (a string that happens
 to look like a list or a number gets mis-typed); pinning the envelope and
@@ -720,19 +725,29 @@ Both renderings come from the **same** region model (D13) and layout policy
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
-  replace, new, close), `fs.*` (open, save), `edit.*` (undo, redo). Remaining:
-  the full op vocabulary + params per namespace, the error taxonomy, and
-  version/capability negotiation in `session.hello`.
+  replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo).
+  Remaining: the full op vocabulary + params per namespace, the error taxonomy,
+  and version/capability negotiation in `session.hello`.
+
+  **`buffer.list` + wire-array — implemented.** `buffer.list` returns
+  `{buffers <array of {buffer,name,path,linecount}>}` from `rio::doc::inventory`
+  (open buffers in creation order; view-local state stays in the frontend per
+  D22). This was the first *non-flat* result, and it settled **how an op declares
+  a non-flat shape** (the open question above): the op still returns a plain Tcl
+  dict (so the in-process path is unchanged), `dispatch` passes the `op` name
+  along on the reply, and `rio::wire` keys a small **result-encoder registry** by
+  op — so the encoder is *told* the shape rather than guessing from Tcl values
+  (D25). `rio::wire::arr` joins already-encoded fragments; unregistered ops fall
+  back to the flat-object encoder. This is the pattern the next non-flat results
+  will reuse.
 
   **Next-step note (near-term candidates, none started):**
-  - **`buffer.list` + wire-array support.** Enumerating open buffers returns an
-    *array of nested objects* — the first non-flat shape, so it's the increment
-    that forces the shape-aware encoder (D25) to grow array/object leaves and to
-    pin down *how an op declares* a non-flat result. The in-process GUI doesn't
-    need it (it tracks what it opened), but a reattaching socket client or the
-    TUI will. This `buffer.list` + wire-array work is itself a natural next step,
-    alongside the earlier candidates (**`session.hello`** capability negotiation,
-    or the **theme applier** for D24).
+  - **`session.hello`** — version/capability negotiation. Its result (a
+    capability list + scalars) is the next non-flat shape; it reuses the
+    `buffer.list` result-encoder pattern.
+  - **theme applier** for D24 — the GUI reads the semantic role table and pokes
+    Tk; pairs with a core op whose result is a nested object (same encoder
+    pattern).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

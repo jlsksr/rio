@@ -43,5 +43,7 @@ proc rio::dispatch::handle {msg emit} {
 			{*}$emit $ev
 		}
 	}
-	return [dict create id $id ok true result $result]
+	# `op` rides along so the wire layer can pick a shape-specific result encoder
+	# (D25); in-process callers ignore it. Error replies need no op (no result).
+	return [dict create id $id ok true result $result op $op]
 }

@@ -29,13 +29,49 @@ proc rio::wire::obj {d} {
 	return "{[join $parts ,]}"
 }
 
-# A response dict {id, ok, result|error} -> a JSON line.
+# A JSON array from a list of already-encoded JSON fragments. The caller decides
+# how each element is shaped (with str/obj/arr) — keeping the "no guessing from
+# Tcl values" rule (D25): arr never inspects what it joins.
+proc rio::wire::arr {items} {
+	return "\[[join $items ,]\]"
+}
+
+# Result-shape registry. Almost every result is a flat object (obj), which is
+# exact for string leaves. The few ops with a richer result — an array, a nested
+# object — register an encoder here, keyed by op name (D25: the op declares its
+# shape, the encoder is told it rather than inferring it). `response` consults
+# this and falls back to obj.
+namespace eval rio::wire { variable results {} }
+
+proc rio::wire::result_encoder {op cmd} {
+	variable results
+	dict set results $op $cmd
+}
+
+# buffer.list: result is {buffers <array of flat objects>}.
+proc rio::wire::_result_buffer_list {result} {
+	set items {}
+	foreach b [dict get $result buffers] { lappend items [obj $b] }
+	return "{\"buffers\":[arr $items]}"
+}
+rio::wire::result_encoder buffer.list rio::wire::_result_buffer_list
+
+# A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
+# ok replies) selects a shape-specific result encoder; without one, the result
+# is a flat object.
 proc rio::wire::response {resp} {
+	variable results
 	set id [str [dict get $resp id]]
-	if {[dict get $resp ok]} {
-		return "{\"id\":$id,\"ok\":true,\"result\":[obj [dict get $resp result]]}"
+	if {![dict get $resp ok]} {
+		return "{\"id\":$id,\"ok\":false,\"error\":[str [dict get $resp error]]}"
 	}
-	return "{\"id\":$id,\"ok\":false,\"error\":[str [dict get $resp error]]}"
+	set r [dict get $resp result]
+	if {[dict exists $resp op] && [dict exists $results [dict get $resp op]]} {
+		set body [[dict get $results [dict get $resp op]] $r]
+	} else {
+		set body [obj $r]
+	}
+	return "{\"id\":$id,\"ok\":true,\"result\":$body}"
 }
 
 # An event dict {event, params} -> a JSON line.

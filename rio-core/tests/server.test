@@ -69,4 +69,29 @@ test server-bad-json {a malformed line gets an error response, no crash} -setup 
 	catch {close $::c2}
 } -result {false {bad json}}
 
+test server-buffer-list {buffer.list's array result crosses the socket intact} -setup {
+	set ::port3 [rio::server::listen 0]
+	rio::doc::new "one\ntwo" srvlist
+	set ::reply3 {}
+	set ::c3 [socket 127.0.0.1 $::port3]
+	fconfigure $::c3 -buffering line -blocking 0 -translation lf -encoding utf-8
+	fileevent $::c3 readable {
+		if {[gets $::c3 line] >= 0 && [string trim $line] ne ""} {
+			set ::reply3 $line ; set ::done3 1
+		}
+	}
+} -body {
+	puts $::c3 "{\"id\":\"L\",\"op\":\"buffer.list\"}"
+	flush $::c3
+	after 3000 {set ::done3 timeout}
+	vwait ::done3
+	if {$::done3 eq "timeout"} { return TIMEOUT }
+	set d [json::json2dict $::reply3]
+	set names {}
+	foreach e [dict get $d result buffers] { lappend names [dict get $e name] }
+	list [dict get $d ok] [expr {"srvlist" in $names}]
+} -cleanup {
+	catch {close $::c3}
+} -result {true 1}
+
 cleanupTests

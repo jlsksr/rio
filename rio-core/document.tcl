@@ -66,6 +66,27 @@ proc rio::doc::linecount {id} {
 	return [llength [lines $id]]
 }
 
+# A summary of every open buffer, in creation order — the registry's key order,
+# which Tcl dicts preserve. Each entry is a flat dict {buffer name path
+# linecount}; `path` is "" for a buffer not backed by a file. View-local state
+# (cursor, selection, tab order, modified) belongs to the frontend (D22), so it
+# is deliberately absent here. This is the model's first non-flat result: a list
+# of dicts, which the wire layer encodes as an array explicitly (D25).
+proc rio::doc::inventory {} {
+	variable buffers
+	set out {}
+	dict for {id b} $buffers {
+		set meta [dict get $b meta]
+		set path [expr {[dict exists $meta path] ? [dict get $meta path] : ""}]
+		lappend out [dict create \
+			buffer    $id \
+			name      [dict get $b name] \
+			path      $path \
+			linecount [llength [dict get $b lines]]]
+	}
+	return $out
+}
+
 # Replace [start, end) with text. Returns the text that was removed (so callers
 # can build change events and, later, undo). Mutates the buffer in place. This is
 # the RAW primitive: it does not touch the undo history, so undo/redo can use it

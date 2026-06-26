@@ -99,4 +99,39 @@ test buffer-close-unknown {closing a missing buffer errors cleanly} -body {
 	list [dict get $r ok] [dict get $r error]
 } -result {false {no such buffer: 99999}}
 
+# --- buffer.list (inventory; the first non-flat result) ----------------------
+# The registry is shared across tests, so don't assert the whole list — locate
+# the buffer under test within it.
+proc bufentry {id} {
+	foreach e [dict get [rio::core::call buffer.list {}] response result buffers] {
+		if {[dict get $e buffer] eq $id} { return $e }
+	}
+	return ""
+}
+
+test buffer-list-shape {buffer.list summarises a buffer: name, linecount, path} -body {
+	set b [rio::doc::new "x\ny\nz" listtest]
+	set e [bufentry $b]
+	list [dict get $e name] [dict get $e linecount] [dict get $e path]
+} -result {listtest 3 {}}
+
+test buffer-list-path {a file-backed buffer reports its stored path} -body {
+	set b [rio::doc::new "hi" doc.txt [dict create path /tmp/doc.txt]]
+	dict get [bufentry $b] path
+} -result /tmp/doc.txt
+
+test buffer-list-order {buffers appear in creation order} -body {
+	set a [rio::doc::new "" first]
+	set z [rio::doc::new "" second]
+	set ids {}
+	foreach e [dict get [rio::core::call buffer.list {}] response result buffers] {
+		lappend ids [dict get $e buffer]
+	}
+	expr {[lsearch -exact $ids $a] < [lsearch -exact $ids $z]}
+} -result 1
+
+test buffer-list-no-event {listing buffers emits no events} -body {
+	llength [dict get [rio::core::call buffer.list {}] events]
+} -result 0
+
 cleanupTests

@@ -31,6 +31,15 @@ proc rio::ops::buffer_close {params} {
 }
 rio::dispatch::register buffer.close rio::ops::buffer_close
 
+# buffer.list -> {buffers <array of {buffer,name,path,linecount}>}
+# The core's inventory of open buffers, in creation order. This is the first op
+# whose result is non-flat — `buffers` is an array — so the wire encoder is told
+# the shape rather than guessing it (D25); see rio::wire.
+proc rio::ops::buffer_list {params} {
+	return [dict create result [dict create buffers [rio::doc::inventory]]]
+}
+rio::dispatch::register buffer.list rio::ops::buffer_list
+
 # buffer.text -> {text <whole document>}
 proc rio::ops::buffer_text {params} {
 	return [dict create result [dict create text [rio::doc::text [_bufid $params]]]]
