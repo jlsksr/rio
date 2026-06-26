@@ -153,8 +153,9 @@ toolkits out of the logic.
 
 **Implemented (GUI):** `rio-gui/rio-gui.tcl` is a minimal but real Tk editor on
 the core — open/save (fs.*), range-edit (buffer.*), undo/redo (edit.*), and
-multiple buffers as tabs (buffer.new / buffer.close), with a menu, tab bar, and
-status line. It embeds the core **in-process** (D2's default path:
+multiple buffers as tabs (buffer.new / buffer.close), themed from the core's role
+table (theme.get / D24, with a live-switching View menu), with a menu, tab bar,
+and status line. It embeds the core **in-process** (D2's default path:
 `rio::core::call` returns the response and events synchronously) and stays a
 *dumb view* (D3): keystrokes become `buffer.replace` requests via a widget-command
 proxy, and the screen only changes when the core echoes `buffer.changed` back.
@@ -613,9 +614,17 @@ object*, encoded via `rio::wire::objmap` (the result-encoder registry again).
 them. The **concrete role vocabulary is now fixed**: colours
 `editor.bg/fg/cursor/selection`, `ui.bg/fg`, `tab.bar.bg`/`tab.active.bg`/
 `tab.inactive.bg`/`tab.fg`, `gutter.fg`, `chat.bg/fg`, `accent`; named fonts
-`RioEditorFont`, `RioUIFont`, `RioChatFont` (each `family`/`size`). **Open:** the
-GUI *applier* (font configure / option DB / live re-config) — next; and how much
-rio leans on `ttk` vs classic widgets, which firms up as the shell grows.
+`RioEditorFont`, `RioUIFont`, `RioChatFont` (each `family`/`size`).
+
+**Implemented (GUI applier).** `rio-gui` fetches `theme.get` at startup and maps
+the role table onto Tk (`apply_theme`): `font create`/`font configure` for the
+named fonts (so a size change is live), explicit per-widget colour config on the
+editor / status bar / tab bar (so a switch is live), and `option add` font
+defaults for widgets created later. A **View menu** switches Default / Solarized
+Dark / Solarized Light live, with no restart. The default theme reproduces the
+plain white-bg look. **Open:** colour-theming dialogs / the future chat pane via
+the option DB, and how much rio leans on `ttk` vs classic widgets — both firm up
+as the shell grows.
 
 ### D25 — JSON value encoding is shape-aware, not value-sniffed
 
@@ -765,8 +774,8 @@ Both renderings come from the **same** region model (D13) and layout policy
   will reuse.
 
   Implemented since: `theme.get` (D24, nested-object result) — the *core* theme
-  service. **Remaining near-term:** the GUI **theme applier** (reads the role
-  table from `theme.get` and pokes Tk — named fonts, option DB, live re-config).
+  service — plus the GUI **theme applier** that consumes it (named fonts, live
+  per-widget re-config, a View menu that switches themes with no restart).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

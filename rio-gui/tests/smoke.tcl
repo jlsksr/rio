@@ -101,5 +101,22 @@ do_close
 ok "tabs: closed tab gone"      [lsearch -exact $::order $victim] -1
 ok "tabs: buffer freed in core" [rio::doc::exists $victim] 0
 
+# --- theme applier -----------------------------------------------------------
+# The default theme (from the core's theme.get) drives the live widgets; named
+# fonts exist, and switching re-applies colours live.
+ok "theme: editor uses named font"   [::rio_real_t cget -font]             RioEditorFont
+ok "theme: RioEditorFont created"    [expr {"RioEditorFont" in [font names]}] 1
+ok "theme: default editor bg"        [::rio_real_t cget -background]        white
+ok "theme: default status bg"        [.status cget -background]             "#dddddd"
+
+do_theme solarized-dark
+ok "theme: dark editor bg applied"   [::rio_real_t cget -background]        "#002b36"
+ok "theme: dark cursor applied"      [::rio_real_t cget -insertbackground]  "#93a1a1"
+ok "theme: dark status bg applied"   [.status cget -background]             "#073642"
+ok "theme: dark tab bar applied"     [.tabs cget -background]               "#00212b"
+
+do_theme default
+ok "theme: switched back to default" [::rio_real_t cget -background]        white
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

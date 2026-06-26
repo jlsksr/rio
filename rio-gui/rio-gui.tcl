@@ -258,16 +258,18 @@ proc refresh_status {} {
 		[llength $::order]]
 }
 proc refresh_tabs {} {
+	set c $::theme_colors
+	set fg [dict get $c tab.fg]
 	foreach w [winfo children .tabs] { destroy $w }
 	foreach id $::order {
 		set active [expr {$id eq $::cur}]
-		set bg [expr {$active ? "white" : "#cfcfcf"}]
+		set bg [expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		set f [frame .tabs.b$id -background $bg -borderwidth 1 \
 			-relief [expr {$active ? "raised" : "flat"}]]
-		label $f.l -text [tab_name $id] -background $bg -foreground black \
-			-font {monospace 9} -padx 6 -pady 1
-		label $f.x -text "×" -background $bg -foreground "#555" \
-			-font {monospace 9} -padx 3
+		label $f.l -text [tab_name $id] -background $bg -foreground $fg \
+			-font RioUIFont -padx 6 -pady 1
+		label $f.x -text "×" -background $bg -foreground $fg \
+			-font RioUIFont -padx 3
 		bind $f.l <Button-1> [list activate $id]
 		bind $f.x <Button-1> [list close_tab $id]
 		pack $f.l -side left ; pack $f.x -side right
@@ -276,8 +278,61 @@ proc refresh_tabs {} {
 }
 
 # ---------------------------------------------------------------------------
-# Build the UI. White-on-black monospace default (D24: the "90s productivity"
-# look the project likes); a real theme applier comes later.
+# Theme applier (AGENTS.md D24). The core serves the theme as a role table
+# (theme.get); here we map roles onto Tk. NAMED fonts are referenced by name by
+# every widget, so reconfiguring one updates them all live; explicit per-widget
+# config makes a colour switch live too (the option DB only reaches widgets
+# created afterwards). Keeping this Tk mapping here is what lets theme files stay
+# dumb data.
+# ---------------------------------------------------------------------------
+set ::theme_colors {} ;# active colour roles, consulted by refresh_tabs
+
+proc ensure_fonts {fonts} {
+	dict for {name spec} $fonts {
+		set opts [list -family [dict get $spec family] -size [dict get $spec size]]
+		if {[lsearch -exact [font names] $name] >= 0} {
+			font configure $name {*}$opts
+		} else {
+			font create $name {*}$opts
+		}
+	}
+}
+
+proc apply_theme {theme} {
+	set c [dict get $theme colors]
+	set ::theme_colors $c
+	ensure_fonts [dict get $theme fonts]
+	# Editor surface.
+	::rio_real_t configure -font RioEditorFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor] \
+		-selectbackground [dict get $c editor.selection]
+	# Chrome: status bar + tab container.
+	.status configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.tabs configure -background [dict get $c tab.bar.bg]
+	# Named-font defaults for widgets created later (dialogs, the future chat pane).
+	option add *Text.font RioEditorFont
+	option add *Label.font RioUIFont
+	if {[llength $::order]} refresh_tabs
+}
+
+# Switch themes live (View menu): re-fetch from the core and re-apply.
+proc do_theme {name} {
+	set resp [rio_call theme.get [dict create name $name]]
+	if {[dict get $resp ok]} {
+		apply_theme [dict get $resp result]
+	} else {
+		tk_messageBox -icon error -type ok -title rio \
+			-message "Theme '$name': [dict get $resp error]"
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Build the UI. The literal colours/fonts here are just a bootstrap; apply_theme
+# (below, fed by the core's theme.get) reconfigures every widget from the role
+# table — the default theme reproduces this plain white-bg "90s productivity"
+# look (D24), and the View menu switches it live.
 # ---------------------------------------------------------------------------
 frame .tabs -background "#bbbbbb"
 text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
@@ -304,6 +359,11 @@ menu .m.edit -tearoff 0
 .m add cascade -label Edit -menu .m.edit
 .m.edit add command -label "Undo" -accelerator Ctrl+Z       -command do_undo
 .m.edit add command -label "Redo" -accelerator Ctrl+Shift+Z -command do_redo
+menu .m.view -tearoff 0
+.m add cascade -label View -menu .m.view
+.m.view add command -label "Theme: Default"         -command {do_theme default}
+.m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
+.m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
@@ -353,6 +413,10 @@ proc .t {args} {
 		default { return [::rio_real_t {*}$args] }
 	}
 }
+
+# Apply the core's theme (the built-in default) before the first tab is drawn, so
+# every widget — and the tab bar refresh_tabs builds — uses the role table.
+apply_theme [dict get [rio_call theme.get {}] result]
 
 # Start on the core's default buffer (an empty "untitled" tab), then open any
 # files named on the command line.

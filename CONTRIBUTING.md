@@ -94,8 +94,9 @@ in-process, so there's nothing else to start:
 
 Open files with Ctrl+O (each lands in its own tab), New with Ctrl+N, switch tabs
 with Ctrl+Tab, close one with Ctrl+W, save with Ctrl+S, undo/redo with Ctrl+Z /
-Ctrl+Shift+Z. The terminal version (Ck) doesn't exist yet; build-and-run steps
-for it will land here when it does.
+Ctrl+Shift+Z. The View menu switches the colour theme live (default or the
+shipped Solarized examples in `themes/`). The terminal version (Ck) doesn't
+exist yet; build-and-run steps for it will land here when it does.
 
 ## Tests
 
