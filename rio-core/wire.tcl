@@ -44,6 +44,15 @@ proc rio::wire::strarr {items} {
 	return [arr $out]
 }
 
+# A JSON object whose VALUES are each encoded by `cmd` (a command prefix taking
+# one value). Lets an op declare "object of <shape>" — e.g. an object of objects
+# — without the encoder guessing the shape from Tcl values (D25).
+proc rio::wire::objmap {d cmd} {
+	set parts {}
+	dict for {k v} $d { lappend parts "[str $k]:[{*}$cmd $v]" }
+	return "{[join $parts ,]}"
+}
+
 # Result-shape registry. Almost every result is a flat object (obj), which is
 # exact for string leaves. The few ops with a richer result — an array, a nested
 # object — register an encoder here, keyed by op name (D25: the op declares its
@@ -73,6 +82,15 @@ proc rio::wire::_result_session_hello {result} {
 	return "{[join $parts ,]}"
 }
 rio::wire::result_encoder session.hello rio::wire::_result_session_hello
+
+# theme.get: `colors` is a flat object; `fonts` is an object OF flat objects.
+proc rio::wire::_result_theme_get {result} {
+	set parts {}
+	lappend parts "\"colors\":[obj [dict get $result colors]]"
+	lappend parts "\"fonts\":[objmap [dict get $result fonts] rio::wire::obj]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder theme.get rio::wire::_result_theme_get
 
 # A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
 # ok replies) selects a shape-specific result encoder; without one, the result

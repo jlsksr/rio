@@ -117,4 +117,27 @@ test server-session-hello {session.hello negotiation crosses the socket} -setup 
 	catch {close $::c4}
 } -result {true rio-core 1}
 
+test server-theme-get {theme.get's nested object crosses the socket intact} -setup {
+	set ::port5 [rio::server::listen 0]
+	set ::reply5 {}
+	set ::c5 [socket 127.0.0.1 $::port5]
+	fconfigure $::c5 -buffering line -blocking 0 -translation lf -encoding utf-8
+	fileevent $::c5 readable {
+		if {[gets $::c5 line] >= 0 && [string trim $line] ne ""} {
+			set ::reply5 $line ; set ::done5 1
+		}
+	}
+} -body {
+	puts $::c5 "{\"id\":\"T\",\"op\":\"theme.get\"}"
+	flush $::c5
+	after 3000 {set ::done5 timeout}
+	vwait ::done5
+	if {$::done5 eq "timeout"} { return TIMEOUT }
+	set d [json::json2dict $::reply5]
+	list [dict get $d ok] [dict get $d result colors editor.bg] \
+		[dict get $d result fonts RioEditorFont family]
+} -cleanup {
+	catch {close $::c5}
+} -result {true white monospace}
+
 cleanupTests

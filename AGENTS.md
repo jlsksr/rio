@@ -600,9 +600,22 @@ second model.
 **Why:** roles-not-paths make a new theme a pure value set; named fonts give
 per-section typography and instant, restart-free changes; refusing to execute
 theme files reuses D21's security/robustness stance; a built-in default keeps the
-look people love without a theme file present. **Open:** the concrete role
-vocabulary (the full list of color/font slots) and how much rio leans on `ttk`
-vs classic widgets — both firm up once the GUI shell exists.
+look people love without a theme file present.
+
+**Implemented (core, data side).** The role table is served as data so the GUI
+applier (and a future TUI) carry no theme-loading logic. `rio::conf` parses the
+shared `[section]`/`key = value` format (D21) — parsed, never executed.
+`rio::theme` owns the built-in default + the concrete role vocabulary and merges
+a named theme file over its `base`. `theme.get {?name?}` returns the role table
+`{colors {…} fonts {…}}` — the protocol's third non-flat result, a *nested
+object*, encoded via `rio::wire::objmap` (the result-encoder registry again).
+`themes/solarized-dark.theme` and `…-light.theme` ship as examples; tests load
+them. The **concrete role vocabulary is now fixed**: colours
+`editor.bg/fg/cursor/selection`, `ui.bg/fg`, `tab.bar.bg`/`tab.active.bg`/
+`tab.inactive.bg`/`tab.fg`, `gutter.fg`, `chat.bg/fg`, `accent`; named fonts
+`RioEditorFont`, `RioUIFont`, `RioChatFont` (each `family`/`size`). **Open:** the
+GUI *applier* (font configure / option DB / live re-config) — next; and how much
+rio leans on `ttk` vs classic widgets, which firms up as the shell grows.
 
 ### D25 — JSON value encoding is shape-aware, not value-sniffed
 
@@ -726,8 +739,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
   replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
-  and `session.hello` (version/capability negotiation). Remaining: the full op
-  vocabulary + params per namespace, and the error taxonomy.
+  `session.hello` (version/capability negotiation), and `theme.get` (D24 role
+  table). Remaining: the full op vocabulary + params per namespace, and the
+  error taxonomy.
 
   **`session.hello` — implemented.** A client's first request; the core replies
   `{protocol, name, ops}` — the wire protocol version (an integer that bumps on a
@@ -750,10 +764,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   back to the flat-object encoder. This is the pattern the next non-flat results
   will reuse.
 
-  **Next-step note (near-term candidates, none started):**
-  - **theme applier** for D24 — the GUI reads the semantic role table and pokes
-    Tk; pairs with a core op whose result is a nested object (same encoder
-    pattern as `buffer.list` / `session.hello`).
+  Implemented since: `theme.get` (D24, nested-object result) — the *core* theme
+  service. **Remaining near-term:** the GUI **theme applier** (reads the role
+  table from `theme.get` and pokes Tk — named fonts, option DB, live re-config).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

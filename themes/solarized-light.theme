@@ -1,0 +1,18 @@
+# Solarized Light — example rio theme (AGENTS.md D24).
+# Data only: PARSED, never executed. The Solarized light palette.
+
+[colors]
+editor.bg        = #fdf6e3
+editor.fg        = #657b83
+editor.cursor    = #586e75
+editor.selection = #eee8d5
+ui.bg            = #eee8d5
+ui.fg            = #586e75
+tab.bar.bg       = #d8d2c0
+tab.active.bg    = #fdf6e3
+tab.inactive.bg  = #eee8d5
+tab.fg           = #586e75
+gutter.fg        = #93a1a1
+chat.bg          = #fdf6e3
+chat.fg          = #657b83
+accent           = #268bd2

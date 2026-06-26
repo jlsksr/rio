@@ -1,0 +1,65 @@
+# Tests for the theme role table (rio::theme) — the built-in default, conf->table
+# conversion, base merging, and loading shipped example themes (D24). Pure data.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. conf.tcl]
+source [file join [file dirname [info script]] .. theme.tcl]
+
+test theme-default-vocabulary {the default carries colour roles and named fonts} -body {
+	set t [rio::theme::default]
+	list [dict get $t colors editor.bg] [dict get $t colors editor.fg] \
+		[dict get $t fonts RioEditorFont family] [dict get $t fonts RioEditorFont size]
+} -result {white black monospace 12}
+
+test theme-from-conf {a parsed conf becomes a partial {base colors fonts}} -body {
+	set conf [rio::conf::parse \
+		"base = default\n\[colors\]\neditor.bg = #002b36\n\[fonts.RioEditorFont\]\nsize = 14"]
+	set p [rio::theme::from_conf $conf]
+	list [dict get $p base] [dict get $p colors editor.bg] \
+		[dict get $p fonts RioEditorFont size]
+} -result {default #002b36 14}
+
+test theme-merge-colour {override colours replace base by role; the rest inherit} -body {
+	set m [rio::theme::merge [rio::theme::default] {colors {editor.bg #002b36}}]
+	list [dict get $m colors editor.fg] [dict get $m colors editor.bg]
+} -result {black #002b36}
+
+test theme-merge-font-key {an override may tweak one font key, keeping the rest} -body {
+	set m [rio::theme::merge [rio::theme::default] {fonts {RioEditorFont {size 20}}}]
+	list [dict get $m fonts RioEditorFont family] [dict get $m fonts RioEditorFont size]
+} -result {monospace 20}
+
+test theme-load-default {load "" is the built-in default} -body {
+	expr {[rio::theme::load ""] eq [rio::theme::default]}
+} -result 1
+
+test theme-load-shipped {a shipped example loads, overriding over the default} -body {
+	set t [rio::theme::load solarized-dark]
+	list [dict get $t fonts RioEditorFont family] [dict get $t colors editor.bg]
+} -result {monospace #002b36}
+
+test theme-load-missing {an unknown theme errors cleanly} -body {
+	catch {rio::theme::load no-such-theme} e
+	set e
+} -result {no such theme: no-such-theme}
+
+test theme-load-base-chain {a theme inherits its declared base} -setup {
+	set ::themesdir [file normalize [file join [file dirname [info script]] .. .. themes]]
+	set ::fixt [file join [::tcltest::temporaryDirectory] riothemes]
+	file mkdir $::fixt
+	set f [open [file join $::fixt child.theme] w]
+	puts $f "base = solarized-dark"
+	puts $f "\[colors\]"
+	puts $f "accent = #ff0000"
+	close $f
+	set ::rio::theme::override_dirs [list $::fixt $::themesdir]
+} -body {
+	set t [rio::theme::load child]
+	return "[dict get $t colors accent] [dict get $t colors editor.bg]"
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::fixt
+} -result {#ff0000 #002b36}
+
+cleanupTests

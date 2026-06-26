@@ -103,4 +103,26 @@ test wire-roundtrip-session-hello {the encoded hello survives json2dict} -body {
 		[dict get $d result ops]
 } -result {1 rio-core {a b c}}
 
+# --- nested objects (theme.get; D25) -----------------------------------------
+
+test wire-objmap {objmap encodes each value with the given encoder} -body {
+	rio::wire::objmap {a {x 1} b {y 2}} rio::wire::obj
+} -result {{"a":{"x":"1"},"b":{"y":"2"}}}
+
+test wire-result-theme-get {theme.get nests a flat colours object + an object of font objects} -body {
+	rio::wire::response [dict create id 1 ok true op theme.get \
+		result [dict create \
+			colors {editor.bg white} \
+			fonts {RioEditorFont {family monospace size 12}}]]
+} -result {{"id":"1","ok":true,"result":{"colors":{"editor.bg":"white"},"fonts":{"RioEditorFont":{"family":"monospace","size":"12"}}}}}
+
+test wire-roundtrip-theme-get {the encoded theme survives json2dict} -body {
+	set enc [rio::wire::response [dict create id 8 ok true op theme.get \
+		result [dict create colors {editor.bg #002b36 editor.fg #839496} \
+			fonts {RioEditorFont {family mono size 13}}]]]
+	set d [json::json2dict $enc]
+	list [dict get $d result fonts RioEditorFont size] \
+		[dict get $d result colors editor.bg]
+} -result {13 #002b36}
+
 cleanupTests

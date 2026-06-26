@@ -151,4 +151,25 @@ test session-hello-no-event {session.hello is a pure query — no events} -body 
 	llength [dict get [rio::core::call session.hello {}] events]
 } -result 0
 
+# --- theme.get (role table; the third non-flat result) -----------------------
+
+test theme-get-default {theme.get with no name returns the built-in default} -body {
+	set r [dict get [rio::core::call theme.get {}] response result]
+	list [dict get $r colors editor.bg] [dict get $r fonts RioEditorFont size]
+} -result {white 12}
+
+test theme-get-named {theme.get loads a named theme file} -body {
+	set r [dict get [rio::core::call theme.get {name solarized-dark}] response result]
+	dict get $r colors editor.bg
+} -result {#002b36}
+
+test theme-get-missing {theme.get on an unknown theme is ok:false} -body {
+	set resp [dict get [rio::core::call theme.get {name nope}] response]
+	list [dict get $resp ok] [dict get $resp error]
+} -result {false {no such theme: nope}}
+
+test theme-get-no-event {theme.get is a pure query — no events} -body {
+	llength [dict get [rio::core::call theme.get {}] events]
+} -result 0
+
 cleanupTests

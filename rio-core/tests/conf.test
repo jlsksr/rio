@@ -1,0 +1,42 @@
+# Tests for the flat config/theme parser (rio::conf) — the [section]/key=value
+# format shared by config (D21) and themes (D24). Parsed, never executed.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. conf.tcl]
+
+test conf-sections {keys land under their section} -body {
+	rio::conf::parse "\[colors\]\neditor.bg = white\neditor.fg = black"
+} -result {colors {editor.bg white editor.fg black}}
+
+test conf-toplevel {keys before any section go under ""} -body {
+	dict get [rio::conf::parse "base = solarized-dark\n\[colors\]\nui.fg = black"] "" base
+} -result solarized-dark
+
+test conf-comments-and-blanks {# comments and blank lines are ignored} -body {
+	rio::conf::parse "# a theme\n\n\[colors\]\n\n  # nested note\neditor.bg = #002b36\n"
+} -result {colors {editor.bg #002b36}}
+
+test conf-trims-whitespace {keys and values are trimmed} -body {
+	rio::conf::parse "\[colors\]\n   editor.bg   =   #fdf6e3   "
+} -result {colors {editor.bg #fdf6e3}}
+
+test conf-value-keeps-inner-equals {only the first = splits; later =s stay in value} -body {
+	dict get [rio::conf::parse "\[x\]\nk = a=b=c"] x k
+} -result a=b=c
+
+test conf-bad-line-errors {a line that is neither comment, section, nor k=v errors} -body {
+	catch {rio::conf::parse "\[colors\]\nnonsense"} e
+	set e
+} -match glob -result {config line 2:*}
+
+test conf-empty-key-errors {an empty key errors} -body {
+	catch {rio::conf::parse "= value"} e
+	set e
+} -match glob -result {config line 1: empty key}
+
+test conf-empty-text {empty text parses to an empty dict} -body {
+	rio::conf::parse ""
+} -result {}
+
+cleanupTests

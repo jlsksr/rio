@@ -1,0 +1,20 @@
+# Solarized Dark — example rio theme (AGENTS.md D24).
+# Data only: this file is PARSED, never executed. It overrides colour roles over
+# the built-in default; unspecified roles (and all fonts) inherit the default.
+# Palette: Ethan Schoonover's Solarized (https://ethanschoonover.com/solarized/).
+
+[colors]
+editor.bg        = #002b36
+editor.fg        = #839496
+editor.cursor    = #93a1a1
+editor.selection = #073642
+ui.bg            = #073642
+ui.fg            = #93a1a1
+tab.bar.bg       = #00212b
+tab.active.bg    = #002b36
+tab.inactive.bg  = #073642
+tab.fg           = #93a1a1
+gutter.fg        = #586e75
+chat.bg          = #002b36
+chat.fg          = #839496
+accent           = #268bd2
