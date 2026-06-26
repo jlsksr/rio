@@ -92,8 +92,39 @@ test git-op-diff {git.diff op returns {diff}} -constraints hasgit -body {
 	list [dict get $resp ok] [string match "*+two*" [dict get $resp result diff]]
 } -result {true 1}
 
-test git-ops-registered {git.status and git.diff are in the live registry} -body {
-	expr {"git.status" in [rio::dispatch::opnames] && "git.diff" in [rio::dispatch::opnames]}
+test git-log-fields {log returns newest-first commits with parsed fields} -constraints hasgit -body {
+	set commits [dict get [rio::git::log $::repo "" ""] commits]
+	set top [lindex $commits 0]
+	list [llength $commits] [dict get $top subject] [dict get $top author] \
+		[string length [dict get $top hash]]
+} -result {1 first tester 40}
+
+test git-log-order-and-max {log is newest-first and respects max} -constraints hasgit -setup {
+	set ::r2 [file join [::tcltest::temporaryDirectory] riogit-log-[clock clicks]]
+	file mkdir $::r2
+	git_in $::r2 init -q
+	writefile [file join $::r2 f.txt] "1\n" ; git_in $::r2 add f.txt
+	git_in $::r2 commit -q -m first
+	writefile [file join $::r2 f.txt] "2\n" ; git_in $::r2 add f.txt
+	git_in $::r2 commit -q -m second
+} -body {
+	set all [dict get [rio::git::log $::r2 "" ""] commits]
+	set capped [dict get [rio::git::log $::r2 1 ""] commits]
+	list [llength $all] [dict get [lindex $all 0] subject] \
+		[llength $capped] [dict get [lindex $capped 0] subject]
+} -cleanup {
+	file delete -force $::r2
+} -result {2 second 1 second}
+
+test git-op-log {git.log op returns {commits}} -constraints hasgit -body {
+	set resp [dict get [rio::core::call git.log [dict create cwd $::repo]] response]
+	list [dict get $resp ok] [dict get [lindex [dict get $resp result commits] 0] subject]
+} -result {true first}
+
+test git-ops-registered {git.status, git.diff, git.log are in the live registry} -body {
+	expr {"git.status" in [rio::dispatch::opnames] \
+		&& "git.diff" in [rio::dispatch::opnames] \
+		&& "git.log" in [rio::dispatch::opnames]}
 } -result 1
 
 test git-status-wire {git.status encodes to JSON with branch + a changes array} -body {

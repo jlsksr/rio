@@ -74,3 +74,22 @@ proc rio::git::diff {cwd path staged} {
 	if {$path ne ""} { lappend args -- $path }
 	return [_run $cwd {*}$args]
 }
+
+# git.log: newest-first commits as {hash, short, author, date, subject}. We pin a
+# field-delimited --pretty (US 0x1f between fields) under -z (NUL between commits)
+# so subjects with spaces, and any field, parse unambiguously. `max` caps the
+# count; `path` limits to a file's history. A repo with no commits yet errors
+# (bad_request) — that's git's own behaviour for `log`.
+proc rio::git::log {cwd max path} {
+	set args [list log --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s -z]
+	if {$max ne "" && $max > 0} { lappend args --max-count=$max }
+	if {$path ne ""} { lappend args -- $path }
+	set commits {}
+	foreach rec [split [_run $cwd {*}$args] \0] {
+		if {$rec eq ""} continue
+		lassign [split $rec \x1f] hash short author date subject
+		lappend commits [dict create hash $hash short $short \
+			author $author date $date subject $subject]
+	}
+	return [dict create commits $commits]
+}

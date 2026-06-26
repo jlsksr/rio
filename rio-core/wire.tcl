@@ -91,6 +91,14 @@ proc rio::wire::_result_git_status {result} {
 }
 rio::wire::result_encoder git.status rio::wire::_result_git_status
 
+# git.log: `commits` is an array of flat objects.
+proc rio::wire::_result_git_log {result} {
+	set items {}
+	foreach c [dict get $result commits] { lappend items [obj $c] }
+	return "{\"commits\":[arr $items]}"
+}
+rio::wire::result_encoder git.log rio::wire::_result_git_log
+
 # theme.get: `colors` is a flat object; `fonts` is an object OF flat objects.
 proc rio::wire::_result_theme_get {result} {
 	set parts {}

@@ -18,3 +18,12 @@ proc rio::ops::git_diff {params} {
 	return [dict create result [dict create diff [rio::git::diff $cwd $path $staged]]]
 }
 rio::dispatch::register git.diff rio::ops::git_diff
+
+# git.log {?cwd?, ?max?, ?path?} -> {commits:[{hash,short,author,date,subject}]}
+proc rio::ops::git_log {params} {
+	set cwd  [expr {[dict exists $params cwd]  ? [dict get $params cwd]  : ""}]
+	set max  [expr {[dict exists $params max]  ? [dict get $params max]  : ""}]
+	set path [expr {[dict exists $params path] ? [dict get $params path] : ""}]
+	return [dict create result [rio::git::log $cwd $max $path]]
+}
+rio::dispatch::register git.log rio::ops::git_log

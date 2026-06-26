@@ -773,8 +773,8 @@ Both renderings come from the **same** region model (D13) and layout policy
   replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
   `session.hello` (version/capability negotiation), `theme.get` (D24 role
   table), `exec.run` (the command-execution primitive, below), and `git.*`
-  (status, diff — the read layer, below). The **error taxonomy is now decided**
-  (below). Remaining: the full op vocabulary + params per namespace.
+  (status, diff, log — the read layer, below). The **error taxonomy is now
+  decided** (below). Remaining: the full op vocabulary + params per namespace.
 
   **Error taxonomy — implemented.** An error reply's `error` is a flat object
   `{code, message}`, not a bare string: a stable machine-readable `code` clients
@@ -845,15 +845,18 @@ Both renderings come from the **same** region model (D13) and layout policy
   `{branch, changes:[{x,y,path,?orig?}]}` parses `status --porcelain=v1 -b -z`
   (NUL-terminated, so paths with spaces/newlines are safe; renames/copies carry
   `orig`); `git.diff {?cwd?, ?path?, ?staged?}` -> `{diff}` returns the raw
-  unified diff for the worktree or the index (`--cached`). A non-zero git exit
-  (not a repo, bad path) becomes `bad_request` carrying git's stderr; git missing
-  is `io_error` from `exec.run`'s launch path. `git.status` registers a D25
-  result-encoder (`changes` is an array). Read-only and UI-less — the pre-spike
-  foundation git's UI and the agent build on (`rio-core/git.tcl`,
-  `rio-core/ops-git.tcl`). Tests build a throwaway real repo and skip cleanly if
-  `git` is absent (a `hasgit` constraint). **Remaining** (the rendering-heavy era,
-  with the spike): write ops (stage/unstage/commit), `git.log`, and surfacing all
-  this in a frontend.
+  unified diff for the worktree or the index (`--cached`); `git.log {?cwd?,
+  ?max?, ?path?}` -> `{commits:[{hash,short,author,date,subject}]}` parses a
+  field-delimited `--pretty` (US `0x1f` between fields, NUL between commits under
+  `-z`) so any field — including a spaced subject — is unambiguous. A non-zero
+  git exit (not a repo, bad path, no commits yet) becomes `bad_request` carrying
+  git's stderr; git missing is `io_error` from `exec.run`'s launch path.
+  `git.status` and `git.log` each register a D25 result-encoder (their array
+  result). Read-only and UI-less — the pre-spike foundation git's UI and the
+  agent build on (`rio-core/git.tcl`, `rio-core/ops-git.tcl`). Tests build a
+  throwaway real repo and skip cleanly if `git` is absent (a `hasgit`
+  constraint). **Remaining** (the rendering-heavy era, with the spike): write ops
+  (stage/unstage/commit), and surfacing all this in a frontend.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
