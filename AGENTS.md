@@ -806,10 +806,11 @@ Both renderings come from the **same** region model (D13) and layout policy
 - **O2 — Protocol details.** Core shape decided in D11 (JSONL,
   request/response/event); **value encoding now decided in D25** (shape-aware,
   string leaves, opaque-string ids). Implemented so far: `buffer.*` (text,
-  replace, new, close, **list**), `fs.*` (open, save), `edit.*` (undo, redo),
-  `session.hello` (version/capability negotiation), `theme.get` (D24 role
-  table), `exec.run` (the command-execution primitive, below), and `git.*`
-  (status, diff, log — the read layer, below). The **error taxonomy is now
+  replace, new, close, **list**), `fs.*` (open, save, **list**), `edit.*` (undo,
+  redo), `session.hello` (version/capability negotiation), `theme.get` (D24 role
+  table), `exec.run` (the command-execution primitive, below), `git.*`
+  (status, diff, log — the read layer, below), and `project.*` (open, get — the
+  workspace root, below). The **error taxonomy is now
   decided** (below). Remaining: the full op vocabulary + params per namespace.
 
   **Error taxonomy — implemented.** An error reply's `error` is a flat object
@@ -893,6 +894,35 @@ Both renderings come from the **same** region model (D13) and layout policy
   throwaway real repo and skip cleanly if `git` is absent (a `hasgit`
   constraint). **Remaining** (the rendering-heavy era, with the spike): write ops
   (stage/unstage/commit), and surfacing all this in a frontend.
+
+  **`project.*` — the workspace root — implemented.** rio is "the editor with a
+  project open": one canonical **root folder** the core holds (`rio-core/project.tcl`),
+  the thing that anchors everything otherwise relative — the `cwd` for `git.*`,
+  the directory `fs.list` walks for the file tree, and the per-project `.rio/`
+  dir (D21). Before this, `git.*` leaned on the core process's own working
+  directory; the root makes "the project" an explicit, queryable fact instead of
+  an accident of how rio was launched. **Single-root by design** (a workspace is
+  one open folder, matching one git repo); multi-root can grow later without
+  changing this seam. `project.open {path}` -> `{root}` validates the path is a
+  directory, records the normalized absolute root, and **emits `project.opened`**
+  so every view (file tree, git pane) resyncs through one event (D3/D11);
+  `project.get` -> `{root}` reads it back (`""` if none). `rio::project::resolve`
+  is the shared rule frontends mean by a path: empty = the root, relative = joined
+  onto it, absolute = as-is.
+
+  **`fs.list` — directory listing for the file tree — implemented.** `fs.list
+  {?path?}` -> `{path <abs dir>, entries:[{name,type}]}` lists one directory,
+  resolving `path` against the project root (omitted = the root). **Lazy by
+  design** — one directory per call, so a frontend expands a subtree on demand
+  rather than the core walking a whole repo. Entries are dictionary-sorted
+  (so `a2` precedes `a10`, case folded), `type` is `dir`|`file` (following
+  symlinks, so a linked dir is expandable), and **dotfiles are included** —
+  hiding them is a frontend choice, not the data layer's. The list proc is
+  `rio::fs::listdir`, deliberately *not* `list`: a proc named `list` would shadow
+  the Tcl builtin for every unqualified `[list …]` in the `rio::fs` namespace.
+  `fs.list` registers a D25 result-encoder (its `entries` array). **Next** (#4):
+  default `git.*`'s `cwd` to the project root so the git pane stops leaning on
+  the process cwd; **then** the GUI file-tree pane consuming `fs.list`.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

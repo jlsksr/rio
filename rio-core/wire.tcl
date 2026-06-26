@@ -99,6 +99,14 @@ proc rio::wire::_result_git_log {result} {
 }
 rio::wire::result_encoder git.log rio::wire::_result_git_log
 
+# fs.list: `path` is a string leaf; `entries` is an array of flat objects.
+proc rio::wire::_result_fs_list {result} {
+	set items {}
+	foreach e [dict get $result entries] { lappend items [obj $e] }
+	return "{\"path\":[str [dict get $result path]],\"entries\":[arr $items]}"
+}
+rio::wire::result_encoder fs.list rio::wire::_result_fs_list
+
 # theme.get: `colors` is a flat object; `fonts` is an object OF flat objects.
 proc rio::wire::_result_theme_get {result} {
 	set parts {}

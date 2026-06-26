@@ -74,6 +74,31 @@ proc rio::fs::write {path text meta} {
 	return
 }
 
+# List the entries of directory `dir` (an absolute path). Returns a list of flat
+# dicts {name type}, where type is "dir" or "file", in dictionary order (so "a2"
+# sorts before "a10" and case is folded — the natural order for a file tree).
+# Hidden entries (dotfiles) are included — filtering them is a frontend choice,
+# not the data layer's; `.` and `..` are not entries. type follows symlinks
+# (a symlink to a directory reads as "dir", so the tree can expand it); anything
+# that is not a directory — including a plain file or a broken link — is "file".
+# Named listdir, not list: a proc named `list` would shadow the builtin for every
+# unqualified [list ...] elsewhere in this namespace (see the ::read note above).
+proc rio::fs::listdir {dir} {
+	set names {}
+	foreach pat {* .*} {
+		foreach name [glob -nocomplain -tails -directory $dir -- $pat] {
+			if {$name eq "." || $name eq ".."} continue
+			lappend names $name
+		}
+	}
+	set entries {}
+	foreach name [lsort -dictionary $names] {
+		set type [expr {[file isdirectory [file join $dir $name]] ? "dir" : "file"}]
+		lappend entries [dict create name $name type $type]
+	}
+	return $entries
+}
+
 # --- UTF-8 well-formedness (RFC 3629 / Unicode Table 3-7) --------------------
 #
 # True iff every byte sequence is a valid UTF-8 encoding — rejecting overlong

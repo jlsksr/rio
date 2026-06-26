@@ -1,0 +1,132 @@
+# Tests for the project / workspace root (rio::project, AGENTS.md project.*) and
+# the project.* / fs.list ops driven through the in-process core. A project is a
+# single open directory the core holds; fs.list lists one directory of it for the
+# file tree, resolving paths against that root.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. fs.tcl]
+source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+
+# A throwaway directory tree to list: two files, one subdir, one dotfile.
+proc make_tree {} {
+	set d [file join [::tcltest::temporaryDirectory] rioproj-[clock clicks]]
+	file mkdir $d
+	file mkdir [file join $d src]
+	close [open [file join $d a.txt] w]
+	close [open [file join $d b.txt] w]
+	close [open [file join $d .hidden] w]
+	return $d
+}
+
+# Each test opens a fresh tree as the project root; close it after so state never
+# leaks between tests (the root is process-global, like the buffer registry).
+proc setup_proj {} { set ::tree [make_tree]; rio::project::open $::tree }
+proc teardown_proj { } { rio::project::close; file delete -force $::tree }
+
+# --- root state (rio::project) ----------------------------------------------
+
+test project-open-sets-root {open records a normalized absolute root} -setup {
+	set ::tree [make_tree]
+} -body {
+	set r [rio::project::open $::tree]
+	list [expr {$r eq [file normalize $::tree]}] [expr {[rio::project::root] eq $r}]
+} -cleanup { rio::project::close; file delete -force $::tree } -result {1 1}
+
+test project-open-rejects-nonexistent {open on a non-directory raises io_error} -body {
+	catch {rio::project::open [file join [::tcltest::temporaryDirectory] no-such-dir-[clock clicks]]} m opts
+	rio::error::code_of $opts
+} -result io_error
+
+test project-open-rejects-empty {open with no path raises bad_request} -body {
+	catch {rio::project::open ""} m opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test project-resolve-empty-is-root {empty path resolves to the root} -setup setup_proj -body {
+	expr {[rio::project::resolve ""] eq [file normalize $::tree]}
+} -cleanup teardown_proj -result 1
+
+test project-resolve-relative {a relative path joins onto the root} -setup setup_proj -body {
+	expr {[rio::project::resolve src] eq [file normalize [file join $::tree src]]}
+} -cleanup teardown_proj -result 1
+
+test project-resolve-absolute {an absolute path is taken as-is} -setup setup_proj -body {
+	expr {[rio::project::resolve /etc] eq [file normalize /etc]}
+} -cleanup teardown_proj -result 1
+
+test project-resolve-no-root {a relative path with no project open raises} -body {
+	rio::project::close
+	catch {rio::project::resolve src} m opts
+	rio::error::code_of $opts
+} -result bad_request
+
+# --- directory listing (rio::fs::list) --------------------------------------
+
+test fs-list-names-and-types {lists files and dirs, dotfiles included, with types} -setup {
+	set ::tree [make_tree]
+} -body {
+	set entries [rio::fs::listdir $::tree]
+	set names {} ; set types {}
+	foreach e $entries { lappend names [dict get $e name]; lappend types [dict get $e type] }
+	list $names $types
+} -cleanup { file delete -force $::tree } \
+  -result {{.hidden a.txt b.txt src} {file file file dir}}
+
+test fs-list-excludes-dot-dotdot {. and .. are never entries} -setup {
+	set ::tree [make_tree]
+} -body {
+	set names {}
+	foreach e [rio::fs::listdir $::tree] { lappend names [dict get $e name] }
+	expr {"." ni $names && ".." ni $names}
+} -cleanup { file delete -force $::tree } -result 1
+
+# --- through the in-process core --------------------------------------------
+
+test project-op-open-and-get {project.open replies {root}, emits project.opened, project.get reads it back} -setup {
+	set ::tree [make_tree]
+} -body {
+	set call [rio::core::call project.open [dict create path $::tree]]
+	set resp [dict get $call response]
+	set evs  [dict get $call events]
+	set root [dict get $resp result root]
+	set got  [dict get [dict get [rio::core::call project.get {}] response] result root]
+	list [dict get $resp ok] [expr {$root eq [file normalize $::tree]}] \
+		[dict get [lindex $evs 0] event] [expr {[dict get [lindex $evs 0] params root] eq $root}] \
+		[expr {$got eq $root}]
+} -cleanup { rio::project::close; file delete -force $::tree } \
+  -result {true 1 project.opened 1 1}
+
+test fs-list-op-defaults-to-root {fs.list with no path lists the open project root} -setup setup_proj -body {
+	set resp [dict get [rio::core::call fs.list {}] response]
+	set names {}
+	foreach e [dict get $resp result entries] { lappend names [dict get $e name] }
+	list [dict get $resp ok] [expr {[dict get $resp result path] eq [file normalize $::tree]}] $names
+} -cleanup teardown_proj -result {true 1 {.hidden a.txt b.txt src}}
+
+test fs-list-op-relative-subdir {fs.list resolves a relative subdir against the root} -setup setup_proj -body {
+	set resp [dict get [rio::core::call fs.list [dict create path src]] response]
+	list [dict get $resp ok] [expr {[dict get $resp result path] eq [file normalize [file join $::tree src]]}] \
+		[llength [dict get $resp result entries]]
+} -cleanup teardown_proj -result {true 1 0}
+
+test fs-list-op-not-a-directory {fs.list on a file raises io_error} -setup setup_proj -body {
+	set resp [dict get [rio::core::call fs.list [dict create path a.txt]] response]
+	list [dict get $resp ok] [dict get $resp error code]
+} -cleanup teardown_proj -result {false io_error}
+
+test project-ops-registered {project.open, project.get, fs.list are in the live registry} -body {
+	expr {"project.open" in [rio::dispatch::opnames] \
+		&& "project.get" in [rio::dispatch::opnames] \
+		&& "fs.list" in [rio::dispatch::opnames]}
+} -result 1
+
+test fs-list-wire {fs.list encodes to JSON with path + an entries array} -body {
+	set result [dict create path /p entries \
+		[list [dict create name a.txt type file] [dict create name src type dir]]]
+	rio::wire::response [dict create id 1 ok true op fs.list result $result]
+} -result {{"id":"1","ok":true,"result":{"path":"/p","entries":[{"name":"a.txt","type":"file"},{"name":"src","type":"dir"}]}}}
+
+cleanupTests

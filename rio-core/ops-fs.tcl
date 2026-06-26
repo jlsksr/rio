@@ -50,3 +50,21 @@ proc rio::ops::file_save {params} {
 	return [dict create result [dict create path $path]]
 }
 rio::dispatch::register file.save rio::ops::file_save
+
+# fs.list {?path?} -> {path <abs dir>, entries:[{name,type}]}
+# Lists one directory for the file tree. `path` resolves against the project root
+# (D11 project.*): omitted means the root itself; a relative path is joined onto
+# it; an absolute path is taken as-is. So with a project open, the GUI lists the
+# root with no params and expands a subtree by passing its relative path.
+proc rio::ops::fs_list {params} {
+	set path [expr {[dict exists $params path] ? [dict get $params path] : ""}]
+	set dir [rio::project::resolve $path]
+	if {![file isdirectory $dir]} {
+		rio::error::raise io_error "not a directory: $dir"
+	}
+	if {[catch {rio::fs::listdir $dir} entries]} {
+		rio::error::raise io_error $entries
+	}
+	return [dict create result [dict create path $dir entries $entries]]
+}
+rio::dispatch::register fs.list rio::ops::fs_list
