@@ -741,11 +741,16 @@ proc .t {args} {
 			return ""
 		}
 		delete {
-			# .t delete <index1> ?index2?
+			# .t delete <index1> ?index2?  — compute i2 WITHOUT expr. A Tk text
+			# index like "1.10" passed through expr is coerced to the float 1.1,
+			# silently corrupting the column: backspace would then no-op at every
+			# column 10, 20, 30, … (and forward/range deletes ending there too).
 			set i1 [::rio_real_t index [lindex $args 1]]
-			set i2 [expr {[llength $args] >= 3
-				? [::rio_real_t index [lindex $args 2]]
-				: [::rio_real_t index "[lindex $args 1]+1c"]}]
+			if {[llength $args] >= 3} {
+				set i2 [::rio_real_t index [lindex $args 2]]
+			} else {
+				set i2 [::rio_real_t index "[lindex $args 1]+1c"]
+			}
 			if {[::rio_real_t compare $i1 < $i2]} {
 				if {[dict get [rio_call buffer.replace \
 					[dict create buffer $::cur start $i1 end $i2 text {}]] ok]} {

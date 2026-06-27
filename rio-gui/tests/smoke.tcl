@@ -62,6 +62,25 @@ ok "save: bytes on disk"        [diskbytes $p]           "Xalpha\nbeta\n"
 .t insert 1.0 "\{\"z"
 ok "edit: braces/quotes intact" [string range [rio::doc::text $::cur] 0 2] "\{\"z"
 
+# --- backspace through the proxy past a trailing-zero column -----------------
+# Regression: the proxy's delete branch computed i2 inside an expr, which coerced
+# a Tk index like "1.10" to the float 1.1 — so `.t delete insert-1c` silently
+# no-op'd at columns 10, 20, … (backspace "stopped working" mid-line). Run the
+# exact body of Tk's <BackSpace> binding over a >20-char line; it must fully empty.
+do_open [tmpbytes ""]
+.t insert 1.0 "abcdefghijklmnopqrstuvwxyz"      ;# crosses cols 10 and 20
+.t mark set insert end-1c
+for {set i 0} {$i < 26} {incr i} {
+	if {[.t compare insert != 1.0]} { .t delete insert-1c }
+}
+ok "backspace: empties past col 10/20" [rio::doc::text $::cur] ""
+ok "backspace: widget mirrors empty"   [widget]               ""
+# A range delete ending on a trailing-zero column must also fire.
+.t insert 1.0 "0123456789ABCDEF"
+.t delete 1.0 1.10
+ok "delete: range to col 10 applied"   [rio::doc::text $::cur] "ABCDEF"
+do_save ; do_close
+
 # --- CRLF is preserved across open -> edit -> save ---------------------------
 set q [tmpbytes "a\r\nb\r\n"]
 do_open $q
