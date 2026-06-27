@@ -20,20 +20,29 @@
 package require json
 
 namespace eval rio::claude::oauth {
-	# PROVISIONAL config — verified/corrected against the live flow in step 3.
+	# Config-as-data, verified against the live Claude Code flow (step 3). Every
+	# value here can drift, so it is DATA — a one-line edit, not a rebuild (D26).
+	# The `system` prompt is the spoof the subscription-OAuth path REQUIRES: the
+	# Messages API rejects an oat token unless the request identifies as Claude
+	# Code. (Authorized by the user, eyes open — it likely runs against Anthropic's
+	# ToS and may break/revoke without notice; that is what the resilience is for.)
 	variable config [dict create \
 		authorize_url     https://claude.ai/oauth/authorize \
 		token_url         https://console.anthropic.com/v1/oauth/token \
 		client_id         9d1c250a-e61b-44d9-88ed-5944d1962f5e \
 		scope             "org:create_api_key user:profile user:inference" \
+		redirect_uri      https://console.anthropic.com/oauth/code/callback \
 		messages_url      https://api.anthropic.com/v1/messages \
 		anthropic_version 2023-06-01 \
 		anthropic_beta    oauth-2025-04-20 \
+		system            "You are Claude Code, Anthropic's official CLI for Claude." \
 		model             claude-sonnet-4-6 \
 		max_tokens        4096 \
 		secret_name       claude-oauth]
 
-	# Network seams (real tcltls impls land in step 3; tests inject fakes).
+	variable pending {}   ;# in-flight sign-in: {state, verifier}
+
+	# Network seams (real tcltls impls land later in step 3; tests inject fakes).
 	variable transport       rio::claude::oauth::_http_transport
 	variable token_transport rio::claude::oauth::_token_http
 }
@@ -81,60 +90,66 @@ proc rio::claude::oauth::_access_token {} {
 	return [expr {[dict exists $s access_token] ? [dict get $s access_token] : ""}]
 }
 
-# --- the OAuth sign-in flow --------------------------------------------------
-# Kick off a browser sign-in. PKCE + a CSRF state, a one-shot loopback to catch
-# the redirect, then the code->token exchange and a secret save. `on_done` is
-# called with {ok true} or {ok false code .. message ..}. Returns the authorize
-# URL (handy if the browser couldn't be launched and the user must open it).
-proc rio::claude::oauth::sign_in {on_done} {
+# --- the OAuth sign-in flow (paste-a-code; verified for this client) ---------
+# The verified Claude Code flow uses Anthropic's HOSTED callback (code=true): the
+# browser lands on a page that shows a code, which the user pastes back. So
+# sign-in is two steps. `sign_in` mints PKCE + a CSRF state, stashes them, opens
+# the browser at the authorize URL, and returns that URL (so the GUI can show it
+# if the browser didn't open). The user then pastes the code into
+# `complete_sign_in`. (The generic loopback catcher in rio::oauth stays available
+# for providers whose client allows a localhost redirect; this one does not.)
+proc rio::claude::oauth::sign_in {} {
+	variable pending
 	set pk    [rio::oauth::pkce]
 	set state [rio::oauth::random_token]
-	set lp [rio::oauth::loopback_listen \
-		[list rio::claude::oauth::_on_redirect $pk $state]]
-	set redirect [dict get $lp redirect]
-	set url [_authorize_url $redirect [dict get $pk challenge] $state]
-	# Stash what the redirect handler will need (it only gets the query).
-	variable pending
-	set pending [dict create on_done $on_done redirect $redirect id [dict get $lp id]]
-	if {![rio::oauth::browser_open $url]} {
-		rio::oauth::loopback_cancel [dict get $lp id]
-		{*}$on_done [dict create ok false code browser message \
-			"Couldn't open a browser. Open this URL to sign in:\n$url"]
-	}
+	set pending [dict create state $state verifier [dict get $pk verifier]]
+	set url [_authorize_url [dict get $pk challenge] $state]
+	rio::oauth::browser_open $url
 	return $url
 }
 
-proc rio::claude::oauth::_on_redirect {pk state query} {
+# Finish sign-in with the pasted code. The hosted callback returns it as
+# `code#state`; we verify the state, exchange the code for tokens, and save the
+# secret. `on_done` gets {ok true} or {ok false code .. message ..}.
+proc rio::claude::oauth::complete_sign_in {pasted on_done} {
 	variable pending
-	set on_done [dict get $pending on_done]
-	set redirect [dict get $pending redirect]
-	if {![dict exists $query code] || [dict get $query code] eq ""} {
-		set msg "Sign-in was cancelled or denied"
-		catch {if {[dict exists $query error]} { set msg "Sign-in failed: [dict get $query error]" }}
-		{*}$on_done [dict create ok false code denied message $msg]
+	if {![dict size $pending]} {
+		{*}$on_done [dict create ok false code no_flow message \
+			"Start sign-in first (View ▸ Sign in to Claude)"]
 		return
 	}
-	if {[dict exists $query state] && [dict get $query state] ne $state} {
+	lassign [split [string trim $pasted] "#"] code pstate
+	set want [dict get $pending state]
+	set verifier [dict get $pending verifier]
+	set pending {}
+	if {$code eq ""} {
+		{*}$on_done [dict create ok false code denied message \
+			"No code was pasted — sign-in was cancelled or denied"]
+		return
+	}
+	if {$pstate ne "" && $pstate ne $want} {
 		{*}$on_done [dict create ok false code state_mismatch message \
-			"Sign-in state didn't match (possible interference) — please retry"]
+			"The pasted code's state didn't match — please retry sign-in"]
 		return
 	}
-	_exchange [dict get $query code] [dict get $pk verifier] $redirect $on_done
+	_exchange $code $verifier $want $on_done
 }
 
-# Exchange the authorization code for tokens, then persist them as a secret.
-proc rio::claude::oauth::_exchange {code verifier redirect on_done} {
+# Exchange the authorization code for tokens (a JSON POST — the verified Claude
+# Code token endpoint uses application/json, not form-encoding), then persist.
+proc rio::claude::oauth::_exchange {code verifier state on_done} {
 	variable config
 	variable token_transport
-	set body [_form [dict create \
+	set body [_json_obj [dict create \
 		grant_type    authorization_code \
 		code          $code \
-		redirect_uri  $redirect \
+		state         $state \
 		client_id     [dict get $config client_id] \
+		redirect_uri  [dict get $config redirect_uri] \
 		code_verifier $verifier]]
 	set req [dict create \
 		url     [dict get $config token_url] \
-		headers [list Content-Type application/x-www-form-urlencoded] \
+		headers [list Content-Type application/json] \
 		body    $body]
 	{*}$token_transport $req [list rio::claude::oauth::_exchanged $on_done]
 }
@@ -165,12 +180,15 @@ proc rio::claude::oauth::_exchanged {on_done status body} {
 }
 
 # --- helpers -----------------------------------------------------------------
-proc rio::claude::oauth::_authorize_url {redirect challenge state} {
+# `code=true` selects the hosted-callback "show the code" mode (the user pastes
+# it back); the redirect_uri is the registered hosted callback from config.
+proc rio::claude::oauth::_authorize_url {challenge state} {
 	variable config
 	set q [_form [dict create \
+		code                  true \
 		response_type         code \
 		client_id             [dict get $config client_id] \
-		redirect_uri          $redirect \
+		redirect_uri          [dict get $config redirect_uri] \
 		scope                 [dict get $config scope] \
 		code_challenge        $challenge \
 		code_challenge_method S256 \
@@ -182,6 +200,14 @@ proc rio::claude::oauth::_form {d} {
 	set parts {}
 	dict for {k v} $d { lappend parts "[_urlenc $k]=[_urlenc $v]" }
 	return [join $parts &]
+}
+
+# A flat JSON object of string values (the token exchange body). Reuses the
+# inference core's JSON string escaper.
+proc rio::claude::oauth::_json_obj {d} {
+	set parts {}
+	dict for {k v} $d { lappend parts "[rio::claude::_jstr $k]:[rio::claude::_jstr $v]" }
+	return "{[join $parts ,]}"
 }
 
 proc rio::claude::oauth::_urlenc {s} {

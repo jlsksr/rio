@@ -1,22 +1,17 @@
 # Tests for the claude-oauth face (rio::claude::oauth, AGENTS.md D26): the OAuth
-# sign-in orchestration, auth resolution, and the provider — all driven through
-# fakes (a fake browser that replays the redirect over the real loopback, a fake
-# token transport, a fake SSE transport), so the whole flow is exercised offline.
+# paste-a-code sign-in (verified Claude Code flow — hosted callback), auth
+# resolution, and the provider. Network stays a seam (a fake token transport, a
+# fake SSE transport) and the browser is a no-op, so the whole flow runs offline.
 package require tcltest
 namespace import ::tcltest::*
-package require http
 
 source [file join [file dirname [info script]] .. .. .. rio-core core.tcl]
 source [file join [file dirname [info script]] .. inference.tcl]
 source [file join [file dirname [info script]] .. oauth-face.tcl]
 
-# Keep secrets in a throwaway dir.
+# Keep secrets in a throwaway dir; don't actually launch a browser.
 set rio::secret::override_dir [file join [::tcltest::temporaryDirectory] rioccf-[clock clicks]]
-
-# Sign-in knobs the fake browser reads.
-set ::sim_code     GOODCODE
-set ::sim_badstate 0
-set ::sim_deny     0
+set rio::oauth::opener [list apply {{url} {return 1}}]
 
 proc collect_post {args} { lappend ::posts $args }
 proc collect_ev {ev} {
@@ -25,32 +20,23 @@ proc collect_ev {ev} {
 }
 proc fake_token {status body req on_result} { {*}$on_result $status $body }
 proc fake_sse {sse status req on_chunk on_done} { {*}$on_chunk $sse ; {*}$on_done $status "" }
-proc sim_get {target} { catch {http::cleanup [http::geturl $target -timeout 3000]} }
 
-# A fake browser: parse the redirect_uri + state out of the authorize URL and hit
-# the loopback exactly as a real redirected browser would (code / state / error
-# per the knobs above), asynchronously.
-proc sim_browser {url} {
-	regexp {redirect_uri=([^&]+)} $url -> r ; set redirect [rio::oauth::_urldecode $r]
-	regexp {state=([^&]+)} $url -> state
-	set st [expr {$::sim_badstate ? "WRONGSTATE" : $state}]
-	if {$::sim_deny} {
-		set target "$redirect?error=access_denied&state=$st"
-	} else {
-		set target "$redirect?code=$::sim_code&state=$st"
+# Drive a paste sign-in: start the flow (stashing PKCE+state), then feed back a
+# pasted "code#state" built per `mode` (good = the real state, bad = wrong state,
+# none = no state suffix, empty = nothing). complete_sign_in is synchronous here
+# because the fake token transport resolves immediately.
+proc paste_signin {code mode} {
+	rio::claude::oauth::sign_in
+	set st [dict get $::rio::claude::oauth::pending state]
+	switch -- $mode {
+		good  { set pasted "$code#$st" }
+		bad   { set pasted "$code#WRONGSTATE" }
+		none  { set pasted $code }
+		empty { set pasted "" }
 	}
-	after 0 [list sim_get $target]
-	return 1
-}
-proc drive_signin {} {
-	set ::rio::oauth::opener sim_browser
-	set ::signin_result PENDING
-	rio::claude::oauth::sign_in [list set ::signin_result]
-	set t [after 3000 {set ::signin_result TIMEOUT}]
-	vwait ::signin_result
-	after cancel $t
-	set ::rio::oauth::opener ""
-	return $::signin_result
+	set ::res {}
+	rio::claude::oauth::complete_sign_in $pasted [list set ::res]
+	return $::res
 }
 
 # --- URL / form encoding -----------------------------------------------------
@@ -59,15 +45,15 @@ test claude-oauth-urlenc {form encoding escapes spaces and reserved chars} -body
 	rio::claude::oauth::_form {a {b c} d e:f}
 } -result {a=b%20c&d=e%3Af}
 
-test claude-oauth-authorize-url {the authorize URL carries PKCE + state + registered params} -body {
-	set url [rio::claude::oauth::_authorize_url "http://127.0.0.1:5/callback" CHAL STATE123]
+test claude-oauth-authorize-url {the authorize URL carries code=true, PKCE, state, hosted redirect} -body {
+	set url [rio::claude::oauth::_authorize_url CHAL STATE123]
 	list [string match "https://claude.ai/oauth/authorize?*" $url] \
+		[string match "*code=true*" $url] \
 		[string match "*response_type=code*" $url] \
 		[string match "*code_challenge=CHAL*" $url] \
 		[string match "*code_challenge_method=S256*" $url] \
 		[string match "*state=STATE123*" $url] \
-		[string match "*redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback*" $url] \
-		[string match "*scope=org%3Acreate_api_key*" $url]
+		[string match "*redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback*" $url]
 } -result {1 1 1 1 1 1 1}
 
 # --- auth resolution + provider ----------------------------------------------
@@ -88,15 +74,14 @@ test claude-oauth-sign-out {sign_out forgets the credential} -setup {
 	list $before [rio::claude::oauth::signed_in]
 } -result {1 0}
 
-# --- the sign-in flow (fake browser over the real loopback + fake exchange) ---
+# --- the paste sign-in flow (fake exchange) ----------------------------------
 
-test claude-oauth-signin-success {a full sign-in exchanges the code and saves a token} -setup {
+test claude-oauth-signin-success {a pasted code is exchanged and the token saved} -setup {
 	rio::claude::oauth::sign_out
-	set ::sim_badstate 0 ; set ::sim_deny 0 ; set ::sim_code GOODCODE
 	set ::rio::claude::oauth::token_transport \
 		[list fake_token 200 {{"access_token":"AT","refresh_token":"RT","expires_in":3600}}]
 } -body {
-	set res [drive_signin]
+	set res [paste_signin GOODCODE good]
 	list [dict get $res ok] [rio::claude::oauth::signed_in] \
 		[dict get [rio::secret::get claude-oauth] access_token] \
 		[dict get [rio::secret::get claude-oauth] refresh_token]
@@ -104,36 +89,55 @@ test claude-oauth-signin-success {a full sign-in exchanges the code and saves a 
 	set ::rio::claude::oauth::token_transport rio::claude::oauth::_token_http
 } -result {true 1 AT RT}
 
-test claude-oauth-signin-state-mismatch {a wrong state aborts before any exchange} -setup {
+test claude-oauth-signin-state-mismatch {a wrong pasted state aborts before any exchange} -setup {
 	rio::claude::oauth::sign_out
-	set ::sim_badstate 1 ; set ::sim_deny 0
 	set ::rio::claude::oauth::token_transport [list fake_token 200 {{"access_token":"NO"}}]
 } -body {
-	set res [drive_signin]
+	set res [paste_signin GOODCODE bad]
 	list [dict get $res ok] [dict get $res code] [rio::claude::oauth::signed_in]
 } -cleanup {
-	set ::sim_badstate 0
 	set ::rio::claude::oauth::token_transport rio::claude::oauth::_token_http
 } -result {false state_mismatch 0}
 
-test claude-oauth-signin-denied {a redirect with no code is reported as denied} -setup {
+test claude-oauth-signin-denied {an empty paste is reported as denied} -setup {
 	rio::claude::oauth::sign_out
-	set ::sim_deny 1 ; set ::sim_badstate 0
 } -body {
-	set res [drive_signin]
+	set res [paste_signin "" empty]
 	list [dict get $res ok] [dict get $res code]
-} -cleanup { set ::sim_deny 0 } -result {false denied}
+} -result {false denied}
 
 test claude-oauth-signin-exchange-fails {a non-200 token exchange is a classified error} -setup {
 	rio::claude::oauth::sign_out
-	set ::sim_deny 0 ; set ::sim_badstate 0 ; set ::sim_code GOODCODE
 	set ::rio::claude::oauth::token_transport [list fake_token 400 {{"error":"invalid_grant"}}]
 } -body {
-	set res [drive_signin]
+	set res [paste_signin GOODCODE good]
 	list [dict get $res ok] [dict get $res code] [rio::claude::oauth::signed_in]
 } -cleanup {
 	set ::rio::claude::oauth::token_transport rio::claude::oauth::_token_http
 } -result {false exchange 0}
+
+test claude-oauth-complete-without-start {completing with no flow in progress is rejected} -body {
+	set ::rio::claude::oauth::pending {}
+	set ::r {}
+	rio::claude::oauth::complete_sign_in "X#Y" [list set ::r]
+	dict get $::r code
+} -result no_flow
+
+# --- the spoof: OAuth inference must identify as Claude Code ------------------
+
+test claude-oauth-system-spoof {the request carries the required Claude Code system prompt} -setup {
+	rio::secret::save claude-oauth {access_token AT}
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req body] ; {*}$on_done 200 "" }
+	set ::rio::claude::oauth::transport capture_tp
+} -body {
+	rio::claude::oauth::provider {{role user text hi}} {} collect_post
+	string match {*You are Claude Code, Anthropic's official CLI for Claude.*} \
+		[dict get [json::json2dict $::seen] system]
+} -cleanup {
+	set ::rio::claude::oauth::transport rio::claude::oauth::_http_transport
+	rio::claude::oauth::sign_out
+} -result 1
 
 # --- end to end: a signed-in provider streams through the real agent loop -----
 

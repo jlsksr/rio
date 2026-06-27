@@ -772,14 +772,22 @@ catcher, and browser-open). The **shared Claude inference core + the `claude-oau
 face** (step 2) are implemented and tested **offline** behind transport seams:
 `plugins/claude/inference.tcl` (request shaping, the SSE→`agent.*` mapping, and
 HTTP-status error classification per D26) and `plugins/claude/oauth-face.tcl` (the
-PKCE→browser→loopback→token-exchange→secret flow as config-as-data, plus the
-provider). Tests stream a *faked* Claude reply all the way through the real agent
-loop, and drive the sign-in over the real loopback with a fake browser + fake
-exchange. The Claude config values are **provisional** — flagged for live
-verification in step 3 (they are data precisely because they drift). **Next
-(step 3):** the real tcltls streaming/token transports, verifying the live
-claude.ai endpoints, and wiring *Sign in to Claude* + provider selection into the
-GUI; `claude-api` later.
+PKCE→token-exchange→secret flow as config-as-data, plus the provider). Tests
+stream a *faked* Claude reply all the way through the real agent loop and drive
+the sign-in with a fake exchange. The Claude config is now **verified** against
+the live Claude Code flow (step 3a): client id, endpoints, scopes, and the **JSON**
+token exchange. Two user-authorized facts are baked in, eyes open: (1) sign-in is
+**paste-a-code** — Anthropic's hosted callback returns the code on a page the user
+copies back (a seamless localhost redirect isn't available for this client, so the
+generic loopback catcher stays unused by Claude); (2) OAuth inference **requires
+identifying as Claude Code** — the `system` spoof *"You are Claude Code,
+Anthropic's official CLI for Claude."* plus `anthropic-beta: oauth-2025-04-20`.
+That impersonation likely runs against Anthropic's ToS and may break or get the
+token revoked without notice — which is exactly what the resilience (config-as-data
++ classified errors) is for; the `claude-api` face is the clean, spoof-free
+fallback. **Remaining (step 3):** the real tcltls streaming/token transports, then
+wiring *Sign in to Claude* + provider selection into the GUI and a real sign-in;
+`claude-api` later.
 
 ---
 
