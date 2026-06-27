@@ -172,6 +172,13 @@ ok "dock: dock_pane is git"       $::dock_pane           git
 show_pane files
 ok "dock: files pane shown"       [list [dock_shows .dock.files] [dock_shows .dock.git]] {1 0}
 
+# The dock width must NOT change when switching panes (regression: the git pane's
+# diff defaults to 80 cols / editor font and ballooned the whole window).
+show_pane files ; update idletasks ; set wf [winfo reqwidth .dock]
+show_pane git   ; update idletasks ; set wg [winfo reqwidth .dock]
+ok "dock: width stable on switch"  [expr {abs($wg - $wf) < 8}] 1
+show_pane files
+
 ok "dock: default side is left"   [dict get [pack info .dock] -side] left
 set ::dock_side right ; place_dock
 ok "dock: moved to the right"     [dict get [pack info .dock] -side] right

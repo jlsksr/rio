@@ -313,6 +313,7 @@ proc refresh_git {} {
 			[format "%s%s %s" [dict get $c x] [dict get $c y] [dict get $c path]]
 		lappend ::git_rows $c
 	}
+	git_diff_set "(select a changed file)"
 }
 
 # Selecting a changed file shows its diff. A path staged but not also modified in
@@ -588,7 +589,11 @@ frame .tabs -background "#bbbbbb"
 
 # The side dock: a selector row (Files | Git) above the two pane bodies, of which
 # show_pane packs exactly one. place_dock decides which edge it sits on.
-frame .dock -background "#dddddd" -width 200
+# propagate off so the dock keeps a STABLE width regardless of which pane shows —
+# otherwise the git pane's diff (editor font) is physically wider than the file
+# list (UI font) at the same column count, and the whole window jumps on switch.
+frame .dock -background "#dddddd" -width 220
+pack propagate .dock 0
 frame .dock.sel -background "#dddddd"
 label .dock.sel.files -text Files -font {monospace 9} -padx 8 -pady 1 \
 	-background "#cccccc" -foreground black
@@ -629,7 +634,9 @@ bind .dock.git.hdr.refresh <Button-1> refresh_git
 listbox .dock.git.list -width 26 -height 8 -activestyle none -exportselection 0 \
 	-borderwidth 0 -highlightthickness 0 \
 	-background "#dddddd" -foreground black
-text .dock.git.diff -wrap none -height 10 -state disabled \
+# -width 26 matches the list so the git pane does not balloon the dock (and the
+# whole window) to the text widget's default 80 columns when it is shown.
+text .dock.git.diff -wrap none -width 26 -height 10 -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black
 pack .dock.git.list -side top -fill x
