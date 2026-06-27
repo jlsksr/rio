@@ -689,9 +689,21 @@ not by building a second frontend.
 **Provider interface (durable, core-owned contract; D8).** *Given a conversation +
 the available tools, stream assistant output and tool-call requests.* Concrete
 providers absorb one service's wire specifics and are swappable by construction.
-The first is an **in-box Claude provider** riding the *thin* protocol-participant
-seam (D8 phasing) — a plugin *architecturally* (it sits behind the interface),
-though loaded in-process until the full plugin platform (D17–D19) exists.
+For Claude we split along the **shared inference core ↔ auth face** line, *not* one
+provider with an internal switch: a single **shared Claude inference module** (the
+~80% that is identical either way — Messages-API request shaping, SSE stream
+parsing, mapping Claude's output + tool calls onto `agent.*` events, tool-schema
+translation) plus **two thin provider faces** over it — `claude-oauth`
+(subscription sign-in; *unofficial / best-effort*), built first, and `claude-api`
+(API key; *supported*), added later. Each face owns only its **auth strategy**, a
+request-quirk hook, and its **provenance/support label**, so the volatile OAuth
+path is an isolated artifact — separately labeled, disable-able, and patchable
+without touching `claude-api` — while the durable inference code is written once.
+Both ride the *thin* protocol-participant seam (D8 phasing): plugins
+*architecturally* (behind the interface), loaded in-process until the full plugin
+platform (D17–D19) exists, at which point they become two real plugins sharing the
+inference module with **no interface rework**. Two faces over one service also
+stress-tests the provider interface — the reason rio builds seams at all.
 
 **MVP scope — read + propose-edit only.** The agent may read the project (existing
 `fs.*` / `buffer.*` ops) and *propose* edits the user applies or rejects through
@@ -699,22 +711,21 @@ the diff→apply review UX (D20). Command execution (`exec.run`) and its
 allow-list / confirmation guardrails are **out of this slice** (O4), so we get a
 useful, dogfoodable agent without the dangerous surface.
 
-**Auth — two strategies behind one interface; claude.ai OAuth first, API key
-later.** The provider must support **both** auth methods behind a single pluggable
-**auth-strategy** seam: OAuth against the user's claude.ai subscription (browser
-sign-in) **and** a pay-per-token Anthropic **API key**. We build the **OAuth path
-first** (it's what the user wants to use day-to-day); the **API-key path is a
-later addition** that slots into the same seam — and doubles as the documented
-fallback if the subscription flow breaks. The **generic** half of OAuth — open a
-URL in the user's browser and catch the redirect on a loopback listener (or accept
-a pasted code) — is a small **core service** reusable by any provider/plugin
+**Auth — claude.ai OAuth first (`claude-oauth`), API key later (`claude-api`, the
+fallback).** `claude-oauth` authenticates with OAuth against the user's claude.ai
+subscription (browser sign-in) — the path the user wants day-to-day, built first.
+`claude-api` authenticates with a pay-per-token Anthropic **API key** and doubles
+as the documented **fallback** if the subscription flow breaks; it is a later
+addition over the same shared inference core. The **generic** half of OAuth — open
+a URL in the user's browser and catch the redirect on a loopback listener (or
+accept a pasted code) — is a small **core service** reusable by any provider/plugin
 needing browser auth; the **Claude-specific** half (PKCE, code↔token exchange, the
-inference auth header) lives entirely in the provider.
+inference auth/beta headers) lives in the `claude-oauth` face.
 
 **Resilience — survive upstream change "without notice" (explicit requirement).**
 The subscription OAuth flow rides the same path Anthropic's own tools use, not a
-documented third-party API, so it *will* shift. The provider is built to degrade
-well:
+documented third-party API, so it *will* shift. The `claude-oauth` face is built to
+degrade well:
 - **Wire specifics are config data, not baked code** — endpoints, client id,
   scopes, redirect URI, inference auth/beta headers live in an overridable config
   block, so an upstream move is a one-line edit (or a rio update), not a rebuild.
@@ -742,7 +753,9 @@ integration outlive the upstream churn it is guaranteed to face. MCP alignment o
 the provider and agent-tool interfaces remains open (O12).
 
 **Status:** designed; **building now** — core `agent.*` + provider interface
-first, then the GUI chat pane, then the OAuth sign-in. Not yet implemented.
+first (with a stub/echo provider), then the GUI chat pane, then the shared Claude
+inference core + the `claude-oauth` face (OAuth sign-in); `claude-api` later. Not
+yet implemented.
 
 ---
 
