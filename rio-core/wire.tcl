@@ -116,6 +116,14 @@ proc rio::wire::_result_theme_get {result} {
 }
 rio::wire::result_encoder theme.get rio::wire::_result_theme_get
 
+# agent.history: `messages` is an array of flat {role, text} objects.
+proc rio::wire::_result_agent_history {result} {
+	set items {}
+	foreach m [dict get $result messages] { lappend items [obj $m] }
+	return "{\"messages\":[arr $items]}"
+}
+rio::wire::result_encoder agent.history rio::wire::_result_agent_history
+
 # A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
 # ok replies) selects a shape-specific result encoder; without one, the result
 # is a flat object.

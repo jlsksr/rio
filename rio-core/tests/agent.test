@@ -1,0 +1,136 @@
+# Tests for the agent orchestration loop (rio::agent, AGENTS.md D20/D26) and the
+# agent.* ops driven through the in-process transport. agent.send is the core's
+# first STREAMING op: content arrives as agent.* events over the event loop, not
+# in the response — so these tests drive a real event loop (vwait) and collect
+# the events live, exactly as a frontend would.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+
+# A live event sink (the streaming `emit`): records every event and trips ::fin
+# when the turn ends (agent.message or agent.error).
+proc collect_ev {ev} {
+	lappend ::evs $ev
+	switch -- [dict get $ev event] {
+		agent.message - agent.error { set ::fin done }
+	}
+}
+
+# Drive one agent turn to completion. Returns {resp <ack> evs <events> fin done}.
+# A fresh provider is set each call (echo by default) so tests are independent.
+proc run_turn {text {provider ::rio::agent::echo_provider}} {
+	rio::agent::set_provider $provider
+	set ::evs {} ; set ::fin {}
+	set resp [rio::core::call_stream agent.send [dict create text $text] collect_ev]
+	set timer [after 3000 {set ::fin timeout}]
+	vwait ::fin
+	after cancel $timer
+	return [dict create resp $resp evs $::evs fin $::fin]
+}
+
+test agent-send-ack {agent.send returns an ack {started, turn} and completes} -body {
+	set out [run_turn "hi there"]
+	set r [dict get $out resp]
+	list [dict get $r ok] [dict get $r result started] \
+		[expr {[dict get $r result turn] > 0}] [dict get $out fin]
+} -result {true true 1 done}
+
+test agent-streams-to-message {deltas stream and accumulate into the final agent.message} -body {
+	set out [run_turn "hi there"]
+	set deltas "" ; set msg ""
+	foreach ev [dict get $out evs] {
+		switch -- [dict get $ev event] {
+			agent.delta   { append deltas [dict get $ev params text] }
+			agent.message { set msg [dict get $ev params text] }
+		}
+	}
+	list $msg [expr {$deltas eq $msg}]
+} -result {{echo: hi there} 1}
+
+test agent-event-order {a turn is deltas (>=1) then exactly one agent.message} -body {
+	set out [run_turn "alpha beta"]
+	set kinds {}
+	foreach ev [dict get $out evs] { lappend kinds [dict get $ev event] }
+	set last [lindex $kinds end]
+	list [expr {[llength $kinds] >= 2}] \
+		[expr {"agent.delta" in $kinds}] \
+		[expr {[llength [lsearch -all -exact $kinds agent.message]] == 1}] \
+		$last
+} -result {1 1 1 agent.message}
+
+test agent-events-carry-turn {every event of a turn carries that turn's id} -body {
+	set out [run_turn "x"]
+	set turn [dict get $out resp result turn]
+	set ok 1
+	foreach ev [dict get $out evs] {
+		if {[dict get $ev params turn] ne $turn} { set ok 0 }
+	}
+	set ok
+} -result 1
+
+test agent-send-is-async {content is streamed via the event loop, not delivered synchronously} -body {
+	set ::evs {} ; set ::fin {}
+	rio::agent::set_provider ::rio::agent::echo_provider
+	rio::core::call_stream agent.send {text hi} collect_ev
+	set immediate [llength $::evs]                ;# nothing yet — first chunk is deferred
+	set timer [after 3000 {set ::fin timeout}]
+	vwait ::fin
+	after cancel $timer
+	list $immediate [expr {[llength $::evs] > 0}] $::fin
+} -result {0 1 done}
+
+test agent-history-records-turn {history holds the user msg then the assistant reply} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	run_turn "hello"
+	set msgs [dict get [rio::core::call agent.history {}] response result messages]
+	list [llength $msgs] \
+		[dict get [lindex $msgs 0] role] [dict get [lindex $msgs 0] text] \
+		[dict get [lindex $msgs 1] role] [dict get [lindex $msgs 1] text]
+} -result {2 user hello assistant {echo: hello}}
+
+test agent-reset-clears {agent.reset empties the conversation} -setup {
+	run_turn "something"
+} -body {
+	rio::core::call agent.reset {}
+	llength [dict get [rio::core::call agent.history {}] response result messages]
+} -result 0
+
+test agent-send-requires-text {agent.send without text is bad_request, no turn started} -body {
+	set r [rio::core::call_stream agent.send {} collect_ev]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test agent-error-from-provider {a provider failure surfaces as a classified agent.error} -setup {
+	proc ::down_provider {conversation tools post} { {*}$post error provider_down "boom" }
+} -body {
+	set out [run_turn "x" ::down_provider]
+	set ev [lindex [dict get $out evs] end]
+	list [dict get $out fin] [dict get $ev event] \
+		[dict get $ev params code] [dict get $ev params message]
+} -cleanup {
+	rename ::down_provider {}
+} -result {done agent.error provider_down boom}
+
+test agent-ops-registered {agent.send/reset/history are in the live registry} -body {
+	set ops [rio::dispatch::opnames]
+	expr {"agent.send" in $ops && "agent.reset" in $ops && "agent.history" in $ops}
+} -result 1
+
+# --- wire encoding (D11/D25) -------------------------------------------------
+
+test agent-delta-wire {an agent.delta event encodes to JSON} -body {
+	rio::wire::event [dict create event agent.delta \
+		params [dict create turn 1 text "hi"]]
+} -result {{"event":"agent.delta","params":{"turn":"1","text":"hi"}}}
+
+test agent-history-wire {agent.history encodes messages as an array of objects} -body {
+	set result [dict create messages [list \
+		[dict create role user text hi] \
+		[dict create role assistant text {echo: hi}]]]
+	rio::wire::response [dict create id 3 ok true op agent.history result $result]
+} -result {{"id":"3","ok":true,"result":{"messages":[{"role":"user","text":"hi"},{"role":"assistant","text":"echo: hi"}]}}}
+
+cleanupTests

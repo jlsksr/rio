@@ -12,8 +12,8 @@ namespace eval rio::core {
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]
-	foreach m {error.tcl document.tcl dispatch.tcl fs.tcl conf.tcl theme.tcl exec.tcl git.tcl project.tcl \
-			ops-buffer.tcl ops-fs.tcl ops-undo.tcl ops-session.tcl ops-theme.tcl ops-exec.tcl ops-git.tcl ops-project.tcl} {
+	foreach m {error.tcl document.tcl dispatch.tcl fs.tcl conf.tcl theme.tcl exec.tcl git.tcl project.tcl agent.tcl \
+			ops-buffer.tcl ops-fs.tcl ops-undo.tcl ops-session.tcl ops-theme.tcl ops-exec.tcl ops-git.tcl ops-project.tcl ops-agent.tcl} {
 		source [file join $dir $m]
 	}
 }}
@@ -35,4 +35,12 @@ proc rio::core::call {op params} {
 proc rio::core::_sink {ev} {
 	variable evbuf
 	lappend evbuf $ev
+}
+
+# In-process STREAMING call (D26): like `call`, but events are delivered LIVE to
+# `emit` as they happen rather than batched into the return — because a streaming
+# op (agent.send) keeps emitting after this returns its ack. `emit` is a command
+# prefix invoked with each event dict; the return is just the ack response dict.
+proc rio::core::call_stream {op params emit} {
+	return [rio::dispatch::handle [dict create op $op params $params] $emit]
 }

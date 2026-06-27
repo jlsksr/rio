@@ -752,10 +752,16 @@ swappable *data* — plus loud, actionable failure modes — is what lets the Cl
 integration outlive the upstream churn it is guaranteed to face. MCP alignment of
 the provider and agent-tool interfaces remains open (O12).
 
-**Status:** designed; **building now** — core `agent.*` + provider interface
-first (with a stub/echo provider), then the GUI chat pane, then the shared Claude
-inference core + the `claude-oauth` face (OAuth sign-in); `claude-api` later. Not
-yet implemented.
+**Status:** core slice **implemented** — `rio-core/agent.tcl` (the orchestration
+loop, the provider interface, and the echo stub provider), `rio-core/ops-agent.tcl`
+(`agent.send` as the first streaming op via `register_stream`, plus `agent.reset` /
+`agent.history`), the streaming dispatch path (`rio::dispatch::register_stream` +
+`rio::core::call_stream` — a streaming handler gets the live `emit`, returns an
+ack, and emits agent.* events from a coroutine), and the `agent.history` wire
+encoder. The streaming model is verified both in-process and over the socket
+*broadcast* (the same loop, D2). **Next:** the GUI chat pane (a dumb view over the
+event stream), then the shared Claude inference core + the `claude-oauth` face
+(OAuth sign-in); `claude-api` later.
 
 ---
 

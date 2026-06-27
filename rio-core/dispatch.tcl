@@ -16,7 +16,13 @@
 # a flat {code, message} object (the taxonomy in error.tcl, O2).
 
 namespace eval rio::dispatch {
-	variable ops {}   ;# dict: op-name -> handler command
+	variable ops {}        ;# dict: op-name -> handler command
+	variable streaming {}  ;# dict: op-name -> 1 for streaming ops (D26). A
+	                       ;# streaming handler is called as `handler params emit`
+	                       ;# and emits events LIVE over time (typically from a
+	                       ;# coroutine), returning only an immediate ack; an
+	                       ;# ordinary handler is `handler params` and returns its
+	                       ;# events in a batch for dispatch to replay.
 }
 
 # Shape an error reply: machine-readable code + human message (D11/O2).
@@ -30,6 +36,15 @@ proc rio::dispatch::register {op handler} {
 	dict set ops $op $handler
 }
 
+# Register a STREAMING op (D26): its handler receives the live `emit` callback so
+# it can broadcast events over time and returns only an immediate ack response.
+proc rio::dispatch::register_stream {op handler} {
+	variable ops
+	variable streaming
+	dict set ops $op $handler
+	dict set streaming $op 1
+}
+
 # The names of every registered op, sorted. session.hello reports these so a
 # client learns what this core supports without a hand-maintained list (O2).
 proc rio::dispatch::opnames {} {
@@ -41,6 +56,7 @@ proc rio::dispatch::opnames {} {
 # event dict appended. Returns the response dict.
 proc rio::dispatch::handle {msg emit} {
 	variable ops
+	variable streaming
 	set id [expr {[dict exists $msg id] ? [dict get $msg id] : ""}]
 	if {![dict exists $msg op]} {
 		return [_fail $id bad_request "missing op"]
@@ -50,7 +66,15 @@ proc rio::dispatch::handle {msg emit} {
 		return [_fail $id unknown_op "unknown op: $op"]
 	}
 	set params [expr {[dict exists $msg params] ? [dict get $msg params] : {}}]
-	if {[catch {[dict get $ops $op] $params} ret opts]} {
+	# A streaming op (D26) is handed the live `emit` so it can broadcast events
+	# itself over time; it returns just an ack. An ordinary op returns its events
+	# (if any) for us to replay through `emit` below.
+	if {[dict exists $streaming $op]} {
+		set rc [catch {[dict get $ops $op] $params $emit} ret opts]
+	} else {
+		set rc [catch {[dict get $ops $op] $params} ret opts]
+	}
+	if {$rc} {
 		return [_fail $id [rio::error::code_of $opts] $ret]
 	}
 	set result [expr {[dict exists $ret result] ? [dict get $ret result] : {}}]
