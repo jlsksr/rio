@@ -148,6 +148,9 @@ open_folder $proj
 ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
 ok "pane: header is project name" [.dock.files.head cget -text] [file tail $proj]
 ok "pane: dirs then files"        [nav_labels]           {sub/ {  zeta.txt}}
+update idletasks
+ok "pane: scrollbar hidden when list fits" \
+	[expr {[lsearch -exact [pack slaves .dock.files] .dock.files.sb] < 0}] 1
 
 # Descend into the subdir (row 0 = sub/), then back up via "../".
 nav_click 0
@@ -198,14 +201,18 @@ if {![catch {exec git --version}]} {
 
 	open_folder $gdir          ;# active pane is files; git refreshes when shown
 	show_pane git
+	proc git_shows_diff {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.diff] >= 0} }
 	ok "git: branch shown"        [.dock.git.hdr.branch cget -text] "⎇ main"
 	ok "git: change listed"       [string match "* M a.txt" [.dock.git.list get 0]] 1
+	ok "git: diff hidden until pick" [git_shows_diff] 0
 	.dock.git.list selection set 0 ; git_select
+	ok "git: diff shows on pick"   [git_shows_diff] 1
 	ok "git: diff shows the edit"  [string match "*+two*" [.dock.git.diff get 1.0 end-1c]] 1
 
-	# Refresh after staging clears the worktree change for that path.
+	# Refresh after staging clears the worktree change for that path and re-collapses.
 	gitc $gdir add a.txt ; refresh_git
 	ok "git: refresh sees staged"   [string match "M *a.txt" [.dock.git.list get 0]] 1
+	ok "git: diff re-collapses"     [git_shows_diff] 0
 	file delete -force $gdir
 } else {
 	puts "SKIP  git pane checks (git not installed)"

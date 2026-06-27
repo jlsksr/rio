@@ -271,17 +271,30 @@ proc open_folder_dialog {} {
 # read-only diff area. No file-watching, so a Refresh button re-reads on demand.
 # ::git_rows maps each list row to its change dict {path x y}.
 # ---------------------------------------------------------------------------
-proc git_diff_set {text} {
+# The diff area is collapsible (D13): hidden until a file is picked, so the
+# default git pane is just a full-height change list — consistent with the file
+# pane — and the diff slides in below (sharing the height) only when there is one
+# to read, instead of sitting empty and looking like dead space.
+proc git_show_diff {text} {
 	.dock.git.diff configure -state normal
 	.dock.git.diff delete 1.0 end
 	.dock.git.diff insert 1.0 $text
 	.dock.git.diff configure -state disabled
+	if {[lsearch -exact [pack slaves .dock.git] .dock.git.diff] < 0} {
+		pack .dock.git.diff -side top -fill both -expand 1
+	}
+}
+proc git_hide_diff {} {
+	.dock.git.diff configure -state normal
+	.dock.git.diff delete 1.0 end
+	.dock.git.diff configure -state disabled
+	pack forget .dock.git.diff
 }
 
 proc refresh_git {} {
 	.dock.git.list delete 0 end
 	set ::git_rows {}
-	git_diff_set ""
+	git_hide_diff
 	# With no folder open, git.* would fall back to rio's OWN process cwd and show
 	# the wrong repo — so the pane is honest about needing a project first.
 	if {[dict get [rio_call project.get {}] result root] eq ""} {
@@ -313,7 +326,6 @@ proc refresh_git {} {
 			[format "%s%s %s" [dict get $c x] [dict get $c y] [dict get $c path]]
 		lappend ::git_rows $c
 	}
-	git_diff_set "(select a changed file)"
 }
 
 # Selecting a changed file shows its diff. A path staged but not also modified in
@@ -323,16 +335,30 @@ proc git_select {} {
 	set sel [.dock.git.list curselection]
 	if {$sel eq ""} return
 	set row [lindex $::git_rows $sel]
-	if {$row eq ""} { git_diff_set "" ; return }
+	if {$row eq ""} { git_hide_diff ; return }
 	set x [dict get $row x] ; set y [dict get $row y]
 	set staged [expr {$y eq " " && $x ne " " && $x ne "?"}]
 	set resp [rio_call git.diff [dict create path [dict get $row path] staged $staged]]
 	if {![dict get $resp ok]} {
-		git_diff_set [dict get $resp error message]
+		git_show_diff [dict get $resp error message]
 		return
 	}
 	set d [dict get $resp result diff]
-	git_diff_set [expr {$d eq "" ? "(no textual diff)" : $d}]
+	git_show_diff [expr {$d eq "" ? "(no textual diff)" : $d}]
+}
+
+# An auto-hiding scrollbar: visible only when the view can't show everything.
+# Wired as a widget's -yscrollcommand (Tk appends the lo/hi fractions). It re-packs
+# with -before the scrolled widget so it reclaims its edge instead of being
+# squeezed to zero width by that widget's -expand. Keeps the dock uncluttered
+# when a short file list or change list fits — the common case.
+proc autoscroll {sb widget lo hi} {
+	if {$lo <= 0.0 && $hi >= 1.0} {
+		pack forget $sb
+	} else {
+		pack $sb -side right -fill y -before $widget
+	}
+	$sb set $lo $hi
 }
 
 # ---------------------------------------------------------------------------
@@ -612,10 +638,10 @@ scrollbar .dock.files.sb -command {.dock.files.list yview}
 listbox .dock.files.list -width 26 -activestyle none -exportselection 0 \
 	-borderwidth 0 -highlightthickness 0 \
 	-background "#dddddd" -foreground black \
-	-yscrollcommand {.dock.files.sb set}
+	-yscrollcommand {autoscroll .dock.files.sb .dock.files.list}
 pack .dock.files.head -side top -fill x
-pack .dock.files.sb   -side right -fill y
 pack .dock.files.list -side left -fill both -expand 1
+# .dock.files.sb is packed on demand by autoscroll (hidden when the list fits).
 bind .dock.files.list <Double-Button-1> nav_activate
 bind .dock.files.list <Return>          nav_activate
 
@@ -636,11 +662,11 @@ listbox .dock.git.list -width 26 -height 8 -activestyle none -exportselection 0 
 	-background "#dddddd" -foreground black
 # -width 26 matches the list so the git pane does not balloon the dock (and the
 # whole window) to the text widget's default 80 columns when it is shown.
-text .dock.git.diff -wrap none -width 26 -height 10 -state disabled \
+text .dock.git.diff -wrap none -width 26 -height 8 -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black
-pack .dock.git.list -side top -fill x
-pack .dock.git.diff -side top -fill both -expand 1
+pack .dock.git.list -side top -fill both -expand 1
+# .dock.git.diff is packed on demand by git_show_diff (hidden until a file is picked).
 bind .dock.git.list <<ListboxSelect>> git_select
 
 text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
