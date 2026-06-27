@@ -513,7 +513,9 @@ Two kinds of state, kept separate:
   **out of both** the plain-text settings file and the synced session JSON, in a
   separate store under the data dir with **restrictive perms (0600)** — OS keychain
   later. They are machine-written, never hand-edited, and must not ride along in a
-  diff-friendly config a user might commit or sync.
+  diff-friendly config a user might commit or sync. *Implemented* in
+  `rio-core/secret.tcl` (one `<name>.secret` file per token set, the rio::conf
+  key=value format, the dir 0700 / files 0600).
 
 **Locations** follow the **XDG Base Directory** spec on Unix:
 `$XDG_CONFIG_HOME/rio/` (config; default `~/.config/rio/`) and
@@ -762,8 +764,13 @@ encoder. The streaming model is verified both in-process and over the socket
 *broadcast* (the same loop, D2). The **GUI chat pane** (slice 2) is implemented too
 — the right-hand `chat` column as a dumb view over the event stream, driven
 end-to-end by the echo provider (see the "GUI agent chat pane — implemented" note
-under O2). **Next:** the shared Claude inference core + the `claude-oauth` face
-(OAuth sign-in); `claude-api` later.
+under O2). The **generic OAuth plumbing** (slice 3, step 1) is in place and tested,
+with no Anthropic network yet: a secrets store (`rio-core/secret.tcl` — 0600 files
+under the data dir, apart from settings/session) and the reusable browser-sign-in
+service (`rio-core/oauth.tcl` — PKCE/RFC 7636 codes, a one-shot loopback redirect
+catcher, and browser-open). **Next:** the shared Claude inference core + the
+`claude-oauth` face wiring these to the live claude.ai OAuth + the Messages API;
+`claude-api` later.
 
 ---
 

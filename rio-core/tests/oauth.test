@@ -1,0 +1,85 @@
+# Tests for the generic OAuth plumbing (rio::oauth, AGENTS.md D26): PKCE codes
+# and the one-shot loopback redirect catcher. The loopback is exercised for real
+# — an http client connects to the listener exactly as a browser would following
+# the provider's redirect. No remote network; all on 127.0.0.1.
+package require tcltest
+namespace import ::tcltest::*
+package require http
+
+source [file join [file dirname [info script]] .. oauth.tcl]
+
+# --- PKCE (RFC 7636) ---------------------------------------------------------
+
+test oauth-pkce-shape {pkce yields a 43-char base64url verifier and S256} -body {
+	set p [rio::oauth::pkce]
+	list [string length [dict get $p verifier]] \
+		[regexp {^[A-Za-z0-9_-]+$} [dict get $p verifier]] \
+		[dict get $p method]
+} -result {43 1 S256}
+
+test oauth-pkce-challenge {challenge is base64url(SHA-256(verifier)), no padding} -body {
+	package require sha256
+	set p [rio::oauth::pkce]
+	set expect [string map {+ - / _ = {}} \
+		[binary encode base64 [::sha2::sha256 -bin [dict get $p verifier]]]]
+	list [expr {[dict get $p challenge] eq $expect}] \
+		[regexp {[=+/]} [dict get $p challenge]]
+} -result {1 0}
+
+test oauth-pkce-unique {each call draws a fresh verifier} -body {
+	expr {[dict get [rio::oauth::pkce] verifier] ne [dict get [rio::oauth::pkce] verifier]}
+} -result 1
+
+# --- loopback redirect catcher -----------------------------------------------
+
+test oauth-loopback-redirect-uri {the redirect uri names the chosen loopback port} -body {
+	set lp [rio::oauth::loopback_listen [list apply {{q} {}}]]
+	set ok [string equal "http://127.0.0.1:[dict get $lp port]/callback" [dict get $lp redirect]]
+	rio::oauth::loopback_cancel [dict get $lp id]
+	set ok
+} -result 1
+
+test oauth-loopback-catches-code {a redirect GET returns its query to the callback + a page} -body {
+	set ::got NONE
+	set lp [rio::oauth::loopback_listen [list apply {{q} {set ::got $q}}]]
+	set port [dict get $lp port]
+	set tok [http::geturl "http://127.0.0.1:$port/callback?code=ABC123&state=xyz" -timeout 3000]
+	set code [http::ncode $tok]
+	set body [http::data $tok]
+	http::cleanup $tok
+	if {$::got eq "NONE"} { set t [after 2000 {set ::got TIMEOUT}] ; vwait ::got ; after cancel $t }
+	list $code [string match "*Signed in to rio*" $body] \
+		[dict get $::got code] [dict get $::got state]
+} -result {200 1 ABC123 xyz}
+
+test oauth-loopback-urldecode {percent-encoded query values are decoded} -body {
+	set ::got2 NONE
+	set lp [rio::oauth::loopback_listen [list apply {{q} {set ::got2 $q}}]]
+	set port [dict get $lp port]
+	set tok [http::geturl "http://127.0.0.1:$port/callback?code=a%2Fb%20c&state=1" -timeout 3000]
+	http::cleanup $tok
+	if {$::got2 eq "NONE"} { set t [after 2000 {set ::got2 TIMEOUT}] ; vwait ::got2 ; after cancel $t }
+	dict get $::got2 code
+} -result {a/b c}
+
+test oauth-loopback-one-shot {after firing once, the listener has stopped} -body {
+	set ::got3 NONE
+	set lp [rio::oauth::loopback_listen [list apply {{q} {set ::got3 $q}}]]
+	set port [dict get $lp port]
+	set tok [http::geturl "http://127.0.0.1:$port/callback?code=one" -timeout 3000]
+	http::cleanup $tok
+	if {$::got3 eq "NONE"} { set t [after 2000 {set ::got3 TIMEOUT}] ; vwait ::got3 ; after cancel $t }
+	# A second connection must now be refused (the server socket is closed).
+	set refused [catch {set s [socket 127.0.0.1 $port] ; close $s}]
+	list [dict get $::got3 code] $refused
+} -result {one 1}
+
+test oauth-browser-open-override {browser_open honours the overridable launcher} -body {
+	set ::opened ""
+	set rio::oauth::opener [list apply {{url} {set ::opened $url ; return 1}}]
+	set rc [rio::oauth::browser_open "https://example.test/auth?x=1"]
+	set rio::oauth::opener ""
+	list $rc $::opened
+} -result {1 https://example.test/auth?x=1}
+
+cleanupTests
