@@ -215,18 +215,23 @@ ok "sash: parked on the dock edge" [dict get [pack info .sash] -side] left
 ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
 
 # --- editor scrollbars + line wrapping ---------------------------------------
-# The editor has both scrollbars wired to the text; toggling wrap flips the text's
-# -wrap and hides/shows the (then-meaningless) horizontal bar.
+# The vertical bar is wired straight to the text; the horizontal bar auto-hides
+# (gridscroll) when no line overflows, and wrapping drops it (no h-scroll wrapped).
+# The auto-hide logic is driven directly with fractions: in a withdrawn window the
+# text never reports real overflow, so we can't lean on live geometry here.
 proc hsb_shown {} { expr {[lsearch -exact [grid slaves .ed] .ed.hsb] >= 0} }
 ok "editor: vsb wired to text"   [::rio_real_t cget -yscrollcommand] {.ed.vsb set}
-ok "editor: hsb wired to text"   [::rio_real_t cget -xscrollcommand] {.ed.hsb set}
+ok "editor: hsb auto-hides"      [::rio_real_t cget -xscrollcommand] {gridscroll .ed.hsb}
 ok "editor: default no wrap"     [::rio_real_t cget -wrap]           none
-ok "editor: hsb shown by default" [hsb_shown] 1
+gridscroll .ed.hsb 0.0 0.5 ; ok "editor: hsb shown when a line overflows" [hsb_shown] 1
+gridscroll .ed.hsb 0.0 1.0 ; ok "editor: hsb hidden when text fits"       [hsb_shown] 0
+# Re-show it, then wrapping must hide it regardless.
+gridscroll .ed.hsb 0.0 0.5
 set ::wrap_lines 1 ; apply_wrap
-ok "editor: wrap word applied"   [::rio_real_t cget -wrap]           word
+ok "editor: wrap word applied"        [::rio_real_t cget -wrap] word
 ok "editor: hsb hidden when wrapping" [hsb_shown] 0
 set ::wrap_lines 0 ; apply_wrap
-ok "editor: wrap off restores hsb" [list [::rio_real_t cget -wrap] [hsb_shown]] {none 1}
+ok "editor: wrap off restores no-wrap" [::rio_real_t cget -wrap] none
 
 # --- git pane: branch + changed files + diff ---------------------------------
 if {![catch {exec git --version}]} {

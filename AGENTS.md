@@ -972,9 +972,11 @@ Both renderings come from the **same** region model (D13) and layout policy
   widget gridded with a vertical and a horizontal scrollbar in a container frame
   (`.ed`; the text is `.ed.t` so the bars can be its siblings — everything still
   drives it through that path/proxy and `::rio_real_t`). A **View ▸ Wrap Lines**
-  checkbutton (Ctrl+Shift+W) toggles `-wrap none`/`word`; with wrap on the
-  horizontal bar is meaningless, so `apply_wrap` grid-removes it. Default is no
-  wrap (bar shown). Wrap state is runtime-only (D21 later).
+  checkbutton (Ctrl+Shift+W) toggles `-wrap none`/`word`. The horizontal bar
+  auto-hides (`gridscroll`, the grid sibling of the dock's pack `autoscroll`) when
+  no line runs past the edge, and `apply_wrap` drops it entirely while wrapping,
+  where horizontal scrolling is meaningless. Default is no wrap. Wrap state is
+  runtime-only (D21 later).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

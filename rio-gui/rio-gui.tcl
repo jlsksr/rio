@@ -362,6 +362,14 @@ proc autoscroll {sb widget lo hi} {
 	$sb set $lo $hi
 }
 
+# Same idea for a grid-managed scrollbar (the editor's horizontal bar). grid remove
+# keeps the cell config, so re-`grid`ing restores its row/col. Wired as the editor's
+# -xscrollcommand so the bar shows only when a line runs past the right edge.
+proc gridscroll {sb lo hi} {
+	if {$lo <= 0.0 && $hi >= 1.0} { grid remove $sb } else { grid $sb }
+	$sb set $lo $hi
+}
+
 # ---------------------------------------------------------------------------
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
 # driven from the View menu; place_dock and show_pane are the two seams.
@@ -419,7 +427,7 @@ proc apply_wrap {} {
 		grid remove .ed.hsb
 	} else {
 		::rio_real_t configure -wrap none
-		grid .ed.hsb
+		gridscroll .ed.hsb {*}[::rio_real_t xview]   ;# show only if a line overflows
 	}
 }
 
@@ -716,12 +724,13 @@ bind .sash <B1-Motion> sash_drag
 # in a container so the scrollbars hug the text (not the whole window). The text is
 # named .ed.t so the scrollbars can be its siblings; everything else still drives it
 # through that path (proxy) and ::rio_real_t (the real command). The horizontal bar
-# is only meaningful when lines are NOT wrapped, so apply_wrap shows/hides it.
+# auto-hides (gridscroll) when no line overflows, and apply_wrap drops it entirely
+# while wrapping, where horizontal scrolling is meaningless.
 frame .ed
 text .ed.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 	-background white -foreground black -insertbackground black \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
-	-yscrollcommand {.ed.vsb set} -xscrollcommand {.ed.hsb set}
+	-yscrollcommand {.ed.vsb set} -xscrollcommand {gridscroll .ed.hsb}
 scrollbar .ed.vsb -orient vertical   -command {.ed.t yview}
 scrollbar .ed.hsb -orient horizontal -command {.ed.t xview}
 grid .ed.t   -row 0 -column 0 -sticky nsew
