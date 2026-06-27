@@ -22,12 +22,15 @@ Decisions carry an *Implemented* note where code now backs them.
 > Mind the difference between **designing a seam** and **building a platform.**
 > The plugin/protocol **boundary** (D2, D11, D16) is designed in from **day one**
 > so nothing has to be bolted on later — but *building out* the full plugin
-> **platform** (contribution API, manifests, permissions, SDKs — D17–D19) and the
-> **agent subsystem (O4)** is **deferred**: do **not** dive deep into their
-> implementation before a working core + GUI exists. The agent's first providers
-> ride the *thin* protocol-participant transport (essentially D11), **not** the
-> full platform. The **marketplace** (O11) is deferred further still. Depth in
-> this design log ≠ priority to build.
+> **platform** (contribution API, manifests, permissions, SDKs — D17–D19) is
+> **deferred**. The **agent subsystem (O4)** was deferred until a working core +
+> GUI existed; that bar is now met, so its **core-orchestration slice is being
+> built (D26)** — the `agent.*` protocol, the provider interface, an in-box Claude
+> provider over claude.ai OAuth, read + propose-edit only — while the heavy
+> run-command guardrails stay deferred (O4). The agent's first providers ride the
+> *thin* protocol-participant transport (essentially D11), **not** the full
+> platform. The **marketplace** (O11) is deferred further still. Depth in this
+> design log ≠ priority to build.
 
 ---
 
@@ -506,6 +509,11 @@ Two kinds of state, kept separate:
 - **Session/workspace state** (machine-written): recent files, window/pane sizes,
   open tabs, per-view cursor positions — written as **JSON** by rio, not meant for
   hand-editing.
+- **Secrets** (tokens/credentials, e.g. the Claude OAuth tokens of D26): kept
+  **out of both** the plain-text settings file and the synced session JSON, in a
+  separate store under the data dir with **restrictive perms (0600)** — OS keychain
+  later. They are machine-written, never hand-edited, and must not ride along in a
+  diff-friendly config a user might commit or sync.
 
 **Locations** follow the **XDG Base Directory** spec on Unix:
 `$XDG_CONFIG_HOME/rio/` (config; default `~/.config/rio/`) and
@@ -658,6 +666,83 @@ protocol, while leaving a clean path (per-op shape declarations) for richer
 payloads. Keeping JSON at the boundary preserves D11's zero-cost in-process path.
 Implemented in `rio-core/wire.tcl`; the socket transport (`server.tcl`) is the
 same dispatch as in-process (D2), proven by a real-socket round-trip test.
+
+### D26 — Agent subsystem, first slice: `agent.*` protocol + provider interface; in-box Claude over claude.ai OAuth
+
+Activates the **core-orchestration slice** of the agent (D20 / O4) now that a
+working core + GUI exists. Scope is deliberately narrow; the heavy run-command
+guardrails stay deferred (O4).
+
+**Protocol (`agent.*`, core-owned).** One streaming op drives a turn:
+`agent.send {text}` starts/continues the orchestration loop for the open
+conversation, streaming events keyed to the request id (D11/D14 streaming):
+`agent.delta` (assistant token chunks), `agent.tool` (a *proposed* tool call
+awaiting the user's permission), `agent.message` (a completed turn), and
+`agent.error` (a *classified* failure — see resilience). Conversation state lives
+in core; the GUI chat pane is a dumb view (D3) over this stream. Events are
+designed **terminal-aware** by construction — structured conversation data (roles,
+text spans, proposed-edit diffs as D12 ranges), never Tk-shaped payloads — so a
+future TUI renders the same stream. This is the O1 commitment to design the first
+*rendering-heavy* namespace with a cell-grid consumer in mind, met by thinking,
+not by building a second frontend.
+
+**Provider interface (durable, core-owned contract; D8).** *Given a conversation +
+the available tools, stream assistant output and tool-call requests.* Concrete
+providers absorb one service's wire specifics and are swappable by construction.
+The first is an **in-box Claude provider** riding the *thin* protocol-participant
+seam (D8 phasing) — a plugin *architecturally* (it sits behind the interface),
+though loaded in-process until the full plugin platform (D17–D19) exists.
+
+**MVP scope — read + propose-edit only.** The agent may read the project (existing
+`fs.*` / `buffer.*` ops) and *propose* edits the user applies or rejects through
+the diff→apply review UX (D20). Command execution (`exec.run`) and its
+allow-list / confirmation guardrails are **out of this slice** (O4), so we get a
+useful, dogfoodable agent without the dangerous surface.
+
+**Auth — two strategies behind one interface; claude.ai OAuth first, API key
+later.** The provider must support **both** auth methods behind a single pluggable
+**auth-strategy** seam: OAuth against the user's claude.ai subscription (browser
+sign-in) **and** a pay-per-token Anthropic **API key**. We build the **OAuth path
+first** (it's what the user wants to use day-to-day); the **API-key path is a
+later addition** that slots into the same seam — and doubles as the documented
+fallback if the subscription flow breaks. The **generic** half of OAuth — open a
+URL in the user's browser and catch the redirect on a loopback listener (or accept
+a pasted code) — is a small **core service** reusable by any provider/plugin
+needing browser auth; the **Claude-specific** half (PKCE, code↔token exchange, the
+inference auth header) lives entirely in the provider.
+
+**Resilience — survive upstream change "without notice" (explicit requirement).**
+The subscription OAuth flow rides the same path Anthropic's own tools use, not a
+documented third-party API, so it *will* shift. The provider is built to degrade
+well:
+- **Wire specifics are config data, not baked code** — endpoints, client id,
+  scopes, redirect URI, inference auth/beta headers live in an overridable config
+  block, so an upstream move is a one-line edit (or a rio update), not a rebuild.
+- **Failures are classified and actionable, never silent** — distinct,
+  plain-language `agent.error` states for *not-signed-in / token-expired* ("Sign in
+  to Claude"), *auth rejected — 401/403* ("re-authenticate; the sign-in flow may
+  have changed"), *network/TLS*, and the break-without-notice case *unexpected
+  response shape* ("Claude replied in a way rio didn't expect; the integration may
+  need an update") — each with the raw detail behind a toggle and a pointer to
+  where to update/report. Always name the next action.
+- **Fail closed and contained** — a provider blow-up surfaces as `agent.error`
+  (D10 async, D20 guardrails); the chat pane stays usable and editor/git are
+  untouched.
+- **Token lifecycle** — access + refresh token + expiry stored as secrets (D21);
+  refresh proactively; on refresh failure clear stale tokens and prompt a fresh
+  sign-in rather than looping.
+- **Honest provenance** — at setup, state plainly that this uses the claude.ai
+  subscription sign-in and that an outage is most likely an upstream change.
+
+**Why:** lands a real, dogfoodable agent on the seam we already designed (D8/D20)
+without building the deferred plugin platform; the read-only MVP defers the
+dangerous guardrail work; and treating every volatile detail as quarantined,
+swappable *data* — plus loud, actionable failure modes — is what lets the Claude
+integration outlive the upstream churn it is guaranteed to face. MCP alignment of
+the provider and agent-tool interfaces remains open (O12).
+
+**Status:** designed; **building now** — core `agent.*` + provider interface
+first, then the GUI chat pane, then the OAuth sign-in. Not yet implemented.
 
 ---
 
@@ -987,8 +1072,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   **Remaining:** keystroke coalescing into undo groups, and large-file handling
   (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
-  orchestration; **deferred** per Sequencing.) Exact built-in tool set, how edits
-  are previewed/applied, guardrails for the headless run-command primitive (now
+  orchestration. Its **read + propose-edit slice is now activated — D26**; the
+  run-command guardrails below remain **deferred** per Sequencing.) Exact built-in
+  tool set, how edits are previewed/applied, guardrails for the headless
+  run-command primitive (now
   implemented as `exec.run` — see O2; its argv-not-shell discipline is the
   baseline, but allow-lists, agent confirmation, and closing exec's
   redirection-token surface remain here), the permission model for
