@@ -208,7 +208,13 @@ ok "dock: editor still expands"   [dict get [pack info .t] -expand] 1
 set ::dock_side left ; place_dock
 ok "dock: back to the left"       [dict get [pack info .dock] -side] left
 
-# --- git pane: branch + changed files + diff (needs git) ---------------------
+# The sash sits between the dock and the editor (same edge as the dock), and a
+# drag clamps the dock width rather than letting it collapse or eat the editor.
+ok "sash: parked on the dock edge" [dict get [pack info .sash] -side] left
+.dock configure -width 40 ; sash_drag      ;# pointer not over sash -> clamps to min
+ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
+
+# --- git pane: branch + changed files + diff ---------------------------------
 if {![catch {exec git --version}]} {
 	set gdir [file join [file dirname $tpath] riogui-git-[clock clicks]]
 	file mkdir $gdir

@@ -383,9 +383,27 @@ proc show_pane {which} {
 # the dock first claims its edge; .t then expands into what's left, so the same
 # two calls work for either side.
 proc place_dock {} {
-	catch {pack forget .dock .t}
+	catch {pack forget .dock .sash .t}
 	pack .dock -side $::dock_side -fill y
+	pack .sash -side $::dock_side -fill y     ;# sits between the dock and the editor
 	pack .t    -side left -fill both -expand 1
+}
+
+# Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
+# so we just recompute it from the pointer: the dock's anchored edge stays put and
+# its inner edge follows the cursor. Clamped so neither the dock nor the editor can
+# be squeezed away. Works for either side because dock_side flips which edge holds.
+proc sash_drag {} {
+	set min 120
+	set max [expr {[winfo width .] - 200}]
+	if {$::dock_side eq "left"} {
+		set w [expr {[winfo pointerx .] - [winfo rootx .dock]}]
+	} else {
+		set w [expr {[winfo rootx .dock] + [winfo width .dock] - [winfo pointerx .]}]
+	}
+	if {$w < $min} { set w $min }
+	if {$max > $min && $w > $max} { set w $max }
+	.dock configure -width $w
 }
 
 # Highlight the active selector label (the inactive one recedes). Guarded so it
@@ -568,6 +586,7 @@ proc apply_theme {theme} {
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.tabs configure -background [dict get $c tab.bar.bg]
+	.sash configure -background [dict get $c tab.bar.bg]   ;# the dock divider/grip
 	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
 	# yet); list selections borrow the editor's selection colour so the panes
 	# match the surface. The selector labels are coloured by style_selector.
@@ -668,6 +687,12 @@ text .dock.git.diff -wrap none -width 26 -height 8 -state disabled \
 pack .dock.git.list -side top -fill both -expand 1
 # .dock.git.diff is packed on demand by git_show_diff (hidden until a file is picked).
 bind .dock.git.list <<ListboxSelect>> git_select
+
+# A thin draggable divider between the dock and the editor. place_dock parks it on
+# whichever edge the dock occupies; dragging it resizes the dock (the editor, which
+# -expands, absorbs the difference). The resize cursor on hover advertises the grip.
+frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
+bind .sash <B1-Motion> sash_drag
 
 text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 	-background white -foreground black -insertbackground black \
