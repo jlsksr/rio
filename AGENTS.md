@@ -941,8 +941,25 @@ Both renderings come from the **same** region model (D13) and layout policy
   working directory. An explicit `cwd` still overrides (a tool on another
   checkout); with neither, `rio::git` falls back to the process cwd as before.
   This was the small follow-on that made the workspace root the real anchor for
-  the git read layer. **Next:** the git pane itself, consuming `git.status` (and
-  `.diff`/`.log`) against the open project.
+  the git read layer.
+
+  **GUI git pane + the side dock — implemented.** The file pane and a new **git
+  pane** now share one **side dock** that shows *exactly one* at a time
+  (`rio-gui.tcl`): a selector row (Files | Git) switches them, `show_pane` packs
+  one body and hides the other. The git pane is a dumb view of the git read layer
+  against the open project — `git.status` fills a branch header + changed-file
+  list (`XY path`), selecting a file fetches `git.diff` into a read-only diff area
+  (staged shown via `--cached` when a path is staged-only); a Refresh control
+  re-reads, since there is no file-watching, and it is honest when there is no
+  folder open or no repo. **The dock's side is a user choice, not dictated**
+  (D13): a View-menu radio puts it Left or Right (default **Left**), `place_dock`
+  re-packs it on either edge with the editor filling the rest. Both panes refresh
+  off the `project.opened` event. Themed through the existing role applier (the
+  diff area takes the editor surface; the selector is coloured like the tab bar).
+  Layout choices are **runtime-only for now** — persisting them (dock side, active
+  pane) across launches is the D21 config plumbing, still to come. **Remaining:**
+  git write ops (stage/unstage/commit) once the read view earns them, a roomier
+  diff view, and `git.log` history in the pane.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

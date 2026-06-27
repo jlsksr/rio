@@ -33,6 +33,12 @@ set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yvie
 set ::order   {} ;# buffer ids, in tab order
 set ::cur     "" ;# active buffer id
 
+# The side dock hosts ONE of the panes at a time (files | git) and sits on one
+# side of the editor (left | right). Both are user choices (View menu), not
+# dictated; left + files is the default.
+set ::dock_side left   ;# left | right — which edge the dock occupies
+set ::dock_pane files  ;# files | git  — which pane is currently shown
+
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
@@ -198,24 +204,25 @@ proc open_folder {path} {
 
 proc on_project_opened {p} {
 	set ::nav_dir [dict get $p root]
-	populate_nav
+	# Refresh the visible pane now; the other refreshes when next shown.
+	if {$::dock_pane eq "git"} { refresh_git } else { populate_nav }
 }
 
 # Repaint the pane with the entries of ::nav_dir: a ".." row (unless at the root),
 # then directories, then files — each group dictionary-sorted by the core already.
 proc populate_nav {} {
-	.side.list delete 0 end
+	.dock.files.list delete 0 end
 	set ::nav_rows {}
 	if {$::nav_dir eq ""} {
-		.side.head configure -text "(no folder)"
-		.side.list insert end "  Open a folder…"
+		.dock.files.head configure -text "(no folder)"
+		.dock.files.list insert end "  Open a folder…"
 		lappend ::nav_rows [list none ""]
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
-	.side.head configure -text [nav_header $::nav_dir $root]
+	.dock.files.head configure -text [nav_header $::nav_dir $root]
 	if {$::nav_dir ne $root} {
-		.side.list insert end "../"
+		.dock.files.list insert end "../"
 		lappend ::nav_rows [list dir [file dirname $::nav_dir]]
 	}
 	set resp [rio_call fs.list [dict create path $::nav_dir]]
@@ -228,7 +235,7 @@ proc populate_nav {} {
 		foreach e $entries {
 			if {[dict get $e type] ne $grp} continue
 			set name [dict get $e name]
-			.side.list insert end [expr {$grp eq "dir" ? "$name/" : "  $name"}]
+			.dock.files.list insert end [expr {$grp eq "dir" ? "$name/" : "  $name"}]
 			lappend ::nav_rows [list $grp [file join $::nav_dir $name]]
 		}
 	}
@@ -242,7 +249,7 @@ proc nav_header {dir root} {
 
 # Double-click / Enter on a row: descend into a directory, or open a file in a tab.
 proc nav_activate {} {
-	set sel [.side.list curselection]
+	set sel [.dock.files.list curselection]
 	if {$sel eq ""} return
 	lassign [lindex $::nav_rows $sel] type path
 	switch -- $type {
@@ -254,6 +261,116 @@ proc nav_activate {} {
 proc open_folder_dialog {} {
 	set p [tk_chooseDirectory -title "Open folder"]
 	if {$p ne ""} { open_folder $p }
+}
+
+# ---------------------------------------------------------------------------
+# The git pane (AGENTS.md D7 read layer in a view). Shares the dock with the
+# file pane — only one shows at a time. A dumb view of the core's git.* against
+# the open project (git.* now defaults its cwd to the project root): git.status
+# fills the branch + changed-file list, selecting a file fetches git.diff into a
+# read-only diff area. No file-watching, so a Refresh button re-reads on demand.
+# ::git_rows maps each list row to its change dict {path x y}.
+# ---------------------------------------------------------------------------
+proc git_diff_set {text} {
+	.dock.git.diff configure -state normal
+	.dock.git.diff delete 1.0 end
+	.dock.git.diff insert 1.0 $text
+	.dock.git.diff configure -state disabled
+}
+
+proc refresh_git {} {
+	.dock.git.list delete 0 end
+	set ::git_rows {}
+	git_diff_set ""
+	# With no folder open, git.* would fall back to rio's OWN process cwd and show
+	# the wrong repo — so the pane is honest about needing a project first.
+	if {[dict get [rio_call project.get {}] result root] eq ""} {
+		.dock.git.hdr.branch configure -text "git"
+		.dock.git.list insert end "  (open a folder)"
+		lappend ::git_rows ""
+		return
+	}
+	set resp [rio_call git.status {}]
+	if {![dict get $resp ok]} {
+		.dock.git.hdr.branch configure -text "git"
+		set code [dict get $resp error code]
+		.dock.git.list insert end \
+			[expr {$code eq "bad_request" ? "  (not a git repository)" \
+				: "  [dict get $resp error message]"}]
+		lappend ::git_rows ""
+		return
+	}
+	set r [dict get $resp result]
+	.dock.git.hdr.branch configure -text "⎇ [dict get $r branch]"
+	set changes [dict get $r changes]
+	if {![llength $changes]} {
+		.dock.git.list insert end "  (clean)"
+		lappend ::git_rows ""
+		return
+	}
+	foreach c $changes {
+		.dock.git.list insert end \
+			[format "%s%s %s" [dict get $c x] [dict get $c y] [dict get $c path]]
+		lappend ::git_rows $c
+	}
+}
+
+# Selecting a changed file shows its diff. A path staged but not also modified in
+# the worktree (X set, Y blank) is shown via --cached; otherwise the worktree
+# diff. An untracked file has no textual diff — git returns empty, said plainly.
+proc git_select {} {
+	set sel [.dock.git.list curselection]
+	if {$sel eq ""} return
+	set row [lindex $::git_rows $sel]
+	if {$row eq ""} { git_diff_set "" ; return }
+	set x [dict get $row x] ; set y [dict get $row y]
+	set staged [expr {$y eq " " && $x ne " " && $x ne "?"}]
+	set resp [rio_call git.diff [dict create path [dict get $row path] staged $staged]]
+	if {![dict get $resp ok]} {
+		git_diff_set [dict get $resp error message]
+		return
+	}
+	set d [dict get $resp result diff]
+	git_diff_set [expr {$d eq "" ? "(no textual diff)" : $d}]
+}
+
+# ---------------------------------------------------------------------------
+# The dock: which pane shows, and which edge it sits on. Both are runtime choices
+# driven from the View menu; place_dock and show_pane are the two seams.
+# ---------------------------------------------------------------------------
+# Show one pane (files | git) in the dock, hiding the other, and refresh it.
+proc show_pane {which} {
+	set ::dock_pane $which
+	pack forget .dock.files .dock.git
+	if {$which eq "git"} {
+		pack .dock.git -side top -fill both -expand 1
+		refresh_git
+	} else {
+		pack .dock.files -side top -fill both -expand 1
+		populate_nav
+	}
+	style_selector
+}
+
+# Re-pack the dock against ::dock_side, with the editor filling the rest. Packing
+# the dock first claims its edge; .t then expands into what's left, so the same
+# two calls work for either side.
+proc place_dock {} {
+	catch {pack forget .dock .t}
+	pack .dock -side $::dock_side -fill y
+	pack .t    -side left -fill both -expand 1
+}
+
+# Highlight the active selector label (the inactive one recedes). Guarded so it
+# can run during apply_theme before the dock might be fully realized.
+proc style_selector {} {
+	if {![winfo exists .dock.sel.files]} return
+	set c $::theme_colors
+	foreach pane {files git} {
+		set active [expr {$pane eq $::dock_pane}]
+		.dock.sel.$pane configure -foreground [dict get $c tab.fg] -background \
+			[expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
+	}
 }
 
 proc do_save_as {path} {
@@ -424,15 +541,26 @@ proc apply_theme {theme} {
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.tabs configure -background [dict get $c tab.bar.bg]
-	# File pane: reuse the UI role (no dedicated sidebar role yet); the active row
-	# borrows the editor's selection colour so the pane matches the surface.
-	.side configure -background [dict get $c ui.bg]
-	.side.head configure -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	.side.list configure -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-selectbackground [dict get $c editor.selection] \
-		-selectforeground [dict get $c ui.fg]
+	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
+	# yet); list selections borrow the editor's selection colour so the panes
+	# match the surface. The selector labels are coloured by style_selector.
+	foreach w {.dock .dock.sel .dock.files .dock.git .dock.git.hdr} {
+		$w configure -background [dict get $c ui.bg]
+	}
+	foreach w {.dock.files.head .dock.git.hdr.branch .dock.git.hdr.refresh} {
+		$w configure -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	}
+	foreach w {.dock.files.list .dock.git.list} {
+		$w configure -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+			-selectbackground [dict get $c editor.selection] \
+			-selectforeground [dict get $c ui.fg]
+	}
+	# The diff area is code, so it takes the editor surface.
+	.dock.git.diff configure -font RioEditorFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
@@ -457,20 +585,57 @@ proc do_theme {name} {
 # look (D24), and the View menu switches it live.
 # ---------------------------------------------------------------------------
 frame .tabs -background "#bbbbbb"
-# The file pane (left): a header + a scrollable listbox the navigator fills.
-frame .side -background "#dddddd"
-label .side.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
+
+# The side dock: a selector row (Files | Git) above the two pane bodies, of which
+# show_pane packs exactly one. place_dock decides which edge it sits on.
+frame .dock -background "#dddddd" -width 200
+frame .dock.sel -background "#dddddd"
+label .dock.sel.files -text Files -font {monospace 9} -padx 8 -pady 1 \
+	-background "#cccccc" -foreground black
+label .dock.sel.git   -text Git   -font {monospace 9} -padx 8 -pady 1 \
+	-background "#cccccc" -foreground black
+pack .dock.sel.files .dock.sel.git -side left -padx 1 -pady 1
+pack .dock.sel -side top -fill x
+bind .dock.sel.files <Button-1> {show_pane files}
+bind .dock.sel.git   <Button-1> {show_pane git}
+
+# File pane body: a header + a scrollable listbox the navigator fills.
+frame .dock.files -background "#dddddd"
+label .dock.files.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-scrollbar .side.sb -command {.side.list yview}
-listbox .side.list -width 26 -activestyle none -exportselection 0 \
+scrollbar .dock.files.sb -command {.dock.files.list yview}
+listbox .dock.files.list -width 26 -activestyle none -exportselection 0 \
 	-borderwidth 0 -highlightthickness 0 \
 	-background "#dddddd" -foreground black \
-	-yscrollcommand {.side.sb set}
-pack .side.head -side top -fill x
-pack .side.sb   -side right -fill y
-pack .side.list -side left -fill both -expand 1
-bind .side.list <Double-Button-1> nav_activate
-bind .side.list <Return>          nav_activate
+	-yscrollcommand {.dock.files.sb set}
+pack .dock.files.head -side top -fill x
+pack .dock.files.sb   -side right -fill y
+pack .dock.files.list -side left -fill both -expand 1
+bind .dock.files.list <Double-Button-1> nav_activate
+bind .dock.files.list <Return>          nav_activate
+
+# Git pane body: branch header + Refresh, the changed-file list, and a read-only
+# diff area below it.
+frame .dock.git -background "#dddddd"
+frame .dock.git.hdr -background "#dddddd"
+label .dock.git.hdr.branch -anchor w -font {monospace 9} -padx 4 -pady 2 \
+	-background "#dddddd" -foreground black
+label .dock.git.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
+	-background "#dddddd" -foreground black
+pack .dock.git.hdr.refresh -side right
+pack .dock.git.hdr.branch  -side left -fill x -expand 1
+pack .dock.git.hdr -side top -fill x
+bind .dock.git.hdr.refresh <Button-1> refresh_git
+listbox .dock.git.list -width 26 -height 8 -activestyle none -exportselection 0 \
+	-borderwidth 0 -highlightthickness 0 \
+	-background "#dddddd" -foreground black
+text .dock.git.diff -wrap none -height 10 -state disabled \
+	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+	-background white -foreground black
+pack .dock.git.list -side top -fill x
+pack .dock.git.diff -side top -fill both -expand 1
+bind .dock.git.list <<ListboxSelect>> git_select
+
 text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 	-background white -foreground black -insertbackground black \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2
@@ -478,8 +643,7 @@ label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .tabs   -side top -fill x
 pack .status -side bottom -fill x
-pack .side   -side left -fill y
-pack .t      -side left -fill both -expand 1
+# .dock and .t are packed by place_dock at startup (so the dock side is live).
 focus .t
 
 menu .m ; . configure -menu .m
@@ -499,6 +663,12 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Redo" -accelerator Ctrl+Shift+Z -command do_redo
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
+.m.view add command -label "Show Files" -accelerator Ctrl+Shift+E -command {show_pane files}
+.m.view add command -label "Show Git"   -accelerator Ctrl+Shift+G -command {show_pane git}
+.m.view add separator
+.m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command place_dock
+.m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command place_dock
+.m.view add separator
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
 .m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
@@ -517,6 +687,8 @@ bind .t <Control-Z>         { do_redo ; break }
 bind .t <Control-y>         { do_redo ; break }
 bind .t <Control-Tab>       { cycle 1 ; break }
 bind .t <Control-Shift-Tab> { cycle -1 ; break }
+bind .t <Control-E>         { show_pane files ; break }
+bind .t <Control-G>         { show_pane git ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
 
 # --- widget proxy: edits become protocol requests, never local mutations -----
@@ -562,9 +734,11 @@ apply_theme [dict get [rio_call theme.get {}] result]
 # a tab. The file pane starts empty until a folder is opened.
 set ::nav_dir ""
 set ::nav_rows {}
+set ::git_rows {}
 register_buffer $::rio::ops::default "" {}
 activate $::rio::ops::default
-populate_nav
+place_dock                 ;# pack the dock (default left) and the editor
+show_pane $::dock_pane     ;# default files; also does the first populate
 foreach f $argv {
 	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
 }

@@ -131,10 +131,12 @@ activate $b1                                              ;# back to a live buff
 # way a double-click would (select a row, call nav_activate).
 proc nav_labels {} {
 	set out {}
-	for {set i 0} {$i < [.side.list size]} {incr i} { lappend out [.side.list get $i] }
+	for {set i 0} {$i < [.dock.files.list size]} {incr i} { lappend out [.dock.files.list get $i] }
 	return $out
 }
-proc nav_click {row} { .side.list selection clear 0 end ; .side.list selection set $row ; nav_activate }
+proc nav_click {row} {
+	.dock.files.list selection clear 0 end ; .dock.files.list selection set $row ; nav_activate
+}
 
 set tf [file tempfile tpath] ; close $tf
 set proj [file join [file dirname $tpath] riogui-nav-[clock clicks]]
@@ -144,7 +146,7 @@ set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; clos
 ok "pane: empty before folder open" [nav_labels] {{  Open a folder…}}
 open_folder $proj
 ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
-ok "pane: header is project name" [.side.head cget -text] [file tail $proj]
+ok "pane: header is project name" [.dock.files.head cget -text] [file tail $proj]
 ok "pane: dirs then files"        [nav_labels]           {sub/ {  zeta.txt}}
 
 # Descend into the subdir (row 0 = sub/), then back up via "../".
@@ -159,6 +161,48 @@ nav_click 1
 ok "pane: file opened in a tab"   [bufget $::cur path]   [file join $proj zeta.txt]
 ok "pane: opened file's text"     [rio::doc::text $::cur] "ZETA\n"
 file delete -force $proj
+
+# --- dock layout: switch panes and switch sides ------------------------------
+proc dock_slaves {} { pack slaves .dock }
+proc dock_shows {w} { expr {[lsearch -exact [dock_slaves] $w] >= 0} }
+
+show_pane git
+ok "dock: git pane shown"         [list [dock_shows .dock.git] [dock_shows .dock.files]] {1 0}
+ok "dock: dock_pane is git"       $::dock_pane           git
+show_pane files
+ok "dock: files pane shown"       [list [dock_shows .dock.files] [dock_shows .dock.git]] {1 0}
+
+ok "dock: default side is left"   [dict get [pack info .dock] -side] left
+set ::dock_side right ; place_dock
+ok "dock: moved to the right"     [dict get [pack info .dock] -side] right
+ok "dock: editor still expands"   [dict get [pack info .t] -expand] 1
+set ::dock_side left ; place_dock
+ok "dock: back to the left"       [dict get [pack info .dock] -side] left
+
+# --- git pane: branch + changed files + diff (needs git) ---------------------
+if {![catch {exec git --version}]} {
+	set gdir [file join [file dirname $tpath] riogui-git-[clock clicks]]
+	file mkdir $gdir
+	proc gitc {dir args} { exec git -C $dir -c user.email=t@e -c user.name=t {*}$args }
+	gitc $gdir init -q ; gitc $gdir branch -M main
+	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\n" ; close $gf
+	gitc $gdir add a.txt ; gitc $gdir commit -q -m first
+	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\ntwo\n" ; close $gf
+
+	open_folder $gdir          ;# active pane is files; git refreshes when shown
+	show_pane git
+	ok "git: branch shown"        [.dock.git.hdr.branch cget -text] "⎇ main"
+	ok "git: change listed"       [string match "* M a.txt" [.dock.git.list get 0]] 1
+	.dock.git.list selection set 0 ; git_select
+	ok "git: diff shows the edit"  [string match "*+two*" [.dock.git.diff get 1.0 end-1c]] 1
+
+	# Refresh after staging clears the worktree change for that path.
+	gitc $gdir add a.txt ; refresh_git
+	ok "git: refresh sees staged"   [string match "M *a.txt" [.dock.git.list get 0]] 1
+	file delete -force $gdir
+} else {
+	puts "SKIP  git pane checks (git not installed)"
+}
 
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
