@@ -390,16 +390,19 @@ proc place_dock {} {
 }
 
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
-# so we just recompute it from the pointer: the dock's anchored edge stays put and
-# its inner edge follows the cursor. Clamped so neither the dock nor the editor can
-# be squeezed away. Works for either side because dock_side flips which edge holds.
+# so we recompute it from the pointer measured against the TOPLEVEL'S stable edge
+# (not the dock's own, which moves as we resize it — referencing that fed back on
+# itself and made the panes jump). The toplevel also has propagation off (startup),
+# so a wider dock shrinks the editor instead of widening the whole window. Clamped
+# so neither side collapses; works on either edge because dock_side flips the math.
 proc sash_drag {} {
+	set total [winfo width .]
 	set min 120
-	set max [expr {[winfo width .] - 200}]
+	set max [expr {$total - 200}]
 	if {$::dock_side eq "left"} {
-		set w [expr {[winfo pointerx .] - [winfo rootx .dock]}]
+		set w [expr {[winfo pointerx .] - [winfo rootx .]}]
 	} else {
-		set w [expr {[winfo rootx .dock] + [winfo width .dock] - [winfo pointerx .]}]
+		set w [expr {[winfo rootx .] + $total - [winfo pointerx .]}]
 	}
 	if {$w < $min} { set w $min }
 	if {$max > $min && $w > $max} { set w $max }
@@ -805,6 +808,13 @@ show_pane $::dock_pane     ;# default files; also does the first populate
 foreach f $argv {
 	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
 }
+
+# Let the window settle at its natural content size, then stop child geometry from
+# driving the toplevel. After this, resizing the dock (the sash) flexes the editor
+# rather than resizing the whole window — which is what made sash drags feed back
+# on themselves. The user can still resize the toplevel via the WM as usual.
+update idletasks
+pack propagate . 0
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }

@@ -955,9 +955,12 @@ Both renderings come from the **same** region model (D13) and layout policy
   (D13): a View-menu radio puts it Left or Right (default **Left**), `place_dock`
   re-packs it on either edge with the editor filling the rest. **The dock is also
   resizable by dragging** a thin sash between it and the editor (resize cursor on
-  hover); `sash_drag` recomputes the dock's fixed width from the pointer, clamped
-  so neither the dock nor the editor collapses, and works on whichever edge the
-  dock holds. Both panes refresh
+  hover); `sash_drag` recomputes the dock's fixed width from the pointer measured
+  against the *toplevel's* stable edge, clamped so neither the dock nor the editor
+  collapses, and works on whichever edge the dock holds. The toplevel runs with
+  geometry propagation off, so a drag flexes the editor instead of resizing the
+  whole window (referencing the dock's own moving edge, or letting the window grow,
+  fed the drag back on itself and made the panes jump). Both panes refresh
   off the `project.opened` event. Themed through the existing role applier (the
   diff area takes the editor surface; the selector is coloured like the tab bar).
   Layout choices are **runtime-only for now** — persisting them (dock side, active
