@@ -50,7 +50,7 @@ ok "open: widget mirrors core"  [widget]                 "alpha\nbeta\n"
 ok "open: encoding detected"    [dict get [bufget $::cur meta] encoding] utf-8
 
 # --- edit through the dumb-view proxy, then save -----------------------------
-.t insert 1.0 "X"
+.ed.t insert 1.0 "X"
 ok "edit: marked modified"      [bufget $::cur modified] 1
 ok "edit: core updated"         [rio::doc::text $::cur]  "Xalpha\nbeta\n"
 ok "edit: widget updated"       [widget]                 "Xalpha\nbeta\n"
@@ -59,25 +59,25 @@ ok "save: not modified"         [bufget $::cur modified] 0
 ok "save: bytes on disk"        [diskbytes $p]           "Xalpha\nbeta\n"
 
 # --- tricky characters survive the proxy (no %A breakage) --------------------
-.t insert 1.0 "\{\"z"
+.ed.t insert 1.0 "\{\"z"
 ok "edit: braces/quotes intact" [string range [rio::doc::text $::cur] 0 2] "\{\"z"
 
 # --- backspace through the proxy past a trailing-zero column -----------------
 # Regression: the proxy's delete branch computed i2 inside an expr, which coerced
-# a Tk index like "1.10" to the float 1.1 — so `.t delete insert-1c` silently
+# a Tk index like "1.10" to the float 1.1 — so `.ed.t delete insert-1c` silently
 # no-op'd at columns 10, 20, … (backspace "stopped working" mid-line). Run the
 # exact body of Tk's <BackSpace> binding over a >20-char line; it must fully empty.
 do_open [tmpbytes ""]
-.t insert 1.0 "abcdefghijklmnopqrstuvwxyz"      ;# crosses cols 10 and 20
-.t mark set insert end-1c
+.ed.t insert 1.0 "abcdefghijklmnopqrstuvwxyz"      ;# crosses cols 10 and 20
+.ed.t mark set insert end-1c
 for {set i 0} {$i < 26} {incr i} {
-	if {[.t compare insert != 1.0]} { .t delete insert-1c }
+	if {[.ed.t compare insert != 1.0]} { .ed.t delete insert-1c }
 }
 ok "backspace: empties past col 10/20" [rio::doc::text $::cur] ""
 ok "backspace: widget mirrors empty"   [widget]               ""
 # A range delete ending on a trailing-zero column must also fire.
-.t insert 1.0 "0123456789ABCDEF"
-.t delete 1.0 1.10
+.ed.t insert 1.0 "0123456789ABCDEF"
+.ed.t delete 1.0 1.10
 ok "delete: range to col 10 applied"   [rio::doc::text $::cur] "ABCDEF"
 do_save ; do_close
 
@@ -85,7 +85,7 @@ do_save ; do_close
 set q [tmpbytes "a\r\nb\r\n"]
 do_open $q
 ok "crlf: eol detected"         [dict get [bufget $::cur meta] eol] crlf
-.t insert 1.0 ">"
+.ed.t insert 1.0 ">"
 do_save
 ok "crlf: preserved on save"    [diskbytes $q]    ">a\r\nb\r\n"
 
@@ -109,9 +109,9 @@ ok "tabs: active is f2"         [bufget $::cur path] $f2
 ok "tabs: distinct buffers"     [expr {$b1 ne $b2}] 1
 
 # Edit each independently; switching must not bleed content across tabs.
-.t insert 1.0 "2"                       ;# edit f2 (active)
+.ed.t insert 1.0 "2"                       ;# edit f2 (active)
 activate $b1
-.t insert 1.0 "1"                       ;# edit f1
+.ed.t insert 1.0 "1"                       ;# edit f1
 ok "tabs: f1 holds its own edit" [rio::doc::text $b1] "1FILE ONE\n"
 ok "tabs: f2 holds its own edit" [rio::doc::text $b2] "2FILE TWO\n"
 ok "tabs: switch shows f1"       [widget]            "1FILE ONE\n"
@@ -204,7 +204,7 @@ show_pane files
 ok "dock: default side is left"   [dict get [pack info .dock] -side] left
 set ::dock_side right ; place_dock
 ok "dock: moved to the right"     [dict get [pack info .dock] -side] right
-ok "dock: editor still expands"   [dict get [pack info .t] -expand] 1
+ok "dock: editor still expands"   [dict get [pack info .ed] -expand] 1
 set ::dock_side left ; place_dock
 ok "dock: back to the left"       [dict get [pack info .dock] -side] left
 
@@ -213,6 +213,20 @@ ok "dock: back to the left"       [dict get [pack info .dock] -side] left
 ok "sash: parked on the dock edge" [dict get [pack info .sash] -side] left
 .dock configure -width 40 ; sash_drag      ;# pointer not over sash -> clamps to min
 ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
+
+# --- editor scrollbars + line wrapping ---------------------------------------
+# The editor has both scrollbars wired to the text; toggling wrap flips the text's
+# -wrap and hides/shows the (then-meaningless) horizontal bar.
+proc hsb_shown {} { expr {[lsearch -exact [grid slaves .ed] .ed.hsb] >= 0} }
+ok "editor: vsb wired to text"   [::rio_real_t cget -yscrollcommand] {.ed.vsb set}
+ok "editor: hsb wired to text"   [::rio_real_t cget -xscrollcommand] {.ed.hsb set}
+ok "editor: default no wrap"     [::rio_real_t cget -wrap]           none
+ok "editor: hsb shown by default" [hsb_shown] 1
+set ::wrap_lines 1 ; apply_wrap
+ok "editor: wrap word applied"   [::rio_real_t cget -wrap]           word
+ok "editor: hsb hidden when wrapping" [hsb_shown] 0
+set ::wrap_lines 0 ; apply_wrap
+ok "editor: wrap off restores hsb" [list [::rio_real_t cget -wrap] [hsb_shown]] {none 1}
 
 # --- git pane: branch + changed files + diff ---------------------------------
 if {![catch {exec git --version}]} {

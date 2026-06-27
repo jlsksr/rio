@@ -38,6 +38,7 @@ set ::cur     "" ;# active buffer id
 # dictated; left + files is the default.
 set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
+set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -120,7 +121,7 @@ proc activate {id} {
 	catch {::rio_real_t mark set insert [bufget $id cursor]}
 	catch {::rio_real_t yview moveto    [bufget $id yview]}
 	::rio_real_t see insert
-	focus .t
+	focus .ed.t
 	refresh_all
 }
 
@@ -383,10 +384,10 @@ proc show_pane {which} {
 # the dock first claims its edge; .t then expands into what's left, so the same
 # two calls work for either side.
 proc place_dock {} {
-	catch {pack forget .dock .sash .t}
+	catch {pack forget .dock .sash .ed}
 	pack .dock -side $::dock_side -fill y
 	pack .sash -side $::dock_side -fill y     ;# sits between the dock and the editor
-	pack .t    -side left -fill both -expand 1
+	pack .ed   -side left -fill both -expand 1
 }
 
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
@@ -407,6 +408,19 @@ proc sash_drag {} {
 	if {$w < $min} { set w $min }
 	if {$max > $min && $w > $max} { set w $max }
 	.dock configure -width $w
+}
+
+# Toggle line wrapping (View menu). With wrap on, lines fold at the word and the
+# horizontal scrollbar is meaningless, so it is hidden; with wrap off the bar comes
+# back for long lines. Configures the real widget (the proxy only guards edits).
+proc apply_wrap {} {
+	if {$::wrap_lines} {
+		::rio_real_t configure -wrap word
+		grid remove .ed.hsb
+	} else {
+		::rio_real_t configure -wrap none
+		grid .ed.hsb
+	}
 }
 
 # Highlight the active selector label (the inactive one recedes). Guarded so it
@@ -585,6 +599,7 @@ proc apply_theme {theme} {
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor] \
 		-selectbackground [dict get $c editor.selection]
+	.ed configure -background [dict get $c editor.bg]   ;# the scrollbar-corner gap
 	# Chrome: status bar + tab container.
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -697,15 +712,29 @@ bind .dock.git.list <<ListboxSelect>> git_select
 frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
 
-text .t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
+# The editor region: the text widget with vertical + horizontal scrollbars, gridded
+# in a container so the scrollbars hug the text (not the whole window). The text is
+# named .ed.t so the scrollbars can be its siblings; everything else still drives it
+# through that path (proxy) and ::rio_real_t (the real command). The horizontal bar
+# is only meaningful when lines are NOT wrapped, so apply_wrap shows/hides it.
+frame .ed
+text .ed.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 	-background white -foreground black -insertbackground black \
-	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2
+	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+	-yscrollcommand {.ed.vsb set} -xscrollcommand {.ed.hsb set}
+scrollbar .ed.vsb -orient vertical   -command {.ed.t yview}
+scrollbar .ed.hsb -orient horizontal -command {.ed.t xview}
+grid .ed.t   -row 0 -column 0 -sticky nsew
+grid .ed.vsb -row 0 -column 1 -sticky ns
+grid .ed.hsb -row 1 -column 0 -sticky ew
+grid rowconfigure    .ed 0 -weight 1
+grid columnconfigure .ed 0 -weight 1
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .tabs   -side top -fill x
 pack .status -side bottom -fill x
-# .dock and .t are packed by place_dock at startup (so the dock side is live).
-focus .t
+# .dock and .ed are packed by place_dock at startup (so the dock side is live).
+focus .ed.t
 
 menu .m ; . configure -menu .m
 menu .m.file -tearoff 0
@@ -730,31 +759,35 @@ menu .m.view -tearoff 0
 .m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command place_dock
 .m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command place_dock
 .m.view add separator
+.m.view add checkbutton -label "Wrap Lines" -accelerator Ctrl+Shift+W \
+	-variable ::wrap_lines -command apply_wrap
+.m.view add separator
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
 .m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
-bind .t <Control-n>         { do_new ; break }
-bind .t <Control-o>         { open_dialog ; break }
-bind .t <Control-O>         { open_folder_dialog ; break }
-bind .t <Control-s>         { do_save ; break }
-bind .t <Control-S>         { save_as_dialog ; break }
-bind .t <Control-w>         { do_close ; break }
-bind .t <Control-q>         { do_quit ; break }
-bind .t <Control-z>         { do_undo ; break }
-bind .t <Control-Z>         { do_redo ; break }
-bind .t <Control-y>         { do_redo ; break }
-bind .t <Control-Tab>       { cycle 1 ; break }
-bind .t <Control-Shift-Tab> { cycle -1 ; break }
-bind .t <Control-E>         { show_pane files ; break }
-bind .t <Control-G>         { show_pane git ; break }
+bind .ed.t <Control-n>         { do_new ; break }
+bind .ed.t <Control-o>         { open_dialog ; break }
+bind .ed.t <Control-O>         { open_folder_dialog ; break }
+bind .ed.t <Control-s>         { do_save ; break }
+bind .ed.t <Control-S>         { save_as_dialog ; break }
+bind .ed.t <Control-w>         { do_close ; break }
+bind .ed.t <Control-q>         { do_quit ; break }
+bind .ed.t <Control-z>         { do_undo ; break }
+bind .ed.t <Control-Z>         { do_redo ; break }
+bind .ed.t <Control-y>         { do_redo ; break }
+bind .ed.t <Control-Tab>       { cycle 1 ; break }
+bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
+bind .ed.t <Control-E>         { show_pane files ; break }
+bind .ed.t <Control-G>         { show_pane git ; break }
+bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
 
 # --- widget proxy: edits become protocol requests, never local mutations -----
-rename .t ::rio_real_t
-proc .t {args} {
+rename .ed.t ::rio_real_t
+proc .ed.t {args} {
 	switch -- [lindex $args 0] {
 		insert {
 			# .t insert <index> <chars> ?tagList chars ...?
@@ -805,6 +838,7 @@ register_buffer $::rio::ops::default "" {}
 activate $::rio::ops::default
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
+apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
 foreach f $argv {
 	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
 }

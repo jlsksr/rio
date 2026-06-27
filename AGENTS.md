@@ -964,9 +964,17 @@ Both renderings come from the **same** region model (D13) and layout policy
   off the `project.opened` event. Themed through the existing role applier (the
   diff area takes the editor surface; the selector is coloured like the tab bar).
   Layout choices are **runtime-only for now** — persisting them (dock side, active
-  pane) across launches is the D21 config plumbing, still to come. **Remaining:**
+  pane, wrap) across launches is the D21 config plumbing, still to come. **Remaining:**
   git write ops (stage/unstage/commit) once the read view earns them, a roomier
   diff view, and `git.log` history in the pane.
+
+  **Editor scrollbars + line wrapping — implemented.** The editor is now a text
+  widget gridded with a vertical and a horizontal scrollbar in a container frame
+  (`.ed`; the text is `.ed.t` so the bars can be its siblings — everything still
+  drives it through that path/proxy and `::rio_real_t`). A **View ▸ Wrap Lines**
+  checkbutton (Ctrl+Shift+W) toggles `-wrap none`/`word`; with wrap on the
+  horizontal bar is meaningless, so `apply_wrap` grid-removes it. Default is no
+  wrap (bar shown). Wrap state is runtime-only (D21 later).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
