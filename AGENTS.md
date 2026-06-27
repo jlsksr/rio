@@ -759,8 +759,10 @@ loop, the provider interface, and the echo stub provider), `rio-core/ops-agent.t
 `rio::core::call_stream` — a streaming handler gets the live `emit`, returns an
 ack, and emits agent.* events from a coroutine), and the `agent.history` wire
 encoder. The streaming model is verified both in-process and over the socket
-*broadcast* (the same loop, D2). **Next:** the GUI chat pane (a dumb view over the
-event stream), then the shared Claude inference core + the `claude-oauth` face
+*broadcast* (the same loop, D2). The **GUI chat pane** (slice 2) is implemented too
+— the right-hand `chat` column as a dumb view over the event stream, driven
+end-to-end by the echo provider (see the "GUI agent chat pane — implemented" note
+under O2). **Next:** the shared Claude inference core + the `claude-oauth` face
 (OAuth sign-in); `claude-api` later.
 
 ---
@@ -1081,6 +1083,20 @@ Both renderings come from the **same** region model (D13) and layout policy
   no line runs past the edge, and `apply_wrap` drops it entirely while wrapping,
   where horizontal scrolling is meaningless. Default is no wrap. Wrap state is
   runtime-only (D21 later).
+
+  **GUI agent chat pane — implemented (D26 slice 2).** The right-hand `chat`
+  column (D14): a dumb view (D3) over the `agent.*` event stream — a read-only
+  transcript, a few-line composer (Enter sends, Shift+Enter newlines), and Send
+  (`rio-gui.tcl`). A new `rio_call_stream` seam passes a *live* `emit` (`chat_event`)
+  to `rio::core::call_stream`, so a turn's `agent.delta` chunks append under one
+  **Agent** block as they arrive (the answer builds in view), `agent.message`
+  closes the turn, and `agent.error` renders a classified failure block. The pane
+  is always on the right with its own draggable `.csash` (mirror of the dock sash),
+  toggled by **View ▸ Agent Chat** (Ctrl+Shift+A); the core owns the conversation
+  (D3), so *Clear* is `agent.reset` and the transcript could be rebuilt from
+  `agent.history`. Themed via the `chat.bg`/`chat.fg` roles + `RioChatFont`, accent
+  on the speaker labels (D24). Driven by the built-in **echo provider** end-to-end
+  (no Claude/network yet); visibility + width are runtime-only (D21 later).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

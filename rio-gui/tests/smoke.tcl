@@ -262,6 +262,62 @@ if {![catch {exec git --version}]} {
 	puts "SKIP  git pane checks (git not installed)"
 }
 
+# --- agent chat pane (streaming agent.* events into a dumb view) -------------
+proc center_shows {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
+ok "chat: shown by default"          [center_shows .chat]  1
+set ::chat_shown 0 ; apply_chat_visibility
+ok "chat: toggles off"               [center_shows .chat]  0
+set ::chat_shown 1 ; apply_chat_visibility
+ok "chat: toggles back on"           [center_shows .chat]  1
+ok "chat: sash on the right"         [dict get [pack info .csash] -side] right
+
+# View logic (deterministic, no async): streamed deltas append under one Agent
+# block, and agent.message closes the turn.
+chat_clear
+chat_event {event agent.delta   params {turn 1 text "hel"}}
+chat_event {event agent.delta   params {turn 1 text "lo"}}
+chat_event {event agent.message params {turn 1 role assistant text hello}}
+ok "chat: deltas render as one Agent block" \
+	[string match "*Agent*hello*" [.chat.log get 1.0 end]] 1
+ok "chat: turn closed after message"  $::chat_turn_open 0
+
+# A classified error renders its own block.
+chat_clear
+chat_event {event agent.error params {turn 2 code provider_down message boom}}
+ok "chat: error block rendered" \
+	[string match "*Error*boom*provider_down*" [.chat.log get 1.0 end]] 1
+
+# End to end: send through call_stream with the echo provider and pump the event
+# loop until the streamed turn lands (echo defers each chunk with `after 0`).
+proc chat_run {text} {
+	chat_clear
+	.chat.input delete 1.0 end ; .chat.input insert end $text
+	chat_send
+	set deadline [expr {[clock milliseconds] + 3000}]
+	while {[clock milliseconds] < $deadline} {
+		update
+		set msgs [dict get [rio_call agent.history {}] result messages]
+		if {!$::chat_turn_open && [llength $msgs] >= 2} break
+	}
+}
+chat_run "hello there"
+set chatlog [.chat.log get 1.0 end]
+ok "chat: transcript shows the prompt" [string match "*You*hello there*" $chatlog] 1
+ok "chat: transcript shows the reply"  [string match "*Agent*echo: hello there*" $chatlog] 1
+set msgs [dict get [rio_call agent.history {}] result messages]
+ok "chat: core recorded the turn"      [llength $msgs] 2
+ok "chat: assistant text is the reply" [dict get [lindex $msgs 1] text] "echo: hello there"
+
+# Clear resets both the view and the core conversation.
+chat_clear
+ok "chat: clear empties transcript"  [string trim [.chat.log get 1.0 end]] ""
+ok "chat: clear resets core" \
+	[llength [dict get [rio_call agent.history {}] result messages]] 0
+
+# The chat sash clamps the width rather than letting the column collapse.
+.chat configure -width 50 ; csash_drag
+ok "chat: sash clamps min width"     [expr {[.chat cget -width] >= 200}] 1
+
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
 # fonts exist, and switching re-applies colours live.
@@ -269,15 +325,19 @@ ok "theme: editor uses named font"   [::rio_real_t cget -font]             RioEd
 ok "theme: RioEditorFont created"    [expr {"RioEditorFont" in [font names]}] 1
 ok "theme: default editor bg"        [::rio_real_t cget -background]        white
 ok "theme: default status bg"        [.status cget -background]             "#dddddd"
+ok "theme: chat log uses chat font"  [.chat.log cget -font]                RioChatFont
+ok "theme: default chat bg"          [.chat.log cget -background]           white
 
 do_theme solarized-dark
 ok "theme: dark editor bg applied"   [::rio_real_t cget -background]        "#002b36"
 ok "theme: dark cursor applied"      [::rio_real_t cget -insertbackground]  "#93a1a1"
 ok "theme: dark status bg applied"   [.status cget -background]             "#073642"
 ok "theme: dark tab bar applied"     [.tabs cget -background]               "#00212b"
+ok "theme: dark chat bg applied"     [.chat.log cget -background]           "#002b36"
 
 do_theme default
 ok "theme: switched back to default" [::rio_real_t cget -background]        white
+ok "theme: chat bg restored"         [.chat.log cget -background]           white
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

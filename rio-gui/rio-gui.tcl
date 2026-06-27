@@ -39,6 +39,8 @@ set ::cur     "" ;# active buffer id
 set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
+set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
+set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -392,9 +394,13 @@ proc show_pane {which} {
 # the dock first claims its edge; .t then expands into what's left, so the same
 # two calls work for either side.
 proc place_dock {} {
-	catch {pack forget .dock .sash .ed}
+	catch {pack forget .dock .sash .chat .csash .ed}
 	pack .dock -side $::dock_side -fill y
-	pack .sash -side $::dock_side -fill y     ;# sits between the dock and the editor
+	pack .sash -side $::dock_side -fill y     ;# between the dock and the editor
+	if {$::chat_shown} {
+		pack .chat  -side right -fill y       ;# chat column on the right (D14)
+		pack .csash -side right -fill y       ;# between the editor and the chat
+	}
 	pack .ed   -side left -fill both -expand 1
 }
 
@@ -441,6 +447,96 @@ proc style_selector {} {
 		.dock.sel.$pane configure -foreground [dict get $c tab.fg] -background \
 			[expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 	}
+}
+
+# ---------------------------------------------------------------------------
+# The agent chat pane (AGENTS.md D14 `chat` column; D20/D26). A dumb view (D3)
+# over the agent.* event stream: a read-only transcript, a composer, and Send.
+# agent.send is a STREAMING op — its reply arrives as agent.delta events that we
+# append live (chat_event), so the answer builds in view; agent.message closes
+# the turn, agent.error shows a classified failure (D26). The core owns the
+# conversation (D3): chat_clear is agent.reset. Always on the right; toggleable.
+# ---------------------------------------------------------------------------
+# Insert into the read-only transcript (briefly enabled), scrolling to the end.
+proc chat_log {text {tag ""}} {
+	.chat.log configure -state normal
+	if {$tag eq ""} { .chat.log insert end $text } else { .chat.log insert end $text $tag }
+	.chat.log configure -state disabled
+	.chat.log see end
+}
+# A speaker label opening a block (a blank line between blocks, not at the top).
+proc chat_label {tag label} {
+	if {[.chat.log index "end-1c"] ne "1.0"} { chat_log "\n" }
+	chat_log "$label\n" $tag
+}
+
+# Send the composer's text as a turn: the user block goes in at once, the reply
+# streams back through chat_event (call_stream delivers events live, D26).
+proc chat_send {} {
+	set text [string trim [.chat.input get 1.0 end]]
+	if {$text eq ""} return
+	.chat.input delete 1.0 end
+	chat_label you-label "You"
+	chat_log "$text\n"
+	set ::chat_turn_open 0
+	rio::core::call_stream agent.send [dict create text $text] chat_event
+}
+
+# Apply one streamed agent.* event to the transcript.
+proc chat_event {ev} {
+	switch -- [dict get $ev event] {
+		agent.delta {
+			if {!$::chat_turn_open} { chat_label agent-label "Agent" ; set ::chat_turn_open 1 }
+			chat_log [dict get $ev params text]
+		}
+		agent.message {
+			# A provider that didn't stream deltas still shows its full reply.
+			if {!$::chat_turn_open} {
+				chat_label agent-label "Agent"
+				chat_log [dict get $ev params text]
+			}
+			chat_log "\n"
+			set ::chat_turn_open 0
+		}
+		agent.error {
+			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			chat_label error-label "Error"
+			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
+		}
+		agent.tool {
+			# A proposed tool call (O4) — surfaced minimally until the review UX lands.
+			chat_label agent-label "Agent"
+			chat_log "· proposes tool: [dict get $ev params name]\n"
+		}
+	}
+}
+
+# Clear the conversation: reset the core's state (agent.reset) and the transcript.
+proc chat_clear {} {
+	rio_call agent.reset {}
+	.chat.log configure -state normal
+	.chat.log delete 1.0 end
+	.chat.log configure -state disabled
+	set ::chat_turn_open 0
+}
+
+# Show/hide the chat pane (driven by the View-menu checkbutton's ::chat_shown).
+proc apply_chat_visibility {} {
+	place_dock
+	if {$::chat_shown} { focus .chat.input }
+}
+
+# Drag the chat sash to resize the chat column. Chat is always on the right, so
+# its width is the toplevel's right edge minus the pointer — measured against the
+# toplevel's STABLE edge like sash_drag. Clamped so neither side collapses.
+proc csash_drag {} {
+	set total [winfo width .]
+	set min 200
+	set max [expr {$total - 250}]
+	set w [expr {[winfo rootx .] + $total - [winfo pointerx .]}]
+	if {$w < $min} { set w $min }
+	if {$max > $min && $w > $max} { set w $max }
+	.chat configure -width $w
 }
 
 proc do_save_as {path} {
@@ -632,6 +728,24 @@ proc apply_theme {theme} {
 	# The diff area is code, so it takes the editor surface.
 	.dock.git.diff configure -font RioEditorFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+	# The agent chat pane (D26): the chat.* roles + RioChatFont; accent on labels.
+	.chat configure -background [dict get $c chat.bg]
+	.chat.hdr configure -background [dict get $c chat.bg]
+	.chat.hdr.title configure -font RioUIFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
+	.chat.hdr.clear configure -font RioUIFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c accent]
+	.chat.log configure -font RioChatFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
+	.chat.input configure -font RioChatFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg] \
+		-insertbackground [dict get $c chat.fg]
+	.chat.send configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.chat.log tag configure agent-label -font RioUIFont -foreground [dict get $c accent]
+	.chat.log tag configure you-label   -font RioUIFont -foreground [dict get $c chat.fg]
+	.chat.log tag configure error-label -font RioUIFont -foreground "#cc0000"
+	.csash configure -background [dict get $c tab.bar.bg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
@@ -738,6 +852,47 @@ grid .ed.vsb -row 0 -column 1 -sticky ns
 grid .ed.hsb -row 1 -column 0 -sticky ew
 grid rowconfigure    .ed 0 -weight 1
 grid columnconfigure .ed 0 -weight 1
+
+# The agent chat pane (built here; place_dock packs it on the right when shown,
+# apply_theme colours it via the chat.* roles + RioChatFont). propagate off so a
+# fixed -width holds across content, like the dock. A header (Agent + Clear) on
+# top, the composer (input + Send) at the bottom, the transcript filling between.
+frame .chat -width 340 -background white
+pack propagate .chat 0
+frame .chat.hdr -background white
+label .chat.hdr.title -text "Agent" -anchor w -font {monospace 9} -padx 4 -pady 2 \
+	-background white -foreground black
+label .chat.hdr.clear -text "Clear" -font {monospace 9} -padx 6 -cursor hand2 \
+	-background white -foreground black
+pack .chat.hdr.clear -side right
+pack .chat.hdr.title -side left -fill x -expand 1
+bind .chat.hdr.clear <Button-1> chat_clear
+# Composer: a few-line input + a Send button. Enter sends; Shift+Enter newlines.
+text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
+	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
+	-background white -foreground black -insertbackground black
+button .chat.send -text "Send" -font {monospace 9} -command chat_send
+bind .chat.input <Return>       { chat_send ; break }
+bind .chat.input <Shift-Return> { %W insert insert "\n" ; break }
+# Transcript: read-only, word-wrapped, with an auto-hiding scrollbar.
+text .chat.log -wrap word -state disabled -font {monospace 11} -cursor "" \
+	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+	-background white -foreground black \
+	-yscrollcommand {autoscroll .chat.sb .chat.log}
+scrollbar .chat.sb -command {.chat.log yview}
+.chat.log tag configure you-label   -font {monospace 9}
+.chat.log tag configure agent-label -font {monospace 9}
+.chat.log tag configure error-label -font {monospace 9}
+pack .chat.hdr   -side top    -fill x
+pack .chat.send  -side bottom -fill x
+pack .chat.input -side bottom -fill x
+pack .chat.log   -side left   -fill both -expand 1
+# .chat.sb is packed on demand by autoscroll (hidden when the transcript fits).
+
+# A thin draggable divider between the editor and the chat pane (mirror of .sash).
+frame .csash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
+bind .csash <B1-Motion> csash_drag
+
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .tabs   -side top -fill x
@@ -770,6 +925,8 @@ menu .m.view -tearoff 0
 .m.view add separator
 .m.view add checkbutton -label "Wrap Lines" -accelerator Ctrl+Shift+W \
 	-variable ::wrap_lines -command apply_wrap
+.m.view add checkbutton -label "Agent Chat" -accelerator Ctrl+Shift+A \
+	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
@@ -792,6 +949,7 @@ bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
 bind .ed.t <Control-E>         { show_pane files ; break }
 bind .ed.t <Control-G>         { show_pane git ; break }
 bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
+bind .ed.t <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
 
 # --- widget proxy: edits become protocol requests, never local mutations -----
