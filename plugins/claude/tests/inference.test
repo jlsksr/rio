@@ -1,0 +1,138 @@
+# Tests for the shared Claude inference core (rio::claude, AGENTS.md D8/D26):
+# request shaping, the streaming SSE -> agent-event mapping, and HTTP-status
+# error classification. The network is faked — a transport replays canned bytes
+# — so this is deterministic and offline. (The real tcltls transport is step 3.)
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. inference.tcl]
+
+set ::conf [dict create \
+	messages_url      https://api.test/v1/messages \
+	anthropic_version 2023-06-01 \
+	anthropic_beta    oauth-2025-04-20 \
+	model             claude-test \
+	max_tokens        1024]
+
+# A fake transport: `[list fake_transport $chunks $status $err]` replays the body
+# chunks to on_chunk (in whatever pieces given, to exercise line buffering), then
+# calls on_done with the status. Synchronous — deterministic for assertions.
+proc fake_transport {chunks status err req on_chunk on_done} {
+	foreach c $chunks { {*}$on_chunk $c }
+	{*}$on_done $status $err
+}
+# Collect the provider `post` calls.
+proc collect_post {args} { lappend ::posts $args }
+proc run_infer {chunks status {err ""} {auth {Authorization {Bearer T}}}} {
+	set ::posts {}
+	rio::claude::infer $::conf {{role user text hi}} $auth \
+		[list fake_transport $chunks $status $err] collect_post
+}
+proc deltas {} {
+	set t ""
+	foreach p $::posts { if {[lindex $p 0] eq "delta"} { append t [lindex $p 1] } }
+	return $t
+}
+proc terminal {} { lindex $::posts end }
+
+# A normal streamed text completion. Built with append (no backslash-newline
+# continuations, which would collapse to spaces and corrupt the `data:` lines).
+set ::sse ""
+append ::sse "event: message_start\n"
+append ::sse "data: {\"type\":\"message_start\"}\n\n"
+append ::sse "event: content_block_delta\n"
+append ::sse "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n"
+append ::sse "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n\n"
+append ::sse "data: {\"type\":\"message_stop\"}\n\n"
+
+# --- request shaping ---------------------------------------------------------
+
+test claude-request-shape {the request JSON carries model, stream, and the messages} -body {
+	set body [rio::claude::_request_json $::conf \
+		[list [dict create role user text {hi "there"}] [dict create role assistant text ok]]]
+	set d [json::json2dict $body]
+	list [dict get $d model] [dict get $d max_tokens] [dict get $d stream] \
+		[llength [dict get $d messages]] \
+		[dict get [lindex [dict get $d messages] 0] role] \
+		[dict get [lindex [dict get $d messages] 0] content] \
+		[dict exists $d system]
+} -result {claude-test 1024 true 2 user {hi "there"} 0}
+
+test claude-request-system {a system prompt is included when set} -body {
+	set c [dict merge $::conf {system {You are terse.}}]
+	dict get [json::json2dict [rio::claude::_request_json $c {{role user text hi}}]] system
+} -result {You are terse.}
+
+test claude-jstr-escapes {the JSON string escaper handles quotes, backslashes, controls} -body {
+	rio::claude::_jstr "a\"b\\c\nd\te"
+} -result {"a\"b\\c\nd\te"}
+
+# --- streaming SSE -> events -------------------------------------------------
+
+test claude-stream-text {text deltas accumulate, ending with done} -body {
+	run_infer [list $::sse] 200
+	list [deltas] [terminal]
+} -result {{Hello world} done}
+
+test claude-stream-chunk-split {the same stream split mid-line parses identically} -body {
+	set chunks {}
+	for {set i 0} {$i < [string length $::sse]} {incr i 7} {
+		lappend chunks [string range $::sse $i [expr {$i + 6}]]
+	}
+	run_infer $chunks 200
+	list [deltas] [terminal]
+} -result {{Hello world} done}
+
+test claude-stream-error-event {an SSE error event becomes a classified post error} -body {
+	run_infer [list "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"slow down\"}}\n\n"] 200
+	terminal
+} -result {error overloaded_error {slow down}}
+
+test claude-stream-clean-close {a 200 that ends without message_stop still finishes the turn} -body {
+	run_infer [list "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"] 200
+	list [deltas] [terminal]
+} -result {hi done}
+
+# --- error classification (D26 resilience) -----------------------------------
+
+test claude-http-401 {a 401 is an actionable auth error, with the API's detail} -body {
+	set body {{"type":"error","error":{"type":"authentication_error","message":"invalid bearer token"}}}
+	run_infer [list $body] 401
+	set t [terminal]
+	list [lindex $t 0] [lindex $t 1] \
+		[string match {*HTTP 401*re-authenticate*invalid bearer token*} [lindex $t 2]]
+} -result {error auth 1}
+
+test claude-http-429 {a 429 is a rate-limit error} -body {
+	run_infer [list ""] 429
+	lindex [terminal] 1
+} -result rate_limit
+
+test claude-http-500 {a 5xx is a server error} -body {
+	run_infer [list ""] 503
+	lindex [terminal] 1
+} -result server
+
+test claude-http-unexpected {an unmapped status is the break-without-notice case} -body {
+	run_infer [list ""] 418
+	set t [terminal]
+	list [lindex $t 1] [string match {*the integration may need an update*} [lindex $t 2]]
+} -result {unexpected 1}
+
+test claude-network-fail {a failure to connect (status 0) is a network error} -body {
+	run_infer [list ""] 0 "connection refused"
+	set t [terminal]
+	list [lindex $t 1] [string match {*connection refused*} [lindex $t 2]]
+} -result {network 1}
+
+# --- auth header passthrough -------------------------------------------------
+
+test claude-auth-header-passed {the face's auth pair is sent as a request header} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
+	rio::claude::infer $::conf {{role user text hi}} {x-api-key SEKRET} capture_tp collect_post
+	expr {[lsearch -exact $::seen x-api-key] >= 0 && [lsearch -exact $::seen SEKRET] >= 0}
+} -result 1
+
+cleanupTests
