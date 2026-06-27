@@ -768,9 +768,18 @@ under O2). The **generic OAuth plumbing** (slice 3, step 1) is in place and test
 with no Anthropic network yet: a secrets store (`rio-core/secret.tcl` — 0600 files
 under the data dir, apart from settings/session) and the reusable browser-sign-in
 service (`rio-core/oauth.tcl` — PKCE/RFC 7636 codes, a one-shot loopback redirect
-catcher, and browser-open). **Next:** the shared Claude inference core + the
-`claude-oauth` face wiring these to the live claude.ai OAuth + the Messages API;
-`claude-api` later.
+catcher, and browser-open). The **shared Claude inference core + the `claude-oauth`
+face** (step 2) are implemented and tested **offline** behind transport seams:
+`plugins/claude/inference.tcl` (request shaping, the SSE→`agent.*` mapping, and
+HTTP-status error classification per D26) and `plugins/claude/oauth-face.tcl` (the
+PKCE→browser→loopback→token-exchange→secret flow as config-as-data, plus the
+provider). Tests stream a *faked* Claude reply all the way through the real agent
+loop, and drive the sign-in over the real loopback with a fake browser + fake
+exchange. The Claude config values are **provisional** — flagged for live
+verification in step 3 (they are data precisely because they drift). **Next
+(step 3):** the real tcltls streaming/token transports, verifying the live
+claude.ai endpoints, and wiring *Sign in to Claude* + provider selection into the
+GUI; `claude-api` later.
 
 ---
 

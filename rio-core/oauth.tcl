@@ -32,6 +32,11 @@ proc rio::oauth::_sha256 {bytes} {
 	return [::sha2::sha256 -bin $bytes]
 }
 
+# A random URL-safe token (base64url, no padding) — e.g. an OAuth `state` nonce.
+proc rio::oauth::random_token {{nbytes 16}} {
+	return [_b64url [_randbytes $nbytes]]
+}
+
 # base64url WITHOUT padding (the OAuth/JOSE convention).
 proc rio::oauth::_b64url {bytes} {
 	return [string map {+ - / _ = {}} [binary encode base64 $bytes]]

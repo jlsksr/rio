@@ -30,6 +30,11 @@ test oauth-pkce-unique {each call draws a fresh verifier} -body {
 	expr {[dict get [rio::oauth::pkce] verifier] ne [dict get [rio::oauth::pkce] verifier]}
 } -result 1
 
+test oauth-random-token {random_token is url-safe and fresh each call} -body {
+	list [regexp {^[A-Za-z0-9_-]+$} [rio::oauth::random_token]] \
+		[expr {[rio::oauth::random_token] ne [rio::oauth::random_token]}]
+} -result {1 1}
+
 # --- loopback redirect catcher -----------------------------------------------
 
 test oauth-loopback-redirect-uri {the redirect uri names the chosen loopback port} -body {
