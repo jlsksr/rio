@@ -932,8 +932,17 @@ Both renderings come from the **same** region model (D13) and layout policy
   a tab), and is themed through the existing role applier (reusing the `ui.*`
   role; a dedicated sidebar role can come later). A listbox navigator, not yet an
   expandable indented tree — the simplest honest first cut; tree-style expansion
-  is a later enrichment. **Remaining** (#4): default `git.*`'s `cwd` to the
-  project root so the git pane stops leaning on the process cwd.
+  is a later enrichment.
+
+  **`git.*` now anchors to the project root — implemented.** The git ops'
+  `cwd` defaults to the open project root (`rio::project::root`) instead of `""`,
+  so a frontend calls `git.status`/`.diff`/`.log` with no `cwd` and gets the open
+  project's git — the (future) git pane no longer leans on the core process's own
+  working directory. An explicit `cwd` still overrides (a tool on another
+  checkout); with neither, `rio::git` falls back to the process cwd as before.
+  This was the small follow-on that made the workspace root the real anchor for
+  the git read layer. **Next:** the git pane itself, consuming `git.status` (and
+  `.diff`/`.log`) against the open project.
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

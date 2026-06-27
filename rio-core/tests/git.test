@@ -87,6 +87,15 @@ test git-op-status {git.status op returns {branch, changes}} -constraints hasgit
 		[expr {[llength [dict get $resp result changes]] == 3}]
 } -result {true main 1}
 
+test git-op-status-defaults-to-project-root {with a project open, git.status needs no cwd} -constraints hasgit -setup {
+	rio::project::open $::repo
+} -body {
+	set resp [dict get [rio::core::call git.status {}] response]
+	list [dict get $resp ok] [dict get $resp result branch]
+} -cleanup {
+	rio::project::close
+} -result {true main}
+
 test git-op-diff {git.diff op returns {diff}} -constraints hasgit -body {
 	set resp [dict get [rio::core::call git.diff [dict create cwd $::repo path a.txt]] response]
 	list [dict get $resp ok] [string match "*+two*" [dict get $resp result diff]]

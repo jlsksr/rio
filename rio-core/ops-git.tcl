@@ -2,28 +2,35 @@
 #
 # Thin handlers over rio::git's read layer. No logic of their own beyond reading
 # params and shaping the result; the porcelain parsing lives in rio::git.
+#
+# cwd defaults to the open project root (project.*), so a frontend just calls
+# git.status with no cwd and gets the open project's git — the git pane no longer
+# leans on the core process's own working directory. An explicit cwd overrides it
+# (e.g. a tool operating on some other checkout); with neither, rio::git falls
+# back to the process cwd as before.
+proc rio::ops::_git_cwd {params} {
+	if {[dict exists $params cwd]} { return [dict get $params cwd] }
+	return [rio::project::root]
+}
 
 # git.status {?cwd?} -> {branch, changes:[{x,y,path,?orig?}]}
 proc rio::ops::git_status {params} {
-	set cwd [expr {[dict exists $params cwd] ? [dict get $params cwd] : ""}]
-	return [dict create result [rio::git::status $cwd]]
+	return [dict create result [rio::git::status [_git_cwd $params]]]
 }
 rio::dispatch::register git.status rio::ops::git_status
 
 # git.diff {?cwd?, ?path?, ?staged?} -> {diff <unified-diff text>}
 proc rio::ops::git_diff {params} {
-	set cwd    [expr {[dict exists $params cwd]    ? [dict get $params cwd]    : ""}]
 	set path   [expr {[dict exists $params path]   ? [dict get $params path]   : ""}]
 	set staged [expr {[dict exists $params staged] ? [dict get $params staged] : 0}]
-	return [dict create result [dict create diff [rio::git::diff $cwd $path $staged]]]
+	return [dict create result [dict create diff [rio::git::diff [_git_cwd $params] $path $staged]]]
 }
 rio::dispatch::register git.diff rio::ops::git_diff
 
 # git.log {?cwd?, ?max?, ?path?} -> {commits:[{hash,short,author,date,subject}]}
 proc rio::ops::git_log {params} {
-	set cwd  [expr {[dict exists $params cwd]  ? [dict get $params cwd]  : ""}]
 	set max  [expr {[dict exists $params max]  ? [dict get $params max]  : ""}]
 	set path [expr {[dict exists $params path] ? [dict get $params path] : ""}]
-	return [dict create result [rio::git::log $cwd $max $path]]
+	return [dict create result [rio::git::log [_git_cwd $params] $max $path]]
 }
 rio::dispatch::register git.log rio::ops::git_log
