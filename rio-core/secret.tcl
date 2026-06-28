@@ -1,6 +1,6 @@
 # rio-core — the secrets store (AGENTS.md D21, D26).
 #
-# Tokens and credentials (e.g. the Claude OAuth tokens) are kept OUT of both the
+# Tokens and credentials (e.g. the Claude API key, D26) are kept OUT of both the
 # plain-text settings file and the synced session JSON, in their own files under
 # the data dir with restrictive perms (0600). They are machine-written, never
 # hand-edited, and must not ride along in a diff-friendly config a user might
@@ -60,5 +60,5 @@ proc rio::secret::get {name} {
 
 proc rio::secret::has {name} { return [file exists [_path $name]] }
 
-# Delete a secret (e.g. on sign-out or after a refresh token is revoked).
+# Delete a secret (e.g. when the user clears a stored API key).
 proc rio::secret::forget {name} { catch {file delete [_path $name]} ; return }

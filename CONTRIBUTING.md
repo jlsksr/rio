@@ -72,10 +72,9 @@ covered in [AGENTS.md](AGENTS.md).
 
 ## Getting started
 
-There's no rio to build yet, but you can get the toolchain in place. rio is
-written in Tcl/Tk, so you'll need `tclsh` and Tk, plus a couple of small
-libraries — `tcltls` (for the agent's HTTPS) and `tcllib` (for JSON) — and
-`git`.
+rio is written in Tcl/Tk, so there's nothing to compile — but you do need the
+runtime in place: `tclsh` and Tk, plus a couple of small libraries — `tcltls`
+(for the agent's HTTPS) and `tcllib` (for JSON) — and `git`.
 
 The quickest way is the setup script in the repo root:
 
@@ -95,8 +94,9 @@ in-process, so there's nothing else to start:
 Open files with Ctrl+O (each lands in its own tab), New with Ctrl+N, switch tabs
 with Ctrl+Tab, close one with Ctrl+W, save with Ctrl+S, undo/redo with Ctrl+Z /
 Ctrl+Shift+Z. The View menu switches the colour theme live (default or the
-shipped Solarized examples in `themes/`). The terminal version (Ck) doesn't
-exist yet; build-and-run steps for it will land here when it does.
+shipped examples in `themes/` — Solarized Dark/Light and Plan 9 Acme). The
+terminal version (Ck) doesn't exist yet; build-and-run steps for it will land
+here when it does.
 
 ## Tests
 

@@ -308,9 +308,11 @@ Three message kinds:
 
 Encoding is **JSON, one message per line** (JSONL framing) over the socket; the
 in-process path uses the same dict structure with no serialization cost.
-Streaming ops (`cmd.run`, `agent.send`) emit a sequence of events keyed by a
-`runId` / `sessionId`, terminated by a final event. Op namespaces:
-`buffer.*`, `fs.*` / `project.*`, `git.*`, `cmd.*`, `agent.*`, `session.*`.
+A streaming op (`agent.send`) emits a sequence of events keyed by a run id (the
+agent uses a per-conversation `turn`), terminated by a final event. Op
+namespaces: `buffer.*`, `fs.*` / `project.*`, `git.*`, `exec.*`, `agent.*`,
+`session.*`. (The command-execution primitive is `exec.run` — synchronous, not
+streaming; see O2/D15.)
 
 **Why:** JSON is language-neutral (supports the D2 any-language-frontend safety
 net), human-readable (debuggable by eye), and trivially mirrors a Tcl dict.
@@ -1105,8 +1107,9 @@ Both renderings come from the **same** region model (D13) and layout policy
   **GUI agent chat pane — implemented (D26 slice 2).** The right-hand `chat`
   column (D14): a dumb view (D3) over the `agent.*` event stream — a read-only
   transcript, a few-line composer (Enter sends, Shift+Enter newlines), and Send
-  (`rio-gui.tcl`). A new `rio_call_stream` seam passes a *live* `emit` (`chat_event`)
-  to `rio::core::call_stream`, so a turn's `agent.delta` chunks append under one
+  (`rio-gui.tcl`). It calls `rio::core::call_stream` with a *live* `emit`
+  (`chat_event`) — the streaming counterpart of the batched `rio_call` seam — so a
+  turn's `agent.delta` chunks append under one
   **Agent** block as they arrive (the answer builds in view), `agent.message`
   closes the turn, and `agent.error` renders a classified failure block. The pane
   is always on the right with its own draggable `.csash` (mirror of the dock sash),
