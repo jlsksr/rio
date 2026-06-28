@@ -101,9 +101,12 @@ proc rio::claude::_content_json {m} {
 				lappend blocks "{\"type\":\"text\",\"text\":[_jstr [dict get $b text]]}"
 			}
 			tool_use {
-				set in [dict get $b raw]
-				if {$in eq ""} { set in "{}" }
-				lappend blocks "{\"type\":\"tool_use\",\"id\":[_jstr [dict get $b id]],\"name\":[_jstr [dict get $b name]],\"input\":$in}"
+				# Re-serialize the PARSED input through _jstr rather than splicing the
+				# raw streamed JSON: the raw fragments carry already-unescaped string
+				# values (json2dict decoded them during SSE parsing), so echoing them
+				# verbatim would put literal control characters (a file's newlines)
+				# into the body and the API rejects it. _obj_json escapes every value.
+				lappend blocks "{\"type\":\"tool_use\",\"id\":[_jstr [dict get $b id]],\"name\":[_jstr [dict get $b name]],\"input\":[_obj_json [dict get $b input]]}"
 			}
 			tool_result {
 				set tr "\"type\":\"tool_result\",\"tool_use_id\":[_jstr [dict get $b tool_use_id]],\"content\":[_jstr [dict get $b content]]"
@@ -115,6 +118,16 @@ proc rio::claude::_content_json {m} {
 		}
 	}
 	return "\[[join $blocks ,]\]"
+}
+
+# A flat {k v ...} dict -> a JSON object, every key and value escaped via _jstr (so
+# control characters and non-ASCII are \u-escaped — the body stays valid + ASCII).
+# Tool inputs here are flat string maps; a future typed input would re-serialize
+# its values as strings, which is fine for the current tool set.
+proc rio::claude::_obj_json {d} {
+	set parts {}
+	dict for {k v} $d { lappend parts "[_jstr $k]:[_jstr $v]" }
+	return "{[join $parts ,]}"
 }
 
 # A JSON string literal: escape ", \, and the control characters (RFC 8259), and

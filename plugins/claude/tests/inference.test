@@ -80,6 +80,17 @@ test claude-request-tools {tool specs ride along as a top-level tools array} -bo
 		[dict get $t input_schema required]
 } -result {1 fs_read {read a file} object path}
 
+test claude-tooluse-controlchars {a tool_use input with literal control chars re-serializes to a valid, ASCII body} -body {
+	# `raw` is deliberately bogus — the encoder must use the parsed `input` and
+	# escape its literal newline/tab, not splice raw (which would break the body).
+	set convo [list [dict create role assistant content [list \
+		[dict create type tool_use id t1 name propose_edit \
+			input [dict create path f.txt new_string "a\nb\tc→d"] raw {NOT VALID}]]]]
+	set body [rio::claude::_request_json $::conf $convo {}]
+	set blk [lindex [dict get [lindex [dict get [json::json2dict $body] messages] 0] content] 0]
+	list [string is ascii $body] [expr {[dict get $blk input new_string] eq "a\nb\tc→d"}]
+} -result {1 1}
+
 test claude-request-tool-roundtrip {tool_use/tool_result content blocks serialize for the follow-up request} -body {
 	set convo [list \
 		[dict create role user content [list [dict create type text text "list it"]]] \
