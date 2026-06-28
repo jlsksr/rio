@@ -708,9 +708,12 @@ interface rework**.
 
 **MVP scope — read + propose-edit only.** The agent may read the project (existing
 `fs.*` / `buffer.*` ops) and *propose* edits the user applies or rejects through
-the diff→apply review UX (D20). Command execution (`exec.run`) and its
-allow-list / confirmation guardrails are **out of this slice** (O4), so we get a
-useful, dogfoodable agent without the dangerous surface.
+the diff→apply review UX (D20). Reads **auto-execute** — they are inspection, not
+mutation, so the agent reads freely and each call renders as transparency; the
+approve/deny gate is reserved for the *write* surface. Command execution
+(`exec.run`) and its allow-list / confirmation guardrails are **out of this slice**
+(O4), so we get a useful, dogfoodable agent without the dangerous surface. The
+**read tool-loop is built — slice 4**; see the status note below.
 
 **Auth — the official Anthropic API key (`claude-api`), and only that.** The face
 authenticates with a pay-per-token Anthropic **API key** sent as the `x-api-key`
@@ -781,9 +784,37 @@ stores/clears the key through the face's 0600 secret store (the dialog never hol
 the key itself). Selecting Claude with no key isn't blocked — the first turn then
 surfaces the face's actionable `not_configured` error, pointing back to Settings.
 The headless GUI smoke drives all of this against a throwaway secret dir (provider
-swap, the no-key error path, and key save/clear incl. the 0600 mode). **Remaining:**
-a real key and a real message against `api.anthropic.com` — the dogfood moment
-(the one step that needs the network and a paid key, so it can't be a unit test).
+swap, the no-key error path, and key save/clear incl. the 0600 mode).
+
+The **read-only tool round-trip is implemented (slice 4)** — the safe half of the
+agent's tool surface (O4), built before anything that writes to disk. The core
+gains a tool registry/executor (`rio-core/agent-tools.tcl`, `rio::agent::tools`)
+exposing four read-only built-ins that wrap existing ops: `fs_list` (browse the
+project tree), `fs_read` (read *any* project file — a new read-only `fs.read` op in
+`ops-fs.tcl` that returns a file's text with **no** buffer/tab side effect),
+`buffer_list`, and `buffer_text` (the live, possibly-unsaved text of an open
+buffer). Tool execution stays in **core** (D20: the security boundary), is
+**read-only by construction** (only read ops are registered), and is fenced by two
+rails — path inputs are **confined to the project root** (an absolute or
+`../`-escaping path is refused unread) and each result is **size-capped**. The
+orchestration loop (`agent.tcl`) became a **tool loop**: the provider contract
+gained `post tool <id> <name> <input> <raw>` and `post done ?stop_reason?`; on
+`stop_reason tool_use` the loop auto-runs the tools, feeds `tool_result`s back as a
+follow-up turn, and re-invokes the provider until the model finishes (a step cap
+bounds runaway loops). Conversation entries generalized to Claude **content
+blocks** (text / tool_use / tool_result) so a turn's tool exchange survives the
+re-send; `agent.history` still flattens to a readable `{role,text}` transcript. Two
+new **terminal-aware** events carry the activity — `agent.tool {turn,id,name,args}`
+and `agent.tool_result {turn,id,name,ok,summary}` — which the chat pane renders as
+muted transparency lines (red on a refusal), *not* as a permission prompt. The
+shared inference core now sends the `tools` array and parses Claude's streamed
+`tool_use` blocks (`input_json_delta` accumulation + `stop_reason`). All of it is
+tested offline: the agent loop against a fake tool-using provider (the
+call→execute→result→final-message round-trip, the containment refusal, and the
+clean history), `fs.read`, and the inference tool-use SSE path. **Remaining:** a
+real key and a real message against `api.anthropic.com` — the dogfood moment (the
+one step that needs the network and a paid key, so it can't be a unit test) — and
+the **write/propose-edit half** with its diff→apply approval gate (O4).
 
 ---
 
@@ -1140,9 +1171,12 @@ Both renderings come from the **same** region model (D13) and layout policy
   **Remaining:** keystroke coalescing into undo groups, and large-file handling
   (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
-  orchestration. Its **read + propose-edit slice is now activated — D26**; the
-  run-command guardrails below remain **deferred** per Sequencing.) Exact built-in
-  tool set, how edits are previewed/applied, guardrails for the headless
+  orchestration. Its **read slice is now built — D26 slice 4**: the four read-only
+  built-ins (`fs_list`, `fs_read`, `buffer_list`, `buffer_text`), auto-executed
+  through a core tool-loop, project-root-confined and size-capped. The
+  **propose-edit (write) slice with its diff→apply approval gate**, and the
+  run-command guardrails below, remain **deferred** per Sequencing.) How edits are
+  previewed/applied, the permission model for writes, guardrails for the headless
   run-command primitive (now
   implemented as `exec.run` — see O2; its argv-not-shell discipline is the
   baseline, but allow-lists, agent confirmation, and closing exec's

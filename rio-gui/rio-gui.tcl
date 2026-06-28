@@ -509,9 +509,16 @@ proc chat_event {ev} {
 			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
 		}
 		agent.tool {
-			# A proposed tool call (O4) — surfaced minimally until the review UX lands.
-			chat_label agent-label "Agent"
-			chat_log "· proposes tool: [dict get $ev params name]\n"
+			# A read-only tool the agent is running (D26 slice 4) — auto-executed, so
+			# this is transparency, not a prompt. Shown on its own line, mid-turn.
+			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			set args [dict get $ev params args]
+			chat_log "· [dict get $ev params name][expr {$args eq "" ? "" : " $args"}]\n" tool
+		}
+		agent.tool_result {
+			# The outcome of that read — a one-line summary (red if it failed/refused).
+			set tag [expr {[dict get $ev params ok] ? "tool" : "tool-error"}]
+			chat_log "  → [dict get $ev params summary]\n" $tag
 		}
 	}
 }
@@ -832,6 +839,8 @@ proc apply_theme {theme} {
 	.chat.log tag configure agent-label -font RioUIFont -foreground [dict get $c accent]
 	.chat.log tag configure you-label   -font RioUIFont -foreground [dict get $c chat.fg]
 	.chat.log tag configure error-label -font RioUIFont -foreground "#cc0000"
+	.chat.log tag configure tool        -font RioUIFont -foreground [dict get $c gutter.fg]
+	.chat.log tag configure tool-error  -font RioUIFont -foreground "#cc0000"
 	.csash configure -background [dict get $c tab.bar.bg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
@@ -970,6 +979,8 @@ scrollbar .chat.sb -command {.chat.log yview}
 .chat.log tag configure you-label   -font {monospace 9}
 .chat.log tag configure agent-label -font {monospace 9}
 .chat.log tag configure error-label -font {monospace 9}
+.chat.log tag configure tool        -font {monospace 9} -foreground "#888888"
+.chat.log tag configure tool-error  -font {monospace 9} -foreground "#cc0000"
 pack .chat.hdr   -side top    -fill x
 pack .chat.send  -side bottom -fill x
 pack .chat.input -side bottom -fill x

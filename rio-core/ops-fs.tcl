@@ -68,3 +68,34 @@ proc rio::ops::fs_list {params} {
 	return [dict create result [dict create path $dir entries $entries]]
 }
 rio::dispatch::register fs.list rio::ops::fs_list
+
+# fs.read {path} -> {path, text, encoding, eol, bom, mixed, linecount}
+# Read-only sibling of file.open: returns a file's decoded text (the same
+# encoding/BOM/EOL detection of D22) WITHOUT minting a buffer — no tab, no
+# document-model state. Reading is the inspection primitive the agent's read-only
+# tools build on (D26), where opening a buffer per file would be a side effect.
+# `path` resolves against the project root exactly like fs.list.
+proc rio::ops::fs_read {params} {
+	if {![dict exists $params path]} {
+		rio::error::raise bad_request "fs.read requires a path"
+	}
+	set abs [rio::project::resolve [dict get $params path]]
+	if {![file isfile $abs]} {
+		rio::error::raise io_error "not a file: $abs"
+	}
+	if {[catch {rio::fs::read $abs} info]} {
+		rio::error::raise io_error $info
+	}
+	set text [dict get $info text]
+	set linecount [expr {$text eq "" ? 0 :
+		[regexp -all "\n" $text] + ([string index $text end] ne "\n")}]
+	return [dict create result [dict create \
+		path      $abs \
+		text      $text \
+		encoding  [dict get $info encoding] \
+		eol       [dict get $info eol] \
+		bom       [dict get $info bom] \
+		mixed     [dict get $info mixed] \
+		linecount $linecount]]
+}
+rio::dispatch::register fs.read rio::ops::fs_read

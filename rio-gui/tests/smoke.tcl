@@ -287,6 +287,21 @@ chat_event {event agent.error params {turn 2 code provider_down message boom}}
 ok "chat: error block rendered" \
 	[string match "*Error*boom*provider_down*" [.chat.log get 1.0 end]] 1
 
+# Read-only tool activity (D26 slice 4): the call and its result render as muted
+# transparency lines between the assistant's text, not as a prompt.
+chat_clear
+chat_event {event agent.delta       params {turn 3 text "let me look"}}
+chat_event {event agent.tool        params {turn 3 id t1 name fs_list args path=src}}
+chat_event {event agent.tool_result params {turn 3 id t1 name fs_list ok 1 summary {12 entries in src}}}
+chat_event {event agent.message     params {turn 3 role assistant text {there are 12}}}
+set tlog [.chat.log get 1.0 end]
+ok "chat: tool call rendered"   [string match "*fs_list path=src*" $tlog] 1
+ok "chat: tool result rendered" [string match "*12 entries in src*"  $tlog] 1
+chat_clear
+chat_event {event agent.tool_result params {turn 4 id t2 name fs_read ok 0 summary {refused: outside project}}}
+ok "chat: a failed tool result uses the error tag" \
+	[expr {[llength [.chat.log tag ranges tool-error]] > 0}] 1
+
 # End to end: send through call_stream with the echo provider and pump the event
 # loop until the streamed turn lands (echo defers each chunk with `after 0`).
 proc chat_run {text} {

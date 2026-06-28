@@ -23,10 +23,16 @@ proc fake_transport {chunks status err req on_chunk on_done} {
 }
 # Collect the provider `post` calls.
 proc collect_post {args} { lappend ::posts $args }
-proc run_infer {chunks status {err ""} {auth {x-api-key T}}} {
+proc run_infer {chunks status {err ""} {auth {x-api-key T}} {tools {}}} {
 	set ::posts {}
-	rio::claude::infer $::conf {{role user text hi}} $auth \
+	rio::claude::infer $::conf {{role user text hi}} $tools $auth \
 		[list fake_transport $chunks $status $err] collect_post
+}
+# The post calls of one kind, each as the args list after the kind word.
+proc posts_of {kind} {
+	set out {}
+	foreach p $::posts { if {[lindex $p 0] eq $kind} { lappend out [lrange $p 1 end] } }
+	return $out
 }
 proc deltas {} {
 	set t ""
@@ -49,19 +55,46 @@ append ::sse "data: {\"type\":\"message_stop\"}\n\n"
 
 test claude-request-shape {the request JSON carries model, stream, and the messages} -body {
 	set body [rio::claude::_request_json $::conf \
-		[list [dict create role user text {hi "there"}] [dict create role assistant text ok]]]
+		[list [dict create role user text {hi "there"}] [dict create role assistant text ok]] {}]
 	set d [json::json2dict $body]
+	set blk0 [lindex [dict get [lindex [dict get $d messages] 0] content] 0]
 	list [dict get $d model] [dict get $d max_tokens] [dict get $d stream] \
 		[llength [dict get $d messages]] \
 		[dict get [lindex [dict get $d messages] 0] role] \
-		[dict get [lindex [dict get $d messages] 0] content] \
-		[dict exists $d system]
-} -result {claude-test 1024 true 2 user {hi "there"} 0}
+		[dict get $blk0 type] [dict get $blk0 text] \
+		[dict exists $d system] [dict exists $d tools]
+} -result {claude-test 1024 true 2 user text {hi "there"} 0 0}
 
 test claude-request-system {a system prompt is included when set} -body {
 	set c [dict merge $::conf {system {You are terse.}}]
-	dict get [json::json2dict [rio::claude::_request_json $c {{role user text hi}}]] system
+	dict get [json::json2dict [rio::claude::_request_json $c {{role user text hi}} {}]] system
 } -result {You are terse.}
+
+test claude-request-tools {tool specs ride along as a top-level tools array} -body {
+	set tools [list [dict create name fs_read description "read a file" \
+		input_schema {{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}]]
+	set d [json::json2dict [rio::claude::_request_json $::conf {{role user text hi}} $tools]]
+	set t [lindex [dict get $d tools] 0]
+	list [llength [dict get $d tools]] [dict get $t name] \
+		[dict get $t description] [dict get $t input_schema type] \
+		[dict get $t input_schema required]
+} -result {1 fs_read {read a file} object path}
+
+test claude-request-tool-roundtrip {tool_use/tool_result content blocks serialize for the follow-up request} -body {
+	set convo [list \
+		[dict create role user content [list [dict create type text text "list it"]]] \
+		[dict create role assistant content [list \
+			[dict create type tool_use id tu_1 name fs_list input {path src} raw {{"path":"src"}}]]] \
+		[dict create role user content [list \
+			[dict create type tool_result tool_use_id tu_1 content "a.tcl\nb.tcl" is_error 0]]]]
+	set d [json::json2dict [rio::claude::_request_json $::conf $convo {}]]
+	set use [lindex [dict get [lindex [dict get $d messages] 1] content] 0]
+	set res [lindex [dict get [lindex [dict get $d messages] 2] content] 0]
+	list [dict get $use type] [dict get $use id] [dict get $use name] \
+		[dict get $use input path] \
+		[dict get $res type] [dict get $res tool_use_id] [dict get $res content]
+} -result {tool_use tu_1 fs_list src tool_result tu_1 {a.tcl
+b.tcl}}
 
 test claude-jstr-escapes {the JSON string escaper handles quotes, backslashes, controls} -body {
 	rio::claude::_jstr "a\"b\\c\nd\te"
@@ -130,7 +163,7 @@ test claude-network-fail {a failure to connect (status 0) is a network error} -b
 test claude-auth-header-passed {the face's auth pair is sent as a request header} -body {
 	set ::seen {}
 	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
-	rio::claude::infer $::conf {{role user text hi}} {x-api-key SEKRET} capture_tp collect_post
+	rio::claude::infer $::conf {{role user text hi}} {} {x-api-key SEKRET} capture_tp collect_post
 	expr {[lsearch -exact $::seen x-api-key] >= 0 && [lsearch -exact $::seen SEKRET] >= 0}
 } -result 1
 
@@ -139,7 +172,7 @@ test claude-auth-header-passed {the face's auth pair is sent as a request header
 test claude-beta-omitted {no anthropic-beta header when config doesn't set one} -body {
 	set ::seen {}
 	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
-	rio::claude::infer $::conf {{role user text hi}} {x-api-key K} capture_tp collect_post
+	rio::claude::infer $::conf {{role user text hi}} {} {x-api-key K} capture_tp collect_post
 	dict exists $::seen anthropic-beta
 } -result 0
 
@@ -147,8 +180,36 @@ test claude-beta-included {anthropic-beta is sent when config sets it} -body {
 	set ::seen {}
 	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
 	set c [dict merge $::conf {anthropic_beta some-beta-2025}]
-	rio::claude::infer $c {{role user text hi}} {x-api-key K} capture_tp collect_post
+	rio::claude::infer $c {{role user text hi}} {} {x-api-key K} capture_tp collect_post
 	dict get $::seen anthropic-beta
 } -result some-beta-2025
+
+# --- tool_use streaming (D26 slice 4) ----------------------------------------
+
+# A stream where the model emits a tool_use block (id + name, with its input
+# arriving as input_json_delta fragments) and ends with stop_reason "tool_use".
+set ::tsse ""
+append ::tsse "data: {\"type\":\"message_start\"}\n\n"
+append ::tsse "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_9\",\"name\":\"fs_list\"}}\n\n"
+append ::tsse "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\"}}\n\n"
+append ::tsse "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"src\\\"}\"}}\n\n"
+append ::tsse "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+append ::tsse "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n"
+append ::tsse "data: {\"type\":\"message_stop\"}\n\n"
+
+test claude-stream-tool-use {a tool_use block surfaces as a tool post with parsed + raw input} -body {
+	run_infer [list $::tsse] 200
+	set tool [lindex [posts_of tool] 0]
+	# {id name input raw}
+	list [lindex $tool 0] [lindex $tool 1] [dict get [lindex $tool 2] path] [lindex $tool 3] \
+		[terminal]
+} -result {toolu_9 fs_list src {{"path":"src"}} {done tool_use}}
+
+test claude-stream-tool-then-text {a text preamble before the tool both stream, in order} -body {
+	set s "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"let me look\"}}\n\n"
+	append s $::tsse
+	run_infer [list $s] 200
+	list [deltas] [llength [posts_of tool]] [terminal]
+} -result {{let me look} 1 {done tool_use}}
 
 cleanupTests

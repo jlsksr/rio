@@ -30,6 +30,27 @@ proc run_turn {text {provider ::rio::agent::echo_provider}} {
 	return [dict create resp $resp evs $::evs fin $::fin]
 }
 
+# A fake tool-using provider: on the first pass it asks to run buffer_list; once
+# the loop feeds the tool_result back (the latest user message carries a
+# tool_result block) it streams a final line and ends. Posts are synchronous —
+# the loop's `post` bridge defers them, so the contract is exercised faithfully.
+proc tool_provider {conversation tools post} {
+	set last [lindex $conversation end]
+	set sawtool 0
+	if {[dict exists $last content]} {
+		foreach b [dict get $last content] {
+			if {[dict get $b type] eq "tool_result"} { set sawtool 1 }
+		}
+	}
+	if {$sawtool} {
+		{*}$post delta "saw tools"
+		{*}$post done end_turn
+	} else {
+		{*}$post tool t1 buffer_list {} {{}}
+		{*}$post done tool_use
+	}
+}
+
 test agent-send-ack {agent.send returns an ack {started, turn} and completes} -body {
 	set out [run_turn "hi there"]
 	set r [dict get $out resp]
@@ -118,6 +139,46 @@ test agent-ops-registered {agent.send/reset/history are in the live registry} -b
 	set ops [rio::dispatch::opnames]
 	expr {"agent.send" in $ops && "agent.reset" in $ops && "agent.history" in $ops}
 } -result 1
+
+# --- tool round-trip (D26 slice 4) -------------------------------------------
+
+test agent-tool-roundtrip {a tool_use turn runs the tool, feeds the result back, and finishes} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	set out [run_turn "list buffers" tool_provider]
+	set tool {} ; set result {} ; set msg {}
+	foreach ev [dict get $out evs] {
+		switch -- [dict get $ev event] {
+			agent.tool        { set tool [dict get $ev params name] }
+			agent.tool_result { set result [list [dict get $ev params ok] [dict get $ev params name]] }
+			agent.message     { set msg [dict get $ev params text] }
+		}
+	}
+	list [dict get $out fin] $tool $result $msg
+} -result {done buffer_list {1 buffer_list} {saw tools}}
+
+test agent-tool-history-clean {history keeps the readable text turns, dropping tool machinery} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	run_turn "list buffers" tool_provider
+	set msgs [dict get [rio::core::call agent.history {}] response result messages]
+	set out {}
+	foreach m $msgs { lappend out [dict get $m role] [dict get $m text] }
+	set out
+} -result {user {list buffers} assistant {saw tools}}
+
+test agent-tool-confined {fs_read inside the project succeeds; an escaping path is refused unread} -setup {
+	set ::pdir [makeDirectory agtool]
+	makeFile "secret\n" inside.txt $::pdir
+	rio::project::open $::pdir
+} -body {
+	set ok  [rio::agent::tools::run fs_read [dict create path inside.txt]]
+	set bad [rio::agent::tools::run fs_read [dict create path /etc/hostname]]
+	list [dict get $ok ok] [string trim [dict get $ok content]] \
+		[dict get $bad ok] [string match {*outside the open project*} [dict get $bad content]]
+} -cleanup {
+	rio::project::close
+} -result {1 secret 0 1}
 
 # --- wire encoding (D11/D25) -------------------------------------------------
 

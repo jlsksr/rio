@@ -17,10 +17,15 @@ package require json
 
 namespace eval rio::claude {
 	variable seq 0
-	variable buf   ;# sid -> SSE line buffer (bytes not yet split into lines)
-	variable raw   ;# sid -> full raw body (kept for error detail on a non-200)
-	variable cb    ;# sid -> the provider `post` callback for this stream
-	variable fin   ;# sid -> 1 once a terminal event (done/error) was posted
+	variable buf    ;# sid -> SSE line buffer (bytes not yet split into lines)
+	variable raw    ;# sid -> full raw body (kept for error detail on a non-200)
+	variable cb     ;# sid -> the provider `post` callback for this stream
+	variable fin    ;# sid -> 1 once a terminal event (done/error) was posted
+	variable stop   ;# sid -> the message's stop_reason ("" until message_delta)
+	variable cbtype ;# sid -> the current content block's type (text|tool_use)
+	variable tuid   ;# sid -> current tool_use block id
+	variable tuname ;# sid -> current tool_use block name
+	variable tujson ;# sid -> accumulated input_json_delta for the current tool_use
 }
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
@@ -32,10 +37,12 @@ namespace eval rio::claude {
 #   on_done  = invoked {status err}: HTTP status (0 = couldn't connect), err text
 # `post` is the agent provider callback. Returns immediately; the turn completes
 # asynchronously as the transport drives the callbacks.
-proc rio::claude::infer {conf conversation auth transport post} {
+proc rio::claude::infer {conf conversation tools auth transport post} {
 	variable seq ; variable buf ; variable raw ; variable cb ; variable fin
+	variable stop ; variable cbtype ; variable tujson
 	set sid [incr seq]
 	set buf($sid) "" ; set raw($sid) "" ; set cb($sid) $post ; set fin($sid) 0
+	set stop($sid) "" ; set cbtype($sid) text ; set tujson($sid) ""
 	set headers [list \
 		Content-Type      application/json \
 		anthropic-version [dict get $conf anthropic_version]]
@@ -46,17 +53,20 @@ proc rio::claude::infer {conf conversation auth transport post} {
 	set req [dict create \
 		url     [dict get $conf messages_url] \
 		headers $headers \
-		body    [_request_json $conf $conversation]]
+		body    [_request_json $conf $conversation $tools]]
 	{*}$transport $req [list rio::claude::_chunk $sid] [list rio::claude::_done $sid]
 	return
 }
 
 # --- request shaping ---------------------------------------------------------
-# The conversation is agent.tcl's list of {role, text} dicts -> Claude messages.
-proc rio::claude::_request_json {conf conversation} {
+# The conversation is agent.tcl's list of {role, content} dicts -> Claude messages,
+# each `content` a block array (text / tool_use / tool_result). `tools` is the
+# agent's tool specs ({name, description, input_schema}); when present they ride
+# along so the model can request a read (D26 slice 4).
+proc rio::claude::_request_json {conf conversation tools} {
 	set msgs {}
 	foreach m $conversation {
-		lappend msgs "{\"role\":[_jstr [dict get $m role]],\"content\":[_jstr [dict get $m text]]}"
+		lappend msgs "{\"role\":[_jstr [dict get $m role]],\"content\":[_content_json $m]}"
 	}
 	set parts {}
 	lappend parts "\"model\":[_jstr [dict get $conf model]]"
@@ -66,7 +76,45 @@ proc rio::claude::_request_json {conf conversation} {
 	if {[dict exists $conf system] && [dict get $conf system] ne ""} {
 		lappend parts "\"system\":[_jstr [dict get $conf system]]"
 	}
+	if {[llength $tools]} {
+		set tj {}
+		foreach t $tools {
+			lappend tj "{\"name\":[_jstr [dict get $t name]],\"description\":[_jstr [dict get $t description]],\"input_schema\":[dict get $t input_schema]}"
+		}
+		lappend parts "\"tools\":\[[join $tj ,]\]"
+	}
 	return "{[join $parts ,]}"
+}
+
+# A message's content -> a JSON array of block objects. A legacy {role,text} entry
+# (no `content`) is wrapped as a single text block, so the echo path and older
+# callers keep working. tool_use re-sends Claude's own input JSON verbatim (`raw`);
+# tool_result carries our captured output and an optional is_error flag.
+proc rio::claude::_content_json {m} {
+	if {![dict exists $m content]} {
+		return "\[{\"type\":\"text\",\"text\":[_jstr [dict get $m text]]}\]"
+	}
+	set blocks {}
+	foreach b [dict get $m content] {
+		switch -- [dict get $b type] {
+			text {
+				lappend blocks "{\"type\":\"text\",\"text\":[_jstr [dict get $b text]]}"
+			}
+			tool_use {
+				set in [dict get $b raw]
+				if {$in eq ""} { set in "{}" }
+				lappend blocks "{\"type\":\"tool_use\",\"id\":[_jstr [dict get $b id]],\"name\":[_jstr [dict get $b name]],\"input\":$in}"
+			}
+			tool_result {
+				set tr "\"type\":\"tool_result\",\"tool_use_id\":[_jstr [dict get $b tool_use_id]],\"content\":[_jstr [dict get $b content]]"
+				if {[dict exists $b is_error] && [dict get $b is_error]} {
+					append tr ",\"is_error\":true"
+				}
+				lappend blocks "{$tr}"
+			}
+		}
+	}
+	return "\[[join $blocks ,]\]"
 }
 
 # A JSON string literal: escape ", \, and all control characters (RFC 8259).
@@ -111,7 +159,8 @@ proc rio::claude::_chunk {sid bytes} {
 }
 
 proc rio::claude::_line {sid line postcmd} {
-	variable fin
+	variable fin ; variable stop
+	variable cbtype ; variable tuid ; variable tuname ; variable tujson
 	if {![string match "data:*" $line]} return
 	set payload [string trim [string range $line 5 end]]
 	if {$payload eq "" || $payload eq {[DONE]}} return
@@ -121,10 +170,38 @@ proc rio::claude::_line {sid line postcmd} {
 		return
 	}
 	switch -- [dict get $d type] {
-		content_block_delta {
-			if {[dict exists $d delta type] && [dict get $d delta type] eq "text_delta"} {
-				{*}$postcmd delta [dict get $d delta text]
+		content_block_start {
+			# A new content block opens. Remember its kind; for a tool_use block,
+			# capture id/name and start accumulating its streamed input JSON.
+			set cbtype($sid) text
+			if {[dict exists $d content_block type] &&
+			    [dict get $d content_block type] eq "tool_use"} {
+				set cbtype($sid) tool_use
+				set tuid($sid)   [dict get $d content_block id]
+				set tuname($sid) [dict get $d content_block name]
+				set tujson($sid) ""
 			}
+		}
+		content_block_delta {
+			if {![dict exists $d delta type]} return
+			switch -- [dict get $d delta type] {
+				text_delta       { {*}$postcmd delta [dict get $d delta text] }
+				input_json_delta { append tujson($sid) [dict get $d delta partial_json] }
+			}
+		}
+		content_block_stop {
+			# A tool_use block closed — parse its accumulated input and surface the
+			# tool call (raw kept verbatim so the loop can re-send Claude's own JSON).
+			if {$cbtype($sid) eq "tool_use"} {
+				set rawjson [expr {$tujson($sid) eq "" ? "{}" : $tujson($sid)}]
+				if {[catch {json::json2dict $rawjson} input]} { set input {} }
+				{*}$postcmd tool $tuid($sid) $tuname($sid) $input $rawjson
+				set cbtype($sid) text
+			}
+		}
+		message_delta {
+			# Carries the stop_reason ("tool_use" means more work follows).
+			catch {set stop($sid) [dict get $d delta stop_reason]}
 		}
 		error {
 			set code stream_error ; set msg "Claude reported a streaming error"
@@ -135,29 +212,38 @@ proc rio::claude::_line {sid line postcmd} {
 		}
 		message_stop {
 			set fin($sid) 1
-			{*}$postcmd done
+			_post_done $postcmd $stop($sid)
 		}
 	}
+}
+
+# Post the terminal `done`, carrying the stop_reason only when there is one — a
+# plain completion is a bare `done` (the same shape the echo provider posts), and
+# `done tool_use` tells the loop to run the requested tools and continue.
+proc rio::claude::_post_done {postcmd stop} {
+	if {$stop eq ""} { {*}$postcmd done } else { {*}$postcmd done $stop }
 }
 
 # Transport finished. If the stream already produced a terminal event we are
 # done; otherwise classify by HTTP status into an actionable agent.error (D26),
 # enriched with the API's own error message when the body carries one.
 proc rio::claude::_done {sid status err} {
-	variable buf ; variable raw ; variable cb ; variable fin
+	variable buf ; variable raw ; variable cb ; variable fin ; variable stop
+	variable cbtype ; variable tuid ; variable tuname ; variable tujson
 	if {![info exists cb($sid)]} return
 	set postcmd $cb($sid)
 	if {!$fin($sid)} {
 		if {$status == 0} {
 			{*}$postcmd error network "Couldn't reach Claude — check your connection ($err)"
 		} elseif {$status == 200} {
-			{*}$postcmd done    ;# clean close without an explicit message_stop
+			_post_done $postcmd $stop($sid)   ;# clean close without an explicit message_stop
 		} else {
 			lassign [_classify $status $raw($sid)] code msg
 			{*}$postcmd error $code $msg
 		}
 	}
-	unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid)
+	unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) stop($sid) \
+		cbtype($sid) tuid($sid) tuname($sid) tujson($sid)
 }
 
 # Map an HTTP status (+ optional JSON error body) to {code, message}. The

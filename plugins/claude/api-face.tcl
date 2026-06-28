@@ -54,7 +54,7 @@ proc rio::claude::api::provider {conversation tools post} {
 		return
 	}
 	set auth [list x-api-key $key]
-	rio::claude::infer $config $conversation $auth $transport $post
+	rio::claude::infer $config $conversation $tools $auth $transport $post
 }
 
 # Whether a key is stored (the GUI offers Set / Clear accordingly).

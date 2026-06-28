@@ -159,4 +159,32 @@ test fs-op-save-no-path {saving a buffer with no file errors cleanly} -body {
 		[dict get $r response error message]
 } -result {false no_path {buffer has no associated file; supply a path}}
 
+# --- fs.read: read a file's text WITHOUT opening a buffer (D26 slice 4) -------
+
+test fs-op-read {fs.read returns text + attributes and mints no buffer} -body {
+	set p [tmpbytes "one\r\ntwo\r\nthree\n"]
+	set before [llength [rio::doc::inventory]]
+	set res [dict get [rio::core::call fs.read [dict create path $p]] response result]
+	set after [llength [rio::doc::inventory]]
+	list [expr {$after == $before}] \
+		[dict get $res eol] [dict get $res encoding] [dict get $res linecount] \
+		[dict get $res text]
+} -result "1 crlf utf-8 3 {one\ntwo\nthree\n}"
+
+test fs-op-read-no-path {fs.read without a path is a bad_request} -body {
+	set r [dict get [rio::core::call fs.read {}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test fs-op-read-missing {fs.read of a nonexistent file is an io_error} -body {
+	set p [file join [temporaryDirectory] no-such-file-[pid].txt]
+	set r [dict get [rio::core::call fs.read [dict create path $p]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
+test fs-op-read-dir {fs.read of a directory is an io_error, not a crash} -body {
+	set r [dict get [rio::core::call fs.read [dict create path [temporaryDirectory]]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
 cleanupTests
