@@ -187,4 +187,23 @@ test fs-op-read-dir {fs.read of a directory is an io_error, not a crash} -body {
 	list [dict get $r ok] [dict get $r error code]
 } -result {false io_error}
 
+# --- fs.write: write text to a path, creating parent dirs (D26 slice 5) -------
+
+test fs-op-write {fs.write creates the file with the given text} -body {
+	set p [file join [makeDirectory fsw] out.txt]
+	set res [dict get [rio::core::call fs.write [dict create path $p text "hello\n"]] response result]
+	list [dict get $res chars] [file exists $p] [dict get [rio::fs::read $p] text]
+} -result "6 1 {hello\n}"
+
+test fs-op-write-mkdir {fs.write creates missing parent directories} -body {
+	set p [file join [makeDirectory fswd] a b c deep.txt]
+	rio::core::call fs.write [dict create path $p text "deep\n"]
+	list [file exists $p] [dict get [rio::fs::read $p] text]
+} -result "1 {deep\n}"
+
+test fs-op-write-no-text {fs.write without text is a bad_request} -body {
+	set r [dict get [rio::core::call fs.write [dict create path /tmp/x]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
 cleanupTests

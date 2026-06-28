@@ -302,6 +302,27 @@ chat_event {event agent.tool_result params {turn 4 id t2 name fs_read ok 0 summa
 ok "chat: a failed tool result uses the error tag" \
 	[expr {[llength [.chat.log tag ranges tool-error]] > 0}] 1
 
+# Proposed edit (D26 slice 5): the diff renders and the Approve/Reject bar appears;
+# the result (or a decision) hides it again.
+proc bar_shown {} { expr {[lsearch -exact [pack slaves .chat] .chat.approve] >= 0} }
+chat_clear
+set ::agent_auto_accept 0
+chat_event {event agent.propose params {turn 7 id w1 name propose_edit path foo.txt diff "- old line
++ new line"}}
+set plog [.chat.log get 1.0 end]
+ok "chat: propose header rendered" [string match "*propose_edit*foo.txt*" $plog] 1
+ok "chat: diff add line tagged"    [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
+ok "chat: diff del line tagged"    [expr {[llength [.chat.log tag ranges diff-del]] > 0}] 1
+ok "chat: approval bar shown"      [bar_shown] 1
+ok "chat: pending turn recorded"   $::pending_turn 7
+chat_event {event agent.tool_result params {turn 7 id w1 name propose_edit ok 1 summary {edited foo.txt}}}
+ok "chat: result hides approval bar" [bar_shown] 0
+# Auto-accept: a proposal renders its diff but raises no bar (core applies it).
+chat_clear ; set ::agent_auto_accept 1
+chat_event {event agent.propose params {turn 8 id w2 name propose_create path bar.txt diff "+ x"}}
+ok "chat: auto-accept raises no bar" [bar_shown] 0
+set ::agent_auto_accept 0
+
 # End to end: send through call_stream with the echo provider and pump the event
 # loop until the streamed turn lands (echo defers each chunk with `after 0`).
 proc chat_run {text} {

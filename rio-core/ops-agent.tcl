@@ -16,6 +16,21 @@ proc rio::ops::agent_send {params emit} {
 }
 rio::dispatch::register_stream agent.send rio::ops::agent_send
 
+# agent.approve {turn, decision} -> {id} ; resolves a proposed edit awaiting the
+# user's decision ("approve" | "reject"). The suspended turn resumes and its
+# remaining content streams as agent.* events on that turn's original emit (D26 s5).
+# A turn with nothing pending is a `bad_request` error.
+proc rio::ops::agent_approve {params} {
+	foreach k {turn decision} {
+		if {![dict exists $params $k]} {
+			rio::error::raise bad_request "agent.approve requires $k"
+		}
+	}
+	set id [rio::agent::approve [dict get $params turn] [dict get $params decision]]
+	return [dict create result [dict create id $id]]
+}
+rio::dispatch::register agent.approve rio::ops::agent_approve
+
 # agent.reset -> {} ; clears the conversation.
 proc rio::ops::agent_reset {params} {
 	rio::agent::reset

@@ -32,7 +32,16 @@ namespace eval rio::agent {
 	variable turnseq      0                         ;# monotonic turn-id source
 	variable maxsteps     8                         ;# max tool round-trips per turn
 	variable provider     [namespace current]::echo_provider
+	variable pending                                ;# array: turn -> {coro id} awaiting approval
+	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
+	variable auto_accept       0                    ;# skip the approval gate (opt-in)
 }
+
+# The write-apply policy (read by rio::agent::tools::apply_write) and its toggles —
+# data, so a frontend setting can flip them (the toggle UI is deferred).
+proc rio::agent::writes_disk {} { variable apply_writes_disk ; return $apply_writes_disk }
+proc rio::agent::set_writes_disk {v} { variable apply_writes_disk ; set apply_writes_disk [expr {$v ? 1 : 0}] }
+proc rio::agent::set_auto_accept {v} { variable auto_accept ; set auto_accept [expr {$v ? 1 : 0}] }
 
 # Swap the active provider — a command prefix obeying the contract in _run. The
 # Claude face (D26: claude-api) registers its provider here.
@@ -41,10 +50,18 @@ proc rio::agent::set_provider {cmd} {
 	set provider $cmd
 }
 
-# Clear the conversation (agent.reset).
+# Clear the conversation (agent.reset). Also abort any turn suspended awaiting an
+# approval — its coroutine would otherwise linger waiting for a decision that the
+# cleared conversation will never produce.
 proc rio::agent::reset {} {
 	variable conversation
+	variable pending
 	set conversation {}
+	foreach turn [array names pending] {
+		lassign $pending($turn) co id
+		catch {rename $co {}}
+	}
+	array unset pending
 	return
 }
 
@@ -112,9 +129,13 @@ proc rio::agent::_run {turn emit} {
 				tool {
 					lassign $msg _ id name input raw
 					lappend calls [dict create id $id name $name input $input raw $raw]
-					{*}$emit [dict create event agent.tool \
-						params [dict create turn $turn id $id name $name \
-							args [_args_str $input]]]
+					# Announce a read call now (it auto-runs); a write call is announced
+					# in phase 2 as agent.propose, carrying the diff for review.
+					if {![rio::agent::tools::is_write $name]} {
+						{*}$emit [dict create event agent.tool \
+							params [dict create turn $turn id $id name $name \
+								args [_args_str $input]]]
+					}
 				}
 				done  { set stop [lindex $msg 1] ; break }
 				error {
@@ -153,21 +174,80 @@ proc rio::agent::_run {turn emit} {
 			return
 		}
 
-		# Auto-execute the read-only tools and feed results back (reads happen, they
-		# are not proposals — D26). Each outcome is surfaced for transparency.
+		# Run each tool and feed its result back. Reads auto-execute (they are not
+		# proposals); writes go through the approval gate (_do_write) — proposed,
+		# reviewed, then applied or rejected (D26 s5). Each outcome is surfaced.
 		set results {}
 		foreach c $calls {
-			set r [rio::agent::tools::run [dict get $c name] [dict get $c input]]
-			{*}$emit [dict create event agent.tool_result \
-				params [dict create turn $turn id [dict get $c id] \
-					name [dict get $c name] ok [dict get $r ok] \
-					summary [dict get $r summary]]]
+			set name [dict get $c name]
+			set id   [dict get $c id]
+			if {[rio::agent::tools::is_write $name]} {
+				set r [_do_write $turn $id $name [dict get $c input] $emit $co]
+			} else {
+				set r [rio::agent::tools::run $name [dict get $c input]]
+				{*}$emit [dict create event agent.tool_result \
+					params [dict create turn $turn id $id name $name \
+						ok [dict get $r ok] summary [dict get $r summary]]]
+			}
 			lappend results [dict create type tool_result \
-				tool_use_id [dict get $c id] content [dict get $r content] \
+				tool_use_id $id content [dict get $r content] \
 				is_error [expr {[dict get $r ok] ? 0 : 1}]]
 		}
 		lappend conversation [dict create role user content $results]
 	}
+}
+
+# Handle one WRITE tool call: prepare a reviewable proposal, surface it
+# (agent.propose, with the diff), then either auto-accept or yield until an
+# agent.approve resumes us with the user's decision. On approval the edit applies
+# (its buffer.changed events forwarded so an open view updates); a rejection feeds
+# Claude a plain "rejected" tool_result. Returns the {ok, content, summary} the
+# loop turns into the tool_result block. (D26 slice 5.)
+proc rio::agent::_do_write {turn id name input emit co} {
+	variable pending
+	variable auto_accept
+	set prep [rio::agent::tools::prepare_write $name $input]
+	if {[dict get $prep ok] == 0} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 \
+				summary [dict get $prep summary]]]
+		return $prep
+	}
+	{*}$emit [dict create event agent.propose \
+		params [dict create turn $turn id $id name $name \
+			path [dict get $prep path] diff [dict get $prep diff]]]
+	if {$auto_accept} {
+		set decision approve
+	} else {
+		set pending($turn) [list $co $id]
+		set decision [yield]
+		unset -nocomplain pending($turn)
+	}
+	if {$decision ne "approve"} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 summary "rejected by user"]]
+		return [dict create ok 0 content "The user rejected this edit." summary "rejected by user"]
+	}
+	set r [rio::agent::tools::apply_write [dict get $prep plan]]
+	if {[dict exists $r events]} {
+		foreach ev [dict get $r events] { {*}$emit $ev }
+	}
+	{*}$emit [dict create event agent.tool_result \
+		params [dict create turn $turn id $id name $name \
+			ok [dict get $r ok] summary [dict get $r summary]]]
+	return $r
+}
+
+# Resolve a pending approval: resume the suspended turn's coroutine with the user's
+# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5).
+proc rio::agent::approve {turn decision} {
+	variable pending
+	if {![info exists pending($turn)]} {
+		rio::error::raise bad_request "no edit is awaiting approval for turn $turn"
+	}
+	lassign $pending($turn) co id
+	after 0 [list [namespace current]::_resume $co $decision]
+	return $id
 }
 
 # A short "k=v k=v" rendering of a tool call's input, for the agent.tool event.

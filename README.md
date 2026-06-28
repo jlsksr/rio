@@ -28,9 +28,12 @@ Everything below runs today:
   share one dockable, resizable side panel.
 - **Agent chat** — a right-hand chat column wired to two providers: a built-in
   offline **echo** provider, and **Claude** over the official Anthropic API
-  (bring your own API key, entered under *Settings*). Today it holds a streaming
-  conversation; reviewing and applying the agent's proposed edits is the next
-  step.
+  (bring your own API key, entered under *Settings*). It holds a streaming
+  conversation and can **read your project** (listing folders, reading files and
+  open buffers — shown as it works) and **propose edits**: it suggests a change or
+  a new file, you review the **diff** and **Approve or Reject**, and on approval
+  it applies (and, by default, saves). Reads run freely; every write waits for you
+  (or opt into *Settings ▸ Auto-accept edits*).
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
@@ -40,8 +43,8 @@ in-process; the very same core can run headless behind a socket (optional
 **server mode**, like `emacs-server`). Frontends are thin views — the core owns
 your files and broadcasts changes back.
 
-**Still to come:** git write ops (stage/commit), the agent's propose-diff →
-apply/reject review flow, the terminal frontend (below), and a polished
+**Still to come:** git write ops (stage/commit), an agent run-command tool (with
+guardrails), the terminal frontend (below), and a polished
 install/packaging path.
 
 ## The two faces, one brain

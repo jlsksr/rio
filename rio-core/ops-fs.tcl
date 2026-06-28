@@ -99,3 +99,30 @@ proc rio::ops::fs_read {params} {
 		linecount $linecount]]
 }
 rio::dispatch::register fs.read rio::ops::fs_read
+
+# fs.write {path, text, ?encoding?, ?eol?, ?bom?} -> {path, chars}
+# Write text to a project path, creating any missing parent directories. The
+# write-sibling of fs.read and the agent's only disk-write primitive (reached
+# solely through the approval gate, D26 slice 5); the user's own Save still goes
+# through file.save. `path` resolves against the project root like fs.read.
+proc rio::ops::fs_write {params} {
+	foreach k {path text} {
+		if {![dict exists $params $k]} {
+			rio::error::raise bad_request "fs.write requires $k"
+		}
+	}
+	set abs [rio::project::resolve [dict get $params path]]
+	set meta {}
+	foreach k {encoding eol bom} {
+		if {[dict exists $params $k]} { dict set meta $k [dict get $params $k] }
+	}
+	if {[catch {
+		file mkdir [file dirname $abs]
+		rio::fs::write $abs [dict get $params text] $meta
+	} err]} {
+		rio::error::raise io_error $err
+	}
+	return [dict create result [dict create \
+		path $abs chars [string length [dict get $params text]]]]
+}
+rio::dispatch::register fs.write rio::ops::fs_write

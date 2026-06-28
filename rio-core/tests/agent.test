@@ -51,6 +51,61 @@ proc tool_provider {conversation tools post} {
 	}
 }
 
+# A fake write-using provider: first pass proposes the tool in ::wt_name/::wt_input/
+# ::wt_raw; after the loop feeds a tool_result back, it finishes. Drives the
+# approval gate (slice 5).
+proc write_provider {conversation tools post} {
+	set last [lindex $conversation end]
+	set sawtool 0
+	if {[dict exists $last content]} {
+		foreach b [dict get $last content] {
+			if {[dict get $b type] eq "tool_result"} { set sawtool 1 }
+		}
+	}
+	if {$sawtool} {
+		{*}$post delta "done"
+		{*}$post done end_turn
+	} else {
+		{*}$post tool w1 $::wt_name $::wt_input $::wt_raw
+		{*}$post done tool_use
+	}
+}
+
+# A sink that stops the event loop at the approval gate (agent.propose) or when the
+# turn ends (agent.message/agent.error).
+proc ev_until_stop {ev} {
+	lappend ::evs $ev
+	switch -- [dict get $ev event] {
+		agent.propose               { set ::stop propose }
+		agent.message - agent.error { set ::stop done }
+	}
+}
+# Start a write turn; return why the loop stopped ("propose"|"done"|"timeout") and
+# bind the turn id. Pumps a real event loop, as a frontend would.
+proc start_write {turnVar} {
+	upvar 1 $turnVar turn
+	set ::evs {} ; set ::stop {}
+	set ack [rio::core::call_stream agent.send {text go} ev_until_stop]
+	set turn [dict get $ack result turn]
+	set tm [after 3000 {set ::stop timeout}] ; vwait ::stop ; after cancel $tm
+	return $::stop
+}
+proc wait_done {} {
+	set ::stop {}
+	set tm [after 3000 {set ::stop timeout}] ; vwait ::stop ; after cancel $tm
+	return $::stop
+}
+# The latest agent.tool_result summary for tool id $id in ::evs.
+proc ev_summary {id} {
+	set s ""
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.tool_result" && [dict get $ev params id] eq $id} {
+			set s [dict get $ev params summary]
+		}
+	}
+	return $s
+}
+
 test agent-send-ack {agent.send returns an ack {started, turn} and completes} -body {
 	set out [run_turn "hi there"]
 	set r [dict get $out resp]
@@ -187,6 +242,77 @@ test agent-tool-no-project {a path read with no project open names that reason, 
 	list [dict get $r ok] [dict get $r summary] \
 		[string match {*No project is open*} [dict get $r content]]
 } -result {0 {no project open} 1}
+
+# --- write/propose-edit gate (D26 slice 5) -----------------------------------
+
+test agent-write-approve {a proposed create applies on approval and the turn finishes} -setup {
+	set ::pdir [makeDirectory agw]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_create
+	set ::wt_input [dict create path new.txt content "hi\n"]
+	set ::wt_raw {{"path":"new.txt","content":"hi\n"}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	set f [file join $::pdir new.txt]
+	list $s1 $s2 [file exists $f] [string trim [dict get [rio::fs::read $f] text]] [ev_summary w1]
+} -cleanup { rio::project::close } -result {propose done 1 hi {created new.txt}}
+
+test agent-write-reject {a rejected proposal does not touch disk and feeds back "rejected"} -setup {
+	set ::pdir [makeDirectory agwr]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_create
+	set ::wt_input [dict create path no.txt content "x\n"]
+	set ::wt_raw {{"path":"no.txt","content":"x\n"}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision reject]
+	set s2 [wait_done]
+	list $s1 $s2 [file exists [file join $::pdir no.txt]] [ev_summary w1]
+} -cleanup { rio::project::close } -result {propose done 0 {rejected by user}}
+
+test agent-write-auto-accept {auto-accept applies without pausing for approval} -setup {
+	set ::pdir [makeDirectory agwa]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 1
+	set ::wt_name propose_create
+	set ::wt_input [dict create path auto.txt content "a\n"]
+	set ::wt_raw {{"path":"auto.txt","content":"a\n"}}
+} -body {
+	set out [run_turn "go" write_provider]
+	list [dict get $out fin] [file exists [file join $::pdir auto.txt]]
+} -cleanup { rio::agent::set_auto_accept 0 ; rio::project::close } -result {done 1}
+
+test agent-approve-stale {approving a turn with nothing pending is a bad_request} -body {
+	set r [dict get [rio::core::call agent.approve [dict create turn 999 decision approve]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test agent-edit-not-found {propose_edit whose old_string is absent is refused, unread} -setup {
+	set ::pdir [makeDirectory agnf] ; makeFile "alpha\n" f.txt $::pdir
+	rio::project::open $::pdir
+} -body {
+	set r [rio::agent::tools::prepare_write propose_edit \
+		[dict create path f.txt old_string ZZZ new_string Q]]
+	list [dict get $r ok] [dict get $r summary]
+} -cleanup { rio::project::close } -result {0 {error: not found}}
+
+test agent-edit-not-unique {propose_edit with a non-unique old_string is refused} -setup {
+	set ::pdir [makeDirectory agnu] ; makeFile "x\nx\n" f.txt $::pdir
+	rio::project::open $::pdir
+} -body {
+	set r [rio::agent::tools::prepare_write propose_edit \
+		[dict create path f.txt old_string x new_string y]]
+	list [dict get $r ok] [string match {*2 matches*} [dict get $r summary]]
+} -cleanup { rio::project::close } -result {0 1}
 
 # --- wire encoding (D11/D25) -------------------------------------------------
 

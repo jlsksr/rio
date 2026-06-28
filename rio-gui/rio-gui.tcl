@@ -46,6 +46,8 @@ set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
+set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
+set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -484,7 +486,22 @@ proc chat_send {} {
 	chat_label you-label "You"
 	chat_log "$text\n"
 	set ::chat_turn_open 0
-	rio::core::call_stream agent.send [dict create text $text] chat_event
+	rio::core::call_stream agent.send [dict create text $text] agent_event
+}
+
+# The streaming sink for a turn (D26): an approved edit's buffer.changed updates
+# the editor view; everything else (agent.*) goes to the chat transcript. One sink
+# so the turn's editor effects and its narration ride the same event stream.
+proc agent_event {ev} {
+	switch -- [dict get $ev event] {
+		buffer.changed {
+			# The model already changed; only refresh the widget when the edited buffer
+			# is the one on screen (others reload from core on tab switch).
+			set p [dict get $ev params]
+			if {[dict get $p buffer] eq $::cur} { apply_change $p }
+		}
+		default { chat_event $ev }
+	}
 }
 
 # Apply one streamed agent.* event to the transcript.
@@ -505,6 +522,7 @@ proc chat_event {ev} {
 		}
 		agent.error {
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			approve_bar 0
 			chat_label error-label "Error"
 			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
 		}
@@ -515,12 +533,53 @@ proc chat_event {ev} {
 			set args [dict get $ev params args]
 			chat_log "· [dict get $ev params name][expr {$args eq "" ? "" : " $args"}]\n" tool
 		}
+		agent.propose {
+			# A proposed EDIT awaiting the user's decision (D26 slice 5). Show the diff;
+			# unless auto-accept is on (the core then applies without pausing), raise the
+			# Approve/Reject bar.
+			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			chat_log "· proposes [dict get $ev params name]: [dict get $ev params path]\n" tool
+			chat_diff [dict get $ev params diff]
+			if {!$::agent_auto_accept} {
+				set ::pending_turn [dict get $ev params turn]
+				approve_bar 1
+			}
+		}
 		agent.tool_result {
-			# The outcome of that read — a one-line summary (red if it failed/refused).
+			# The outcome of a read or an applied/rejected edit (red if it failed).
+			approve_bar 0
 			set tag [expr {[dict get $ev params ok] ? "tool" : "tool-error"}]
 			chat_log "  → [dict get $ev params summary]\n" $tag
 		}
 	}
+}
+
+# Render a proposed edit's diff: -removed in red, +added in green.
+proc chat_diff {diff} {
+	foreach line [split $diff "\n"] {
+		set tag tool
+		if {[string match "+*" $line]} { set tag diff-add } elseif {[string match {-*} $line]} { set tag diff-del }
+		chat_log "  $line\n" $tag
+	}
+}
+
+# Show/hide the Approve/Reject bar for a pending proposal.
+proc approve_bar {show} {
+	if {$show} {
+		pack .chat.approve -side bottom -fill x -before .chat.input
+	} else {
+		catch {pack forget .chat.approve}
+		set ::pending_turn ""
+	}
+}
+
+# The user's decision on the pending edit → agent.approve resumes the turn, whose
+# remaining events stream back on agent_event (the turn's original sink).
+proc agent_decide {decision} {
+	if {$::pending_turn eq ""} return
+	set t $::pending_turn
+	approve_bar 0
+	catch {rio::core::call agent.approve [dict create turn $t decision $decision]}
 }
 
 # Clear the conversation: reset the core's state (agent.reset) and the transcript.
@@ -841,6 +900,13 @@ proc apply_theme {theme} {
 	.chat.log tag configure error-label -font RioUIFont -foreground "#cc0000"
 	.chat.log tag configure tool        -font RioUIFont -foreground [dict get $c gutter.fg]
 	.chat.log tag configure tool-error  -font RioUIFont -foreground "#cc0000"
+	.chat.log tag configure diff-add    -font RioUIFont -foreground "#118811"
+	.chat.log tag configure diff-del    -font RioUIFont -foreground "#cc0000"
+	.chat.approve configure -background [dict get $c chat.bg]
+	.chat.approve.lbl configure -font RioUIFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
+	.chat.approve.yes configure -font RioUIFont
+	.chat.approve.no  configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
@@ -970,6 +1036,15 @@ text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 button .chat.send -text "Send" -font {monospace 9} -command chat_send
 bind .chat.input <Return>       { chat_send ; break }
 bind .chat.input <Shift-Return> { %W insert insert "\n" ; break }
+# Approve/Reject bar for a proposed edit (packed on demand by approve_bar; D26 s5).
+frame .chat.approve -background white
+label .chat.approve.lbl -text "Apply this edit?" -anchor w -font {monospace 9} \
+	-padx 4 -pady 2 -background white -foreground black
+button .chat.approve.yes -text "Approve" -font {monospace 9} -command {agent_decide approve}
+button .chat.approve.no  -text "Reject"  -font {monospace 9} -command {agent_decide reject}
+pack .chat.approve.yes -side right
+pack .chat.approve.no  -side right
+pack .chat.approve.lbl -side left -fill x -expand 1
 # Transcript: read-only, word-wrapped, with an auto-hiding scrollbar.
 text .chat.log -wrap word -state disabled -font {monospace 11} -cursor "" \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
@@ -981,6 +1056,8 @@ scrollbar .chat.sb -command {.chat.log yview}
 .chat.log tag configure error-label -font {monospace 9}
 .chat.log tag configure tool        -font {monospace 9} -foreground "#888888"
 .chat.log tag configure tool-error  -font {monospace 9} -foreground "#cc0000"
+.chat.log tag configure diff-add    -font {monospace 9} -foreground "#118811"
+.chat.log tag configure diff-del    -font {monospace 9} -foreground "#cc0000"
 pack .chat.hdr   -side top    -fill x
 pack .chat.send  -side bottom -fill x
 pack .chat.input -side bottom -fill x
@@ -1038,6 +1115,9 @@ menu .m.settings -tearoff 0
 	-value claude -command apply_provider
 .m.settings add separator
 .m.settings add command -label "Claude API Key…" -command claude_key_dialog
+.m.settings add separator
+.m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
+	-command {rio::agent::set_auto_accept $::agent_auto_accept}
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.

@@ -811,10 +811,40 @@ shared inference core now sends the `tools` array and parses Claude's streamed
 `tool_use` blocks (`input_json_delta` accumulation + `stop_reason`). All of it is
 tested offline: the agent loop against a fake tool-using provider (the
 call→execute→result→final-message round-trip, the containment refusal, and the
-clean history), `fs.read`, and the inference tool-use SSE path. **Remaining:** a
-real key and a real message against `api.anthropic.com` — the dogfood moment (the
-one step that needs the network and a paid key, so it can't be a unit test) — and
-the **write/propose-edit half** with its diff→apply approval gate (O4).
+clean history), `fs.read`, and the inference tool-use SSE path. The read
+round-trip is **verified live** against `api.anthropic.com` (the dogfood moment) —
+a real turn lists the project, reads a file, and answers, with the containment
+refusal holding; a request-body `\u`-escape fix (`_jstr`) was needed so a
+tool_result carrying a file's non-ASCII text survives transport encoding.
+
+The **write/propose-edit half is implemented (slice 5)** — the dangerous tool
+surface (O4), gated by user approval. It is **general agent/core work, not
+provider-specific**: the Claude plugin needed **no change** (its inference core is
+tool-agnostic), so the same gate serves any provider. The agent gets two **write**
+tools alongside the reads — `propose_edit {path, old_string, new_string}` (a
+unique-match find/replace, with *not-found* / *not-unique* refusals in the
+Claude-Code Edit discipline) and `propose_create {path, content}` (a new file;
+parents made on apply) — registered in `rio::agent::tools` with `kind write`.
+Unlike reads, a write **never auto-runs**: the loop calls `prepare_write` (locate
+the match, build a review diff), emits **`agent.propose {turn,id,name,path,diff}`**,
+and **suspends the turn's coroutine** until the new op **`agent.approve
+{turn,decision}`** resumes it (a `pending` turn→coroutine registry; `agent.reset`
+aborts a waiting turn). On *approve*, `apply_write` edits an open buffer through
+`buffer.replace` (undoable; its `buffer.changed` is forwarded on the turn's emit so
+the editor updates live) and, by default, persists via `file.save`; a closed file
+or a create is written straight to disk through the new **read-only-sibling
+`fs.write`** op (root-confined, `mkdir -p`). On *reject* the model gets a plain
+"rejected" tool_result and the turn continues. Two policy flags are **data** so a
+later setting can flip them: `apply_writes_disk` (default on — apply *and* save)
+and `auto_accept` (default off — when on, the gate is skipped). The GUI renders the
+diff (+green/−red) and raises an **Approve/Reject bar** wired to `agent.approve`,
+with a *Settings ▸ Auto-accept edits* toggle; an applied edit to the visible buffer
+updates through the existing `buffer.changed`→`apply_change` path. All paths are
+tested offline (approve/reject round-trips, auto-accept, the stale-approve error,
+the prepare refusals, `fs.write` incl. parent-dir creation) and the Claude suite is
+**unchanged** — the proof it's provider-agnostic. **Remaining:** a live write
+against `api.anthropic.com`, and the exposed-as-config UI for the write policy /
+the run-command tool with its allow-list guardrails (O4).
 
 ---
 
@@ -1171,12 +1201,15 @@ Both renderings come from the **same** region model (D13) and layout policy
   **Remaining:** keystroke coalescing into undo groups, and large-file handling
   (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*
-  orchestration. Its **read slice is now built — D26 slice 4**: the four read-only
-  built-ins (`fs_list`, `fs_read`, `buffer_list`, `buffer_text`), auto-executed
-  through a core tool-loop, project-root-confined and size-capped. The
-  **propose-edit (write) slice with its diff→apply approval gate**, and the
-  run-command guardrails below, remain **deferred** per Sequencing.) How edits are
-  previewed/applied, the permission model for writes, guardrails for the headless
+  orchestration. Its **read slice is built — D26 slice 4** (the four read-only
+  built-ins, auto-executed through a core tool-loop, project-root-confined and
+  size-capped) and its **propose-edit / write slice is built — D26 slice 5**: the
+  `propose_edit` / `propose_create` tools, the `agent.propose`→`agent.approve`
+  approval gate with a diff review, apply-via-`buffer.replace`+`file.save` /
+  `fs.write` (root-confined), and the `apply_writes_disk` / `auto_accept` policy
+  flags — provider-agnostic, so no plugin change was needed. The **run-command**
+  guardrails below remain **deferred** per Sequencing.) Still open here: surfacing
+  the write-policy flags as persisted config (D21), guardrails for the headless
   run-command primitive (now
   implemented as `exec.run` — see O2; its argv-not-shell discipline is the
   baseline, but allow-lists, agent confirmation, and closing exec's
