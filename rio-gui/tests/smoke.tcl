@@ -318,6 +318,56 @@ ok "chat: clear resets core" \
 .chat configure -width 50 ; csash_drag
 ok "chat: sash clamps min width"     [expr {[.chat cget -width] >= 200}] 1
 
+# --- agent provider selection + the Claude API key store (D26) ---------------
+# Point the face's secret store at a THROWAWAY dir so the smoke never touches the
+# user's real ~/.local/share/rio/secrets.
+set ::secdir [file join [file dirname $tpath] riogui-sec-[clock clicks]]
+set rio::secret::override_dir $::secdir
+proc pump_until {cond {ms 3000}} {
+	set deadline [expr {[clock milliseconds] + $ms}]
+	while {[clock milliseconds] < $deadline} { update ; if {[uplevel 1 $cond]} return }
+}
+
+ok "provider: default is echo"        $::agent_provider echo
+apply_provider
+ok "provider: echo wired in core"     [set rio::agent::provider] rio::agent::echo_provider
+ok "provider: header names echo"      [.chat.hdr.title cget -text] "Agent · Echo"
+set ::agent_provider claude ; apply_provider
+ok "provider: claude wired in core"   [set rio::agent::provider] rio::claude::api::provider
+ok "provider: header names claude"    [.chat.hdr.title cget -text] "Agent · Claude"
+
+# Claude selected with no key stored: a turn must surface the face's actionable
+# not_configured error (D26) — it never reaches the network.
+ok "provider: no key stored yet"      [rio::claude::api::configured] 0
+chat_clear
+.chat.input delete 1.0 end ; .chat.input insert end "hi"
+chat_send
+pump_until {string match {*not_configured*} [.chat.log get 1.0 end]}
+ok "provider: claude w/o key errors actionably" \
+	[string match {*Settings*Claude API key*(not_configured)*} [.chat.log get 1.0 end]] 1
+
+# The key dialog stores / clears through the claude-api face.
+claude_key_dialog
+ok "keydlg: opens"                    [winfo exists .claudekey] 1
+ok "keydlg: clear disabled w/o key"   [.claudekey.btns.clear cget -state] disabled
+.claudekey.e insert end "sk-ant-smoke-123"
+claude_key_save .claudekey
+ok "keydlg: closed after save"        [winfo exists .claudekey] 0
+ok "keydlg: key now stored"           [rio::claude::api::configured] 1
+ok "keydlg: secret is 0600" \
+	[format %04o [expr {[file attributes [file join $::secdir claude-api.secret] -permissions] & 0777}]] 0600
+
+# Re-open: Clear is enabled now, and clearing removes the secret.
+claude_key_dialog
+ok "keydlg: clear enabled with key"   [.claudekey.btns.clear cget -state] normal
+claude_key_clear .claudekey
+ok "keydlg: key cleared"              [rio::claude::api::configured] 0
+
+# Back to the offline echo provider for the rest of the run.
+set ::agent_provider echo ; apply_provider
+chat_clear
+file delete -force $::secdir
+
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
 # fonts exist, and switching re-applies colours live.

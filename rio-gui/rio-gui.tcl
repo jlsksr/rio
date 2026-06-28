@@ -28,6 +28,11 @@ package require json
 # Embed the core (Tk-free; we are the only Tk in this process).
 source [file join [file dirname [info script]] .. rio-core core.tcl]
 
+# Load the Claude provider plugin (D26): the shared inference core + the claude-api
+# face. Sourcing only DEFINES the provider; the frontend selects/activates it
+# (apply_provider) and owns the key-entry UI — the face just owns the key's store.
+source [file join [file dirname [info script]] .. plugins claude claude.tcl]
+
 # Per-buffer view state. The core holds the text; we hold the rest.
 set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yview <frac>}
 set ::order   {} ;# buffer ids, in tab order
@@ -539,6 +544,88 @@ proc csash_drag {} {
 	.chat configure -width $w
 }
 
+# ---------------------------------------------------------------------------
+# Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
+# one provider at a time: the offline `echo` stub (the default — proves the
+# streaming path with no network or credentials) or `claude`, the claude-api
+# provider, which needs a stored Anthropic API key. Which one is live is a
+# runtime choice from the Settings menu; the API key is the only DURABLE agent
+# credential, kept by the face as a 0600 secret (D21). The chat header names the
+# active provider so the choice is never invisible.
+# ---------------------------------------------------------------------------
+set ::agent_provider echo   ;# echo | claude
+set ::claude_key_show 0     ;# the key dialog's reveal toggle
+
+proc apply_provider {} {
+	if {$::agent_provider eq "claude"} {
+		rio::agent::set_provider rio::claude::api::provider
+		catch {.chat.hdr.title configure -text "Agent · Claude"}
+	} else {
+		rio::agent::set_provider rio::agent::echo_provider
+		catch {.chat.hdr.title configure -text "Agent · Echo"}
+	}
+}
+
+# The Claude API key dialog (Settings ▸ Claude API Key…). A small modal that is a
+# dumb view of the claude-api face's key store: it never holds the key itself, it
+# just hands what the user types to set_key / removes it with clear_key. Selecting
+# the Claude provider with no key stored isn't blocked here — the first turn then
+# surfaces the face's actionable not_configured error (D26), pointing right back.
+proc claude_key_dialog {} {
+	set w .claudekey
+	destroy $w
+	toplevel $w
+	wm title $w "Claude API key"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set stored [rio::claude::api::configured]
+	label $w.prompt -anchor w -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-text "Anthropic API key — create one at console.anthropic.com."
+	entry $w.e -show • -width 52 -font RioUIFont
+	checkbutton $w.show -text "Show key" -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg] \
+		-variable ::claude_key_show -command [list claude_key_reveal $w]
+	set ::claude_key_show 0
+	label $w.status -anchor w -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-text [expr {$stored ? "A key is stored; saving one replaces it." : "No key stored yet."}]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.save   -text "Save"   -font RioUIFont -command [list claude_key_save $w]
+	button $w.btns.clear  -text "Clear"  -font RioUIFont -command [list claude_key_clear $w] \
+		-state [expr {$stored ? "normal" : "disabled"}]
+	button $w.btns.cancel -text "Cancel" -font RioUIFont -command [list destroy $w]
+	pack $w.btns.cancel $w.btns.clear $w.btns.save -side right -padx 3
+	grid $w.prompt -row 0 -column 0 -sticky we -padx 8 -pady {8 2}
+	grid $w.e      -row 1 -column 0 -sticky we -padx 8
+	grid $w.show   -row 2 -column 0 -sticky w  -padx 6
+	grid $w.status -row 3 -column 0 -sticky we -padx 8 -pady {2 4}
+	grid $w.btns   -row 4 -column 0 -sticky e  -padx 5 -pady {2 8}
+	bind $w.e <Return> [list $w.btns.save invoke]
+	bind $w <Escape>   [list destroy $w]
+	catch {grab $w}
+	focus $w.e
+}
+proc claude_key_reveal {w} {
+	$w.e configure -show [expr {$::claude_key_show ? "" : "•"}]
+}
+proc claude_key_save {w} {
+	set key [string trim [$w.e get]]
+	if {$key eq ""} {
+		report_error "Enter an API key, or use Clear to remove the stored one."
+		return
+	}
+	rio::claude::api::set_key $key
+	destroy $w
+}
+proc claude_key_clear {w} {
+	rio::claude::api::clear_key
+	destroy $w
+}
+
 proc do_save_as {path} {
 	set resp [rio_call file.save [dict create buffer $::cur path $path]]
 	if {![dict get $resp ok]} {
@@ -931,6 +1018,14 @@ menu .m.view -tearoff 0
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
 .m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
+menu .m.settings -tearoff 0
+.m add cascade -label Settings -menu .m.settings
+.m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \
+	-value echo   -command apply_provider
+.m.settings add radiobutton -label "Agent: Claude (API key)"  -variable ::agent_provider \
+	-value claude -command apply_provider
+.m.settings add separator
+.m.settings add command -label "Claude API Key…" -command claude_key_dialog
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
@@ -1006,6 +1101,7 @@ activate $::rio::ops::default
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
+apply_provider             ;# activate the default agent provider (echo) + name it
 foreach f $argv {
 	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
 }

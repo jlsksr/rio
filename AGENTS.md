@@ -772,9 +772,16 @@ config-as-data), and `plugins/claude/transport.tcl` (the real tcltls streaming
 transport, CA-verified). Tests stream a *faked* Claude reply all the way through
 the real agent loop. The earlier **claude.ai OAuth prototype was removed** (faces,
 PKCE/loopback plumbing, and the Claude-Code system spoof) — see the *Rejected*
-note above; rio ships only the sanctioned API-key path. **Remaining:** wire the
-GUI — a *Settings ▸ Claude API key* entry + provider selection (echo ↔ claude-api)
-— then a real key and a real message (the dogfood moment).
+note above; rio ships only the sanctioned API-key path. The **GUI is now wired**
+(slice 3): a *Settings* menu selects the live provider (echo ↔ claude-api) and
+names it in the chat header, and *Settings ▸ Claude API Key…* opens a modal that
+stores/clears the key through the face's 0600 secret store (the dialog never holds
+the key itself). Selecting Claude with no key isn't blocked — the first turn then
+surfaces the face's actionable `not_configured` error, pointing back to Settings.
+The headless GUI smoke drives all of this against a throwaway secret dir (provider
+swap, the no-key error path, and key save/clear incl. the 0600 mode). **Remaining:**
+a real key and a real message against `api.anthropic.com` — the dogfood moment
+(the one step that needs the network and a paid key, so it can't be a unit test).
 
 ---
 
@@ -1106,8 +1113,20 @@ Both renderings come from the **same** region model (D13) and layout policy
   toggled by **View ▸ Agent Chat** (Ctrl+Shift+A); the core owns the conversation
   (D3), so *Clear* is `agent.reset` and the transcript could be rebuilt from
   `agent.history`. Themed via the `chat.bg`/`chat.fg` roles + `RioChatFont`, accent
-  on the speaker labels (D24). Driven by the built-in **echo provider** end-to-end
-  (no Claude/network yet); visibility + width are runtime-only (D21 later).
+  on the speaker labels (D24). Visibility + width are runtime-only (D21 later).
+
+  **GUI provider selection + Claude key entry — implemented (D26 slice 3).** A
+  **Settings** menu picks the live agent provider — *Echo (offline)* or *Claude
+  (API key)* — via `apply_provider`, which calls `rio::agent::set_provider` and
+  names the active provider in the chat header (`Agent · Echo` / `Agent · Claude`).
+  *Settings ▸ Claude API Key…* opens a small modal (`claude_key_dialog`) that is a
+  dumb view of the `claude-api` face's key store: it hands a typed key to `set_key`
+  or removes it with `clear_key` (a 0600 secret; the dialog never retains the key),
+  with a *Show key* reveal and a *Clear* enabled only when one is stored. Selecting
+  Claude with no key isn't blocked — the first turn surfaces the face's actionable
+  `not_configured` error, pointing back to Settings. The choice of provider is
+  runtime-only; the key is the durable state. The headless smoke exercises all of
+  it against a throwaway secret dir (`rio::secret::override_dir`).
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*
