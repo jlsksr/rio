@@ -1018,6 +1018,7 @@ menu .m.view -tearoff 0
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
 .m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
+.m.view add command -label "Theme: Plan 9 Acme"     -command {do_theme acme}
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
 .m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \

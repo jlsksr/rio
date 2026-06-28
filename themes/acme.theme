@@ -1,0 +1,30 @@
+# Plan 9 Acme — a rio theme (AGENTS.md D24).
+# Data only: PARSED, never executed. Rob Pike's acme palette: a pale-yellow body,
+# pale-blue tag/chrome bars, the olive border, and acme's muted-yellow selection.
+# Colours only — fonts inherit the default (acme's Lucida isn't portable).
+
+[colors]
+# The body window: acme's #FFFFEA paper-yellow, black ink, the #EEEE9E selection.
+editor.bg        = #ffffea
+editor.fg        = #000000
+editor.cursor    = #000000
+editor.selection = #eeee9e
+
+# Chrome (status, dock, panes) is the tag surface: acme's pale blue, black text.
+ui.bg            = #eaffff
+ui.fg            = #000000
+
+# Tabs as tags: the focused one bright blue, the rest muted, on the olive bar.
+tab.bar.bg       = #99994c
+tab.active.bg    = #eaffff
+tab.inactive.bg  = #cce8e8
+tab.fg           = #000000
+
+gutter.fg        = #99994c
+
+# The chat pane is just another body window — same paper-yellow.
+chat.bg          = #ffffea
+chat.fg          = #000000
+
+# Acme's dark navy, for executable/plumbed text — here the accent on labels.
+accent           = #00007f

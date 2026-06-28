@@ -385,6 +385,11 @@ ok "theme: dark status bg applied"   [.status cget -background]             "#07
 ok "theme: dark tab bar applied"     [.tabs cget -background]               "#00212b"
 ok "theme: dark chat bg applied"     [.chat.log cget -background]           "#002b36"
 
+do_theme acme
+ok "theme: acme body yellow applied" [::rio_real_t cget -background]        "#ffffea"
+ok "theme: acme tag-blue chrome"     [.status cget -background]             "#eaffff"
+ok "theme: acme selection applied"   [::rio_real_t cget -selectbackground]  "#eeee9e"
+
 do_theme default
 ok "theme: switched back to default" [::rio_real_t cget -background]        white
 ok "theme: chat bg restored"         [.chat.log cget -background]           white

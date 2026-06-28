@@ -600,10 +600,10 @@ only affects widgets created after it's set). Keeping that Tk-specific mapping i
 code is what lets theme files stay dumb, portable, and safe.
 
 The shipped **default is the plain white-bg/black-text look** (the "90s
-productivity" aesthetic); themes are opt-in. `solarized-light` and
-`solarized-dark` ship as example files under `$XDG_CONFIG_HOME/rio/themes/`. A
-theme may optionally declare `base = <theme>` and override a few roles rather
-than copy the whole set.
+productivity" aesthetic); themes are opt-in. `solarized-light`, `solarized-dark`,
+and `acme` (Plan 9's pale-yellow body / pale-blue tag bars) ship as example files
+under `$XDG_CONFIG_HOME/rio/themes/`. A theme may optionally declare
+`base = <theme>` and override a few roles rather than copy the whole set.
 
 **Scope:** theming is a **GUI concern** (D1) — fonts have no meaning in a
 terminal. But the **color-role vocabulary is shared**, so a future TUI theme can
@@ -633,8 +633,8 @@ the role table onto Tk (`apply_theme`): `font create`/`font configure` for the
 named fonts (so a size change is live), explicit per-widget colour config on the
 editor / status bar / tab bar (so a switch is live), and `option add` font
 defaults for widgets created later. A **View menu** switches Default / Solarized
-Dark / Solarized Light live, with no restart. The default theme reproduces the
-plain white-bg look. **Open:** colour-theming dialogs / the future chat pane via
+Dark / Solarized Light / Plan 9 Acme live, with no restart. The default theme
+reproduces the plain white-bg look. **Open:** colour-theming dialogs / the future chat pane via
 the option DB, and how much rio leans on `ttk` vs classic widgets — both firm up
 as the shell grows.
 
