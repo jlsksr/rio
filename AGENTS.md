@@ -26,8 +26,8 @@ Decisions carry an *Implemented* note where code now backs them.
 > **deferred**. The **agent subsystem (O4)** was deferred until a working core +
 > GUI existed; that bar is now met, so its **core-orchestration slice is being
 > built (D26)** — the `agent.*` protocol, the provider interface, an in-box Claude
-> provider over claude.ai OAuth, read + propose-edit only — while the heavy
-> run-command guardrails stay deferred (O4). The agent's first providers ride the
+> provider over the official Anthropic API (API key), read + propose-edit only —
+> while the heavy run-command guardrails stay deferred (O4). The agent's first providers ride the
 > *thin* protocol-participant transport (essentially D11), **not** the full
 > platform. The **marketplace** (O11) is deferred further still. Depth in this
 > design log ≠ priority to build.
@@ -509,7 +509,7 @@ Two kinds of state, kept separate:
 - **Session/workspace state** (machine-written): recent files, window/pane sizes,
   open tabs, per-view cursor positions — written as **JSON** by rio, not meant for
   hand-editing.
-- **Secrets** (tokens/credentials, e.g. the Claude OAuth tokens of D26): kept
+- **Secrets** (tokens/credentials, e.g. the Claude API key of D26): kept
   **out of both** the plain-text settings file and the synced session JSON, in a
   separate store under the data dir with **restrictive perms (0600)** — OS keychain
   later. They are machine-written, never hand-edited, and must not ride along in a
@@ -669,7 +669,7 @@ payloads. Keeping JSON at the boundary preserves D11's zero-cost in-process path
 Implemented in `rio-core/wire.tcl`; the socket transport (`server.tcl`) is the
 same dispatch as in-process (D2), proven by a real-socket round-trip test.
 
-### D26 — Agent subsystem, first slice: `agent.*` protocol + provider interface; in-box Claude over claude.ai OAuth
+### D26 — Agent subsystem, first slice: `agent.*` protocol + provider interface; in-box Claude over the official Anthropic API
 
 Activates the **core-orchestration slice** of the agent (D20 / O4) now that a
 working core + GUI exists. Scope is deliberately narrow; the heavy run-command
@@ -692,20 +692,17 @@ not by building a second frontend.
 the available tools, stream assistant output and tool-call requests.* Concrete
 providers absorb one service's wire specifics and are swappable by construction.
 For Claude we split along the **shared inference core ↔ auth face** line, *not* one
-provider with an internal switch: a single **shared Claude inference module** (the
-~80% that is identical either way — Messages-API request shaping, SSE stream
-parsing, mapping Claude's output + tool calls onto `agent.*` events, tool-schema
-translation) plus **two thin provider faces** over it — `claude-oauth`
-(subscription sign-in; *unofficial / best-effort*), built first, and `claude-api`
-(API key; *supported*), added later. Each face owns only its **auth strategy**, a
-request-quirk hook, and its **provenance/support label**, so the volatile OAuth
-path is an isolated artifact — separately labeled, disable-able, and patchable
-without touching `claude-api` — while the durable inference code is written once.
-Both ride the *thin* protocol-participant seam (D8 phasing): plugins
-*architecturally* (behind the interface), loaded in-process until the full plugin
-platform (D17–D19) exists, at which point they become two real plugins sharing the
-inference module with **no interface rework**. Two faces over one service also
-stress-tests the provider interface — the reason rio builds seams at all.
+monolith: a **shared Claude inference module** (Messages-API request shaping, SSE
+stream parsing, mapping Claude's output + tool calls onto `agent.*` events,
+tool-schema translation) plus a thin **provider face** over it that owns only its
+**auth strategy** (`claude-api` — the Anthropic API key, the `x-api-key` header).
+The split is not over-engineering for one face: it keeps the durable inference code
+free of any one credential scheme, so an alternative *sanctioned* auth strategy
+could be added later as another face without touching it. The face rides the *thin*
+protocol-participant seam (D8 phasing): a plugin *architecturally* (behind the
+interface), loaded in-process until the full plugin platform (D17–D19) exists, at
+which point it becomes a real plugin sharing the inference module with **no
+interface rework**.
 
 **MVP scope — read + propose-edit only.** The agent may read the project (existing
 `fs.*` / `buffer.*` ops) and *propose* edits the user applies or rejects through
@@ -713,46 +710,47 @@ the diff→apply review UX (D20). Command execution (`exec.run`) and its
 allow-list / confirmation guardrails are **out of this slice** (O4), so we get a
 useful, dogfoodable agent without the dangerous surface.
 
-**Auth — claude.ai OAuth first (`claude-oauth`), API key later (`claude-api`, the
-fallback).** `claude-oauth` authenticates with OAuth against the user's claude.ai
-subscription (browser sign-in) — the path the user wants day-to-day, built first.
-`claude-api` authenticates with a pay-per-token Anthropic **API key** and doubles
-as the documented **fallback** if the subscription flow breaks; it is a later
-addition over the same shared inference core. The **generic** half of OAuth — open
-a URL in the user's browser and catch the redirect on a loopback listener (or
-accept a pasted code) — is a small **core service** reusable by any provider/plugin
-needing browser auth; the **Claude-specific** half (PKCE, code↔token exchange, the
-inference auth/beta headers) lives in the `claude-oauth` face.
+**Auth — the official Anthropic API key (`claude-api`), and only that.** The face
+authenticates with a pay-per-token Anthropic **API key** sent as the `x-api-key`
+header against the documented Messages API — the only **sanctioned, stable,
+ToS-compliant** path for a third-party integration. The key is stored as a 0600
+secret (D21); no system prompt is forced and no beta header is sent — it is the
+plain, supported request.
 
-**Resilience — survive upstream change "without notice" (explicit requirement).**
-The subscription OAuth flow rides the same path Anthropic's own tools use, not a
-documented third-party API, so it *will* shift. The `claude-oauth` face is built to
-degrade well:
-- **Wire specifics are config data, not baked code** — endpoints, client id,
-  scopes, redirect URI, inference auth/beta headers live in an overridable config
-  block, so an upstream move is a one-line edit (or a rio update), not a rebuild.
+> **Rejected — the claude.ai subscription OAuth path (eyes open, then removed).**
+> An earlier increment prototyped signing in with the user's claude.ai
+> *subscription* via OAuth, the way Anthropic's own Claude Code does. It was
+> **removed and will not be revived.** Making the Messages API accept a
+> subscription token requires the request to **impersonate Claude Code** — a forced
+> `system` prompt *"You are Claude Code, …"* plus an `anthropic-beta: oauth-…`
+> header. That is an undocumented path that runs against Anthropic's ToS and can be
+> revoked without notice. **rio will not ship code or architecture that depends on
+> violating a SaaS provider's ToS** — it sheds a bad light on the project and rests
+> on a foundation we don't control. Any future alternate auth must be a *sanctioned*
+> mechanism. (The generic browser/PKCE/loopback plumbing built for that path was
+> removed with it; nothing in the supported API path needs it.)
+
+**Resilience.** The API path is documented and stable, so the "break without
+notice" pressure is far lower than the rejected OAuth path faced — but the same
+discipline still applies and is cheap:
+- **Wire specifics are config data, not baked code** — endpoint, model, API
+  version live in an overridable config block, so a model bump or version change is
+  a one-line edit, not a rebuild.
 - **Failures are classified and actionable, never silent** — distinct,
-  plain-language `agent.error` states for *not-signed-in / token-expired* ("Sign in
-  to Claude"), *auth rejected — 401/403* ("re-authenticate; the sign-in flow may
-  have changed"), *network/TLS*, and the break-without-notice case *unexpected
-  response shape* ("Claude replied in a way rio didn't expect; the integration may
-  need an update") — each with the raw detail behind a toggle and a pointer to
-  where to update/report. Always name the next action.
+  plain-language `agent.error` states for *not-configured* ("add a key in Settings ▸
+  Claude API key"), *auth rejected — 401/403* ("check your API key"), *rate-limited
+  — 429*, *server — 5xx*, *network/TLS*, and the catch-all *unexpected response
+  shape* ("the integration may need an update") — each enriched with the API's own
+  error detail. Always name the next action.
 - **Fail closed and contained** — a provider blow-up surfaces as `agent.error`
   (D10 async, D20 guardrails); the chat pane stays usable and editor/git are
   untouched.
-- **Token lifecycle** — access + refresh token + expiry stored as secrets (D21);
-  refresh proactively; on refresh failure clear stale tokens and prompt a fresh
-  sign-in rather than looping.
-- **Honest provenance** — at setup, state plainly that this uses the claude.ai
-  subscription sign-in and that an outage is most likely an upstream change.
 
 **Why:** lands a real, dogfoodable agent on the seam we already designed (D8/D20)
 without building the deferred plugin platform; the read-only MVP defers the
-dangerous guardrail work; and treating every volatile detail as quarantined,
-swappable *data* — plus loud, actionable failure modes — is what lets the Claude
-integration outlive the upstream churn it is guaranteed to face. MCP alignment of
-the provider and agent-tool interfaces remains open (O12).
+dangerous guardrail work; and shipping only the **sanctioned API-key path** keeps
+rio on a foundation it controls and can stand behind. MCP alignment of the provider
+and agent-tool interfaces remains open (O12).
 
 **Status:** core slice **implemented** — `rio-core/agent.tcl` (the orchestration
 loop, the provider interface, and the echo stub provider), `rio-core/ops-agent.tcl`
@@ -764,30 +762,19 @@ encoder. The streaming model is verified both in-process and over the socket
 *broadcast* (the same loop, D2). The **GUI chat pane** (slice 2) is implemented too
 — the right-hand `chat` column as a dumb view over the event stream, driven
 end-to-end by the echo provider (see the "GUI agent chat pane — implemented" note
-under O2). The **generic OAuth plumbing** (slice 3, step 1) is in place and tested,
-with no Anthropic network yet: a secrets store (`rio-core/secret.tcl` — 0600 files
-under the data dir, apart from settings/session) and the reusable browser-sign-in
-service (`rio-core/oauth.tcl` — PKCE/RFC 7636 codes, a one-shot loopback redirect
-catcher, and browser-open). The **shared Claude inference core + the `claude-oauth`
-face** (step 2) are implemented and tested **offline** behind transport seams:
-`plugins/claude/inference.tcl` (request shaping, the SSE→`agent.*` mapping, and
-HTTP-status error classification per D26) and `plugins/claude/oauth-face.tcl` (the
-PKCE→token-exchange→secret flow as config-as-data, plus the provider). Tests
-stream a *faked* Claude reply all the way through the real agent loop and drive
-the sign-in with a fake exchange. The Claude config is now **verified** against
-the live Claude Code flow (step 3a): client id, endpoints, scopes, and the **JSON**
-token exchange. Two user-authorized facts are baked in, eyes open: (1) sign-in is
-**paste-a-code** — Anthropic's hosted callback returns the code on a page the user
-copies back (a seamless localhost redirect isn't available for this client, so the
-generic loopback catcher stays unused by Claude); (2) OAuth inference **requires
-identifying as Claude Code** — the `system` spoof *"You are Claude Code,
-Anthropic's official CLI for Claude."* plus `anthropic-beta: oauth-2025-04-20`.
-That impersonation likely runs against Anthropic's ToS and may break or get the
-token revoked without notice — which is exactly what the resilience (config-as-data
-+ classified errors) is for; the `claude-api` face is the clean, spoof-free
-fallback. **Remaining (step 3):** the real tcltls streaming/token transports, then
-wiring *Sign in to Claude* + provider selection into the GUI and a real sign-in;
-`claude-api` later.
+under O2). The supporting **secrets store** (`rio-core/secret.tcl` — 0600 files
+under the data dir, apart from settings/session) is in place and tested. The
+**shared Claude inference core + the `claude-api` face** are implemented and tested
+**offline** behind a transport seam: `plugins/claude/inference.tcl` (request
+shaping, the SSE→`agent.*` mapping, and HTTP-status error classification per D26),
+`plugins/claude/api-face.tcl` (the `x-api-key` auth + key storage + the provider,
+config-as-data), and `plugins/claude/transport.tcl` (the real tcltls streaming
+transport, CA-verified). Tests stream a *faked* Claude reply all the way through
+the real agent loop. The earlier **claude.ai OAuth prototype was removed** (faces,
+PKCE/loopback plumbing, and the Claude-Code system spoof) — see the *Rejected*
+note above; rio ships only the sanctioned API-key path. **Remaining:** wire the
+GUI — a *Settings ▸ Claude API key* entry + provider selection (echo ↔ claude-api)
+— then a real key and a real message (the dogfood moment).
 
 ---
 

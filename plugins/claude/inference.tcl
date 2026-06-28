@@ -4,9 +4,10 @@
 # shaping the Messages-API request, parsing the streaming SSE response, mapping
 # Claude's output onto the agent provider vocabulary (post delta/tool/done/error,
 # see rio-core/agent.tcl), and classifying failures into helpful, actionable
-# messages (the D26 resilience requirement). The two auth faces (claude-oauth,
-# claude-api) call infer with their own auth header + config; nothing here knows
-# how the credential was obtained.
+# messages (the D26 resilience requirement). The auth face (claude-api) calls
+# infer with its own auth header + config; nothing here knows how the credential
+# was obtained — the split keeps room for other auth strategies without rewriting
+# this core.
 #
 # The network itself is a seam: infer is handed a `transport` command, so this
 # module is fully testable against canned SSE bytes with no HTTPS (the real
@@ -24,8 +25,8 @@ namespace eval rio::claude {
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
 # messages_url, anthropic_version, anthropic_beta, model, max_tokens, ?system?.
-# `auth` is a {header value} pair the face supplies (Authorization {Bearer ..} or
-# x-api-key ..). `transport` is `{*}$transport request on_chunk on_done`:
+# `auth` is a {header value} pair the face supplies (x-api-key <key> for the
+# API face). `transport` is `{*}$transport request on_chunk on_done`:
 #   request  = {url, headers, body}
 #   on_chunk = invoked with each response body chunk (bytes)
 #   on_done  = invoked {status err}: HTTP status (0 = couldn't connect), err text
@@ -37,8 +38,10 @@ proc rio::claude::infer {conf conversation auth transport post} {
 	set buf($sid) "" ; set raw($sid) "" ; set cb($sid) $post ; set fin($sid) 0
 	set headers [list \
 		Content-Type      application/json \
-		anthropic-version [dict get $conf anthropic_version] \
-		anthropic-beta    [dict get $conf anthropic_beta]]
+		anthropic-version [dict get $conf anthropic_version]]
+	if {[dict exists $conf anthropic_beta] && [dict get $conf anthropic_beta] ne ""} {
+		lappend headers anthropic-beta [dict get $conf anthropic_beta]
+	}
 	lappend headers {*}$auth
 	set req [dict create \
 		url     [dict get $conf messages_url] \
@@ -167,7 +170,7 @@ proc rio::claude::_classify {status raw} {
 		if {[dict exists $d error message]} { set detail ": [dict get $d error message]" }
 	}
 	if {$status == 401 || $status == 403} {
-		return [list auth "Claude rejected the sign-in (HTTP $status) — re-authenticate; the sign-in flow may have changed$detail"]
+		return [list auth "Claude rejected the credentials (HTTP $status) — check your API key (Settings ▸ Claude API key)$detail"]
 	} elseif {$status == 429} {
 		return [list rate_limit "Rate limited by Claude (HTTP $status) — wait a moment and retry$detail"]
 	} elseif {$status >= 500} {

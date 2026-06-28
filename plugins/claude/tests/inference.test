@@ -11,7 +11,6 @@ source [file join [file dirname [info script]] .. inference.tcl]
 set ::conf [dict create \
 	messages_url      https://api.test/v1/messages \
 	anthropic_version 2023-06-01 \
-	anthropic_beta    oauth-2025-04-20 \
 	model             claude-test \
 	max_tokens        1024]
 
@@ -24,7 +23,7 @@ proc fake_transport {chunks status err req on_chunk on_done} {
 }
 # Collect the provider `post` calls.
 proc collect_post {args} { lappend ::posts $args }
-proc run_infer {chunks status {err ""} {auth {Authorization {Bearer T}}}} {
+proc run_infer {chunks status {err ""} {auth {x-api-key T}}} {
 	set ::posts {}
 	rio::claude::infer $::conf {{role user text hi}} $auth \
 		[list fake_transport $chunks $status $err] collect_post
@@ -101,7 +100,7 @@ test claude-http-401 {a 401 is an actionable auth error, with the API's detail} 
 	run_infer [list $body] 401
 	set t [terminal]
 	list [lindex $t 0] [lindex $t 1] \
-		[string match {*HTTP 401*re-authenticate*invalid bearer token*} [lindex $t 2]]
+		[string match {*HTTP 401*check your API key*invalid bearer token*} [lindex $t 2]]
 } -result {error auth 1}
 
 test claude-http-429 {a 429 is a rate-limit error} -body {
@@ -134,5 +133,22 @@ test claude-auth-header-passed {the face's auth pair is sent as a request header
 	rio::claude::infer $::conf {{role user text hi}} {x-api-key SEKRET} capture_tp collect_post
 	expr {[lsearch -exact $::seen x-api-key] >= 0 && [lsearch -exact $::seen SEKRET] >= 0}
 } -result 1
+
+# anthropic-beta is OPTIONAL: omitted unless config sets it (the API path sends
+# none; a beta header is only added when a face asks for one).
+test claude-beta-omitted {no anthropic-beta header when config doesn't set one} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
+	rio::claude::infer $::conf {{role user text hi}} {x-api-key K} capture_tp collect_post
+	dict exists $::seen anthropic-beta
+} -result 0
+
+test claude-beta-included {anthropic-beta is sent when config sets it} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
+	set c [dict merge $::conf {anthropic_beta some-beta-2025}]
+	rio::claude::infer $c {{role user text hi}} {x-api-key K} capture_tp collect_post
+	dict get $::seen anthropic-beta
+} -result some-beta-2025
 
 cleanupTests

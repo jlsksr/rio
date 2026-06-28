@@ -26,7 +26,7 @@ namespace eval rio::agent {
 }
 
 # Swap the active provider — a command prefix obeying the contract in _run. The
-# Claude faces (D26: claude-oauth / claude-api) register theirs here.
+# Claude face (D26: claude-api) registers its provider here.
 proc rio::agent::set_provider {cmd} {
 	variable provider
 	set provider $cmd

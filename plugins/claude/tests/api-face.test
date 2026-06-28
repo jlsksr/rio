@@ -1,0 +1,89 @@
+# Tests for the claude-api face (rio::claude::api, AGENTS.md D26): API-key auth,
+# the x-api-key header (no oauth beta, no forced system prompt), key storage, and
+# end-to-end streaming through the real agent loop. Network stays a seam (a fake
+# SSE transport), so the whole flow runs offline.
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. .. .. rio-core core.tcl]
+source [file join [file dirname [info script]] .. inference.tcl]
+source [file join [file dirname [info script]] .. transport.tcl]
+source [file join [file dirname [info script]] .. api-face.tcl]
+
+# Keep secrets in a throwaway dir.
+set rio::secret::override_dir [file join [::tcltest::temporaryDirectory] rioapi-[clock clicks]]
+
+proc collect_post {args} { lappend ::posts $args }
+proc collect_ev {ev} {
+	lappend ::evs $ev
+	switch -- [dict get $ev event] { agent.message - agent.error { set ::fin done } }
+}
+
+# --- key storage + the not-configured guard ----------------------------------
+
+test claude-api-not-configured {with no key the provider posts not_configured} -setup {
+	rio::claude::api::clear_key
+} -body {
+	set ::posts {}
+	rio::claude::api::provider {{role user text hi}} {} collect_post
+	lindex [lindex $::posts 0] 1
+} -result not_configured
+
+test claude-api-set-clear {set_key stores the key; clear_key forgets it} -setup {
+	rio::claude::api::clear_key
+} -body {
+	set a [rio::claude::api::configured]
+	rio::claude::api::set_key sk-ant-XYZ
+	set b [rio::claude::api::configured]
+	rio::claude::api::clear_key
+	list $a $b [rio::claude::api::configured]
+} -result {0 1 0}
+
+# --- the request: x-api-key, and none of the OAuth baggage -------------------
+
+test claude-api-request {the request carries x-api-key and no oauth beta / no forced system} -setup {
+	rio::claude::api::set_key sk-ant-XYZ
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set ::rio::claude::api::transport capture_tp
+} -body {
+	rio::claude::api::provider {{role user text hi}} {} collect_post
+	set hdrs [dict get $::seen headers]
+	set body [json::json2dict [dict get $::seen body]]
+	list [dict get $hdrs x-api-key] \
+		[dict exists $hdrs anthropic-beta] \
+		[dict exists $body system]
+} -cleanup {
+	set ::rio::claude::api::transport rio::claude::http::stream
+	rio::claude::api::clear_key
+} -result {sk-ant-XYZ 0 0}
+
+# --- end to end: a configured provider streams through the real agent loop ----
+
+set ::api_sse ""
+append ::api_sse "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi there\"}}\n\n"
+append ::api_sse "data: {\"type\":\"message_stop\"}\n\n"
+
+proc fake_sse {sse status req on_chunk on_done} { {*}$on_chunk $sse ; {*}$on_done $status "" }
+
+test claude-api-provider-streams {a configured provider streams a Claude reply via agent.send} -setup {
+	rio::claude::api::set_key sk-ant-XYZ
+	set ::rio::claude::api::transport [list fake_sse $::api_sse 200]
+	rio::agent::set_provider rio::claude::api::provider
+	rio::core::call agent.reset {}
+} -body {
+	set ::evs {} ; set ::fin {}
+	rio::core::call_stream agent.send {text {say hi}} collect_ev
+	set t [after 3000 {set ::fin timeout}] ; vwait ::fin ; after cancel $t
+	set reply ""
+	foreach ev $::evs { if {[dict get $ev event] eq "agent.message"} { set reply [dict get $ev params text] } }
+	list $::fin $reply
+} -cleanup {
+	rio::agent::set_provider ::rio::agent::echo_provider
+	set ::rio::claude::api::transport rio::claude::http::stream
+	rio::claude::api::clear_key
+} -result {done {Hi there}}
+
+file delete -force $rio::secret::override_dir
+cleanupTests

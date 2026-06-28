@@ -1,0 +1,81 @@
+# Tests for the real HTTPS transports (rio::claude::http, AGENTS.md D26). TLS and
+# Anthropic are not involved: the transports are driven over plain HTTP against a
+# local one-shot server, which is enough to exercise the http plumbing — the
+# streaming handler, the buffered POST, the request body, and the status mapping.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. transport.tcl]
+
+# A one-shot HTTP/1.1 server: reads the request (capturing it in ::srv_req),
+# then replies with the given status + body and closes.
+proc http_accept {status body chan addr port} {
+	fileevent $chan readable [list http_handle $status $body $chan]
+}
+proc http_handle {status body chan} {
+	fconfigure $chan -translation crlf -blocking 1
+	set reqline [gets $chan]
+	set headers {} ; set clen 0
+	while {[gets $chan line] >= 0 && $line ne ""} {
+		lappend headers $line
+		if {[regexp -nocase {^Content-Length:\s*(\d+)} $line -> n]} { set clen $n }
+	}
+	set reqbody ""
+	if {$clen > 0} { fconfigure $chan -translation binary ; set reqbody [read $chan $clen] }
+	set ::srv_req [dict create line $reqline headers $headers body $reqbody]
+	fconfigure $chan -translation crlf
+	puts $chan "HTTP/1.1 $status [expr {$status == 200 ? {OK} : {Error}}]"
+	puts $chan "Content-Type: text/event-stream"
+	puts $chan "Content-Length: [string length $body]"
+	puts $chan "Connection: close"
+	puts $chan ""
+	fconfigure $chan -translation binary
+	puts -nonewline $chan $body ; flush $chan ; close $chan
+}
+proc serve {status body} { socket -myaddr 127.0.0.1 -server [list http_accept $status $body] 0 }
+proc port_of {srv} { lindex [fconfigure $srv -sockname] 2 }
+
+proc tchunk {c} { append ::tchunks $c }
+proc tdone {status err} { set ::tdone [list $status $err] }
+proc run_stream {url body} {
+	set ::tchunks "" ; set ::tdone ""
+	rio::claude::http::stream \
+		[dict create url $url headers {Content-Type application/json} body $body] tchunk tdone
+	set t [after 5000 {set ::tdone TIMEOUT}] ; vwait ::tdone ; after cancel $t
+}
+
+set ::sse "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+
+test transport-headers-split {Content-Type is split out; other headers pass through} -body {
+	set rest [rio::claude::http::_headers {Content-Type application/json x-api-key K} ct]
+	list $ct $rest
+} -result {application/json {x-api-key K}}
+
+test transport-stream-200 {a streamed 200 delivers the body to on_chunk and ends ok} -setup {
+	set srv [serve 200 $::sse]
+} -body {
+	run_stream "http://127.0.0.1:[port_of $srv]/v1/messages" {{"q":1}}
+	list $::tdone $::tchunks
+} -cleanup { close $srv } -result [list {200 {}} $::sse]
+
+test transport-stream-sends-body {the streamed POST carries our body to the server} -setup {
+	set srv [serve 200 $::sse]
+} -body {
+	run_stream "http://127.0.0.1:[port_of $srv]/v1/messages" {{"hello":"world"}}
+	list [string match "POST /v1/messages*" [dict get $::srv_req line]] [dict get $::srv_req body]
+} -cleanup { close $srv } -result {1 {{"hello":"world"}}}
+
+test transport-stream-401 {a non-200 is reported with its status (body still streamed)} -setup {
+	set srv [serve 401 {{"type":"error","error":{"message":"bad token"}}}]
+} -body {
+	run_stream "http://127.0.0.1:[port_of $srv]/v1/messages" {{}}
+	lindex $::tdone 0
+} -cleanup { close $srv } -result 401
+
+test transport-connect-fail {a connection that can't be made is status 0} -body {
+	set srv [serve 200 x] ; set p [port_of $srv] ; close $srv   ;# free, then nobody listening
+	run_stream "http://127.0.0.1:$p/" {{}}
+	lindex $::tdone 0
+} -result 0
+
+cleanupTests
