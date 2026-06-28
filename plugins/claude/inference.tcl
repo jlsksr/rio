@@ -117,7 +117,15 @@ proc rio::claude::_content_json {m} {
 	return "\[[join $blocks ,]\]"
 }
 
-# A JSON string literal: escape ", \, and all control characters (RFC 8259).
+# A JSON string literal: escape ", \, and the control characters (RFC 8259), and
+# \u-escape every NON-ASCII character so the whole request body is pure ASCII.
+# That sidesteps request-body transcoding entirely — ASCII bytes are invariant
+# under whatever encoding the HTTP layer applies — which is what a tool_result
+# carrying a file's non-ASCII text (arrows, box-drawing, an emoji) needs to make
+# it to the API intact. Astral codepoints (> U+FFFF) become a UTF-16 surrogate
+# pair, the only way JSON can spell them; a Tcl build that already hands us
+# surrogate halves (TCL_UTF_MAX=3) falls through the BMP branch and pairs up the
+# same way.
 proc rio::claude::_jstr {s} {
 	set out ""
 	foreach ch [split $s ""] {
@@ -135,6 +143,12 @@ proc rio::claude::_jstr {s} {
 				13 { append out {\r} }
 				default { append out [format {\u%04x} $code] }
 			}
+		} elseif {$code > 0xffff} {
+			set c [expr {$code - 0x10000}]
+			append out [format {\u%04x\u%04x} \
+				[expr {0xd800 + ($c >> 10)}] [expr {0xdc00 + ($c & 0x3ff)}]]
+		} elseif {$code > 0x7e} {
+			append out [format {\u%04x} $code]
 		} else {
 			append out $ch
 		}

@@ -100,6 +100,26 @@ test claude-jstr-escapes {the JSON string escaper handles quotes, backslashes, c
 	rio::claude::_jstr "a\"b\\c\nd\te"
 } -result {"a\"b\\c\nd\te"}
 
+test claude-jstr-nonascii {non-ASCII is escaped: the literal is ASCII-only and round-trips} -body {
+	set j [rio::claude::_jstr "a→b…"]
+	list [string is ascii $j] [json::json2dict $j]
+} -result {1 a→b…}
+
+test claude-jstr-astral {an astral codepoint escapes to a UTF-16 surrogate pair} -body {
+	# U+1F600 the way a file read delivers it (4 UTF-8 bytes F0 9F 98 80) — on a
+	# narrow Tcl build a surrogate pair, on a wide build one codepoint; both must
+	# spell 😀 in the body.
+	set ch [encoding convertfrom utf-8 "\xF0\x9F\x98\x80"]
+	set j [rio::claude::_jstr "x$ch"]
+	list [string is ascii $j] [string match {*\\ud83d\\ude00*} $j]
+} -result {1 1}
+
+test claude-request-ascii-body {a tool_result with non-ASCII text yields a pure-ASCII body} -body {
+	set convo [list [dict create role user content [list \
+		[dict create type tool_result tool_use_id t1 content "arrow → and 日本 text" is_error 0]]]]
+	string is ascii [rio::claude::_request_json $::conf $convo {}]
+} -result 1
+
 # --- streaming SSE -> events -------------------------------------------------
 
 test claude-stream-text {text deltas accumulate, ending with done} -body {
