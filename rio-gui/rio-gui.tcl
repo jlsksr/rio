@@ -610,6 +610,41 @@ proc csash_drag {} {
 	.chat configure -width $w
 }
 
+# Drag the composer sash to resize the input box. Its height is in text lines, so we
+# anchor on the press (start height + pointer y) and convert the vertical drag to a
+# line delta via the font's line height — dragging up grows the input, down shrinks
+# it. Clamped so it can't vanish or eat the whole transcript.
+proc isash_press {y} {
+	set ::isash_y0 $y
+	set ::isash_h0 [.chat.input cget -height]
+}
+proc isash_drag {y} {
+	set lh [font metrics [.chat.input cget -font] -linespace]
+	if {$lh < 1} { set lh 1 }
+	set h [expr {$::isash_h0 + int(double($::isash_y0 - $y) / $lh + 0.5)}]
+	if {$h < 1} { set h 1 }
+	set max [chat_input_max]
+	if {$h > $max} { set h $max }
+	.chat.input configure -height $h
+}
+# The most lines the input may take while leaving the sash and a few transcript
+# lines on screen — otherwise a maxed input squeezes the divider out of reach.
+proc chat_input_max {} {
+	set lh [font metrics [.chat.input cget -font] -linespace]
+	if {$lh < 1} { set lh 1 }
+	set avail [expr {[winfo height .chat] - [winfo height .chat.hdr] \
+		- [winfo height .chat.send] - [winfo reqheight .chat.isash] - 3 * $lh}]
+	set m [expr {$avail / $lh}]
+	if {$m < 1} { set m 1 }
+	return $m
+}
+# Re-clamp on layout changes (chat shown, window resized) so the input never hides
+# the sash — and a previously over-tall input shrinks back into reach on its own.
+proc clamp_input_height {} {
+	set m [chat_input_max]
+	if {[.chat.input cget -height] > $m} { .chat.input configure -height $m }
+}
+
 # ---------------------------------------------------------------------------
 # Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
 # one provider at a time: the offline `echo` stub (the default — proves the
@@ -895,8 +930,13 @@ proc apply_theme {theme} {
 		-insertbackground [dict get $c chat.fg]
 	.chat.send configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	.chat.log tag configure agent-label -font RioUIFont -foreground [dict get $c accent]
-	.chat.log tag configure you-label   -font RioUIFont -foreground [dict get $c chat.fg]
+	# Speaker headers get a full-width highlight band so each turn is easy to find in
+	# the log (diffs, tool lines, replies). The label's trailing newline is in the tag
+	# range, so the background fills to the right edge. Two tints keep You vs Agent apart.
+	.chat.log tag configure agent-label -font RioUIFont -foreground [dict get $c accent] \
+		-background [dict get $c ui.bg] -spacing1 4 -spacing3 2
+	.chat.log tag configure you-label   -font RioUIFont -foreground [dict get $c chat.fg] \
+		-background [dict get $c editor.selection] -spacing1 4 -spacing3 2
 	.chat.log tag configure error-label -font RioUIFont -foreground "#cc0000"
 	.chat.log tag configure tool        -font RioUIFont -foreground [dict get $c gutter.fg]
 	.chat.log tag configure tool-error  -font RioUIFont -foreground "#cc0000"
@@ -908,6 +948,7 @@ proc apply_theme {theme} {
 	.chat.approve.yes configure -font RioUIFont
 	.chat.approve.no  configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
+	.chat.isash configure -background [dict get $c tab.bar.bg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
@@ -1036,6 +1077,12 @@ text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 button .chat.send -text "Send" -font {monospace 9} -command chat_send
 bind .chat.input <Return>       { chat_send ; break }
 bind .chat.input <Shift-Return> { %W insert insert "\n" ; break }
+# A thin draggable divider between the transcript and the composer, so the user can
+# size the input box (mirror of .sash/.csash, but horizontal).
+frame .chat.isash -height 5 -cursor sb_v_double_arrow -background "#bbbbbb"
+bind .chat.isash <ButtonPress-1> { isash_press %Y }
+bind .chat.isash <B1-Motion>     { isash_drag %Y }
+bind .chat <Configure> clamp_input_height
 # Approve/Reject bar for a proposed edit (packed on demand by approve_bar; D26 s5).
 frame .chat.approve -background white
 label .chat.approve.lbl -text "Apply this edit?" -anchor w -font {monospace 9} \
@@ -1051,8 +1098,10 @@ text .chat.log -wrap word -state disabled -font {monospace 11} -cursor "" \
 	-background white -foreground black \
 	-yscrollcommand {autoscroll .chat.sb .chat.log}
 scrollbar .chat.sb -command {.chat.log yview}
-.chat.log tag configure you-label   -font {monospace 9}
-.chat.log tag configure agent-label -font {monospace 9}
+.chat.log tag configure you-label   -font {monospace 9} -background "#c3d9ff" \
+	-spacing1 4 -spacing3 2
+.chat.log tag configure agent-label -font {monospace 9} -background "#dddddd" \
+	-spacing1 4 -spacing3 2
 .chat.log tag configure error-label -font {monospace 9}
 .chat.log tag configure tool        -font {monospace 9} -foreground "#888888"
 .chat.log tag configure tool-error  -font {monospace 9} -foreground "#cc0000"
@@ -1061,6 +1110,7 @@ scrollbar .chat.sb -command {.chat.log yview}
 pack .chat.hdr   -side top    -fill x
 pack .chat.send  -side bottom -fill x
 pack .chat.input -side bottom -fill x
+pack .chat.isash -side bottom -fill x
 pack .chat.log   -side left   -fill both -expand 1
 # .chat.sb is packed on demand by autoscroll (hidden when the transcript fits).
 
