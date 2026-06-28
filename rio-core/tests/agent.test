@@ -180,6 +180,14 @@ test agent-tool-confined {fs_read inside the project succeeds; an escaping path 
 	rio::project::close
 } -result {1 secret 0 1}
 
+test agent-tool-no-project {a path read with no project open names that reason, not "outside"} -setup {
+	rio::project::close
+} -body {
+	set r [rio::agent::tools::run fs_read [dict create path AGENTS.md]]
+	list [dict get $r ok] [dict get $r summary] \
+		[string match {*No project is open*} [dict get $r content]]
+} -result {0 {no project open} 1}
+
 # --- wire encoding (D11/D25) -------------------------------------------------
 
 test agent-delta-wire {an agent.delta event encodes to JSON} -body {

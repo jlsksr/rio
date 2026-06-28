@@ -68,9 +68,8 @@ proc rio::agent::tools::run {name input} {
 	# Confine path inputs to the project root — the read-only "safe half" must not
 	# become arbitrary host-filesystem read access (D26 containment).
 	if {[dict exists $input path]} {
-		if {[catch {_confine [dict get $input path]} msg]} {
-			return [_err $msg "refused: outside project"]
-		}
+		set guard [_confine [dict get $input path]]
+		if {[dict get $guard ok] == 0} { return $guard }
 	}
 	set out [rio::core::call $op $input]
 	set resp [dict get $out response]
@@ -81,15 +80,18 @@ proc rio::agent::tools::run {name input} {
 	return [_format $name [dict get $resp result]]
 }
 
-# Verify a path resolves inside the open project root. Raises when it escapes (an
-# absolute path elsewhere, or ../ traversal) so run() can turn it into a refusal.
+# Check a path input against the project root. Returns an ok=1 dict to proceed, or
+# an ok=0 _err to short-circuit run() — with a summary that names the real reason:
+# no project open vs. a path escaping the root (each is a distinct refusal).
 proc rio::agent::tools::_confine {path} {
-	set abs   [rio::project::resolve $path]
-	set rootn [file normalize [rio::project::resolve ""]]   ;# raises if no project open
-	if {$abs ne $rootn && [string first "$rootn/" "$abs/"] != 0} {
-		error "path is outside the open project: $path"
+	if {[catch {file normalize [rio::project::resolve ""]} rootn]} {
+		return [_err "No project is open — open a folder first." "no project open"]
 	}
-	return $abs
+	set abs [rio::project::resolve $path]
+	if {$abs ne $rootn && [string first "$rootn/" "$abs/"] != 0} {
+		return [_err "path is outside the open project: $path" "refused: outside project"]
+	}
+	return [dict create ok 1]
 }
 
 # Shape an op result into {ok, content, summary}, applying the size cap.
