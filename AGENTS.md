@@ -846,6 +846,33 @@ the prepare refusals, `fs.write` incl. parent-dir creation) and the Claude suite
 against `api.anthropic.com`, and the exposed-as-config UI for the write policy /
 the run-command tool with its allow-list guardrails (O4).
 
+### D27 — UI iconography: monochrome Unicode glyphs (no raster/`.ico`, no emoji)
+
+The handful of iconic affordances in the GUI use **monochrome Unicode symbol
+glyphs**, not raster icons. This is already the established idiom — the tab close
+`×`, the `·` separators, `→`, and the `•` key mask are all glyphs — so it is a
+decision to *keep* and lean into, not a new mechanism. Glyphs cost zero assets,
+inherit the theme foreground (they color and recolor for free through the D24
+`apply_theme` roles), and scale with the font. The one constraint: a glyph must
+exist in common monospace fonts, so we stick to widely-covered code points
+(`⌕ ▶ ▸ ▾ ☰ ● ○`) and fall back to a plain text label where coverage is doubtful.
+
+**Rejected — classic Win95 `.ico`.** Tk 8.6's core `photo` reads PNG and GIF
+natively but **not** `.ico` (here `image types` is only `bitmap photo` — no Img
+extension). Loading `.ico` would need the **Img/tkimg** runtime dependency (or a
+build-time convert), against rio's dependency-light grain; the classic
+Microsoft icon set also isn't freely redistributable; and raster doesn't scale
+with font size / HiDPI. **Rejected — color emoji:** Tk 8.6 has no color-emoji
+rendering (tofu or monochrome), and they clash with the Acme/monospace look.
+
+**Escape hatch (if true pixel icons are ever wanted):** ship **PNGs through core
+`photo`** (alpha works in 8.6) — never pull in Img just to read `.ico`.
+
+**Why:** matches the existing look and the from-scratch/no-dependency ethos, and
+themes for free. Implementation across the remaining spots (search, run/send,
+file-tree expand/collapse, modified-dot) is **deferred** — this entry only fixes
+the direction.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
