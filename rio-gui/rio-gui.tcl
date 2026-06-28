@@ -801,13 +801,15 @@ proc save_as_dialog {} {
 	if {$p eq ""} { return 0 }
 	return [do_save_as $p]
 }
-# Returns 1 if it is safe to throw away the active buffer.
+# Returns 1 if it is safe to close the active buffer. On a modified buffer we ask
+# to save (Yes), not to discard: Yes saves then closes (abort if the save fails),
+# No closes without saving, Cancel keeps the buffer open.
 proc maybe_discard {} {
 	if {![bufget $::cur modified]} { return 1 }
-	switch -- [tk_messageBox -icon question -type yesnocancel -title rio \
-			-message "Discard unsaved changes to [tab_name $::cur]?"] {
-		yes    { return 1 }
-		no     { return [do_save] }
+	switch -- [tk_messageBox -icon question -type yesnocancel -default yes -title rio \
+			-message "[tab_name $::cur] has unsaved changes. Save before closing?"] {
+		yes    { return [do_save] }
+		no     { return 1 }
 		cancel { return 0 }
 	}
 }
