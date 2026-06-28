@@ -367,10 +367,13 @@ proc pump_until {cond {ms 3000}} {
 ok "provider: default is echo"        $::agent_provider echo
 apply_provider
 ok "provider: echo wired in core"     [set rio::agent::provider] rio::agent::echo_provider
-ok "provider: header names echo"      [.chat.hdr.title cget -text] "Agent · Echo"
+ok "status: names echo agent"         [.chat.status cget -text] "Echo   ·   review edits"
 set ::agent_provider claude ; apply_provider
 ok "provider: claude wired in core"   [set rio::agent::provider] rio::claude::api::provider
-ok "provider: header names claude"    [.chat.hdr.title cget -text] "Agent · Claude"
+ok "status: names claude agent"       [.chat.status cget -text] "Claude   ·   review edits"
+set ::agent_auto_accept 1 ; chat_status_update
+ok "status: shows auto-accept mode"   [.chat.status cget -text] "Claude   ·   auto-accept edits"
+set ::agent_auto_accept 0 ; chat_status_update
 
 # Claude selected with no key stored: a turn must surface the face's actionable
 # not_configured error (D26) — it never reaches the network.

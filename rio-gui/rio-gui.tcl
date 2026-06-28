@@ -633,7 +633,8 @@ proc chat_input_max {} {
 	set lh [font metrics [.chat.input cget -font] -linespace]
 	if {$lh < 1} { set lh 1 }
 	set avail [expr {[winfo height .chat] - [winfo height .chat.hdr] \
-		- [winfo height .chat.send] - [winfo reqheight .chat.isash] - 3 * $lh}]
+		- [winfo height .chat.status] - [winfo height .chat.send] \
+		- [winfo reqheight .chat.isash] - 3 * $lh}]
 	set m [expr {$avail / $lh}]
 	if {$m < 1} { set m 1 }
 	return $m
@@ -660,11 +661,19 @@ set ::claude_key_show 0     ;# the key dialog's reveal toggle
 proc apply_provider {} {
 	if {$::agent_provider eq "claude"} {
 		rio::agent::set_provider rio::claude::api::provider
-		catch {.chat.hdr.title configure -text "Agent · Claude"}
 	} else {
 		rio::agent::set_provider rio::agent::echo_provider
-		catch {.chat.hdr.title configure -text "Agent · Echo"}
 	}
+	chat_status_update
+}
+
+# The chat status strip (under the Send button): which agent is live and whether
+# proposed edits auto-apply or wait for review. A spot for context-window usage
+# later. Called on provider change and on the auto-accept toggle.
+proc chat_status_update {} {
+	set agent [expr {$::agent_provider eq "claude" ? "Claude" : "Echo"}]
+	set mode  [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
+	catch {.chat.status configure -text "$agent   ·   $mode"}
 }
 
 # The Claude API key dialog (Settings ▸ Claude API Key…). A small modal that is a
@@ -930,6 +939,8 @@ proc apply_theme {theme} {
 		-insertbackground [dict get $c chat.fg]
 	.chat.send configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.chat.status configure -font RioUIFont \
+		-background [dict get $c tab.bar.bg] -foreground [dict get $c ui.fg]
 	# Speaker headers get a full-width highlight band so each turn is easy to find in
 	# the log (diffs, tool lines, replies). The label's trailing newline is in the tag
 	# range, so the background fills to the right edge. Two tints keep You vs Agent apart.
@@ -1075,6 +1086,10 @@ text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
 	-background white -foreground black -insertbackground black
 button .chat.send -text "Send" -font {monospace 9} -command chat_send
+# Status strip at the pane's very bottom: live agent + edit mode (filled by
+# chat_status_update; room for context-window usage later).
+label .chat.status -anchor w -font {monospace 9} -padx 4 -pady 2 \
+	-background "#eeeeee" -foreground "#444444"
 bind .chat.input <Return>       { chat_send ; break }
 bind .chat.input <Shift-Return> { %W insert insert "\n" ; break }
 # A thin draggable divider between the transcript and the composer, so the user can
@@ -1107,11 +1122,12 @@ scrollbar .chat.sb -command {.chat.log yview}
 .chat.log tag configure tool-error  -font {monospace 9} -foreground "#cc0000"
 .chat.log tag configure diff-add    -font {monospace 9} -foreground "#118811"
 .chat.log tag configure diff-del    -font {monospace 9} -foreground "#cc0000"
-pack .chat.hdr   -side top    -fill x
-pack .chat.send  -side bottom -fill x
-pack .chat.input -side bottom -fill x
-pack .chat.isash -side bottom -fill x
-pack .chat.log   -side left   -fill both -expand 1
+pack .chat.hdr    -side top    -fill x
+pack .chat.status -side bottom -fill x
+pack .chat.send   -side bottom -fill x
+pack .chat.input  -side bottom -fill x
+pack .chat.isash  -side bottom -fill x
+pack .chat.log    -side left   -fill both -expand 1
 # .chat.sb is packed on demand by autoscroll (hidden when the transcript fits).
 
 # A thin draggable divider between the editor and the chat pane (mirror of .sash).
@@ -1167,7 +1183,7 @@ menu .m.settings -tearoff 0
 .m.settings add command -label "Claude API Key…" -command claude_key_dialog
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
-	-command {rio::agent::set_auto_accept $::agent_auto_accept}
+	-command {rio::agent::set_auto_accept $::agent_auto_accept; chat_status_update}
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
