@@ -423,6 +423,17 @@ ok "compare: added line tagged"     [expr {[llength [.cmp.r.t tag ranges add]] >
 ok "compare: filler rows present"   [expr {[llength [.cmp.l.t tag ranges filler]] > 0 \
                                          && [llength [.cmp.r.t tag ranges filler]] > 0}] 1
 ok "compare: panes are read-only"   [list [.cmp.l.t cget -state] [.cmp.r.t cget -state]] {disabled disabled}
+ok "compare: close button present"  [winfo exists .cmp.bar.close] 1
+# Line wrap (View ▸ Wrap Lines) reaches the compare panes — they have no h-scroll.
+set ::wrap_lines 1 ; apply_wrap
+ok "compare: wrap on reaches panes"  [list [.cmp.l.t cget -wrap] [.cmp.r.t cget -wrap]] {word word}
+set ::wrap_lines 0 ; apply_wrap
+ok "compare: wrap off reaches panes" [list [.cmp.l.t cget -wrap] [.cmp.r.t cget -wrap]] {none none}
+# Opening a compare picks up the current wrap setting.
+set ::wrap_lines 1
+compare_open "x" "y" "l" "r"
+ok "compare: open honors wrap"       [.cmp.l.t cget -wrap] word
+set ::wrap_lines 0 ; apply_wrap
 # Synced scrolling keeps both panes at the same fraction.
 set ::cmp_syncing 0
 cmp_yview moveto 0.5

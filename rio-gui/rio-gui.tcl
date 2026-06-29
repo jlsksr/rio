@@ -451,6 +451,15 @@ proc apply_wrap {} {
 		::rio_real_t configure -wrap none
 		gridscroll .ed.hsb {*}[::rio_real_t xview]   ;# show only if a line overflows
 	}
+	cmp_apply_wrap
+}
+
+# The compare panes have no horizontal scrollbar, so wrap is the only way to read
+# long lines there; keep them in step with the editor's View ▸ Wrap Lines.
+proc cmp_apply_wrap {} {
+	set w [expr {$::wrap_lines ? "word" : "none"}]
+	.cmp.l.t configure -wrap $w
+	.cmp.r.t configure -wrap $w
 }
 
 # Highlight the active selector label (the inactive one recedes). Guarded so it
@@ -685,6 +694,7 @@ proc compare_open {ltext rtext llabel rlabel} {
 	set resp [rio_call diff.lines [dict create a $ltext b $rtext]]
 	set ops [expr {[dict get $resp ok] ? [dict get $resp result ops] : {}}]
 	cmp_fill $ops [split $ltext "\n"] [split $rtext "\n"]
+	cmp_apply_wrap
 	set ::compare_shown 1
 	place_dock
 	.cmp.l.t yview moveto 0
@@ -1096,6 +1106,9 @@ proc apply_theme {theme} {
 		$w tag configure filler -background [dict get $c ui.bg]
 	}
 	.cmp.sb configure -background [dict get $c ui.bg]
+	.cmp.bar configure -background [dict get $c ui.bg]
+	.cmp.bar.close configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
@@ -1219,6 +1232,12 @@ text .cmp.r.t -wrap none -state disabled -font {monospace 12} -width 40 -height 
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black -yscrollcommand {cmp_yscroll r}
 scrollbar .cmp.sb -orient vertical -command cmp_yview
+# A top bar with a clear way out — the Esc binding alone isn't discoverable, so the
+# button names the shortcut (D27: a plain × glyph, widely covered).
+frame .cmp.bar
+button .cmp.bar.close -text "× Close compare (Esc)" -font {monospace 9} -command compare_close
+pack .cmp.bar.close -side right -padx 2 -pady 1
+pack .cmp.bar -side top -fill x
 pack .cmp.l.hdr -side top -fill x ; pack .cmp.l.t -side left -fill both -expand 1
 pack .cmp.r.hdr -side top -fill x ; pack .cmp.r.t -side left -fill both -expand 1
 pack .cmp.l  -side left  -fill both -expand 1
