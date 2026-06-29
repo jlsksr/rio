@@ -492,6 +492,9 @@ proc chat_send {} {
 	set text [string trim [.chat.input get 1.0 end]]
 	if {$text eq ""} return
 	.chat.input delete 1.0 end
+	# Sending a new message abandons any proposal still awaiting a decision; the core
+	# seals the dangling tool call, so dismiss its review UI here to match (D28).
+	if {$::pending_turn ne ""} { approve_bar 0 ; compare_close }
 	chat_label you-label "You"
 	chat_log "$text\n"
 	set ::chat_turn_open 0

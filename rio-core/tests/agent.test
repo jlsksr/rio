@@ -354,6 +354,75 @@ test agent-proposal-cleared {a resolved proposal is no longer pullable} -setup {
 	list $s1 [dict get $r ok] [dict get $r error code]
 } -cleanup { rio::project::close } -result {propose false bad_request}
 
+# Every tool_use id in the conversation that has no following tool_result — the
+# shape Claude rejects (HTTP 400). Must be empty before any provider request.
+proc unanswered_tooluse {} {
+	set open {}
+	foreach m [set ::rio::agent::conversation] {
+		foreach b [dict get $m content] {
+			switch -- [dict get $b type] {
+				tool_use    { dict set open [dict get $b id] 1 }
+				tool_result { dict unset open [dict get $b tool_use_id] }
+			}
+		}
+	}
+	return [lsort [dict keys $open]]
+}
+
+test agent-send-seals-dangling-tooluse {a new turn after an undecided proposal seals the dangling tool_use} -setup {
+	set ::pdir [makeDirectory agsd]
+	makeFile "a\n" s.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path s.txt old_string a new_string b]
+	set ::wt_raw {{"path":"s.txt","old_string":"a","new_string":"b"}}
+} -body {
+	set s1 [start_write turn]                  ;# suspends at the gate — no decision
+	set dangling_before [unanswered_tooluse]   ;# the proposed edit's tool_use is open
+	set out [run_turn "never mind, hello"]     ;# send a new message instead of deciding
+	# The dangling tool_use is now answered (folded into the new user turn), the new
+	# turn completes, and the interrupted proposal is no longer pullable.
+	set stale [dict get [rio::core::call agent.proposal [dict create turn $turn]] response]
+	list $s1 [llength $dangling_before] [unanswered_tooluse] [dict get $out fin] \
+		[dict get $stale ok] [dict get $stale error code]
+} -cleanup { rio::project::close } -result {propose 1 {} done false bad_request}
+
+test agent-seal-keeps-roles-alternating {the sealed tool_result rides in the new user turn, not a separate one} -setup {
+	set ::pdir [makeDirectory agsr]
+	makeFile "a\n" s.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path s.txt old_string a new_string b]
+	set ::wt_raw {{"path":"s.txt","old_string":"a","new_string":"b"}}
+} -body {
+	start_write turn
+	run_turn "hello again"
+	# Walk the conversation: no two consecutive same-role messages (Claude requires
+	# strict alternation), and the user turn that follows the proposal carries both a
+	# tool_result and the new text.
+	set roles {} ; set sealed_turn_ok 0
+	set prevtu 0
+	foreach m [set ::rio::agent::conversation] {
+		lappend roles [dict get $m role]
+		set types {}
+		foreach b [dict get $m content] { lappend types [dict get $b type] }
+		if {$prevtu && [dict get $m role] eq "user" \
+				&& "tool_result" in $types && "text" in $types} { set sealed_turn_ok 1 }
+		set prevtu [expr {"tool_use" in $types}]
+	}
+	set alt 1
+	for {set i 1} {$i < [llength $roles]} {incr i} {
+		if {[lindex $roles $i] eq [lindex $roles [expr {$i-1}]]} { set alt 0 }
+	}
+	list $alt $sealed_turn_ok
+} -cleanup { rio::project::close } -result {1 1}
+
 test agent-proposal-stale {agent.proposal with nothing pending is a bad_request} -body {
 	set r [dict get [rio::core::call agent.proposal [dict create turn 999]] response]
 	list [dict get $r ok] [dict get $r error code]

@@ -81,15 +81,50 @@ proc rio::agent::history {} {
 	return $out
 }
 
+# Make the conversation safe to extend with a fresh turn. A turn can be abandoned
+# with unfinished tool business — suspended at the approval gate (the user typed a
+# new message instead of deciding) or stopped at the step cap — leaving an
+# assistant turn whose tool_use blocks have no tool_result. Claude rejects that on
+# the next request ("tool_use ids ... without tool_result"), so before a new turn
+# we (a) abort any turn suspended awaiting approval — its coroutine must never
+# resume into the new turn's conversation — and (b) return an "interrupted"
+# tool_result for each dangling tool_use, which `send` folds into the new user
+# message so the assistant tool_use stays immediately followed by its tool_result
+# (one user turn carrying both the results and the new text — roles still alternate).
+proc rio::agent::_seal_dangling {} {
+	variable conversation
+	variable pending
+	variable proposals
+	foreach turn [array names pending] {
+		lassign $pending($turn) co id
+		catch {rename $co {}}
+	}
+	array unset pending
+	array unset proposals
+	set last [lindex $conversation end]
+	set results {}
+	if {[llength $last] && [dict get $last role] eq "assistant"} {
+		foreach b [_blocks $last] {
+			if {[dict get $b type] eq "tool_use"} {
+				lappend results [dict create type tool_result \
+					tool_use_id [dict get $b id] \
+					content "This tool call was interrupted before it completed." is_error 1]
+			}
+		}
+	}
+	return $results
+}
+
 # Start a turn: record the user message, kick off the orchestration coroutine,
 # and return the ack {started, turn}. The turn's content arrives afterward as
 # agent.* events on `emit` (D26).
 proc rio::agent::send {text emit} {
 	variable conversation
 	variable turnseq
+	set seal [_seal_dangling]
 	set turn [incr turnseq]
 	lappend conversation [dict create role user \
-		content [list [dict create type text text $text]]]
+		content [concat $seal [list [dict create type text text $text]]]]
 	coroutine [namespace current]::_turn_$turn \
 		[namespace current]::_run $turn $emit
 	return [dict create result [dict create started true turn $turn]]

@@ -927,6 +927,20 @@ diff surface) are later enrichments; so is the D14 narrow-tier fallback from
 side-by-side to a unified diff. This first cut is the simplest honest one,
 matching how the file pane (O2) was scoped.
 
+**Conversation integrity — sealing abandoned tool calls.** Surfacing proposals
+in the compare view made it easy to *abandon* one — type a new message instead of
+deciding — which exposed a latent loop bug (D26): the assistant `tool_use` turn is
+recorded before the loop suspends at the approval gate, so a new turn left that
+`tool_use` with no `tool_result`, and Claude rejects that on the next request
+(HTTP 400, "tool_use ids ... without tool_result"; the step cap had the same
+hole). Fix (`rio::agent::_seal_dangling`, called by `send`): before a new turn,
+abort any turn suspended awaiting approval (its coroutine must never resume into
+the new conversation) and answer each dangling `tool_use` with an *interrupted*
+`tool_result`, **folded into the new user message** so the assistant `tool_use`
+stays immediately followed by its `tool_result` and roles still alternate. The
+GUI matches by dismissing a pending proposal's review UI when the user sends
+instead of deciding.
+
 **Why:** lands a genuinely useful compare/diff surface on the seam D13/D14
 already reserved, with the diff logic in core (shared with a future TUI, and a
 candidate to later back the agent's `_difftext`), while keeping the GUI a dumb
