@@ -124,16 +124,19 @@ proc rio::agent::tools::prepare_write {name input} {
 				if {$c == 0} { return [_err "old_string not found in $rel" "error: not found"] }
 				return [_err "old_string is not unique in $rel ($c matches) — add surrounding context" "error: $c matches"]
 			}
+			set newfull [string map [list $old $new] $text]
 			return [dict create ok 1 name $name path $rel diff [_difftext $old $new] \
+				original $text proposed $newfull \
 				plan [dict create kind edit abs $abs bufid [dict get $cur bufid] \
 					start [dict get $loc start] end [dict get $loc end] \
-					new $new newfull [string map [list $old $new] $text]]]
+					new $new newfull $newfull]]
 		}
 		propose_create {
 			if {![dict exists $input content]} { return [_err "propose_create requires content" "error: missing content"] }
 			if {[file exists $abs]} { return [_err "$rel already exists — use propose_edit" "error: exists"] }
 			set content [dict get $input content]
 			return [dict create ok 1 name $name path $rel diff [_difftext "" $content] \
+				original "" proposed $content \
 				plan [dict create kind create abs $abs content $content]]
 		}
 	}

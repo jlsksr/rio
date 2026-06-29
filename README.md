@@ -1,4 +1,4 @@
-# rio
+# rio — test
 
 A small, cross-platform IDE: a fast, no-nonsense text editor with first-class
 git and AI-agent integration — a desktop **GUI** today, a **terminal** frontend
@@ -26,14 +26,18 @@ Everything below runs today:
 - **Files & git** — open a project folder and browse it in a side pane; view
   **git status and diffs** for the open repo (read-only for now). Files and git
   share one dockable, resizable side panel.
+- **Compare view** — a **side-by-side diff** of two documents, original beside
+  proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
+  the active buffer against any file from the View menu.
 - **Agent chat** — a right-hand chat column wired to two providers: a built-in
   offline **echo** provider, and **Claude** over the official Anthropic API
   (bring your own API key, entered under *Settings*). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
   open buffers — shown as it works) and **propose edits**: it suggests a change or
   a new file, you review the **diff** and **Approve or Reject**, and on approval
-  it applies (and, by default, saves). Reads run freely; every write waits for you
-  (or opt into *Settings ▸ Auto-accept edits*).
+  it applies (and, by default, saves). A **complex** edit opens live in the
+  side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
+  every write waits for you (or opt into *Settings ▸ Auto-accept edits*).
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.

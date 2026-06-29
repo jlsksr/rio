@@ -1,0 +1,62 @@
+# Tests for the line diff (rio::diff) — the D28 LCS alignment that backs the
+# compare/diff view. Pure logic: an ordered op list {tag, a, b} turning text A
+# into text B, line by line (1-based line numbers, 0 = no line on that side).
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. diff.tcl]
+
+# A compact rendering of the ops for readable expectations: "tag a/b" per op.
+proc render {a b} {
+	set out {}
+	foreach o [rio::diff::lines $a $b] {
+		lappend out "[dict get $o tag] [dict get $o a]/[dict get $o b]"
+	}
+	return $out
+}
+
+test diff-identical {identical text is all equal lines} -body {
+	render "a\nb\nc" "a\nb\nc"
+} -result {{equal 1/1} {equal 2/2} {equal 3/3}}
+
+test diff-pure-insert {an appended line is a single insert at the end} -body {
+	render "a\nb" "a\nb\nc"
+} -result {{equal 1/1} {equal 2/2} {insert 0/3}}
+
+test diff-pure-delete {a removed line is a single delete} -body {
+	render "a\nb\nc" "a\nc"
+} -result {{equal 1/1} {delete 2/0} {equal 3/2}}
+
+test diff-replace {a changed line is a delete adjacent to an insert} -body {
+	render "a\nX\nc" "a\nY\nc"
+} -result {{equal 1/1} {delete 2/0} {insert 0/2} {equal 3/3}}
+
+test diff-insert-at-front {a line added at the top inserts first} -body {
+	render "b\nc" "a\nb\nc"
+} -result {{insert 0/1} {equal 1/2} {equal 2/3}}
+
+test diff-empty-to-nonempty {empty vs content: the one empty line is deleted, content inserted} -body {
+	# "" normalizes to one empty line {""}; "x\ny" is {x y}, which has no empty line,
+	# so the empty line is deleted and both content lines inserted.
+	render "" "x\ny"
+} -result {{delete 1/0} {insert 0/1} {insert 0/2}}
+
+test diff-nonempty-to-empty {content vs empty deletes the content, inserts the empty line} -body {
+	render "x\ny" ""
+} -result {{delete 1/0} {delete 2/0} {insert 0/1}}
+
+test diff-trailing-newline {a trailing newline is a real empty last line} -body {
+	# "a\n" is {a {}}, "a" is {a}: the empty last line is deleted.
+	render "a\n" "a"
+} -result {{equal 1/1} {delete 2/0}}
+
+test diff-both-empty {two empty texts are one equal empty line} -body {
+	render "" ""
+} -result {{equal 1/1}}
+
+test diff-block-change {a whole block replaced groups deletes then inserts} -body {
+	render "k\na\nb\nz" "k\nc\nd\nz"
+} -result {{equal 1/1} {delete 2/0} {delete 3/0} {insert 0/2} {insert 0/3} {equal 4/4}}
+
+cleanupTests

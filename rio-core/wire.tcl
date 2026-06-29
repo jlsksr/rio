@@ -116,6 +116,14 @@ proc rio::wire::_result_theme_get {result} {
 }
 rio::wire::result_encoder theme.get rio::wire::_result_theme_get
 
+# diff.lines: `ops` is an array of flat {tag, a, b} objects.
+proc rio::wire::_result_diff_lines {result} {
+	set items {}
+	foreach o [dict get $result ops] { lappend items [obj $o] }
+	return "{\"ops\":[arr $items]}"
+}
+rio::wire::result_encoder diff.lines rio::wire::_result_diff_lines
+
 # agent.history: `messages` is an array of flat {role, text} objects.
 proc rio::wire::_result_agent_history {result} {
 	set items {}

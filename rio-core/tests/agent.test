@@ -314,6 +314,51 @@ test agent-edit-not-unique {propose_edit with a non-unique old_string is refused
 	list [dict get $r ok] [string match {*2 matches*} [dict get $r summary]]
 } -cleanup { rio::project::close } -result {0 1}
 
+# --- agent.proposal: the compare view's pull op (D28) ------------------------
+
+test agent-proposal-pull {agent.proposal returns a pending proposal's original/proposed texts} -setup {
+	set ::pdir [makeDirectory agpp]
+	makeFile "alpha\nfoo\nbeta\n" f.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path f.txt old_string foo new_string FOO]
+	set ::wt_raw {{"path":"f.txt","old_string":"foo","new_string":"FOO"}}
+} -body {
+	set s1 [start_write turn]
+	set res [dict get [rio::core::call agent.proposal [dict create turn $turn]] response result]
+	rio::core::call agent.approve [dict create turn $turn decision reject]
+	wait_done
+	list $s1 [dict get $res name] [dict get $res path] \
+		[expr {[dict get $res original] eq "alpha\nfoo\nbeta\n"}] \
+		[expr {[dict get $res proposed] eq "alpha\nFOO\nbeta\n"}]
+} -cleanup { rio::project::close } -result {propose propose_edit f.txt 1 1}
+
+test agent-proposal-cleared {a resolved proposal is no longer pullable} -setup {
+	set ::pdir [makeDirectory agpc]
+	makeFile "x\n" g.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path g.txt old_string x new_string y]
+	set ::wt_raw {{"path":"g.txt","old_string":"x","new_string":"y"}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision reject]
+	wait_done
+	set r [dict get [rio::core::call agent.proposal [dict create turn $turn]] response]
+	list $s1 [dict get $r ok] [dict get $r error code]
+} -cleanup { rio::project::close } -result {propose false bad_request}
+
+test agent-proposal-stale {agent.proposal with nothing pending is a bad_request} -body {
+	set r [dict get [rio::core::call agent.proposal [dict create turn 999]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
 # --- wire encoding (D11/D25) -------------------------------------------------
 
 test agent-delta-wire {an agent.delta event encodes to JSON} -body {

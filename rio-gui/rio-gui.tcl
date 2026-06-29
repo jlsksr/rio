@@ -48,6 +48,10 @@ set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
+set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
+set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
+set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
+set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -401,14 +405,19 @@ proc show_pane {which} {
 # the dock first claims its edge; .t then expands into what's left, so the same
 # two calls work for either side.
 proc place_dock {} {
-	catch {pack forget .dock .sash .chat .csash .ed}
+	catch {pack forget .dock .sash .chat .csash .ed .cmp}
 	pack .dock -side $::dock_side -fill y
 	pack .sash -side $::dock_side -fill y     ;# between the dock and the editor
 	if {$::chat_shown} {
 		pack .chat  -side right -fill y       ;# chat column on the right (D14)
 		pack .csash -side right -fill y       ;# between the editor and the chat
 	}
-	pack .ed   -side left -fill both -expand 1
+	# The center is the editor, or the compare view in its place while comparing (D28).
+	if {$::compare_shown} {
+		pack .cmp -side left -fill both -expand 1
+	} else {
+		pack .ed -side left -fill both -expand 1
+	}
 }
 
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
@@ -534,14 +543,24 @@ proc chat_event {ev} {
 			chat_log "· [dict get $ev params name][expr {$args eq "" ? "" : " $args"}]\n" tool
 		}
 		agent.propose {
-			# A proposed EDIT awaiting the user's decision (D26 slice 5). Show the diff;
-			# unless auto-accept is on (the core then applies without pausing), raise the
-			# Approve/Reject bar.
+			# A proposed EDIT awaiting the user's decision (D26 s5). Show the diff and,
+			# unless auto-accept is on, raise the Approve/Reject bar. A *complex* edit (more
+			# than ::compare_threshold diff lines) opens in the side-by-side compare view
+			# instead of dumping the whole diff inline — unless the user turned that off
+			# (Settings ▸ Compare complex edits) (D28).
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			set turn [dict get $ev params turn]
+			set diff [dict get $ev params diff]
 			chat_log "· proposes [dict get $ev params name]: [dict get $ev params path]\n" tool
-			chat_diff [dict get $ev params diff]
+			set complex [expr {[llength [split $diff "\n"]] > $::compare_threshold}]
+			if {$::agent_compare_complex && $complex && !$::agent_auto_accept \
+					&& [compare_proposal $turn]} {
+				chat_log "  (opened in compare view)\n" tool
+			} else {
+				chat_diff $diff
+			}
 			if {!$::agent_auto_accept} {
-				set ::pending_turn [dict get $ev params turn]
+				set ::pending_turn $turn
 				approve_bar 1
 			}
 		}
@@ -579,6 +598,7 @@ proc agent_decide {decision} {
 	if {$::pending_turn eq ""} return
 	set t $::pending_turn
 	approve_bar 0
+	compare_close
 	catch {rio::core::call agent.approve [dict create turn $t decision $decision]}
 }
 
@@ -645,6 +665,101 @@ proc clamp_input_height {} {
 	set m [chat_input_max]
 	if {[.chat.input cget -height] > $m} { .chat.input configure -height $m }
 }
+
+# ---------------------------------------------------------------------------
+# The compare / diff view (AGENTS.md D28; D13/D14 anticipated it). Two read-only
+# panes side by side with line-level diff coloring, shown in the center INSTEAD
+# of the editor while comparing (place_dock swaps .ed <-> .cmp). A dumb view
+# (D3): the line alignment comes from the core diff.lines op; this only renders
+# it. Filler rows keep equal lines level across the panes (VSCode-style). The
+# right/proposed side is read-only for now — an editable temp buffer and a real
+# tabbed second editor group are later enrichments.
+# ---------------------------------------------------------------------------
+# Compare text `ltext` (left) against `rtext` (right), labelled and shown.
+proc compare_open {ltext rtext llabel rlabel} {
+	.cmp.l.hdr configure -text $llabel
+	.cmp.r.hdr configure -text $rlabel
+	set resp [rio_call diff.lines [dict create a $ltext b $rtext]]
+	set ops [expr {[dict get $resp ok] ? [dict get $resp result ops] : {}}]
+	cmp_fill $ops [split $ltext "\n"] [split $rtext "\n"]
+	set ::compare_shown 1
+	place_dock
+	.cmp.l.t yview moveto 0
+	.cmp.r.t yview moveto 0
+}
+
+# Fill both panes in one pass over the diff ops so equal lines stay aligned: an
+# equal op emits a real line on each side; a delete emits the left line (tagged
+# del) opposite a blank filler row; an insert a filler opposite the right line
+# (tagged add). Adjacent delete+insert runs read as a change (red beside green).
+proc cmp_fill {ops La Lb} {
+	foreach t {.cmp.l.t .cmp.r.t} { $t configure -state normal ; $t delete 1.0 end }
+	foreach o $ops {
+		set a [dict get $o a] ; set b [dict get $o b]
+		switch -- [dict get $o tag] {
+			equal  { cmp_put .cmp.l.t [lindex $La [expr {$a-1}]] "" ; cmp_put .cmp.r.t [lindex $Lb [expr {$b-1}]] "" }
+			delete { cmp_put .cmp.l.t [lindex $La [expr {$a-1}]] del ; cmp_put .cmp.r.t "" filler }
+			insert { cmp_put .cmp.l.t "" filler ; cmp_put .cmp.r.t [lindex $Lb [expr {$b-1}]] add }
+		}
+	}
+	foreach t {.cmp.l.t .cmp.r.t} { $t configure -state disabled }
+}
+proc cmp_put {t text tag} {
+	if {$tag eq ""} { $t insert end "$text\n" } else { $t insert end "$text\n" $tag }
+}
+
+# Scroll both panes together: the shared scrollbar drives both (cmp_yview); each
+# pane's own scroll keeps the bar and the OTHER pane in step (cmp_yscroll, guarded
+# against the feedback loop). Equal row counts (fillers) make the lockstep exact.
+proc cmp_yview {args} {
+	.cmp.l.t yview {*}$args
+	.cmp.r.t yview {*}$args
+}
+proc cmp_yscroll {which lo hi} {
+	.cmp.sb set $lo $hi
+	if {$::cmp_syncing} return
+	set ::cmp_syncing 1
+	[expr {$which eq "l" ? {.cmp.r.t} : {.cmp.l.t}}] yview moveto $lo
+	set ::cmp_syncing 0
+}
+
+# Leave the compare view, restoring the editor as the center.
+proc compare_close {} {
+	if {!$::compare_shown} return
+	set ::compare_shown 0
+	place_dock
+	focus .ed.t
+}
+
+# Open the side-by-side review for a pending agent proposal (D28): pull both full
+# versions (agent.proposal) and show original | proposed. Returns 1 on success, 0
+# if there is nothing to pull (the caller then falls back to the inline diff).
+proc compare_proposal {turn} {
+	if {$turn eq ""} { return 0 }
+	set resp [rio_call agent.proposal [dict create turn $turn]]
+	if {![dict get $resp ok]} { return 0 }
+	set r [dict get $resp result]
+	set path [dict get $r path]
+	compare_open [dict get $r original] [dict get $r proposed] \
+		"$path (original)" "$path (proposed)"
+	return 1
+}
+
+# Compare the active buffer against a file the user picks (View menu). The other
+# side is read-only via fs.read (D28) (an absolute path is taken as-is, D11), so it
+# need not be open or even inside the project.
+proc compare_with_file_dialog {} {
+	set path [tk_getOpenFile -title "Compare active buffer with file"]
+	if {$path eq ""} return
+	set resp [rio_call fs.read [dict create path $path]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	compare_open [rio::doc::text $::cur] [dict get $resp result text] \
+		"[tab_name $::cur] (buffer)" "[file tail $path] (file)"
+}
+
 
 # ---------------------------------------------------------------------------
 # Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
@@ -960,8 +1075,24 @@ proc apply_theme {theme} {
 		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
 	.chat.approve.yes configure -font RioUIFont
 	.chat.approve.no  configure -font RioUIFont
+	.chat.approve.cmp configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
 	.chat.isash configure -background [dict get $c tab.bar.bg]
+	# The compare/diff view (D28): the panes take the editor surface, the headers the
+	# UI chrome (like the dock); row tags tint removed/added lines and grey the
+	# fillers so a changed line reads as a coloured band (VSCode-style).
+	foreach w {.cmp.l.hdr .cmp.r.hdr} {
+		$w configure -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	}
+	foreach w {.cmp.l.t .cmp.r.t} {
+		$w configure -font RioEditorFont \
+			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+		$w tag configure del    -background "#ffdddd" -foreground "#cc0000"
+		$w tag configure add    -background "#ddffdd" -foreground "#118811"
+		$w tag configure filler -background [dict get $c ui.bg]
+	}
+	.cmp.sb configure -background [dict get $c ui.bg]
 	style_selector
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
@@ -1069,6 +1200,34 @@ grid .ed.hsb -row 1 -column 0 -sticky ew
 grid rowconfigure    .ed 0 -weight 1
 grid columnconfigure .ed 0 -weight 1
 
+# The compare / diff view (AGENTS.md D28): two read-only text panes side by side
+# with a single shared vertical scrollbar, packed in the center INSTEAD of .ed
+# while comparing (place_dock). Built here with bootstrap colours; apply_theme
+# recolours them and configures the del/add/filler row tags. cmp_fill renders the
+# core diff.lines alignment into the panes.
+frame .cmp
+frame .cmp.l ; frame .cmp.r
+label .cmp.l.hdr -anchor w -font {monospace 9} -padx 4 -pady 2 -background "#dddddd" -foreground black
+label .cmp.r.hdr -anchor w -font {monospace 9} -padx 4 -pady 2 -background "#dddddd" -foreground black
+text .cmp.l.t -wrap none -state disabled -font {monospace 12} -width 40 -height 28 \
+	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+	-background white -foreground black -yscrollcommand {cmp_yscroll l}
+text .cmp.r.t -wrap none -state disabled -font {monospace 12} -width 40 -height 28 \
+	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+	-background white -foreground black -yscrollcommand {cmp_yscroll r}
+scrollbar .cmp.sb -orient vertical -command cmp_yview
+pack .cmp.l.hdr -side top -fill x ; pack .cmp.l.t -side left -fill both -expand 1
+pack .cmp.r.hdr -side top -fill x ; pack .cmp.r.t -side left -fill both -expand 1
+pack .cmp.l  -side left  -fill both -expand 1
+pack .cmp.sb -side right -fill y
+pack .cmp.r  -side left  -fill both -expand 1
+foreach w {.cmp.l.t .cmp.r.t} {
+	bind $w <MouseWheel> {cmp_yview scroll [expr {%D > 0 ? -1 : 1}] units ; break}
+	bind $w <Button-4>   {cmp_yview scroll -1 units ; break}
+	bind $w <Button-5>   {cmp_yview scroll 1 units ; break}
+	bind $w <Escape>     {compare_close ; break}
+}
+
 # The agent chat pane (built here; place_dock packs it on the right when shown,
 # apply_theme colours it via the chat.* roles + RioChatFont). propagate off so a
 # fixed -width holds across content, like the dock. A header (Agent + Clear) on
@@ -1106,8 +1265,10 @@ label .chat.approve.lbl -text "Apply this edit?" -anchor w -font {monospace 9} \
 	-padx 4 -pady 2 -background white -foreground black
 button .chat.approve.yes -text "Approve" -font {monospace 9} -command {agent_decide approve}
 button .chat.approve.no  -text "Reject"  -font {monospace 9} -command {agent_decide reject}
+button .chat.approve.cmp -text "Compare" -font {monospace 9} -command {compare_proposal $::pending_turn}
 pack .chat.approve.yes -side right
 pack .chat.approve.no  -side right
+pack .chat.approve.cmp -side right
 pack .chat.approve.lbl -side left -fill x -expand 1
 # Transcript: read-only, word-wrapped, with an auto-hiding scrollbar.
 text .chat.log -wrap word -state disabled -font {monospace 11} -cursor "" \
@@ -1171,6 +1332,9 @@ menu .m.view -tearoff 0
 .m.view add checkbutton -label "Agent Chat" -accelerator Ctrl+Shift+A \
 	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
+.m.view add command -label "Compare With File…" -command compare_with_file_dialog
+.m.view add command -label "Close Compare" -accelerator Esc -command compare_close
+.m.view add separator
 .m.view add command -label "Theme: Default"         -command {do_theme default}
 .m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
 .m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
@@ -1186,6 +1350,8 @@ menu .m.settings -tearoff 0
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio::agent::set_auto_accept $::agent_auto_accept; chat_status_update}
+.m.settings add checkbutton -label "Agent: Compare complex edits" \
+	-variable ::agent_compare_complex
 
 # Shortcuts bound on the text widget with `break`, so the widget's own class
 # bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.

@@ -407,6 +407,62 @@ set ::agent_provider echo ; apply_provider
 chat_clear
 file delete -force $::secdir
 
+# --- compare / diff view (D28) -----------------------------------------------
+# compare_open renders the core diff.lines alignment into the two read-only panes,
+# with filler rows keeping equal lines level, and swaps .cmp in for .ed.
+proc cmp_rows {t} { return [lindex [split [$t index end-1c] .] 0] }
+
+compare_open "a\nb\nc\nd" "a\nB\nc\nd\ne" "left" "right"
+ok "compare: shown flag set"        $::compare_shown 1
+ok "compare: center shows .cmp"     [list [center_shows .cmp] [center_shows .ed]] {1 0}
+ok "compare: headers set"           [list [.cmp.l.hdr cget -text] [.cmp.r.hdr cget -text]] {left right}
+# Equal-length panes (fillers) so the lines stay aligned and scroll in lockstep.
+ok "compare: panes equal length"    [expr {[cmp_rows .cmp.l.t] == [cmp_rows .cmp.r.t]}] 1
+ok "compare: removed line tagged"   [expr {[llength [.cmp.l.t tag ranges del]] > 0}] 1
+ok "compare: added line tagged"     [expr {[llength [.cmp.r.t tag ranges add]] > 0}] 1
+ok "compare: filler rows present"   [expr {[llength [.cmp.l.t tag ranges filler]] > 0 \
+                                         && [llength [.cmp.r.t tag ranges filler]] > 0}] 1
+ok "compare: panes are read-only"   [list [.cmp.l.t cget -state] [.cmp.r.t cget -state]] {disabled disabled}
+# Synced scrolling keeps both panes at the same fraction.
+set ::cmp_syncing 0
+cmp_yview moveto 0.5
+ok "compare: scroll synced"         [expr {abs([lindex [.cmp.l.t yview] 0] - [lindex [.cmp.r.t yview] 0]) < 0.001}] 1
+# The View menu exposes the entry points.
+ok "compare: View menu has open"    [expr {![catch {.m.view index "Compare With File…"}]}] 1
+ok "compare: View menu has close"   [expr {![catch {.m.view index "Close Compare"}]}] 1
+compare_close
+ok "compare: close restores editor" [list [center_shows .ed] [center_shows .cmp]] {1 0}
+ok "compare: close clears flag"     $::compare_shown 0
+
+# Agent-proposal routing: a *complex* proposed edit opens the compare view instead
+# of dumping the whole diff inline; a small one stays inline; the Settings toggle
+# disables the auto-open. Drive the decision with a stubbed compare_proposal so the
+# view logic is tested without a live core proposal (core tests cover the pull).
+ok "compare: button on approve bar" [winfo exists .chat.approve.cmp] 1
+rename compare_proposal _real_compare_proposal
+proc compare_proposal {turn} { lappend ::cmp_calls $turn ; return 1 }
+proc big_diff {n} { set d {} ; for {set i 0} {$i < $n} {incr i} { lappend d "+ line $i" } ; return [join $d "\n"] }
+
+set ::cmp_calls {} ; chat_clear ; set ::agent_auto_accept 0 ; set ::agent_compare_complex 1
+chat_event [list event agent.propose params [list turn 11 id w9 name propose_edit path big.txt diff [big_diff 20]]]
+ok "compare: complex edit auto-opens"   $::cmp_calls 11
+ok "compare: inline diff skipped"       [string match "*opened in compare view*" [.chat.log get 1.0 end]] 1
+ok "compare: approval bar still raised"  [bar_shown] 1
+
+set ::cmp_calls {} ; chat_clear
+chat_event {event agent.propose params {turn 12 id wA name propose_edit path small.txt diff "- a
++ b"}}
+ok "compare: small edit stays inline"   $::cmp_calls {}
+ok "compare: small edit diff inline"    [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
+
+set ::cmp_calls {} ; chat_clear ; set ::agent_compare_complex 0
+chat_event [list event agent.propose params [list turn 13 id wB name propose_edit path big.txt diff [big_diff 20]]]
+ok "compare: toggle off suppresses auto" $::cmp_calls {}
+ok "compare: toggle off renders inline"  [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
+set ::agent_compare_complex 1
+rename compare_proposal {} ; rename _real_compare_proposal compare_proposal
+chat_clear ; approve_bar 0
+
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named
 # fonts exist, and switching re-applies colours live.

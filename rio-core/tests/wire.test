@@ -125,4 +125,20 @@ test wire-roundtrip-theme-get {the encoded theme survives json2dict} -body {
 		[dict get $d result colors editor.bg]
 } -result {13 #002b36}
 
+test wire-result-diff-lines {diff.lines encodes ops as an array of flat {tag,a,b} objects} -body {
+	rio::wire::response [dict create id 3 ok true op diff.lines \
+		result [dict create ops [list \
+			[dict create tag equal a 1 b 1] \
+			[dict create tag delete a 2 b 0] \
+			[dict create tag insert a 0 b 2]]]]
+} -result {{"id":"3","ok":true,"result":{"ops":[{"tag":"equal","a":"1","b":"1"},{"tag":"delete","a":"2","b":"0"},{"tag":"insert","a":"0","b":"2"}]}}}
+
+test wire-roundtrip-diff-lines {the encoded diff survives json2dict} -body {
+	set enc [rio::wire::response [dict create id 4 ok true op diff.lines \
+		result [dict create ops [list [dict create tag insert a 0 b 5]]]]]
+	set d [json::json2dict $enc]
+	list [dict get [lindex [dict get $d result ops] 0] tag] \
+		[dict get [lindex [dict get $d result ops] 0] b]
+} -result {insert 5}
+
 cleanupTests

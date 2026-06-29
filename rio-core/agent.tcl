@@ -35,6 +35,7 @@ namespace eval rio::agent {
 	variable pending                                ;# array: turn -> {coro id} awaiting approval
 	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
 	variable auto_accept       0                    ;# skip the approval gate (opt-in)
+	variable proposals                              ;# array: turn -> {name,path,original,proposed} awaiting review
 }
 
 # The write-apply policy (read by rio::agent::tools::apply_write) and its toggles —
@@ -56,12 +57,14 @@ proc rio::agent::set_provider {cmd} {
 proc rio::agent::reset {} {
 	variable conversation
 	variable pending
+	variable proposals
 	set conversation {}
 	foreach turn [array names pending] {
 		lassign $pending($turn) co id
 		catch {rename $co {}}
 	}
 	array unset pending
+	array unset proposals
 	return
 }
 
@@ -206,6 +209,7 @@ proc rio::agent::_run {turn emit} {
 proc rio::agent::_do_write {turn id name input emit co} {
 	variable pending
 	variable auto_accept
+	variable proposals
 	set prep [rio::agent::tools::prepare_write $name $input]
 	if {[dict get $prep ok] == 0} {
 		{*}$emit [dict create event agent.tool_result \
@@ -220,8 +224,11 @@ proc rio::agent::_do_write {turn id name input emit co} {
 		set decision approve
 	} else {
 		set pending($turn) [list $co $id]
+		set proposals($turn) [dict create name $name path [dict get $prep path] \
+			original [dict get $prep original] proposed [dict get $prep proposed]]
 		set decision [yield]
 		unset -nocomplain pending($turn)
+		unset -nocomplain proposals($turn)
 	}
 	if {$decision ne "approve"} {
 		{*}$emit [dict create event agent.tool_result \
@@ -248,6 +255,18 @@ proc rio::agent::approve {turn decision} {
 	lassign $pending($turn) co id
 	after 0 [list [namespace current]::_resume $co $decision]
 	return $id
+}
+
+# A pending proposal's full texts (agent.proposal, D28): the original file content
+# and the proposed new content for a turn whose write is awaiting the user's
+# decision. The compare/diff view pulls this on demand — only when opened — so the
+# agent.propose event itself stays lean. Raises if nothing is pending for the turn.
+proc rio::agent::proposal {turn} {
+	variable proposals
+	if {![info exists proposals($turn)]} {
+		rio::error::raise bad_request "no proposal is awaiting review for turn $turn"
+	}
+	return $proposals($turn)
 }
 
 # A short "k=v k=v" rendering of a tool call's input, for the agent.tool event.

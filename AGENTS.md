@@ -873,6 +873,66 @@ themes for free. Implementation across the remaining spots (search, run/send,
 file-tree expand/collapse, modified-dot) is **deferred** — this entry only fixes
 the direction.
 
+### D28 — Compare / diff view: a core line-diff op + a read-only two-pane GUI view
+
+D13/D14 always anticipated the editor center "splittable into two editor groups
+for side-by-side / diff viewing"; this builds the **first cut**. The split is
+along the usual rio seam — **the diff is computed in core, the frontend only
+renders it** (D1/D3) — so a future TUI compare view consumes the same data.
+
+**Core — `diff.lines` (the durable, terminal-aware part).** A pure-logic LCS
+line diff (`rio-core/diff.tcl`, `rio::diff::lines {a b}`): given two texts it
+returns the ordered op list that turns A into B, line by line — each op a flat
+dict `{tag <equal|delete|insert> a <A-lineno|0> b <B-lineno|0>}` (1-based; `0` =
+no line on that side; a *changed* line is a delete adjacent to an insert). It
+splits on `"\n"` and normalizes `""`→one empty line **exactly like the document
+model** (D12) so a diff lines up with the buffer it came from. Exposed as the
+`diff.lines {a, b}` op (`rio-core/ops-diff.tcl`) with a D25 result-encoder
+(`ops` is an array of flat objects). No Tk shape rides on it — the O1 discipline
+of designing a rendering-heavy namespace for a cell-grid consumer, met by
+thinking. Classic O(n·m) DP; fine for source-file sizes, large-file handling
+out of scope as elsewhere (O3).
+
+**GUI — the compare view (`rio-gui.tcl`).** A center region `.cmp` of **two
+read-only text panes** with a shared vertical scrollbar, shown *instead of* the
+editor while comparing (`place_dock` swaps `.ed`↔`.cmp`; the editor returns on
+close). It is a dumb view (D3): `compare_open` calls `diff.lines` and `cmp_fill`
+walks the ops once, filling both panes in lockstep — an `equal` op emits a real
+line on each side, a `delete` the left line (tagged `del`) opposite a blank
+`filler` row, an `insert` a `filler` opposite the right line (tagged `add`). The
+**filler rows keep equal lines level across the panes** (VSCode-style alignment),
+which also makes the synced scroll (shared scrollbar + a guarded `cmp_yscroll`)
+exact. Reached from **View ▸ Compare With File…** (active buffer vs. a picked
+file, read via `fs.read`) and closed with **View ▸ Close Compare** / `Esc`.
+
+**Agent — complex proposed edits open live as compare (the VSCode-like part).**
+The write/propose-edit gate (D26 s5) is unchanged; the compare view is a richer
+review surface over it. A new pull op **`agent.proposal {turn}`** →
+`{name, path, original, proposed}` returns a *pending* proposal's full original
+and proposed text (kept in a `proposals` registry alongside the approval
+`pending` one, cleared when the turn resolves or on `agent.reset`). The
+`agent.propose` **event stays lean** (unchanged) — the GUI pulls both versions
+on demand only when the view opens, so a TUI would too. In the chat pane a
+**complex** edit (more than `compare_threshold` diff lines) auto-opens the
+compare view instead of dumping the whole diff inline; a small edit stays inline
+as before; a **Compare** button on the Approve/Reject bar opens it for any
+proposal; approving/rejecting closes it. A **Settings ▸ Agent: Compare complex
+edits** toggle disables the auto-open entirely (everything renders inline; the
+button still works) — the user's explicit escape hatch.
+
+**Deferred (noted, not built):** the right/proposed pane is **read-only** for
+now — an *editable* proposed-side scratch buffer (tweak-then-apply) and a real
+**tabbed second editor group** (the full D13 "two editor groups", not just a
+diff surface) are later enrichments; so is the D14 narrow-tier fallback from
+side-by-side to a unified diff. This first cut is the simplest honest one,
+matching how the file pane (O2) was scoped.
+
+**Why:** lands a genuinely useful compare/diff surface on the seam D13/D14
+already reserved, with the diff logic in core (shared with a future TUI, and a
+candidate to later back the agent's `_difftext`), while keeping the GUI a dumb
+renderer; the pull-op keeps proposal events lean; and the read-only first cut
+defers the editor-group refactor without blocking the feature.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -1023,8 +1083,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   replace, new, close, **list**), `fs.*` (open, save, **list**), `edit.*` (undo,
   redo), `session.hello` (version/capability negotiation), `theme.get` (D24 role
   table), `exec.run` (the command-execution primitive, below), `git.*`
-  (status, diff, log — the read layer, below), and `project.*` (open, get — the
-  workspace root, below). The **error taxonomy is now
+  (status, diff, log — the read layer, below), `project.*` (open, get — the
+  workspace root, below), `diff.lines` (the line diff backing the compare view —
+  D28), and `agent.*` (send, approve, reset, history, **proposal** — the
+  compare view's pull op, D28). The **error taxonomy is now
   decided** (below). Remaining: the full op vocabulary + params per namespace.
 
   **Error taxonomy — implemented.** An error reply's `error` is a flat object

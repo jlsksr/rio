@@ -31,6 +31,18 @@ proc rio::ops::agent_approve {params} {
 }
 rio::dispatch::register agent.approve rio::ops::agent_approve
 
+# agent.proposal {turn} -> {name, path, original, proposed} ; the full original and
+# proposed text of a write awaiting review for `turn` (D28). The compare/diff view
+# pulls this on demand to render the two versions side by side; the agent.propose
+# event stays lean. A turn with nothing pending is a `bad_request`.
+proc rio::ops::agent_proposal {params} {
+	if {![dict exists $params turn]} {
+		rio::error::raise bad_request "agent.proposal requires turn"
+	}
+	return [dict create result [rio::agent::proposal [dict get $params turn]]]
+}
+rio::dispatch::register agent.proposal rio::ops::agent_proposal
+
 # agent.reset -> {} ; clears the conversation.
 proc rio::ops::agent_reset {params} {
 	rio::agent::reset
