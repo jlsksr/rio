@@ -710,15 +710,15 @@ proc cmp_fill {ops La Lb} {
 	foreach o $ops {
 		set a [dict get $o a] ; set b [dict get $o b]
 		switch -- [dict get $o tag] {
-			equal  { cmp_put .cmp.l.t [lindex $La [expr {$a-1}]] "" ; cmp_put .cmp.r.t [lindex $Lb [expr {$b-1}]] "" }
-			delete { cmp_put .cmp.l.t [lindex $La [expr {$a-1}]] del ; cmp_put .cmp.r.t "" filler }
-			insert { cmp_put .cmp.l.t "" filler ; cmp_put .cmp.r.t [lindex $Lb [expr {$b-1}]] add }
+			equal  { cmp_put .cmp.l.t "  " [lindex $La [expr {$a-1}]] "" ; cmp_put .cmp.r.t "  " [lindex $Lb [expr {$b-1}]] "" }
+			delete { cmp_put .cmp.l.t "- " [lindex $La [expr {$a-1}]] del ; cmp_put .cmp.r.t "  " "" filler }
+			insert { cmp_put .cmp.l.t "  " "" filler ; cmp_put .cmp.r.t "+ " [lindex $Lb [expr {$b-1}]] add }
 		}
 	}
 	foreach t {.cmp.l.t .cmp.r.t} { $t configure -state disabled }
 }
-proc cmp_put {t text tag} {
-	if {$tag eq ""} { $t insert end "$text\n" } else { $t insert end "$text\n" $tag }
+proc cmp_put {t marker text tag} {
+	if {$tag eq ""} { $t insert end "$marker$text\n" } else { $t insert end "$marker$text\n" $tag }
 }
 
 # Scroll both panes together: the shared scrollbar drives both (cmp_yview); each

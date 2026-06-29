@@ -422,6 +422,11 @@ ok "compare: removed line tagged"   [expr {[llength [.cmp.l.t tag ranges del]] >
 ok "compare: added line tagged"     [expr {[llength [.cmp.r.t tag ranges add]] > 0}] 1
 ok "compare: filler rows present"   [expr {[llength [.cmp.l.t tag ranges filler]] > 0 \
                                          && [llength [.cmp.r.t tag ranges filler]] > 0}] 1
+# Color-independent gutter markers (-/+) so the diff reads regardless of how the
+# Tk build renders tag backgrounds under wrap.
+proc cmp_lines {t} { return [split [string trimright [$t get 1.0 end] "\n"] "\n"] }
+ok "compare: removed line has - marker" [expr {[lsearch -glob [cmp_lines .cmp.l.t] {- *}] >= 0}] 1
+ok "compare: added line has + marker"   [expr {[lsearch -glob [cmp_lines .cmp.r.t] {+ *}] >= 0}] 1
 ok "compare: panes are read-only"   [list [.cmp.l.t cget -state] [.cmp.r.t cget -state]] {disabled disabled}
 ok "compare: close button present"  [winfo exists .cmp.bar.close] 1
 # Line wrap (View ▸ Wrap Lines) reaches the compare panes — they have no h-scroll.

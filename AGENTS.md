@@ -902,7 +902,10 @@ line on each side, a `delete` the left line (tagged `del`) opposite a blank
 `filler` row, an `insert` a `filler` opposite the right line (tagged `add`). The
 **filler rows keep equal lines level across the panes** (VSCode-style alignment),
 which also makes the synced scroll (shared scrollbar + a guarded `cmp_yscroll`)
-exact. Reached from **View ▸ Compare With File…** (active buffer vs. a picked
+exact. Each line also carries a **`-`/`+` gutter marker** (color-independent), so
+the diff reads even where a Tk build renders tag backgrounds poorly under wrap —
+colour is the emphasis, the marker the guarantee. Reached from
+**View ▸ Compare With File…** (active buffer vs. a picked
 file, read via `fs.read`) and closed with a visible **× Close compare** button (a
 top bar over the panes; its label names the `Esc` shortcut, which alone isn't
 discoverable), **View ▸ Close Compare**, or `Esc`. The panes have no horizontal
