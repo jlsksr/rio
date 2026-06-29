@@ -1237,7 +1237,7 @@ scrollbar .cmp.sb -orient vertical -command cmp_yview
 frame .cmp.bar
 button .cmp.bar.close -text "× Close compare (Esc)" -font {monospace 9} -command compare_close
 pack .cmp.bar.close -side right -padx 2 -pady 1
-pack .cmp.bar -side top -fill x
+pack .cmp.bar -side bottom -fill x
 pack .cmp.l.hdr -side top -fill x ; pack .cmp.l.t -side left -fill both -expand 1
 pack .cmp.r.hdr -side top -fill x ; pack .cmp.r.t -side left -fill both -expand 1
 pack .cmp.l  -side left  -fill both -expand 1
