@@ -25,13 +25,45 @@
 package require Tk
 package require json
 
-# Embed the core (Tk-free; we are the only Tk in this process).
-source [file join [file dirname [info script]] .. rio-core core.tcl]
+# ---------------------------------------------------------------------------
+# Transport: in-process (embed the core) or remote (a socket client to a core
+# running elsewhere — AGENTS.md D29). The mode is decided BEFORE anything is
+# sourced, because the two modes load different code: in-process embeds the whole
+# Tk-free core; remote loads only the wire encoder (rio::wire) and talks JSON over
+# a socket. The agent chat is in-process-only this iteration, so its plugin is
+# loaded only when embedding the core.
+#
+# Mode is chosen by, in order: a pre-set ::connect_to (tests), --connect host:port
+# (argv), or the RIO_CONNECT environment variable. Any of them set ⇒ remote.
+# ---------------------------------------------------------------------------
+set ::rio_dir [file dirname [info script]]
+if {![info exists ::connect_to]} { set ::connect_to "" }
+set ci [lsearch -exact $argv --connect]
+if {$ci >= 0} {
+	set ::connect_to [lindex $argv [expr {$ci + 1}]]
+	set argv [lreplace $argv $ci [expr {$ci + 1}]]   ;# don't treat it as a file arg
+}
+if {$::connect_to eq "" && [info exists ::env(RIO_CONNECT)]} {
+	set ::connect_to $::env(RIO_CONNECT)
+}
+set ::remote [expr {$::connect_to ne ""}]
 
-# Load the Claude provider plugin (D26): the shared inference core + the claude-api
-# face. Sourcing only DEFINES the provider; the frontend selects/activates it
-# (apply_provider) and owns the key-entry UI — the face just owns the key's store.
-source [file join [file dirname [info script]] .. plugins claude claude.tcl]
+if {$::remote} {
+	# Remote: the wire encoder only (Tk-free, no core), plus a socket to the core.
+	source [file join $::rio_dir .. rio-core wire.tcl]
+	lassign [split $::connect_to :] host port
+	set ::sock [socket $host $port]
+	fconfigure $::sock -buffering line -blocking 0 -translation lf -encoding utf-8
+	fileevent $::sock readable remote_reader
+	set ::reply_seq 0
+} else {
+	# In-process: embed the core (Tk-free; we are the only Tk in this process)…
+	source [file join $::rio_dir .. rio-core core.tcl]
+	# …and the Claude provider plugin (D26): the shared inference core + the
+	# claude-api face. Sourcing only DEFINES the provider; the frontend selects it
+	# (apply_provider) and owns the key-entry UI — the face just owns the key store.
+	source [file join $::rio_dir .. plugins claude claude.tcl]
+}
 
 # Per-buffer view state. The core holds the text; we hold the rest.
 set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yview <frac>}
@@ -57,18 +89,87 @@ proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
 # ---------------------------------------------------------------------------
-# Core calls: run the op, apply any buffer.changed events to the widget, and
-# hand the response back. This is the single seam to the core.
+# The single seam to the core (AGENTS.md D2/D29). One op call, one response; any
+# events the op produced are fed to dispatch_event. Two transports sit behind it,
+# and callers can't tell which is live — both return the same response dict:
+#   in-process — rio::core::call runs the op and returns the response + its events
+#                synchronously (no round-trip lag).
+#   remote     — the request is written to the socket and we run the event loop
+#                until the matching reply lands; events arrive asynchronously on
+#                the same socket (remote_reader) and dispatch the moment they do.
 # ---------------------------------------------------------------------------
 proc rio_call {op params} {
+	if {$::remote} { return [remote_call $op $params] }
 	set r [rio::core::call $op $params]
-	foreach ev [dict get $r events] {
-		switch -- [dict get $ev event] {
-			buffer.changed  { apply_change [dict get $ev params] }
-			project.opened  { on_project_opened [dict get $ev params] }
-		}
-	}
+	foreach ev [dict get $r events] { dispatch_event $ev }
 	return [dict get $r response]
+}
+
+# Apply one core event to the view, in either transport. buffer.changed redraws
+# the editor only when the changed buffer is the active one (others reload from the
+# core on tab switch — matching agent_event's guard, and the rule that lets an async
+# remote event for a background buffer be ignored safely).
+proc dispatch_event {ev} {
+	switch -- [dict get $ev event] {
+		buffer.changed {
+			set p [dict get $ev params]
+			if {[dict get $p buffer] eq $::cur} { apply_change $p }
+		}
+		project.opened { on_project_opened [dict get $ev params] }
+	}
+}
+
+# A remote op call: write {id, op, params} as one JSON line (the same escaping the
+# server uses to reply, rio::wire), then run the event loop until the reply with our
+# id arrives. Ids are unique per call, so a keystroke typed while we wait — itself a
+# nested rio_call — resolves on its own id without disturbing this one.
+proc remote_call {op params} {
+	set id r[incr ::reply_seq]
+	set ::pending($id) 1
+	if {[catch {
+		puts $::sock "{\"id\":[rio::wire::str $id],\"op\":[rio::wire::str $op],\"params\":[rio::wire::obj $params]}"
+		flush $::sock
+	}]} {
+		unset -nocomplain ::pending($id)
+		remote_lost
+		return [dict create id $id ok false \
+			error [dict create code disconnected message "no connection to the core"]]
+	}
+	vwait ::reply($id)
+	unset -nocomplain ::pending($id)
+	set resp $::reply($id)
+	unset ::reply($id)
+	return $resp
+}
+
+# The socket reader (remote mode): each line is either an event — dispatched to the
+# view at once — or a reply, handed to the rio_call waiting on its id. Junk lines are
+# ignored; EOF means the core went away.
+proc remote_reader {} {
+	if {[catch {gets $::sock line} n]} { remote_lost ; return }
+	if {$n < 0} { if {[eof $::sock]} { remote_lost } ; return }
+	if {[string trim $line] eq ""} return
+	if {[catch {json::json2dict $line} msg]} return
+	if {[dict exists $msg event]} {
+		dispatch_event $msg
+	} elseif {[dict exists $msg id]} {
+		set ::reply([dict get $msg id]) $msg
+	}
+}
+
+# The core's socket closed. Report it once, stop reading, and wake any call blocked
+# on a reply (with a disconnected error) so the GUI never hangs. The editor stays up
+# so nothing in view is lost; further ops fail fast through remote_call.
+proc remote_lost {} {
+	if {![info exists ::sock]} return
+	catch {fileevent $::sock readable {}}
+	catch {close $::sock}
+	unset -nocomplain ::sock
+	foreach id [array names ::pending] {
+		set ::reply($id) [dict create id $id ok false \
+			error [dict create code disconnected message "lost the connection to the core"]]
+	}
+	report_error "Lost the connection to the core (the server closed)." disconnected
 }
 
 # Surface a core error to the user (the {code, message} taxonomy, AGENTS.md O2).
@@ -113,6 +214,16 @@ proc load_buffer {} {
 	}
 }
 
+# A buffer's whole text via the protocol (buffer.text), so the frontend never reads
+# the core's document model directly — the one path that works the same in-process
+# and remote (AGENTS.md D29). "" on failure (a vanished buffer): callers only use
+# this to test emptiness or seed a compare, where "" is a safe miss.
+proc buf_text {id} {
+	set resp [rio_call buffer.text [dict create buffer $id]]
+	if {[dict get $resp ok]} { return [dict get $resp result text] }
+	return ""
+}
+
 # ---------------------------------------------------------------------------
 # Buffer / tab bookkeeping.
 # ---------------------------------------------------------------------------
@@ -152,7 +263,7 @@ proc prune_scratch {keep} {
 	set pruned 0
 	foreach id $::order {
 		if {$id eq $keep} continue
-		if {[bufget $id path] eq "" && ![bufget $id modified] && [rio::doc::text $id] eq ""} {
+		if {[bufget $id path] eq "" && ![bufget $id modified] && [buf_text $id] eq ""} {
 			close_buffer $id
 			set pruned 1
 		}
@@ -170,6 +281,20 @@ proc do_new {} {
 	set id [dict get $res buffer]
 	register_buffer $id "" {}
 	activate $id
+}
+
+# Adopt whatever buffers the core already has — its startup default in-process, or
+# the server's open buffers in remote mode — via buffer.list, activating the first
+# (AGENTS.md D29). Replaces reaching into $::rio::ops::default, which exists only in
+# the embedded core. If the core reports none, mint one so there is always a tab.
+proc adopt_initial_buffers {} {
+	set resp [rio_call buffer.list {}]
+	set buffers [expr {[dict get $resp ok] ? [dict get $resp result buffers] : {}}]
+	if {![llength $buffers]} { do_new ; return }
+	foreach b $buffers {
+		register_buffer [dict get $b buffer] [dict get $b path] {}
+	}
+	activate [dict get [lindex $buffers 0] buffer]
 }
 
 proc do_open {path} {
@@ -273,7 +398,11 @@ proc nav_activate {} {
 }
 
 proc open_folder_dialog {} {
-	set p [tk_chooseDirectory -title "Open folder"]
+	if {$::remote} {
+		set p [remote_path_dialog "Open folder" "Folder path on the server:"]
+	} else {
+		set p [tk_chooseDirectory -title "Open folder"]
+	}
 	if {$p ne ""} { open_folder $p }
 }
 
@@ -762,14 +891,18 @@ proc compare_proposal {turn} {
 # side is read-only via fs.read (D28) (an absolute path is taken as-is, D11), so it
 # need not be open or even inside the project.
 proc compare_with_file_dialog {} {
-	set path [tk_getOpenFile -title "Compare active buffer with file"]
+	if {$::remote} {
+		set path [remote_path_dialog "Compare with file" "File path on the server:"]
+	} else {
+		set path [tk_getOpenFile -title "Compare active buffer with file"]
+	}
 	if {$path eq ""} return
 	set resp [rio_call fs.read [dict create path $path]]
 	if {![dict get $resp ok]} {
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
-	compare_open [rio::doc::text $::cur] [dict get $resp result text] \
+	compare_open [buf_text $::cur] [dict get $resp result text] \
 		"[tab_name $::cur] (buffer)" "[file tail $path] (file)"
 }
 
@@ -919,13 +1052,59 @@ proc cycle {dir} {
 	activate [lindex $::order [expr {($i + $dir) % [llength $::order]}]]
 }
 
+# A server-side path prompt (AGENTS.md D29). In remote mode the filesystem of record
+# is the core's, but tk_getOpenFile / tk_getSaveFile / tk_chooseDirectory browse the
+# CLIENT's disk — wrong for a remote core. So those choosers are replaced by a typed
+# path the core resolves. Returns the entered path, or "" if cancelled. (The file
+# tree remains the point-and-click way in; this is the explicit-path escape hatch.)
+proc remote_path_dialog {title label {seed ""}} {
+	set w .rpath
+	destroy $w
+	toplevel $w
+	wm title $w $title
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.prompt -anchor w -font RioUIFont -text $label \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	entry $w.e -width 60 -font RioUIFont
+	$w.e insert end $seed
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.ok     -text OK     -font RioUIFont \
+		-command {set ::rpath_result [.rpath.e get] ; destroy .rpath}
+	button $w.btns.cancel -text Cancel -font RioUIFont \
+		-command {set ::rpath_result "" ; destroy .rpath}
+	pack $w.btns.cancel $w.btns.ok -side right -padx 3
+	grid $w.prompt -row 0 -column 0 -sticky we -padx 8 -pady {8 2}
+	grid $w.e      -row 1 -column 0 -sticky we -padx 8
+	grid $w.btns   -row 2 -column 0 -sticky e  -padx 5 -pady {2 8}
+	bind $w.e <Return> {set ::rpath_result [.rpath.e get] ; destroy .rpath}
+	bind $w <Escape>   {set ::rpath_result "" ; destroy .rpath}
+	set ::rpath_result ""
+	catch {grab $w}
+	focus $w.e
+	tkwait window $w
+	return $::rpath_result
+}
+
 # --- dialog wrappers ---------------------------------------------------------
+# Each picks a path then calls a do_* action. The native chooser browses the local
+# disk; in remote mode it gives way to a server-side typed path (remote_path_dialog).
 proc open_dialog {} {
-	set p [tk_getOpenFile -title "Open file"]
+	if {$::remote} {
+		set p [remote_path_dialog "Open file" "File path on the server:"]
+	} else {
+		set p [tk_getOpenFile -title "Open file"]
+	}
 	if {$p ne ""} { do_open $p }
 }
 proc save_as_dialog {} {
-	set p [tk_getSaveFile -title "Save as"]
+	if {$::remote} {
+		set p [remote_path_dialog "Save as" "Save to path on the server:" [bufget $::cur path]]
+	} else {
+		set p [tk_getSaveFile -title "Save as"]
+	}
 	if {$p eq ""} { return 0 }
 	return [do_save_as $p]
 }
@@ -1392,8 +1571,21 @@ bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
 bind .ed.t <Control-E>         { show_pane files ; break }
 bind .ed.t <Control-G>         { show_pane git ; break }
 bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
-bind .ed.t <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
+bind .ed.t <Control-A>         { if {!$::remote} { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility } ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
+
+# Remote mode: the agent is in-process-only this iteration (its provider/key/policy
+# plumbing isn't ops yet — AGENTS.md D29), so hide the chat column and grey out its
+# menu entries. The editor, file tree, git, and compare view all run over the socket.
+if {$::remote} {
+	set ::chat_shown 0
+	.m.view entryconfigure "Agent Chat"                 -state disabled
+	.m.settings entryconfigure "Agent: Echo (offline)"    -state disabled
+	.m.settings entryconfigure "Agent: Claude (API key)"  -state disabled
+	.m.settings entryconfigure "Claude API Key…"         -state disabled
+	.m.settings entryconfigure "Agent: Auto-accept edits" -state disabled
+	.m.settings entryconfigure "Agent: Compare complex edits" -state disabled
+}
 
 # --- widget proxy: edits become protocol requests, never local mutations -----
 rename .ed.t ::rio_real_t
@@ -1438,20 +1630,27 @@ proc .ed.t {args} {
 # every widget — and the tab bar refresh_tabs builds — uses the role table.
 apply_theme [dict get [rio_call theme.get {}] result]
 
-# Start on the core's default buffer (an empty "untitled" tab), then process the
-# command line: a directory argument opens as the project folder, a file opens in
-# a tab. The file pane starts empty until a folder is opened.
+# Adopt the core's existing buffer(s), then process the command line. In-process: a
+# directory argument opens as the project folder, a file opens in a tab. Remote: the
+# path lives on the SERVER, so we can't stat it from here — open each as a project
+# folder (project.open) and let the core judge; files are reached via the tree (D29).
+# The agent provider is selected only when the agent is embedded (in-process).
 set ::nav_dir ""
 set ::nav_rows {}
 set ::git_rows {}
-register_buffer $::rio::ops::default "" {}
-activate $::rio::ops::default
+adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
-apply_provider             ;# activate the default agent provider (echo) + name it
+if {!$::remote} { apply_provider }   ;# activate the default agent provider (echo) + name it
 foreach f $argv {
-	if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
+	if {$::remote} {
+		open_folder $f
+	} elseif {[file isdirectory $f]} {
+		open_folder $f
+	} else {
+		do_open $f
+	}
 }
 
 # Let the window settle at its natural content size, then stop child geometry from

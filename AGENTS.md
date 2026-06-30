@@ -956,6 +956,82 @@ defers the editor-group refactor without blocking the feature.
 
 ---
 
+### D29 — GUI as a socket client: editor over a remote core (server mode, editor-first)
+
+D2 made the protocol transport-independent and the socket **server** has existed
+and been tested since (`rio-core/server.tcl`, `tests/server.test`): the *same*
+`rio::dispatch::handle` over TCP, response to the requester, events broadcast to
+all clients. What was missing was a **client** — the GUI embedded the core and
+called `rio::core::call` directly. D29 makes the GUI able to drive a core running
+**elsewhere** (a headless box, reached over an SSH tunnel), editor-first.
+
+**One transport seam.** `rio_call {op params}` now dispatches on `::remote`. The
+mode is chosen *before any sourcing* (so the two modes load different code):
+`--connect host:port` (argv), `RIO_CONNECT` (env), or a pre-set `::connect_to`
+(tests). In-process (default, unchanged) embeds the Tk-free core + the Claude
+plugin and calls `rio::core::call`. **Remote** sources only the wire encoder
+(`rio::wire`, Tk-free) and opens a socket; `remote_call` writes one `{id,op,params}`
+JSON line (the *same* `rio::wire` escaping the server replies with) and runs the
+event loop until the reply with its **unique id** lands. A `fileevent` reader
+(`remote_reader`) splits incoming lines: **events → `dispatch_event`** (applied to
+the view at once), **replies → the `rio_call` waiting on that id**. Unique ids make
+a keystroke typed mid-wait — itself a nested `rio_call` — resolve independently
+(nested `vwait` on distinct vars). A dropped socket wakes every pending call with a
+`disconnected` error (no hang) and reports once. Both transports return the *same*
+response dict, so no caller can tell which is live.
+
+**Symmetric event handling.** The event switch that lived inline in `rio_call` is
+now `dispatch_event {ev}`, fed by both transports (in-process from the call's
+returned events, remote from the reader). `buffer.changed` redraws the editor only
+when the changed buffer is the **active** one (matching `agent_event`'s guard) — the
+rule that lets an async remote event for a background buffer be ignored safely.
+
+**No more reaching past the protocol.** Two in-process shortcuts are gone so both
+modes use ops only: `rio::doc::text $id` → the **`buffer.text`** op (`buf_text`),
+and the startup `$::rio::ops::default` → **`buffer.list`** adoption
+(`adopt_initial_buffers` registers every reported buffer and activates the first;
+`buffer.new` if none). In-process reports its own default buffer; remote reports the
+server's open buffers — same code.
+
+**Remote file access is server-side.** The filesystem of record is the **core's**.
+The native choosers (`tk_getOpenFile`/`tk_getSaveFile`/`tk_chooseDirectory`) browse
+the *client* disk, so in remote mode they give way to a typed **server-path** prompt
+(`remote_path_dialog`); the **file-tree pane** (`fs.list` + `project.open`, already
+ops) is the point-and-click way in, unchanged. A path on the command line opens as a
+project folder (we can't stat a server path from the client).
+
+**Agent stays in-process this pass.** Its provider/key/policy plumbing isn't ops
+yet, so in remote mode the chat column is hidden and its menu entries greyed; the
+editor, file tree, git, and compare view all run fully over the socket.
+
+**Server binds loopback by default.** `rio::server::listen` now binds **127.0.0.1**
+unless asked otherwise (`--any`, or `RIO_BIND=0.0.0.0`, which also prints a no-auth
+warning): the core has no auth or encryption (the SSH-tunnel model), so it must not
+face the public interface unasked.
+
+**Two honest caveats (inherent, not bugs).** (1) **Per-keystroke round-trip**: the
+GUI is a dumb view (D3), so a keystroke is a `buffer.replace` whose echoed
+`buffer.changed` draws the character — one RTT each over the socket. Fine on
+localhost / a nearby box through an SSH tunnel; laggy across the world. A local-echo
+optimization is possible later. (2) **Files live on the server.** Verified by a new
+end-to-end socket smoke (`rio-gui/tests/remote.tcl`): an in-process server + the GUI
+in remote mode over a real socket — open/edit/save/undo/redo/compare, asserting the
+widget mirrors only because a `buffer.changed` round-tripped the wire and the
+server's own document and on-disk bytes agree.
+
+**Out of scope (named, not built):** agent-over-socket (provider/key/policy ops +
+loading the Claude plugin server-side), auth, encryption (SSH provides both),
+reconnect/resume, multi-client conflict UX, and the local-echo latency win.
+
+**Why:** the protocol was built for this (D2); the missing half was a client. Adding
+it as one `rio_call` seam — rather than a parallel frontend — keeps the in-process
+path (the common case) unchanged and the remote path a thin reroute, while finally
+exercising the wire layer end-to-end from a real GUI. Editor-first lands the useful
+80% (remote editing over a tunnel) without dragging the agent's credential model
+onto the server yet.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

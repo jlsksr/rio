@@ -41,11 +41,19 @@ Everything below runs today:
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
+- **Remote / server mode** — run the core on another box and point the GUI at it
+  over a socket (editor, files, git, and compare all work; the agent is local-only
+  for now). On the server: `tclsh rio-core/server.tcl 7711` (binds **loopback** by
+  default — front it with an SSH tunnel). On your machine:
+  `ssh -L 7711:127.0.0.1:7711 host`, then
+  `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server`. Files open
+  and save on the *server*; browse them from the file tree.
 
-**Under the hood:** all the logic lives in a **UI-less core** that the GUI drives
-in-process; the very same core can run headless behind a socket (optional
-**server mode**, like `emacs-server`). Frontends are thin views — the core owns
-your files and broadcasts changes back.
+**Under the hood:** all the logic lives in a **UI-less core**. The GUI drives it
+either **in-process** (the default) or as a **socket client** to a core running
+elsewhere (**server mode**, like `emacs-server`) — the same op calls, just a
+different transport. Frontends are thin views — the core owns your files and
+broadcasts changes back.
 
 **Still to come:** git write ops (stage/commit), an agent run-command tool (with
 guardrails), the terminal frontend (below), and a polished
