@@ -261,7 +261,17 @@ proc rio::claude::_done {sid status err} {
 	set postcmd $cb($sid)
 	if {!$fin($sid)} {
 		if {$status == 0} {
-			{*}$postcmd error network "Couldn't reach Claude — check your connection ($err)"
+			# Status 0 is "the transport never got an HTTP reply" — usually a real
+			# connection failure, but ALSO the case where the core can't even set up
+			# TLS because the tcltls package is missing (D30: the agent's HTTPS runs
+			# in the core, so a TLS-less server fails here). Tell those apart — the
+			# fixes are different (check the network vs. install tcltls on the core).
+			if {[string match {*can't find package tls*} $err]} {
+				{*}$postcmd error tls_unavailable \
+					"The core can't load the TLS library Claude's HTTPS needs — install tcltls where the core runs (apt/apk: tcl-tls; OpenBSD: tcltls) and restart it. This is the core's host, not yours, when it's remote ($err)"
+			} else {
+				{*}$postcmd error network "Couldn't reach Claude — check your connection ($err)"
+			}
 		} elseif {$status == 200} {
 			_post_done $postcmd $stop($sid)   ;# clean close without an explicit message_stop
 		} else {

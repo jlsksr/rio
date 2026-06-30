@@ -189,6 +189,14 @@ test claude-network-fail {a failure to connect (status 0) is a network error} -b
 	list [lindex $t 1] [string match {*connection refused*} [lindex $t 2]]
 } -result {network 1}
 
+test claude-tls-missing {status 0 from a missing tcltls is a distinct, actionable error — not "check your connection"} -body {
+	run_infer [list ""] 0 "can't find package tls"
+	set t [terminal]
+	list [lindex $t 1] \
+		[string match {*install tcltls*} [lindex $t 2]] \
+		[string match {*check your connection*} [lindex $t 2]]
+} -result {tls_unavailable 1 0}
+
 # --- auth header passthrough -------------------------------------------------
 
 test claude-auth-header-passed {the face's auth pair is sent as a request header} -body {
