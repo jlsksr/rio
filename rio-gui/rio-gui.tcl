@@ -52,7 +52,19 @@ if {$::remote} {
 	# Remote: the wire encoder only (Tk-free, no core), plus a socket to the core.
 	source [file join $::rio_dir .. rio-core wire.tcl]
 	lassign [split $::connect_to :] host port
-	set ::sock [socket $host $port]
+	if {$host eq "" || ![string is integer -strict $port]} {
+		puts stderr "rio-gui: --connect expects host:port, got '$::connect_to'"
+		exit 2
+	}
+	# A failed connect must not dump a Tcl stack trace: the usual cause is the core
+	# not running, or — for a remote core, which binds loopback (D29) — no SSH tunnel
+	# yet. Say so, with the tunnel recipe, and exit cleanly.
+	if {[catch {socket $host $port} ::sock]} {
+		puts stderr "rio-gui: cannot reach a rio core at $::connect_to ($::sock)."
+		puts stderr "  • Is the core running?   on the server:  tclsh rio-core/server.tcl $port"
+		puts stderr "  • Remote core binds loopback — tunnel first:  ssh -L $port:127.0.0.1:$port <server>"
+		exit 1
+	}
 	fconfigure $::sock -buffering line -blocking 0 -translation lf -encoding utf-8
 	fileevent $::sock readable remote_reader
 	set ::reply_seq 0
