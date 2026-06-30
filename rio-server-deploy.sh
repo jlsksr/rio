@@ -12,6 +12,7 @@
 # What it installs:
 #   - tclsh     the Tcl interpreter the core runs on (no Tk — the server is headless)
 #   - tcllib    provides the json package the wire protocol parses with
+#               (Alpine names this package tcl-lib, in the community repo)
 #   - git       recommended: the git pane shells out to it (skip with --no-git)
 #
 # Usage:
@@ -90,21 +91,33 @@ detect_pm() {
 
 install_server() {
 	# No Tk, no tcl-tls: the server is headless and the agent stays client-side.
-	set -- tcl tcllib
-	[ "$WITH_GIT" = 1 ] && set -- "$@" git
+	# The pure-Tcl json library is "tcllib" on Debian/OpenBSD, but Alpine renamed it
+	# to "tcl-lib" (community repo); old Alpine still calls it "tcllib".
 	case "$PM" in
 		apt)
+			set -- tcl tcllib
+			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			run apt-get update
 			run apt-get install -y "$@"
 			;;
 		apk)
+			run apk update
+			lib=tcl-lib
+			if [ "$DRY_RUN" != 1 ]; then
+				if   apk search -x tcl-lib 2>/dev/null | grep -q .; then lib=tcl-lib
+				elif apk search -x tcllib  2>/dev/null | grep -q .; then lib=tcllib
+				else die "no tcl-lib/tcllib in the apk index — enable the 'community' repository in /etc/apk/repositories, then re-run"
+				fi
+			fi
+			set -- tcl "$lib"
+			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			run apk add --no-interactive "$@"
 			;;
 		pkg_add)
-			# OpenBSD: pkg_add resolves the 8.6 flavor of tcl; tcllib/git are plain.
-			obsd=""; for p in "$@"; do [ "$p" = tcl ] && p=tcl%8.6; obsd="$obsd $p"; done
+			set -- tcl%8.6 tcllib
+			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			# shellcheck disable=SC2086
-			run pkg_add -I $obsd
+			run pkg_add -I "$@"
 			;;
 	esac
 }
