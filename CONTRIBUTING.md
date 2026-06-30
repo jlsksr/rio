@@ -87,9 +87,10 @@ on the terminal version, add `--with-ck` to build the curses toolkit from
 source — otherwise skip it; the GUI doesn't need it.
 
 To run only the **headless core** on a remote box (server mode, no GUI), there's
-a slimmer sibling — `./rio-server-deploy.sh` installs just `tclsh` + `tcllib`
-(the core is Tk-free and needs no TLS), and verifies it by binding a throwaway
-socket. See the README's "remote / server mode" note for the tunnel + `--connect`
+a slimmer sibling — `./rio-server-deploy.sh` installs `tclsh` + `tcllib` + `tcl-tls`
+(Tk-free, but the agent runs in the core now, so its Claude HTTPS needs TLS here),
+and verifies it by binding a throwaway socket. See the README's "remote / server
+mode" note for the tunnel + `--connect`
 recipe.
 
 With the toolchain in place you can run the GUI editor — it spawns its own

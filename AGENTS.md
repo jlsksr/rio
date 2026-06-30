@@ -1091,9 +1091,13 @@ core locally if you won't put a key on a given box — the GUI is the same eithe
 traffic**: they arrive on the GUI's one channel reader and `dispatch_event` routes
 `agent.*` to the chat — there is no separate in-process streaming sink. The chat is
 **no longer hidden** (`::agent_avail` retired); the smoke exercises a full turn over a
-socket and `pipe.tcl` a full turn over the real spawned-child pipe. *Pending:* a
-`--ssh host [path]` convenience wrapper (P4) — today the remote path is `--connect`
-over a hand-made `ssh -L` tunnel, or `ssh host … server.tcl --stdio` by hand.
+socket and `pipe.tcl` a full turn over the real spawned-child pipe. **Deploy
+consequence:** the agent's Claude HTTPS now runs *server-side*, so a headless core
+box needs `tcl-tls` too — `rio-server-deploy.sh` installs it and the verifier checks
+`package require tls` (a pre-P3 server, provisioned TLS-free, fails a Claude turn with
+"can't find package tls"). *Pending:* a `--ssh host [path]` convenience wrapper (P4) —
+today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
+`ssh host … server.tcl --stdio` by hand.
 
 **Caveats (inherent).** Per-keystroke round-trip (the D3 dumb view) — imperceptible
 over a local pipe or a nearby tunnel, laggy across the world; and **one core per

@@ -3,16 +3,19 @@
 # rio-server-deploy.sh — install rio-core's server-mode runtime on a headless box.
 #
 # Server mode (AGENTS.md D29) runs the UI-less core behind a socket; a remote rio
-# GUI then drives it over an SSH tunnel. The core is Tk-FREE (D1) and, with the
-# agent kept client-side this iteration, needs no TLS — so the server's whole
-# runtime is just tclsh + tcllib (for JSON), plus git if you want the git pane.
-# This is the slim counterpart to rio-dev-deploy.sh (which sets up a full GUI/dev
-# toolchain). POSIX sh; targets Alpine (apk), Debian/Ubuntu (apt), OpenBSD (pkg_add).
+# GUI then drives it over an SSH tunnel. The core is Tk-FREE (D1) but, since the
+# agent now runs IN THE CORE (D30), the server needs TLS too: the Claude provider's
+# HTTPS happens server-side wherever the core runs. So the runtime is tclsh + tcllib
+# (JSON) + tcl-tls (HTTPS for the agent), plus git if you want the git pane. This is
+# the slim counterpart to rio-dev-deploy.sh (which sets up a full GUI/dev toolchain).
+# POSIX sh; targets Alpine (apk), Debian/Ubuntu (apt), OpenBSD (pkg_add).
 #
 # What it installs:
 #   - tclsh     the Tcl interpreter the core runs on (no Tk — the server is headless)
 #   - tcllib    provides the json package the wire protocol parses with
 #               (Alpine names this package tcl-lib, in the community repo)
+#   - tcl-tls   the TLS extension the agent's Claude HTTPS transport needs (D30);
+#               without it a server-side Claude turn fails "can't find package tls"
 #   - git       recommended: the git pane shells out to it (skip with --no-git)
 #
 # Usage:
@@ -90,12 +93,14 @@ detect_pm() {
 }
 
 install_server() {
-	# No Tk, no tcl-tls: the server is headless and the agent stays client-side.
-	# The pure-Tcl json library is "tcllib" on Debian/OpenBSD, but Alpine renamed it
-	# to "tcl-lib" (community repo); old Alpine still calls it "tcllib".
+	# No Tk (headless), but tcl-tls IS needed now: the agent runs in the core (D30),
+	# so its Claude HTTPS happens server-side. The pure-Tcl json library is "tcllib"
+	# on Debian/OpenBSD, but Alpine renamed it to "tcl-lib" (community repo); old
+	# Alpine still calls it "tcllib". The TLS extension is "tcl-tls" on apt/apk and
+	# "tcltls" on OpenBSD.
 	case "$PM" in
 		apt)
-			set -- tcl tcllib
+			set -- tcl tcllib tcl-tls
 			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			run apt-get update
 			run apt-get install -y "$@"
@@ -109,12 +114,12 @@ install_server() {
 				else die "no tcl-lib/tcllib in the apk index — enable the 'community' repository in /etc/apk/repositories, then re-run"
 				fi
 			fi
-			set -- tcl "$lib"
+			set -- tcl "$lib" tcl-tls
 			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			run apk add --no-interactive "$@"
 			;;
 		pkg_add)
-			set -- tcl%8.6 tcllib
+			set -- tcl%8.6 tcllib tcltls
 			[ "$WITH_GIT" = 1 ] && set -- "$@" git
 			# shellcheck disable=SC2086
 			run pkg_add -I "$@"
@@ -145,6 +150,15 @@ if {[catch {package require json} ver]} {
 	incr fail
 } else {
 	puts "  json     ok $ver"
+}
+# The agent runs in the core now (D30), so its Claude HTTPS needs the TLS extension
+# right here on the server — check it loads, or a Claude turn fails at the first
+# request with "can't find package tls".
+if {[catch {package require tls} tver]} {
+	puts "  tls      MISSING ($tver) — server-side Claude will fail; install tcl-tls"
+	incr fail
+} else {
+	puts "  tls      ok $tver"
 }
 # Load the core exactly as server mode does, then bind an ephemeral loopback port.
 if {[catch {

@@ -46,8 +46,8 @@ Everything below runs today:
 - **Local & remote, one transport** — the GUI always talks to a core over a
   channel. **Locally there is nothing to start**: it spawns its own private core as
   a child process automatically. To edit on **another box**, run the core there
-  (after a `git clone`: `./rio-server-deploy.sh` installs just `tclsh` + `tcllib`,
-  then `tclsh rio-core/server.tcl 7711`, loopback by default), tunnel in
+  (after a `git clone`: `./rio-server-deploy.sh` installs `tclsh` + `tcllib` +
+  `tcl-tls`, then `tclsh rio-core/server.tcl 7711`, loopback by default), tunnel in
   (`ssh -L 7711:127.0.0.1:7711 host`), and attach:
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server`. Files open
   and save on whichever box the core runs on; browse them from the file tree.
