@@ -29,8 +29,9 @@ Everything below runs today:
 - **Compare view** — a **side-by-side diff** of two documents, original beside
   proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
   the active buffer against any file from the View menu.
-- **Agent chat** — a right-hand chat column wired to two providers: a built-in
-  offline **echo** provider, and **Claude** over the official Anthropic API
+- **Agent chat** *(temporarily hidden while it moves onto the new core transport —
+  see D30; returns next)* — a right-hand chat column wired to two providers: a
+  built-in offline **echo** provider, and **Claude** over the official Anthropic API
   (bring your own API key, entered under *Settings*). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
   open buffers — shown as it works) and **propose edits**: it suggests a change or
@@ -41,20 +42,20 @@ Everything below runs today:
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
-- **Remote / server mode** — run the core on another box and point the GUI at it
-  over a socket (editor, files, git, and compare all work; the agent is local-only
-  for now). On the server (after a `git clone`), install the slim runtime with
-  `./rio-server-deploy.sh` (just `tclsh` + `tcllib`, no Tk), then
-  `tclsh rio-core/server.tcl 7711` (binds **loopback** by default — front it with
-  an SSH tunnel). On your machine: `ssh -L 7711:127.0.0.1:7711 host`, then
+- **Local & remote, one transport** — the GUI always talks to a core over a
+  channel. **Locally there is nothing to start**: it spawns its own private core as
+  a child process automatically. To edit on **another box**, run the core there
+  (after a `git clone`: `./rio-server-deploy.sh` installs just `tclsh` + `tcllib`,
+  then `tclsh rio-core/server.tcl 7711`, loopback by default), tunnel in
+  (`ssh -L 7711:127.0.0.1:7711 host`), and attach:
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server`. Files open
-  and save on the *server*; browse them from the file tree.
+  and save on whichever box the core runs on; browse them from the file tree.
 
-**Under the hood:** all the logic lives in a **UI-less core**. The GUI drives it
-either **in-process** (the default) or as a **socket client** to a core running
-elsewhere (**server mode**, like `emacs-server`) — the same op calls, just a
-different transport. Frontends are thin views — the core owns your files and
-broadcasts changes back.
+**Under the hood:** all the logic lives in a **UI-less core**, and the GUI is
+**always a client** to one over a channel — a pipe to a private core it spawns
+locally, or a socket to a core running elsewhere (**server mode**, like
+`emacs-server`). Same op calls either way; there is no separate in-process path.
+Frontends are thin views — the core owns your files and broadcasts changes back.
 
 **Still to come:** git write ops (stage/commit), an agent run-command tool (with
 guardrails), the terminal frontend (below), and a polished

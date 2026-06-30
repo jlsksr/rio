@@ -1032,6 +1032,66 @@ onto the server yet.
 
 ---
 
+### D30 — Frontend is always a client to a core over a channel (pipe local, socket remote)
+
+D29 made the GUI *able* to attach to a remote core but left **two transports**: an
+in-process default and a socket. That split is the redundancy network transparency is
+meant to remove — and, for the agent's coming write/exec powers, a loopback socket
+with no auth is a real hole on a shared host (SSH guards the network hop, not the
+loopback endpoints on either end). D30 collapses to **one transport**: the frontend is
+*always* a client to a core at the far end of a **channel**, never embedding it.
+
+**Two channel kinds, one client path.** (1) **Default — a pipe to a spawned child
+core** (`tclsh rio-core/server.tcl --stdio`): requests on its stdin, responses +
+events on its stdout (the LSP / git-over-ssh model). Local, so the core's filesystem
+is ours and it runs as us; **no listening socket exists**, so there is nothing on a
+shared host to connect to and process ownership is the access control. (2)
+**`--connect host:port` — a TCP socket** to a listening core (the optional
+persistent-daemon mode, D29's server), loopback by default. The same `rio_call` seam
+(`core_call` / `core_reader` / `core_lost` over `::core_chan`) drives both; there is
+**no in-process code path**, so local and remote are the same code — true network
+transparency.
+
+**Why pipes, not unix sockets or a cookie.** The goal was secure local IPC with no
+network surface. Unix domain sockets would do it, but **core Tcl is TCP-only**
+(8.6–9.0; AF_UNIX needs a compiled C extension) — a build dependency we won't take. A
+loopback-TCP + capability-token (cookie) scheme would also work but adds an auth
+protocol and token-distribution friction. A **pipe to a child** needs none of it: no
+socket, no auth, no crypto, pure stdlib — and for the remote case the *same* child is
+reached through `ssh host … --stdio`, so **SSH provides authN + encryption** (extending
+D29's "leave encryption to SSH" to transport + authentication). The listening TCP
+server survives only as an opt-in daemon for several frontends on one core; that is
+the one place a cookie would later be added.
+
+**Filesystem of record.** A spawned local core shares our filesystem, so the GUI keeps
+native file choosers there; a `--connect` daemon may be elsewhere (e.g. SSH-forwarded),
+so it uses typed server-side paths (`::core_remote`). The file tree is the
+point-and-click way in either way.
+
+**Lifecycle.** Closing the channel ends the session: a spawned child sees EOF on stdin
+and exits with the GUI (verified even on an abrupt kill); a daemon just drops the
+connection. A vanished core wakes every pending call with a `disconnected` error
+rather than hanging.
+
+**Landed vs pending.** *Done:* the core `--stdio` transport (`rio::server::serve_stdio`)
+and the GUI's single channel transport (default spawn + `--connect`), with
+`rio-gui/tests/{smoke,remote,pipe}.tcl` covering the socket-backed and real
+pipe-spawn paths. *Pending — the agent:* it is a core concern, so it moves over the
+channel next — provider/key/policy become ops, the spawned core loads the Claude
+plugin, and `agent.*` events route through the channel reader; until then the chat is
+hidden (`::agent_avail`). A `--ssh host` convenience wrapper lands with it.
+
+**Caveats (inherent).** Per-keystroke round-trip (the D3 dumb view) — imperceptible
+over a local pipe or a nearby tunnel, laggy across the world; and **one core per
+frontend** (no shared live state across windows — that is the daemon's job).
+
+**Why:** one transport kills the in-process/remote redundancy, and having no default
+listening socket removes the shared-host exposure *structurally* rather than patching
+it with auth — the POSIX-purist answer (compose with SSH and pipes). The wire layer
+(D2/D11) already let the core speak this; the GUI just stopped being a special case.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

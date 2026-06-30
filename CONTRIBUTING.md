@@ -92,8 +92,9 @@ a slimmer sibling — `./rio-server-deploy.sh` installs just `tclsh` + `tcllib`
 socket. See the README's "remote / server mode" note for the tunnel + `--connect`
 recipe.
 
-With the toolchain in place you can run the GUI editor — it embeds the core
-in-process, so there's nothing else to start:
+With the toolchain in place you can run the GUI editor — it spawns its own
+private core as a child process and talks to it over a pipe, so there's nothing
+else to start:
 
     wish rio-gui/rio-gui.tcl [file ...]
 
