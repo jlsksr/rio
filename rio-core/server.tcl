@@ -25,6 +25,10 @@ apply {{} {
 	set dir [file dirname [file normalize [info script]]]
 	source [file join $dir core.tcl]   ;# loads doc/dispatch/ops + default buffer
 	source [file join $dir wire.tcl]
+	# The spawned core carries the agent (D30): load the Claude plugin so it
+	# registers its provider (agent.provider.set claude) and key store. In-process
+	# for now (D26's phasing); a real out-of-process plugin is a later increment.
+	source [file join $dir .. plugins claude claude.tcl]
 }}
 
 namespace eval rio::server {

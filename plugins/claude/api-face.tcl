@@ -80,3 +80,13 @@ proc rio::claude::api::_api_key {} {
 	set s [rio::secret::get [dict get $config secret_name]]
 	return [expr {[dict exists $s api_key] ? [dict get $s api_key] : ""}]
 }
+
+# Register with the agent's named-provider registry (D26/D30) so a frontend can
+# select this face by name over the channel (agent.provider.set claude). The key
+# capability routes agent.key.set/clear/status here — the API key is this face's to
+# keep (D21), the agent layer stays credential-blind.
+rio::agent::register_provider claude rio::claude::api::provider \
+	-key [dict create \
+		set    rio::claude::api::set_key \
+		clear  rio::claude::api::clear_key \
+		status rio::claude::api::configured]

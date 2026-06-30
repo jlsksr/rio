@@ -34,7 +34,7 @@ ok "pipe: wire encoder present"   [expr {[info commands rio::wire::str] ne ""}] 
 ok "pipe: marked local"           $::core_remote 0
 ok "pipe: channel open"           [expr {[info exists ::core_chan] && $::core_chan in [chan names]}] 1
 ok "pipe: a buffer adopted"       [expr {$::cur ne "" && [llength $::order] == 1}] 1
-ok "pipe: agent hidden"           $::chat_shown 0
+ok "pipe: agent shown"            $::chat_shown 1
 
 # --- open / edit / save, all over the pipe -----------------------------------
 set p [tmpbytes "alpha\nbeta\n"]
@@ -58,6 +58,21 @@ ok "pipe: compare opened"         $::compare_shown 1
 ok "pipe: diff tagged via pipe" \
 	[expr {[llength [.cmp.l.t tag ranges del]] > 0 && [llength [.cmp.r.t tag ranges add]] > 0}] 1
 compare_close
+
+# --- an agent turn end to end over the real child-process pipe (D26/D30) ------
+# The full agent path black-box: the GUI sends agent.send over the pipe, the child
+# core runs its built-in echo provider and broadcasts the turn back as agent.* events,
+# which the chat view appends. Pump the event loop until the streamed reply lands.
+proc settle {cond {ms 3000}} {
+	set deadline [expr {[clock milliseconds] + $ms}]
+	while {[clock milliseconds] < $deadline} { update ; if {[uplevel 1 $cond]} return }
+}
+chat_clear
+.chat.input delete 1.0 end ; .chat.input insert end "ping"
+chat_send
+settle {string match {*echo: ping*} [.chat.log get 1.0 end]}
+ok "pipe: agent turn streams back"  [string match {*You*ping*Agent*echo: ping*} [.chat.log get 1.0 end]] 1
+ok "pipe: core recorded the turn"   [llength [dict get [rio_call agent.history {}] result messages]] 2
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

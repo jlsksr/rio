@@ -29,10 +29,11 @@ Everything below runs today:
 - **Compare view** — a **side-by-side diff** of two documents, original beside
   proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
   the active buffer against any file from the View menu.
-- **Agent chat** *(temporarily hidden while it moves onto the new core transport —
-  see D30; returns next)* — a right-hand chat column wired to two providers: a
+- **Agent chat** — a right-hand chat column wired to two providers: a
   built-in offline **echo** provider, and **Claude** over the official Anthropic API
-  (bring your own API key, entered under *Settings*). It holds a streaming
+  (bring your own API key, entered under *Settings*). The agent lives in the core
+  and runs wherever it does — so over a remote core the turn and your key stay
+  server-side, with the same GUI either way (see D30). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
   open buffers — shown as it works) and **propose edits**: it suggests a change or
   a new file, you review the **diff** and **Approve or Reject**, and on approval

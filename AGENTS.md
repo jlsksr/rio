@@ -1076,10 +1076,24 @@ rather than hanging.
 **Landed vs pending.** *Done:* the core `--stdio` transport (`rio::server::serve_stdio`)
 and the GUI's single channel transport (default spawn + `--connect`), with
 `rio-gui/tests/{smoke,remote,pipe}.tcl` covering the socket-backed and real
-pipe-spawn paths. *Pending — the agent:* it is a core concern, so it moves over the
-channel next — provider/key/policy become ops, the spawned core loads the Claude
-plugin, and `agent.*` events route through the channel reader; until then the chat is
-hidden (`::agent_avail`). A `--ssh host` convenience wrapper lands with it.
+pipe-spawn paths. *Done — the agent over the channel (P3):* the agent is a core
+concern, so it now lives wherever the core runs. The spawned core **loads the Claude
+plugin** (`server.tcl` sources `plugins/claude/claude.tcl`), which **self-registers**
+in a new **named-provider registry** in `rio::agent` (`register_provider name cmd
+?-key …?`): `echo` is built in, `claude` registers itself with a *key capability*
+(set/clear/status) so the agent layer stays credential-blind. Provider, key, and
+policy are now **ops** — `agent.provider.set {name}`, `agent.key.set {key}` /
+`agent.key.clear`, `agent.autoaccept.set {on}`, and `agent.status` (provider /
+auto_accept / key_set) — so a frontend (local **or** remote) drives them identically;
+the API key lives in the **core's** 0600 store (D21) wherever the core runs (run the
+core locally if you won't put a key on a given box — the GUI is the same either way).
+`agent.send` stays a streaming op, but its events are now **ordinary broadcast
+traffic**: they arrive on the GUI's one channel reader and `dispatch_event` routes
+`agent.*` to the chat — there is no separate in-process streaming sink. The chat is
+**no longer hidden** (`::agent_avail` retired); the smoke exercises a full turn over a
+socket and `pipe.tcl` a full turn over the real spawned-child pipe. *Pending:* a
+`--ssh host [path]` convenience wrapper (P4) — today the remote path is `--connect`
+over a hand-made `ssh -L` tunnel, or `ssh host … server.tcl --stdio` by hand.
 
 **Caveats (inherent).** Per-keystroke round-trip (the D3 dumb view) — imperceptible
 over a local pipe or a nearby tunnel, laggy across the world; and **one core per
@@ -1424,6 +1438,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   (D3), so *Clear* is `agent.reset` and the transcript could be rebuilt from
   `agent.history`. Themed via the `chat.bg`/`chat.fg` roles + `RioChatFont`, accent
   on the speaker labels (D24). Visibility + width are runtime-only (D21 later).
+  *(Rewired by D30 P3: `chat_send` now sends `agent.send` as a plain op over the
+  one channel and the turn's `agent.*` events arrive as ordinary broadcast traffic —
+  `dispatch_event` routes them to `chat_event`; there is no `call_stream`/`agent_event`
+  in-process sink anymore.)*
 
   **GUI provider selection + Claude key entry — implemented (D26 slice 3).** A
   **Settings** menu picks the live agent provider — *Echo (offline)* or *Claude
@@ -1437,6 +1455,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   `not_configured` error, pointing back to Settings. The choice of provider is
   runtime-only; the key is the durable state. The headless smoke exercises all of
   it against a throwaway secret dir (`rio::secret::override_dir`).
+  *(Rewired by D30 P3: `apply_provider` now calls the `agent.provider.set` op and the
+  key dialog the `agent.key.set`/`clear` ops + `agent.status` — provider, key, and the
+  auto-accept policy are core-side, selected by name from `rio::agent`'s provider
+  registry, so the same GUI drives a local or a remote core identically.)*
 - **O3 — Document model details.** Representation decided in D12 (lines-list,
   `line.col`); encoding, line endings, and cursor locality decided in D22 and now
   *implemented* (`rio-core/fs.tcl`, `fs.*` ops). Undo/redo is now *implemented*

@@ -40,6 +40,32 @@ test claude-api-set-clear {set_key stores the key; clear_key forgets it} -setup 
 	list $a $b [rio::claude::api::configured]
 } -result {0 1 0}
 
+# --- registration with the agent's provider registry (D30) -------------------
+# Loading the face self-registers it by name so a frontend can pick it over the
+# channel (agent.provider.set claude), and routes the agent.key.* ops to its store.
+
+test claude-api-registered {sourcing the face registers `claude` in the agent registry} -body {
+	expr {"claude" in [rio::agent::provider_names]}
+} -result 1
+
+test claude-api-selectable {agent.provider.set claude makes this face the live provider} -setup {
+	rio::agent::use_provider echo
+} -body {
+	rio::agent::use_provider claude
+	list [rio::agent::provider_name] [expr {[set rio::agent::provider] eq "rio::claude::api::provider"}]
+} -cleanup { rio::agent::use_provider echo } -result {claude 1}
+
+test claude-api-key-ops-route {agent.key.set/clear/status reach this face's 0600 store} -setup {
+	rio::claude::api::clear_key
+} -body {
+	set a [rio::agent::key_status]
+	rio::agent::key_set sk-ant-route
+	set b [rio::agent::key_status]
+	set stored [rio::claude::api::configured]
+	rio::agent::key_clear
+	list $a $b $stored [rio::agent::key_status]
+} -result {0 1 1 0}
+
 # --- the request: x-api-key, and none of the OAuth baggage -------------------
 
 test claude-api-request {the request carries x-api-key and no oauth beta / no forced system} -setup {

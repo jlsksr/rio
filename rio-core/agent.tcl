@@ -36,6 +36,16 @@ namespace eval rio::agent {
 	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
 	variable auto_accept       0                    ;# skip the approval gate (opt-in)
 	variable proposals                              ;# array: turn -> {name,path,original,proposed} awaiting review
+
+	# The named-provider registry (D26/D30). A provider is known by NAME so a
+	# frontend can pick one over the channel (agent.provider.set) without ever
+	# naming a Tcl command: `echo` is built in; a plugin (claude-api) registers
+	# itself when the core loads it. An entry is {provider <cmd> ?key <caps>?},
+	# where caps = {set <cmd> clear <cmd> status <cmd>} for a provider that holds a
+	# durable credential (the Claude API key; D21).
+	variable providers       {}                     ;# name -> entry
+	variable active_provider echo                   ;# the registered provider now live
+	variable keyed_provider  ""                     ;# name of the key-holding provider (claude)
 }
 
 # The write-apply policy (read by rio::agent::tools::apply_write) and its toggles —
@@ -43,12 +53,69 @@ namespace eval rio::agent {
 proc rio::agent::writes_disk {} { variable apply_writes_disk ; return $apply_writes_disk }
 proc rio::agent::set_writes_disk {v} { variable apply_writes_disk ; set apply_writes_disk [expr {$v ? 1 : 0}] }
 proc rio::agent::set_auto_accept {v} { variable auto_accept ; set auto_accept [expr {$v ? 1 : 0}] }
+proc rio::agent::auto_accept {} { variable auto_accept ; return $auto_accept }
 
-# Swap the active provider — a command prefix obeying the contract in _run. The
-# Claude face (D26: claude-api) registers its provider here.
+# Swap the active provider directly — a command prefix obeying the contract in
+# _run. The low-level hook used by the core's own tests; frontends pick a provider
+# by NAME through use_provider (the registry), which also keeps the live name.
 proc rio::agent::set_provider {cmd} {
 	variable provider
 	set provider $cmd
+}
+
+# --- named-provider registry (D26/D30) ---------------------------------------
+#
+# register_provider name cmd ?-key {set .. clear .. status ..}?
+#   Record a provider under `name`. `-key` declares the provider holds a durable
+#   credential and wires the three commands the agent.key.* ops drive (the claude
+#   face uses this for the API key); the agent layer itself stays credential-blind.
+proc rio::agent::register_provider {name cmd args} {
+	variable providers
+	variable keyed_provider
+	set entry [dict create provider $cmd]
+	foreach {opt val} $args {
+		switch -- $opt {
+			-key { dict set entry key $val ; set keyed_provider $name }
+			default { error "register_provider: unknown option $opt" }
+		}
+	}
+	dict set providers $name $entry
+}
+
+# Activate a registered provider by name (agent.provider.set). An unknown name is a
+# bad_request — the frontend offered a provider this core doesn't carry.
+proc rio::agent::use_provider {name} {
+	variable providers
+	variable provider
+	variable active_provider
+	if {![dict exists $providers $name]} {
+		rio::error::raise bad_request "unknown agent provider: $name"
+	}
+	set provider [dict get $providers $name provider]
+	set active_provider $name
+	return $name
+}
+
+proc rio::agent::provider_name  {} { variable active_provider ; return $active_provider }
+proc rio::agent::provider_names {} { variable providers ; return [lsort [dict keys $providers]] }
+
+# The key capability of the key-holding provider (claude), or raise if this core
+# carries none. key_status answers softly (0) so a frontend can render "no key".
+proc rio::agent::_key_caps {} {
+	variable providers
+	variable keyed_provider
+	if {$keyed_provider eq "" || ![dict exists $providers $keyed_provider key]} {
+		rio::error::raise bad_request "this core has no key-based agent provider"
+	}
+	return [dict get $providers $keyed_provider key]
+}
+proc rio::agent::key_set {key} { {*}[dict get [_key_caps] set] $key ; return }
+proc rio::agent::key_clear {}   { {*}[dict get [_key_caps] clear] ; return }
+proc rio::agent::key_status {} {
+	variable providers
+	variable keyed_provider
+	if {$keyed_provider eq "" || ![dict exists $providers $keyed_provider key]} { return 0 }
+	return [{*}[dict get $providers $keyed_provider key status]]
 }
 
 # Clear the conversation (agent.reset). Also abort any turn suspended awaiting an
@@ -363,3 +430,7 @@ proc rio::agent::_echo_stream {post chunks} {
 	{*}$post delta $head
 	after 0 [list [namespace current]::_echo_stream $post $chunks]
 }
+
+# The built-in, always-available provider. A keyed provider (claude) registers
+# itself from its plugin when the core loads it (server.tcl).
+rio::agent::register_provider echo ::rio::agent::echo_provider

@@ -428,6 +428,100 @@ test agent-proposal-stale {agent.proposal with nothing pending is a bad_request}
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
 
+# --- provider / key / policy control ops (D30) -------------------------------
+# A frontend drives the agent over the channel: provider, key, and policy are ops,
+# not in-process swaps. echo is built in; tests register a fake provider (and a
+# fake key-holding one) so the registry is exercised without the claude plugin.
+
+proc fake_provider {conversation tools post} { {*}$post delta "fake reply" ; {*}$post done end_turn }
+proc fakekey_set {k} { set ::fakekey $k }
+proc fakekey_clear {} { set ::fakekey "" }
+proc fakekey_status {} { expr {[info exists ::fakekey] && $::fakekey ne ""} }
+
+test agent-provider-echo-registered {echo is in the registry from the start} -body {
+	expr {"echo" in [rio::agent::provider_names]}
+} -result 1
+
+test agent-provider-set-by-name {agent.provider.set selects a registered provider and reports the live name} -setup {
+	rio::agent::register_provider faked fake_provider
+} -body {
+	set r [dict get [rio::core::call agent.provider.set {name faked}] response]
+	list [dict get $r ok] [dict get $r result name] [rio::agent::provider_name]
+} -cleanup {
+	rio::agent::use_provider echo
+} -result {true faked faked}
+
+test agent-provider-set-runs-it {a turn after agent.provider.set streams through the chosen provider} -setup {
+	rio::agent::register_provider faked fake_provider
+	rio::core::call agent.provider.set {name faked}
+	rio::core::call agent.reset {}
+} -body {
+	# Drive the turn WITHOUT re-setting the provider, so it proves the op wired the
+	# live command (not run_turn, which sets a provider of its own).
+	set ::evs {} ; set ::fin {}
+	rio::core::call_stream agent.send {text x} collect_ev
+	set tm [after 3000 {set ::fin timeout}] ; vwait ::fin ; after cancel $tm
+	set msg ""
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.message"} { set msg [dict get $ev params text] }
+	}
+	list $::fin $msg
+} -cleanup { rio::agent::use_provider echo } -result {done {fake reply}}
+
+test agent-provider-set-unknown {an unknown provider name is a bad_request} -body {
+	set r [dict get [rio::core::call agent.provider.set {name nope}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test agent-provider-set-requires-name {agent.provider.set without a name is bad_request} -body {
+	set r [dict get [rio::core::call agent.provider.set {}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test agent-autoaccept-op {agent.autoaccept.set toggles the approval gate} -setup {
+	rio::agent::set_auto_accept 0
+} -body {
+	set on  [dict get [rio::core::call agent.autoaccept.set {on 1}] response result on]
+	set v1  [rio::agent::auto_accept]
+	set off [dict get [rio::core::call agent.autoaccept.set {on 0}] response result on]
+	set v0  [rio::agent::auto_accept]
+	list $on $v1 $off $v0
+} -cleanup { rio::agent::set_auto_accept 0 } -result {1 1 0 0}
+
+test agent-key-ops {agent.key.set/clear route to the key-holding provider; status reflects them} -setup {
+	unset -nocomplain ::fakekey
+	rio::agent::register_provider fkeyed fake_provider \
+		-key {set fakekey_set clear fakekey_clear status fakekey_status}
+} -body {
+	set s0 [dict get [rio::core::call agent.status {}] response result key_set]
+	rio::core::call agent.key.set {key sk-test-123}
+	set s1 [dict get [rio::core::call agent.status {}] response result key_set]
+	set stored $::fakekey
+	rio::core::call agent.key.clear {}
+	set s2 [dict get [rio::core::call agent.status {}] response result key_set]
+	list $s0 $s1 $stored $s2
+} -result {0 1 sk-test-123 0}
+
+test agent-key-set-requires-key {agent.key.set without a key is bad_request} -body {
+	set r [dict get [rio::core::call agent.key.set {}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test agent-status-shape {agent.status reports provider, auto_accept and key_set} -setup {
+	rio::agent::use_provider echo
+	rio::agent::set_auto_accept 0
+} -body {
+	set r [dict get [rio::core::call agent.status {}] response result]
+	list [dict get $r provider] [dict get $r auto_accept] [dict exists $r key_set]
+} -result {echo 0 1}
+
+test agent-control-ops-registered {the new control ops are in the live registry} -body {
+	set ops [rio::dispatch::opnames]
+	expr {"agent.provider.set" in $ops && "agent.key.set" in $ops \
+		&& "agent.key.clear" in $ops && "agent.autoaccept.set" in $ops \
+		&& "agent.status" in $ops}
+} -result 1
+
 # --- wire encoding (D11/D25) -------------------------------------------------
 
 test agent-delta-wire {an agent.delta event encodes to JSON} -body {

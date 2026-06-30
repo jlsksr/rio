@@ -50,6 +50,66 @@ proc rio::ops::agent_reset {params} {
 }
 rio::dispatch::register agent.reset rio::ops::agent_reset
 
+# --- provider / key / policy controls (D30) ----------------------------------
+#
+# The agent is a core concern reached over the channel, so its settings are ops,
+# not in-process calls: a frontend (the GUI, local or remote) drives them the same
+# way. The provider runs and the key lives WHEREVER THE CORE RUNS (server-side for
+# a remote core; D21's 0600 store) — the frontend never holds the credential (D3).
+
+# agent.provider.set {name} -> {name} ; choose the live provider by name
+# (echo | a plugin-registered provider such as claude). Unknown name is bad_request.
+proc rio::ops::agent_provider_set {params} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.provider.set requires name"
+	}
+	set name [rio::agent::use_provider [dict get $params name]]
+	return [dict create result [dict create name $name]]
+}
+rio::dispatch::register agent.provider.set rio::ops::agent_provider_set
+
+# agent.key.set {key} -> {} ; store the key-holding provider's credential (the
+# Claude API key) in the core's 0600 secret store (D21). The frontend hands the key
+# across once and never keeps it.
+proc rio::ops::agent_key_set {params} {
+	if {![dict exists $params key]} {
+		rio::error::raise bad_request "agent.key.set requires key"
+	}
+	rio::agent::key_set [dict get $params key]
+	return [dict create result {}]
+}
+rio::dispatch::register agent.key.set rio::ops::agent_key_set
+
+# agent.key.clear -> {} ; forget the stored credential.
+proc rio::ops::agent_key_clear {params} {
+	rio::agent::key_clear
+	return [dict create result {}]
+}
+rio::dispatch::register agent.key.clear rio::ops::agent_key_clear
+
+# agent.autoaccept.set {on} -> {on} ; toggle the approval gate (D26 s5). When on,
+# a proposed edit applies without waiting for the user's Approve/Reject.
+proc rio::ops::agent_autoaccept_set {params} {
+	if {![dict exists $params on]} {
+		rio::error::raise bad_request "agent.autoaccept.set requires on"
+	}
+	set on [expr {[dict get $params on] ? 1 : 0}]
+	rio::agent::set_auto_accept $on
+	return [dict create result [dict create on $on]]
+}
+rio::dispatch::register agent.autoaccept.set rio::ops::agent_autoaccept_set
+
+# agent.status -> {provider, auto_accept, key_set} ; the agent's current settings,
+# so a frontend renders its menus/dialogs without holding the state itself (D3).
+# All leaves are strings — the default wire encoder applies.
+proc rio::ops::agent_status {params} {
+	return [dict create result [dict create \
+		provider    [rio::agent::provider_name] \
+		auto_accept [rio::agent::auto_accept] \
+		key_set     [rio::agent::key_status]]]
+}
+rio::dispatch::register agent.status rio::ops::agent_status
+
 # agent.history -> {messages:[{role,text}]} ; the conversation so far (newest
 # last). A non-flat result (an array), so the wire layer registers a shape
 # encoder (D25; see rio::wire).

@@ -30,7 +30,7 @@ package require json
 # Transport (AGENTS.md D30): the GUI is ALWAYS a client to a core at the far end of
 # a channel — it never embeds the core. Two channel kinds, one client code path:
 #   default        spawn a private core as a child and talk over its stdio pipe.
-#                  Local: its filesystem is ours, and (later) its agent runs as us.
+#                  Local: its filesystem is ours, and its agent runs as us (D30).
 #                  No listening socket ⇒ nothing on a shared host to connect to.
 #   --connect h:p  attach to a listening core over TCP — the optional daemon mode
 #                  (D29). Its filesystem may be elsewhere (e.g. SSH-forwarded), so
@@ -52,7 +52,6 @@ if {$::connect_to eq "" && [info exists ::env(RIO_CONNECT)]} {
 }
 
 set ::reply_seq 0
-set ::agent_avail 0   ;# agent is server-side from D30 on; wired over the channel in a later step
 if {$::connect_to ne ""} {
 	# Attach to a listening core (daemon mode). Its filesystem may not be ours.
 	set ::core_remote 1
@@ -122,12 +121,17 @@ proc rio_call {op params} {
 	return [core_call $op $params]
 }
 
-# Apply one core event to the view. buffer.changed redraws the editor only when the
-# changed buffer is the active one (others reload from the core on tab switch —
-# matching agent_event's guard, and the rule that lets an async event for a
-# background buffer be ignored safely).
+# Apply one core event to the view. Every event the core broadcasts arrives here
+# over the channel (D30) — including the agent's live stream (D26): an agent turn
+# is now ordinary broadcast traffic, so agent.* events route to the chat transcript
+# and a turn's approved-edit buffer.changed lands in the same buffer.changed case.
+# buffer.changed redraws the editor only when the changed buffer is the active one
+# (others reload from the core on tab switch — the rule that lets an async event for
+# a background buffer be ignored safely).
 proc dispatch_event {ev} {
-	switch -- [dict get $ev event] {
+	set name [dict get $ev event]
+	if {[string match agent.* $name]} { chat_event $ev ; return }
+	switch -- $name {
 		buffer.changed {
 			set p [dict get $ev params]
 			if {[dict get $p buffer] eq $::cur} { apply_change $p }
@@ -621,12 +625,13 @@ proc style_selector {} {
 }
 
 # ---------------------------------------------------------------------------
-# The agent chat pane (AGENTS.md D14 `chat` column; D20/D26). A dumb view (D3)
+# The agent chat pane (AGENTS.md D14 `chat` column; D20/D26/D30). A dumb view (D3)
 # over the agent.* event stream: a read-only transcript, a composer, and Send.
-# agent.send is a STREAMING op — its reply arrives as agent.delta events that we
-# append live (chat_event), so the answer builds in view; agent.message closes
-# the turn, agent.error shows a classified failure (D26). The core owns the
-# conversation (D3): chat_clear is agent.reset. Always on the right; toggleable.
+# agent.send is a STREAMING op — its reply is an ack, and the turn's content arrives
+# as agent.delta events the core broadcasts over the channel (D30), routed here by
+# dispatch_event and appended live (chat_event), so the answer builds in view;
+# agent.message closes the turn, agent.error shows a classified failure (D26). The
+# core owns the conversation (D3): chat_clear is agent.reset. Right side; toggleable.
 # ---------------------------------------------------------------------------
 # Insert into the read-only transcript (briefly enabled), scrolling to the end.
 proc chat_log {text {tag ""}} {
@@ -641,8 +646,9 @@ proc chat_label {tag label} {
 	chat_log "$label\n" $tag
 }
 
-# Send the composer's text as a turn: the user block goes in at once, the reply
-# streams back through chat_event (call_stream delivers events live, D26).
+# Send the composer's text as a turn (D26). agent.send is a streaming op: its reply
+# is just an ack — the turn's content streams back afterward as agent.* events the
+# core broadcasts over the channel, landing in chat_event via dispatch_event (D30).
 proc chat_send {} {
 	set text [string trim [.chat.input get 1.0 end]]
 	if {$text eq ""} return
@@ -653,21 +659,11 @@ proc chat_send {} {
 	chat_label you-label "You"
 	chat_log "$text\n"
 	set ::chat_turn_open 0
-	rio::core::call_stream agent.send [dict create text $text] agent_event
-}
-
-# The streaming sink for a turn (D26): an approved edit's buffer.changed updates
-# the editor view; everything else (agent.*) goes to the chat transcript. One sink
-# so the turn's editor effects and its narration ride the same event stream.
-proc agent_event {ev} {
-	switch -- [dict get $ev event] {
-		buffer.changed {
-			# The model already changed; only refresh the widget when the edited buffer
-			# is the one on screen (others reload from core on tab switch).
-			set p [dict get $ev params]
-			if {[dict get $p buffer] eq $::cur} { apply_change $p }
-		}
-		default { chat_event $ev }
+	set resp [rio_call agent.send [dict create text $text]]
+	if {![dict get $resp ok]} {
+		set e [dict get $resp error]
+		chat_label error-label "Error"
+		chat_log "[dict get $e message] ([dict get $e code])\n"
 	}
 }
 
@@ -751,13 +747,13 @@ proc approve_bar {show} {
 }
 
 # The user's decision on the pending edit → agent.approve resumes the turn, whose
-# remaining events stream back on agent_event (the turn's original sink).
+# remaining events stream back as broadcast agent.* events (dispatch_event → chat).
 proc agent_decide {decision} {
 	if {$::pending_turn eq ""} return
 	set t $::pending_turn
 	approve_bar 0
 	compare_close
-	catch {rio::core::call agent.approve [dict create turn $t decision $decision]}
+	catch {rio_call agent.approve [dict create turn $t decision $decision]}
 }
 
 # Clear the conversation: reset the core's state (agent.reset) and the transcript.
@@ -936,12 +932,11 @@ proc compare_with_file_dialog {} {
 set ::agent_provider echo   ;# echo | claude
 set ::claude_key_show 0     ;# the key dialog's reveal toggle
 
+# Tell the core which provider to run (agent.provider.set, D30). The agent lives in
+# the core wherever it runs, so this is an op, not an in-process swap; the chat
+# header then names the live choice.
 proc apply_provider {} {
-	if {$::agent_provider eq "claude"} {
-		rio::agent::set_provider rio::claude::api::provider
-	} else {
-		rio::agent::set_provider rio::agent::echo_provider
-	}
+	rio_result agent.provider.set [dict create name $::agent_provider]
 	chat_status_update
 }
 
@@ -968,7 +963,7 @@ proc claude_key_dialog {} {
 	wm resizable $w 0 0
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
-	set stored [rio::claude::api::configured]
+	set stored [dict get [rio_result agent.status {}] key_set]
 	label $w.prompt -anchor w -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-text "Anthropic API key — create one at console.anthropic.com."
@@ -1006,11 +1001,11 @@ proc claude_key_save {w} {
 		report_error "Enter an API key, or use Clear to remove the stored one."
 		return
 	}
-	rio::claude::api::set_key $key
+	rio_result agent.key.set [dict create key $key]
 	destroy $w
 }
 proc claude_key_clear {w} {
-	rio::claude::api::clear_key
+	rio_result agent.key.clear {}
 	destroy $w
 }
 
@@ -1571,7 +1566,7 @@ menu .m.settings -tearoff 0
 .m.settings add command -label "Claude API Key…" -command claude_key_dialog
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
-	-command {rio::agent::set_auto_accept $::agent_auto_accept; chat_status_update}
+	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}
 .m.settings add checkbutton -label "Agent: Compare complex edits" \
 	-variable ::agent_compare_complex
 
@@ -1592,22 +1587,8 @@ bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
 bind .ed.t <Control-E>         { show_pane files ; break }
 bind .ed.t <Control-G>         { show_pane git ; break }
 bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
-bind .ed.t <Control-A>         { if {$::agent_avail} { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility } ; break }
+bind .ed.t <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
-
-# The agent is a core concern reached over the channel (AGENTS.md D30); its provider/
-# key/policy ops + chat wiring land in a later step. Until ::agent_avail flips on, hide
-# the chat column and grey out its menu entries. The editor, file tree, git, and
-# compare view all run over the channel regardless.
-if {!$::agent_avail} {
-	set ::chat_shown 0
-	.m.view entryconfigure "Agent Chat"                 -state disabled
-	.m.settings entryconfigure "Agent: Echo (offline)"    -state disabled
-	.m.settings entryconfigure "Agent: Claude (API key)"  -state disabled
-	.m.settings entryconfigure "Claude API Key…"         -state disabled
-	.m.settings entryconfigure "Agent: Auto-accept edits" -state disabled
-	.m.settings entryconfigure "Agent: Compare complex edits" -state disabled
-}
 
 # --- widget proxy: edits become protocol requests, never local mutations -----
 rename .ed.t ::rio_real_t
@@ -1656,7 +1637,6 @@ apply_theme [dict get [rio_call theme.get {}] result]
 # directory argument opens as the project folder, a file opens in a tab. Remote: the
 # path lives on the SERVER, so we can't stat it from here — open each as a project
 # folder (project.open) and let the core judge; files are reached via the tree (D29).
-# The agent provider is selected only when the agent is embedded (in-process).
 set ::nav_dir ""
 set ::nav_rows {}
 set ::git_rows {}
@@ -1664,7 +1644,7 @@ adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
-if {$::agent_avail} { apply_provider }   ;# activate the default agent provider + name it
+apply_provider             ;# tell the core our default provider (echo) + name it in the chat header (D30)
 foreach f $argv {
 	if {$::core_remote} {
 		open_folder $f
