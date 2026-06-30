@@ -44,9 +44,9 @@ proc widget {} { ::rio_real_t get 1.0 end-1c }
 # state the GUI is editing through the socket. This is the document of record (D29).
 proc srvtext {id} { return [rio::doc::text $id] }
 
-# --- the transport is actually remote ----------------------------------------
-ok "remote: mode flag set"        $::remote 1
-ok "remote: socket open"          [expr {[info exists ::sock] && $::sock in [chan names]}] 1
+# --- the transport is a remote (socket) core ---------------------------------
+ok "remote: core marked remote"   $::core_remote 1
+ok "remote: channel open"         [expr {[info exists ::core_chan] && $::core_chan in [chan names]}] 1
 ok "remote: agent chat hidden"    $::chat_shown 0
 
 # --- buffer.list adoption over the socket ------------------------------------

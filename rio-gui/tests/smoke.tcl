@@ -1,13 +1,22 @@
 #!/usr/bin/env wish
 #
-# Headless smoke for rio-gui: sources the real frontend (window withdrawn) and
-# drives its actions and the dumb-view proxy directly — no dialogs, no synthetic
-# key events — checking that the widget, the core, and the bytes on disk all
-# agree. Needs a DISPLAY (Tk), but never shows a window.
+# Headless smoke for rio-gui: drives the real frontend (window withdrawn) and its
+# dumb-view proxy directly — no dialogs, no synthetic key events — checking that the
+# widget, the core, and the bytes on disk all agree. Needs a DISPLAY (Tk), but never
+# shows a window.
+#
+# The GUI is always a client to an out-of-process core (D30), so we run a core in
+# THIS process behind a socket and attach the GUI to it (::connect_to). That keeps
+# the core's document model inspectable here (rio::doc::text) while every GUI op
+# still crosses the real channel. The agent is server-side from D30 on and wired over
+# the channel in a later step, so it is hidden here and not exercised yet.
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
 set ::env(RIO_GUI_HEADLESS) 1
+source [file join [file dirname [info script]] .. .. rio-core server.tcl]
+set ::port [rio::server::listen 0]
+set ::connect_to "127.0.0.1:$::port"
 set argv {}                ;# don't let the frontend treat our args as a file
 source [file join [file dirname [info script]] .. rio-gui.tcl]
 
@@ -262,150 +271,12 @@ if {![catch {exec git --version}]} {
 	puts "SKIP  git pane checks (git not installed)"
 }
 
-# --- agent chat pane (streaming agent.* events into a dumb view) -------------
+# --- agent chat: hidden until it is wired over the channel (D30) -------------
+# The agent is a core concern reached over the channel; its provider/key/policy ops
+# and the chat-view tests return in the step that wires it. For now it is hidden, so
+# we only assert that. center_shows is kept — the compare checks below use it.
 proc center_shows {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
-ok "chat: shown by default"          [center_shows .chat]  1
-set ::chat_shown 0 ; apply_chat_visibility
-ok "chat: toggles off"               [center_shows .chat]  0
-set ::chat_shown 1 ; apply_chat_visibility
-ok "chat: toggles back on"           [center_shows .chat]  1
-ok "chat: sash on the right"         [dict get [pack info .csash] -side] right
-
-# View logic (deterministic, no async): streamed deltas append under one Agent
-# block, and agent.message closes the turn.
-chat_clear
-chat_event {event agent.delta   params {turn 1 text "hel"}}
-chat_event {event agent.delta   params {turn 1 text "lo"}}
-chat_event {event agent.message params {turn 1 role assistant text hello}}
-ok "chat: deltas render as one Agent block" \
-	[string match "*Agent*hello*" [.chat.log get 1.0 end]] 1
-ok "chat: turn closed after message"  $::chat_turn_open 0
-
-# A classified error renders its own block.
-chat_clear
-chat_event {event agent.error params {turn 2 code provider_down message boom}}
-ok "chat: error block rendered" \
-	[string match "*Error*boom*provider_down*" [.chat.log get 1.0 end]] 1
-
-# Read-only tool activity (D26 slice 4): the call and its result render as muted
-# transparency lines between the assistant's text, not as a prompt.
-chat_clear
-chat_event {event agent.delta       params {turn 3 text "let me look"}}
-chat_event {event agent.tool        params {turn 3 id t1 name fs_list args path=src}}
-chat_event {event agent.tool_result params {turn 3 id t1 name fs_list ok 1 summary {12 entries in src}}}
-chat_event {event agent.message     params {turn 3 role assistant text {there are 12}}}
-set tlog [.chat.log get 1.0 end]
-ok "chat: tool call rendered"   [string match "*fs_list path=src*" $tlog] 1
-ok "chat: tool result rendered" [string match "*12 entries in src*"  $tlog] 1
-chat_clear
-chat_event {event agent.tool_result params {turn 4 id t2 name fs_read ok 0 summary {refused: outside project}}}
-ok "chat: a failed tool result uses the error tag" \
-	[expr {[llength [.chat.log tag ranges tool-error]] > 0}] 1
-
-# Proposed edit (D26 slice 5): the diff renders and the Approve/Reject bar appears;
-# the result (or a decision) hides it again.
-proc bar_shown {} { expr {[lsearch -exact [pack slaves .chat] .chat.approve] >= 0} }
-chat_clear
-set ::agent_auto_accept 0
-chat_event {event agent.propose params {turn 7 id w1 name propose_edit path foo.txt diff "- old line
-+ new line"}}
-set plog [.chat.log get 1.0 end]
-ok "chat: propose header rendered" [string match "*propose_edit*foo.txt*" $plog] 1
-ok "chat: diff add line tagged"    [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
-ok "chat: diff del line tagged"    [expr {[llength [.chat.log tag ranges diff-del]] > 0}] 1
-ok "chat: approval bar shown"      [bar_shown] 1
-ok "chat: pending turn recorded"   $::pending_turn 7
-chat_event {event agent.tool_result params {turn 7 id w1 name propose_edit ok 1 summary {edited foo.txt}}}
-ok "chat: result hides approval bar" [bar_shown] 0
-# Auto-accept: a proposal renders its diff but raises no bar (core applies it).
-chat_clear ; set ::agent_auto_accept 1
-chat_event {event agent.propose params {turn 8 id w2 name propose_create path bar.txt diff "+ x"}}
-ok "chat: auto-accept raises no bar" [bar_shown] 0
-set ::agent_auto_accept 0
-
-# End to end: send through call_stream with the echo provider and pump the event
-# loop until the streamed turn lands (echo defers each chunk with `after 0`).
-proc chat_run {text} {
-	chat_clear
-	.chat.input delete 1.0 end ; .chat.input insert end $text
-	chat_send
-	set deadline [expr {[clock milliseconds] + 3000}]
-	while {[clock milliseconds] < $deadline} {
-		update
-		set msgs [dict get [rio_call agent.history {}] result messages]
-		if {!$::chat_turn_open && [llength $msgs] >= 2} break
-	}
-}
-chat_run "hello there"
-set chatlog [.chat.log get 1.0 end]
-ok "chat: transcript shows the prompt" [string match "*You*hello there*" $chatlog] 1
-ok "chat: transcript shows the reply"  [string match "*Agent*echo: hello there*" $chatlog] 1
-set msgs [dict get [rio_call agent.history {}] result messages]
-ok "chat: core recorded the turn"      [llength $msgs] 2
-ok "chat: assistant text is the reply" [dict get [lindex $msgs 1] text] "echo: hello there"
-
-# Clear resets both the view and the core conversation.
-chat_clear
-ok "chat: clear empties transcript"  [string trim [.chat.log get 1.0 end]] ""
-ok "chat: clear resets core" \
-	[llength [dict get [rio_call agent.history {}] result messages]] 0
-
-# The chat sash clamps the width rather than letting the column collapse.
-.chat configure -width 50 ; csash_drag
-ok "chat: sash clamps min width"     [expr {[.chat cget -width] >= 200}] 1
-
-# --- agent provider selection + the Claude API key store (D26) ---------------
-# Point the face's secret store at a THROWAWAY dir so the smoke never touches the
-# user's real ~/.local/share/rio/secrets.
-set ::secdir [file join [file dirname $tpath] riogui-sec-[clock clicks]]
-set rio::secret::override_dir $::secdir
-proc pump_until {cond {ms 3000}} {
-	set deadline [expr {[clock milliseconds] + $ms}]
-	while {[clock milliseconds] < $deadline} { update ; if {[uplevel 1 $cond]} return }
-}
-
-ok "provider: default is echo"        $::agent_provider echo
-apply_provider
-ok "provider: echo wired in core"     [set rio::agent::provider] rio::agent::echo_provider
-ok "status: names echo agent"         [.chat.status cget -text] "Echo   ·   review edits"
-set ::agent_provider claude ; apply_provider
-ok "provider: claude wired in core"   [set rio::agent::provider] rio::claude::api::provider
-ok "status: names claude agent"       [.chat.status cget -text] "Claude   ·   review edits"
-set ::agent_auto_accept 1 ; chat_status_update
-ok "status: shows auto-accept mode"   [.chat.status cget -text] "Claude   ·   auto-accept edits"
-set ::agent_auto_accept 0 ; chat_status_update
-
-# Claude selected with no key stored: a turn must surface the face's actionable
-# not_configured error (D26) — it never reaches the network.
-ok "provider: no key stored yet"      [rio::claude::api::configured] 0
-chat_clear
-.chat.input delete 1.0 end ; .chat.input insert end "hi"
-chat_send
-pump_until {string match {*not_configured*} [.chat.log get 1.0 end]}
-ok "provider: claude w/o key errors actionably" \
-	[string match {*Settings*Claude API key*(not_configured)*} [.chat.log get 1.0 end]] 1
-
-# The key dialog stores / clears through the claude-api face.
-claude_key_dialog
-ok "keydlg: opens"                    [winfo exists .claudekey] 1
-ok "keydlg: clear disabled w/o key"   [.claudekey.btns.clear cget -state] disabled
-.claudekey.e insert end "sk-ant-smoke-123"
-claude_key_save .claudekey
-ok "keydlg: closed after save"        [winfo exists .claudekey] 0
-ok "keydlg: key now stored"           [rio::claude::api::configured] 1
-ok "keydlg: secret is 0600" \
-	[format %04o [expr {[file attributes [file join $::secdir claude-api.secret] -permissions] & 0777}]] 0600
-
-# Re-open: Clear is enabled now, and clearing removes the secret.
-claude_key_dialog
-ok "keydlg: clear enabled with key"   [.claudekey.btns.clear cget -state] normal
-claude_key_clear .claudekey
-ok "keydlg: key cleared"              [rio::claude::api::configured] 0
-
-# Back to the offline echo provider for the rest of the run.
-set ::agent_provider echo ; apply_provider
-chat_clear
-file delete -force $::secdir
+ok "chat: hidden (agent not yet over the channel)" [center_shows .chat] 0
 
 # --- compare / diff view (D28) -----------------------------------------------
 # compare_open renders the core diff.lines alignment into the two read-only panes,
@@ -449,35 +320,8 @@ ok "compare: View menu has close"   [expr {![catch {.m.view index "Close Compare
 compare_close
 ok "compare: close restores editor" [list [center_shows .ed] [center_shows .cmp]] {1 0}
 ok "compare: close clears flag"     $::compare_shown 0
-
-# Agent-proposal routing: a *complex* proposed edit opens the compare view instead
-# of dumping the whole diff inline; a small one stays inline; the Settings toggle
-# disables the auto-open. Drive the decision with a stubbed compare_proposal so the
-# view logic is tested without a live core proposal (core tests cover the pull).
-ok "compare: button on approve bar" [winfo exists .chat.approve.cmp] 1
-rename compare_proposal _real_compare_proposal
-proc compare_proposal {turn} { lappend ::cmp_calls $turn ; return 1 }
-proc big_diff {n} { set d {} ; for {set i 0} {$i < $n} {incr i} { lappend d "+ line $i" } ; return [join $d "\n"] }
-
-set ::cmp_calls {} ; chat_clear ; set ::agent_auto_accept 0 ; set ::agent_compare_complex 1
-chat_event [list event agent.propose params [list turn 11 id w9 name propose_edit path big.txt diff [big_diff 20]]]
-ok "compare: complex edit auto-opens"   $::cmp_calls 11
-ok "compare: inline diff skipped"       [string match "*opened in compare view*" [.chat.log get 1.0 end]] 1
-ok "compare: approval bar still raised"  [bar_shown] 1
-
-set ::cmp_calls {} ; chat_clear
-chat_event {event agent.propose params {turn 12 id wA name propose_edit path small.txt diff "- a
-+ b"}}
-ok "compare: small edit stays inline"   $::cmp_calls {}
-ok "compare: small edit diff inline"    [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
-
-set ::cmp_calls {} ; chat_clear ; set ::agent_compare_complex 0
-chat_event [list event agent.propose params [list turn 13 id wB name propose_edit path big.txt diff [big_diff 20]]]
-ok "compare: toggle off suppresses auto" $::cmp_calls {}
-ok "compare: toggle off renders inline"  [expr {[llength [.chat.log tag ranges diff-add]] > 0}] 1
-set ::agent_compare_complex 1
-rename compare_proposal {} ; rename _real_compare_proposal compare_proposal
-chat_clear ; approve_bar 0
+# (Agent→compare routing — a complex proposed edit auto-opening the compare view —
+# returns with the agent-over-channel step, alongside the chat tests above.)
 
 # --- theme applier -----------------------------------------------------------
 # The default theme (from the core's theme.get) drives the live widgets; named

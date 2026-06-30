@@ -4,10 +4,11 @@
 # its own text widget. Keystrokes become buffer.replace requests; the widget only
 # changes when the core echoes a buffer.changed event back. Open/save go through
 # the fs.* ops, undo/redo through edit.*, and buffers (tabs) through buffer.new /
-# buffer.close. The core is embedded IN-PROCESS (D2's default transport):
-# rio::core::call runs a request and returns the response plus any events
-# synchronously — so there is no round-trip lag, and the only way text appears on
-# screen is the core's own change event.
+# buffer.close. The frontend is ALWAYS a client to a core at the far end of a
+# channel (D30): by default it spawns a private core as a child and talks over its
+# stdio pipe; --connect attaches to a listening core over a socket. There is no
+# in-process path — local and remote are the same code — so the only way text
+# appears on screen is the core's own change event, arriving over the channel.
 #
 # Multi-buffer: the core owns the buffers (D3); the frontend keeps the per-buffer
 # *view* state — tab order, which one is active, and each buffer's cursor/viewport
@@ -26,17 +27,20 @@ package require Tk
 package require json
 
 # ---------------------------------------------------------------------------
-# Transport: in-process (embed the core) or remote (a socket client to a core
-# running elsewhere — AGENTS.md D29). The mode is decided BEFORE anything is
-# sourced, because the two modes load different code: in-process embeds the whole
-# Tk-free core; remote loads only the wire encoder (rio::wire) and talks JSON over
-# a socket. The agent chat is in-process-only this iteration, so its plugin is
-# loaded only when embedding the core.
-#
-# Mode is chosen by, in order: a pre-set ::connect_to (tests), --connect host:port
-# (argv), or the RIO_CONNECT environment variable. Any of them set ⇒ remote.
+# Transport (AGENTS.md D30): the GUI is ALWAYS a client to a core at the far end of
+# a channel — it never embeds the core. Two channel kinds, one client code path:
+#   default        spawn a private core as a child and talk over its stdio pipe.
+#                  Local: its filesystem is ours, and (later) its agent runs as us.
+#                  No listening socket ⇒ nothing on a shared host to connect to.
+#   --connect h:p  attach to a listening core over TCP — the optional daemon mode
+#                  (D29). Its filesystem may be elsewhere (e.g. SSH-forwarded), so
+#                  file access goes through typed server-side paths (::core_remote).
+# A test may pre-set ::connect_to (a host:port) to attach to an in-process server.
+# Only the wire encoder is sourced here (Tk-free); the core lives in its own process.
 # ---------------------------------------------------------------------------
 set ::rio_dir [file dirname [info script]]
+source [file join $::rio_dir .. rio-core wire.tcl]
+
 if {![info exists ::connect_to]} { set ::connect_to "" }
 set ci [lsearch -exact $argv --connect]
 if {$ci >= 0} {
@@ -46,36 +50,43 @@ if {$ci >= 0} {
 if {$::connect_to eq "" && [info exists ::env(RIO_CONNECT)]} {
 	set ::connect_to $::env(RIO_CONNECT)
 }
-set ::remote [expr {$::connect_to ne ""}]
 
-if {$::remote} {
-	# Remote: the wire encoder only (Tk-free, no core), plus a socket to the core.
-	source [file join $::rio_dir .. rio-core wire.tcl]
+set ::reply_seq 0
+set ::agent_avail 0   ;# agent is server-side from D30 on; wired over the channel in a later step
+if {$::connect_to ne ""} {
+	# Attach to a listening core (daemon mode). Its filesystem may not be ours.
+	set ::core_remote 1
 	lassign [split $::connect_to :] host port
 	if {$host eq "" || ![string is integer -strict $port]} {
 		puts stderr "rio-gui: --connect expects host:port, got '$::connect_to'"
 		exit 2
 	}
-	# A failed connect must not dump a Tcl stack trace: the usual cause is the core
-	# not running, or — for a remote core, which binds loopback (D29) — no SSH tunnel
-	# yet. Say so, with the tunnel recipe, and exit cleanly.
-	if {[catch {socket $host $port} ::sock]} {
-		puts stderr "rio-gui: cannot reach a rio core at $::connect_to ($::sock)."
-		puts stderr "  • Is the core running?   on the server:  tclsh rio-core/server.tcl $port"
-		puts stderr "  • Remote core binds loopback — tunnel first:  ssh -L $port:127.0.0.1:$port <server>"
+	# A failed connect must not dump a Tcl stack trace: usually the core isn't running,
+	# or — for a remote daemon, loopback-bound (D29) — there's no SSH tunnel yet.
+	if {[catch {socket $host $port} ::core_chan]} {
+		puts stderr "rio-gui: cannot reach a rio core at $::connect_to ($::core_chan)."
+		puts stderr "  • Is a core listening there?     tclsh rio-core/server.tcl $port"
+		puts stderr "  • If it's remote, tunnel first:  ssh -L $port:127.0.0.1:$port <server>"
 		exit 1
 	}
-	fconfigure $::sock -buffering line -blocking 0 -translation lf -encoding utf-8
-	fileevent $::sock readable remote_reader
-	set ::reply_seq 0
 } else {
-	# In-process: embed the core (Tk-free; we are the only Tk in this process)…
-	source [file join $::rio_dir .. rio-core core.tcl]
-	# …and the Claude provider plugin (D26): the shared inference core + the
-	# claude-api face. Sourcing only DEFINES the provider; the frontend selects it
-	# (apply_provider) and owns the key-entry UI — the face just owns the key store.
-	source [file join $::rio_dir .. plugins claude claude.tcl]
+	# Default: spawn a private local core and talk over its stdio (D30). We run under
+	# wish, so find a Tk-free tclsh — in PATH, else one beside our own interpreter.
+	set ::core_remote 0
+	set _tclsh [lindex [auto_execok tclsh] 0]
+	if {$_tclsh eq ""} {
+		set _me [info nameofexecutable]
+		set _g [file join [file dirname $_me] [string map {wish tclsh} [file tail $_me]]]
+		set _tclsh [expr {[file executable $_g] ? $_g : "tclsh"}]
+	}
+	set ::core_cmd [list $_tclsh [file join $::rio_dir .. rio-core server.tcl] --stdio]
+	if {[catch {open |$::core_cmd r+} ::core_chan]} {
+		puts stderr "rio-gui: could not start a local core ($::core_chan)."
+		exit 1
+	}
 }
+fconfigure $::core_chan -buffering line -blocking 0 -translation lf -encoding utf-8
+fileevent $::core_chan readable core_reader
 
 # Per-buffer view state. The core holds the text; we hold the rest.
 set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yview <frac>}
@@ -101,26 +112,20 @@ proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
 # ---------------------------------------------------------------------------
-# The single seam to the core (AGENTS.md D2/D29). One op call, one response; any
-# events the op produced are fed to dispatch_event. Two transports sit behind it,
-# and callers can't tell which is live — both return the same response dict:
-#   in-process — rio::core::call runs the op and returns the response + its events
-#                synchronously (no round-trip lag).
-#   remote     — the request is written to the socket and we run the event loop
-#                until the matching reply lands; events arrive asynchronously on
-#                the same socket (remote_reader) and dispatch the moment they do.
+# The single seam to the core (AGENTS.md D2/D30). One op call, one response; any
+# events the op produced arrive asynchronously on the channel and are fed to
+# dispatch_event. The core is always at the far end of ::core_chan (a pipe to a
+# spawned core, or a daemon socket) — there is no in-process path, so local and
+# remote are the same code.
 # ---------------------------------------------------------------------------
 proc rio_call {op params} {
-	if {$::remote} { return [remote_call $op $params] }
-	set r [rio::core::call $op $params]
-	foreach ev [dict get $r events] { dispatch_event $ev }
-	return [dict get $r response]
+	return [core_call $op $params]
 }
 
-# Apply one core event to the view, in either transport. buffer.changed redraws
-# the editor only when the changed buffer is the active one (others reload from the
-# core on tab switch — matching agent_event's guard, and the rule that lets an async
-# remote event for a background buffer be ignored safely).
+# Apply one core event to the view. buffer.changed redraws the editor only when the
+# changed buffer is the active one (others reload from the core on tab switch —
+# matching agent_event's guard, and the rule that lets an async event for a
+# background buffer be ignored safely).
 proc dispatch_event {ev} {
 	switch -- [dict get $ev event] {
 		buffer.changed {
@@ -131,19 +136,19 @@ proc dispatch_event {ev} {
 	}
 }
 
-# A remote op call: write {id, op, params} as one JSON line (the same escaping the
-# server uses to reply, rio::wire), then run the event loop until the reply with our
-# id arrives. Ids are unique per call, so a keystroke typed while we wait — itself a
-# nested rio_call — resolves on its own id without disturbing this one.
-proc remote_call {op params} {
+# An op call over the channel: write {id, op, params} as one JSON line (the same
+# escaping the server replies with, rio::wire), then run the event loop until the
+# reply with our id lands. Ids are unique per call, so a keystroke typed while we
+# wait — itself a nested rio_call — resolves on its own id without disturbing this one.
+proc core_call {op params} {
 	set id r[incr ::reply_seq]
 	set ::pending($id) 1
 	if {[catch {
-		puts $::sock "{\"id\":[rio::wire::str $id],\"op\":[rio::wire::str $op],\"params\":[rio::wire::obj $params]}"
-		flush $::sock
+		puts $::core_chan "{\"id\":[rio::wire::str $id],\"op\":[rio::wire::str $op],\"params\":[rio::wire::obj $params]}"
+		flush $::core_chan
 	}]} {
 		unset -nocomplain ::pending($id)
-		remote_lost
+		core_lost
 		return [dict create id $id ok false \
 			error [dict create code disconnected message "no connection to the core"]]
 	}
@@ -154,12 +159,12 @@ proc remote_call {op params} {
 	return $resp
 }
 
-# The socket reader (remote mode): each line is either an event — dispatched to the
-# view at once — or a reply, handed to the rio_call waiting on its id. Junk lines are
-# ignored; EOF means the core went away.
-proc remote_reader {} {
-	if {[catch {gets $::sock line} n]} { remote_lost ; return }
-	if {$n < 0} { if {[eof $::sock]} { remote_lost } ; return }
+# The channel reader: each line is either an event — dispatched to the view at once —
+# or a reply, handed to the rio_call waiting on its id. Junk lines are ignored; EOF
+# means the core went away (a crashed child, or a dropped daemon).
+proc core_reader {} {
+	if {[catch {gets $::core_chan line} n]} { core_lost ; return }
+	if {$n < 0} { if {[eof $::core_chan]} { core_lost } ; return }
 	if {[string trim $line] eq ""} return
 	if {[catch {json::json2dict $line} msg]} return
 	if {[dict exists $msg event]} {
@@ -169,19 +174,19 @@ proc remote_reader {} {
 	}
 }
 
-# The core's socket closed. Report it once, stop reading, and wake any call blocked
-# on a reply (with a disconnected error) so the GUI never hangs. The editor stays up
-# so nothing in view is lost; further ops fail fast through remote_call.
-proc remote_lost {} {
-	if {![info exists ::sock]} return
-	catch {fileevent $::sock readable {}}
-	catch {close $::sock}
-	unset -nocomplain ::sock
+# The channel closed. Report it once, stop reading, and wake any call blocked on a
+# reply (with a disconnected error) so the GUI never hangs. The editor stays up so
+# nothing in view is lost; further ops fail fast through core_call.
+proc core_lost {} {
+	if {![info exists ::core_chan]} return
+	catch {fileevent $::core_chan readable {}}
+	catch {close $::core_chan}
+	unset -nocomplain ::core_chan
 	foreach id [array names ::pending] {
 		set ::reply($id) [dict create id $id ok false \
 			error [dict create code disconnected message "lost the connection to the core"]]
 	}
-	report_error "Lost the connection to the core (the server closed)." disconnected
+	report_error "Lost the connection to the core (it exited or the link dropped)." disconnected
 }
 
 # Surface a core error to the user (the {code, message} taxonomy, AGENTS.md O2).
@@ -410,7 +415,7 @@ proc nav_activate {} {
 }
 
 proc open_folder_dialog {} {
-	if {$::remote} {
+	if {$::core_remote} {
 		set p [remote_path_dialog "Open folder" "Folder path on the server:"]
 	} else {
 		set p [tk_chooseDirectory -title "Open folder"]
@@ -903,7 +908,7 @@ proc compare_proposal {turn} {
 # side is read-only via fs.read (D28) (an absolute path is taken as-is, D11), so it
 # need not be open or even inside the project.
 proc compare_with_file_dialog {} {
-	if {$::remote} {
+	if {$::core_remote} {
 		set path [remote_path_dialog "Compare with file" "File path on the server:"]
 	} else {
 		set path [tk_getOpenFile -title "Compare active buffer with file"]
@@ -1102,9 +1107,10 @@ proc remote_path_dialog {title label {seed ""}} {
 
 # --- dialog wrappers ---------------------------------------------------------
 # Each picks a path then calls a do_* action. The native chooser browses the local
-# disk; in remote mode it gives way to a server-side typed path (remote_path_dialog).
+# disk; when the core is remote (its FS isn't ours) it gives way to a server-side
+# typed path (remote_path_dialog).
 proc open_dialog {} {
-	if {$::remote} {
+	if {$::core_remote} {
 		set p [remote_path_dialog "Open file" "File path on the server:"]
 	} else {
 		set p [tk_getOpenFile -title "Open file"]
@@ -1112,7 +1118,7 @@ proc open_dialog {} {
 	if {$p ne ""} { do_open $p }
 }
 proc save_as_dialog {} {
-	if {$::remote} {
+	if {$::core_remote} {
 		set p [remote_path_dialog "Save as" "Save to path on the server:" [bufget $::cur path]]
 	} else {
 		set p [tk_getSaveFile -title "Save as"]
@@ -1139,6 +1145,9 @@ proc do_quit {} {
 			if {![maybe_discard]} return
 		}
 	}
+	# Close the channel so a spawned child core sees EOF on stdin and exits with us
+	# (a daemon socket just drops the connection); then go.
+	catch {close $::core_chan}
 	exit 0
 }
 
@@ -1583,13 +1592,14 @@ bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
 bind .ed.t <Control-E>         { show_pane files ; break }
 bind .ed.t <Control-G>         { show_pane git ; break }
 bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
-bind .ed.t <Control-A>         { if {!$::remote} { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility } ; break }
+bind .ed.t <Control-A>         { if {$::agent_avail} { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility } ; break }
 wm protocol . WM_DELETE_WINDOW do_quit
 
-# Remote mode: the agent is in-process-only this iteration (its provider/key/policy
-# plumbing isn't ops yet — AGENTS.md D29), so hide the chat column and grey out its
-# menu entries. The editor, file tree, git, and compare view all run over the socket.
-if {$::remote} {
+# The agent is a core concern reached over the channel (AGENTS.md D30); its provider/
+# key/policy ops + chat wiring land in a later step. Until ::agent_avail flips on, hide
+# the chat column and grey out its menu entries. The editor, file tree, git, and
+# compare view all run over the channel regardless.
+if {!$::agent_avail} {
 	set ::chat_shown 0
 	.m.view entryconfigure "Agent Chat"                 -state disabled
 	.m.settings entryconfigure "Agent: Echo (offline)"    -state disabled
@@ -1654,9 +1664,9 @@ adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
-if {!$::remote} { apply_provider }   ;# activate the default agent provider (echo) + name it
+if {$::agent_avail} { apply_provider }   ;# activate the default agent provider + name it
 foreach f $argv {
-	if {$::remote} {
+	if {$::core_remote} {
 		open_folder $f
 	} elseif {[file isdirectory $f]} {
 		open_folder $f
