@@ -15,8 +15,8 @@ Everything below runs today:
 
     wish rio-gui/rio-gui.tcl [file ...]
 
-(needs `tclsh`/Tk + `tcllib`, plus `tcltls` for the agent's HTTPS; see
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup.)
+(needs `tclsh`/Tk + `tcllib`, plus `tcltls` for the agent's HTTPS — `./rio-dev-deploy.sh`
+sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 
 **What works now (GUI):**
 
@@ -80,10 +80,10 @@ Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lan
 
 ## Learn more
 
+- **[INSTALL.md](INSTALL.md)** — install & deployment: requirements, the deploy
+  scripts, local vs. remote (server mode over SSH), the agent/Claude key, and
+  troubleshooting.
 - **[AGENTS.md](AGENTS.md)** — the living design & decision log (the *why* behind
   every choice). Start here if you want the full picture.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — for programmers who want to hack on rio
   itself: toolchain setup, how it's laid out, and how to run the tests.
-
-A polished install path and quickstart will land here as rio fills out; for now
-the run line above plus CONTRIBUTING's toolchain setup is the way in.

@@ -101,8 +101,9 @@ install_base() {
 			run apk add --no-interactive tcl tk tcl-tls tcllib git
 			;;
 		pkg_add)
-			# OpenBSD package stems; pkg_add resolves the 8.6 flavors.
-			run pkg_add -I tcl%8.6 tk%8.6 tcl-tls tcllib git
+			# OpenBSD package stems; pkg_add resolves the 8.6 flavors. The TLS
+			# extension is "tcltls" on OpenBSD (one word), unlike apt/apk's tcl-tls.
+			run pkg_add -I tcl%8.6 tk%8.6 tcltls tcllib git
 			;;
 	esac
 }
