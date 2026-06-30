@@ -1,4 +1,4 @@
-# rio — test
+# rio
 
 A small, cross-platform IDE: a fast, no-nonsense text editor with first-class
 git and AI-agent integration — a desktop **GUI** today, a **terminal** frontend

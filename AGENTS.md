@@ -6,12 +6,36 @@
 > Keep it current. When a decision changes, edit the decision and note the
 > change — don't silently overwrite history.
 
-Status: **early implementation.** A working UI-less core (`rio-core`) and a
-minimal real Tk editor (`rio-gui`) exist: open/save with encoding and
-line-ending preservation, range-based editing, undo/redo, and multiple buffers
-as tabs — all over the in-process protocol, with a socket (server-mode)
-transport sharing the same dispatch. The wider design space below (agent,
-plugins, server platform, TUI) is mapped but **not** built yet; see Sequencing.
+> **Orientation for a new agent — read this first.**
+>
+> - **The load-bearing decisions**, if you read only a few: three layers —
+>   core / frontends / optional server (D1); protocol-first transport (D2), now
+>   collapsed to **one channel** (D30 — a pipe to a spawned local core, or a
+>   socket to a remote one; **no in-process path**); the core owns the document,
+>   frontends are **dumb views** (D3); and the **agent lives in the core**
+>   (D26, over the channel since D30 P3).
+> - **Tcl all the way down.** Core + GUI are Tcl/Tk; the (deferred) TUI is Ck.
+>   **No Python — not even a scratch script.** Reach for `tclsh`, Edit/Write.
+> - **Logic in the core; frontends stay dumb** (D1/D3). New behaviour almost
+>   always belongs in `rio-core`, reached through an op — not in the GUI.
+> - **Headless code stays Tk-free and `exit`s explicitly** (the D4 lesson: the
+>   core, tests, the server, any verify probe). Loading Tk makes a bare `tclsh`
+>   hang at EOF and map a stray window.
+> - **Design every new op with a terminal client in mind** (O1) — structured
+>   data, never Tk-shaped — so the protocol seam stays honest for the future TUI.
+> - **Keep the docs in sync** (§7): a decision change → here, *with its why*; a
+>   deployment change → INSTALL.md. This log is **append-and-annotate** — edit a
+>   decision when it changes and note the change; don't erase the history.
+
+Status: **early implementation.** A working UI-less core (`rio-core`) and a real
+Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
+preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
+tree, a git read pane, a side-by-side compare view, live theming, and a working
+**agent** (read + propose-edit, Claude over the official Anthropic API). The GUI
+is **always a client to the core over a channel** — a pipe to a private core it
+spawns locally, or a socket to a remote core; **there is no in-process path**
+(D29/D30 retired it). Still mapped-but-unbuilt: the TUI, the full plugin
+platform, git write ops, and the agent's run-command surface — see Sequencing.
 Decisions carry an *Implemented* note where code now backs them.
 
 > **Sequencing (read this).** This is a **multi-phase** project and there is **no
@@ -24,10 +48,11 @@ Decisions carry an *Implemented* note where code now backs them.
 > so nothing has to be bolted on later — but *building out* the full plugin
 > **platform** (contribution API, manifests, permissions, SDKs — D17–D19) is
 > **deferred**. The **agent subsystem (O4)** was deferred until a working core +
-> GUI existed; that bar is now met, so its **core-orchestration slice is being
-> built (D26)** — the `agent.*` protocol, the provider interface, an in-box Claude
-> provider over the official Anthropic API (API key), read + propose-edit only —
-> while the heavy run-command guardrails stay deferred (O4). The agent's first providers ride the
+> GUI existed; that bar is now met, so its **core-orchestration slice is built
+> (D26, slices 1–5; over the channel since D30 P3)** — the `agent.*` protocol, the
+> provider interface, an in-box Claude provider over the official Anthropic API
+> (API key), read + propose-edit — while the heavy run-command guardrails stay
+> deferred (O4). The agent's first providers ride the
 > *thin* protocol-participant transport (essentially D11), **not** the full
 > platform. The **marketplace** (O11) is deferred further still. Depth in this
 > design log ≠ priority to build.
@@ -143,6 +168,11 @@ Each decision records the reasoning. Numbered for reference.
                  └──────────────────┘   └─────────────────────┘
 ```
 
+*(Transport labels above are the original D1/D2 framing. **D30 superseded them:**
+a frontend is now always a client over a **channel** — a pipe to a spawned local
+core, or a socket to a remote one — with no in-process call. The three-layer
+split itself is unchanged.)*
+
 - **`rio-core`**: pure Tcl, zero UI dependency. ~80% of the code and *all*
   business logic. Document model, undo, file I/O, git (shell out to `git`,
   parse porcelain), LLM/agent orchestration, project/session state, command
@@ -158,10 +188,13 @@ toolkits out of the logic.
 the core — open/save (fs.*), range-edit (buffer.*), undo/redo (edit.*), and
 multiple buffers as tabs (buffer.new / buffer.close), themed from the core's role
 table (theme.get / D24, with a live-switching View menu), with a menu, tab bar,
-and status line. It embeds the core **in-process** (D2's default path:
-`rio::core::call` returns the response and events synchronously) and stays a
-*dumb view* (D3): keystrokes become `buffer.replace` requests via a widget-command
-proxy, and the screen only changes when the core echoes `buffer.changed` back.
+and status line. It is **always a client to the core over a channel** — a pipe
+to a spawned local core by default, a socket to a remote one (`--connect`); the
+in-process embedding this originally used (`rio::core::call`, synchronous) was
+retired by D29/D30, so `rio_call`→`core_call` over `::core_chan` is the one path.
+It stays a *dumb view* (D3): keystrokes become `buffer.replace` requests via a
+widget-command proxy, and the screen only changes when the core echoes
+`buffer.changed` back.
 The core owns the buffers; the frontend keeps only the per-buffer *view* state —
 tab order, the active tab, and each buffer's cursor/viewport (frontend-local per
 D22). A headless smoke (`rio-gui/tests/smoke.tcl`) drives it without showing a
@@ -174,6 +207,12 @@ from day one, **independent of transport**:
 
 - **In-process** (default, no server): transport is a direct in-memory call.
 - **Server mode**: the *same* commands marshaled over a Unix socket / TCP.
+
+> **Superseded by D30 (kept for the reasoning).** The in-process transport is
+> gone — the frontend is *always* a client to a core over a **channel** (a pipe
+> to a spawned local core, or a socket to a remote one). The protocol-first
+> design here is exactly what let server mode and then the channel collapse to
+> one path cheaply; the reasoning stands, only "in-process is the default" changed.
 
 **Why:** server mode stops being a second codebase — it's the same core with a
 different transport. `emacs-server` semantics fall out for free, and "server is
@@ -1551,16 +1590,25 @@ against the protocol (Perl/`Curses::UI` first candidate). Core is unaffected.
 
 ## 7. Documentation plan
 
-Professional, maintained across four documents (three audiences — agents,
-contributors, users):
+Professional, maintained across these documents (audiences — users,
+contributors, agents):
 
 - **AGENTS.md** (this file) — design & decision log for agents/contributors.
-- **CONTRIBUTING.md** — for **human programmers** who hack on rio: how to build,
-  test, and contribute; code conventions. _Drafted_ (pre-impl); points here for
-  the "why", build/test sections provisional pending O7.
-- **README.md** — user-facing intro, install, quickstart.
+- **README.md** — user-facing intro, status, quickstart.
+- **INSTALL.md** — the **canonical home for install & deployment**: requirements,
+  the two deploy scripts, local vs. remote (server mode over SSH), where the
+  agent's key lives, troubleshooting. README/CONTRIBUTING only *point* here —
+  keep deploy specifics out of them so they can't drift.
+- **PITCH.md** — a short landing-page pitch (food for a static-site generator):
+  what rio is and why, for someone who's never heard of it.
+- **CONTRIBUTING.md** — for **human programmers** who hack on rio: build, test,
+  conventions. Points here for the "why"; build/test sections firm up with O7.
 - **rio wiki** (separate `rio-wiki.git`) — comprehensive user documentation,
   eventually with screenshots. *Hold screenshots until there's a UI to show.*
+
+**Keep them in sync.** A change that shifts a decision lands in AGENTS.md *with
+its why*; a deployment change lands in INSTALL.md; user-facing changes in README.
+Don't let the same fact live in two docs where it can drift.
 
 ---
 

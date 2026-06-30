@@ -1,9 +1,9 @@
 # Contributing to rio
 
 rio is a small, cross-platform IDE: a fast, no-nonsense text editor with proper
-git and AI-agent support, available both as a desktop GUI and in the terminal.
-If you like editors that stay out of your way — and software whose source you can
-actually sit down and read — you'll feel at home here.
+git and AI-agent support — a desktop GUI today, with a terminal frontend planned
+(both over one shared core). If you like editors that stay out of your way — and
+software whose source you can actually sit down and read — you'll feel at home here.
 
 This guide is for programmers who want to hack on rio itself. Welcome; we're glad
 you're here.
@@ -56,6 +56,11 @@ the core. Keep the frontends dumb.
   drawing — a feature shouldn't work in one and not the other.
 - **Reach for a plugin before growing the core.** Anything beyond the essentials
   is a good candidate to live outside.
+- **Tcl all the way down.** Core and GUI are Tcl/Tk; the (deferred) terminal
+  frontend is Ck. rio uses **no Python** — not even for a throwaway script.
+- **Headless code stays Tk-free and exits explicitly.** The core, the tests, the
+  server — anything without a window — must not `package require Tk` (it makes a
+  bare `tclsh` hang at EOF) and should `exit` rather than fall into the event loop.
 - **Match the style of the code around you.**
 
 The *why* behind all of these is in [AGENTS.md](AGENTS.md) if you're curious.
