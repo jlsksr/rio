@@ -43,9 +43,10 @@ Everything below runs today:
   `themes/`, never executed.
 - **Remote / server mode** — run the core on another box and point the GUI at it
   over a socket (editor, files, git, and compare all work; the agent is local-only
-  for now). On the server: `tclsh rio-core/server.tcl 7711` (binds **loopback** by
-  default — front it with an SSH tunnel). On your machine:
-  `ssh -L 7711:127.0.0.1:7711 host`, then
+  for now). On the server (after a `git clone`), install the slim runtime with
+  `./rio-server-deploy.sh` (just `tclsh` + `tcllib`, no Tk), then
+  `tclsh rio-core/server.tcl 7711` (binds **loopback** by default — front it with
+  an SSH tunnel). On your machine: `ssh -L 7711:127.0.0.1:7711 host`, then
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server`. Files open
   and save on the *server*; browse them from the file tree.
 
