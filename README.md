@@ -51,7 +51,8 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   (`ssh -L 7711:127.0.0.1:7711 host`), and attach:
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server` — or, from an
   already-open GUI, **File ▸ Connect to Remote Core…**. Files open and save on
-  whichever box the core runs on; browse them from the file tree.
+  whichever box the core runs on; browse them from the file tree or the point-and-click
+  Open/Save dialogs, which follow the core onto the remote disk.
 
 **Under the hood:** all the logic lives in a **UI-less core**, and the GUI is
 **always a client** to one over a channel — a pipe to a private core it spawns

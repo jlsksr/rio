@@ -426,7 +426,7 @@ proc nav_activate {} {
 
 proc open_folder_dialog {} {
 	if {$::core_remote} {
-		set p [remote_path_dialog "Open folder" "Folder path on the server:"]
+		set p [remote_browse_dialog "Open folder (remote)" dir]
 	} else {
 		set p [tk_chooseDirectory -title "Open folder"]
 	}
@@ -911,7 +911,7 @@ proc compare_proposal {turn} {
 # need not be open or even inside the project.
 proc compare_with_file_dialog {} {
 	if {$::core_remote} {
-		set path [remote_path_dialog "Compare with file" "File path on the server:"]
+		set path [remote_browse_dialog "Compare with file (remote)" open]
 	} else {
 		set path [tk_getOpenFile -title "Compare active buffer with file"]
 	}
@@ -1070,49 +1070,178 @@ proc cycle {dir} {
 	activate [lindex $::order [expr {($i + $dir) % [llength $::order]}]]
 }
 
-# A server-side path prompt (AGENTS.md D29). In remote mode the filesystem of record
-# is the core's, but tk_getOpenFile / tk_getSaveFile / tk_chooseDirectory browse the
-# CLIENT's disk — wrong for a remote core. So those choosers are replaced by a typed
-# path the core resolves. Returns the entered path, or "" if cancelled. (The file
-# tree remains the point-and-click way in; this is the explicit-path escape hatch.)
-proc remote_path_dialog {title label {seed ""}} {
-	set w .rpath
+# A protocol-native remote file/folder browser (AGENTS.md D29/D30). In remote mode
+# the filesystem of record is the CORE's, but tk_getOpenFile / tk_getSaveFile /
+# tk_chooseDirectory browse the CLIENT's disk — wrong for a remote core. So those
+# choosers give way to this browser, which walks the REMOTE tree over `fs.list` —
+# the very op the docked file pane uses (populate_nav) — point-and-click, not typed.
+# An editable Location bar still lets you jump straight to a known path, so it also
+# subsumes the old typed-path prompt (remote_path_dialog).
+#
+#   mode = open -> pick an existing file    -> returns its abs path
+#          save -> pick a dir + type a name -> returns dir/name
+#          dir  -> pick a directory         -> returns the shown dir
+#
+# Returns the chosen absolute path, or "" if cancelled.
+
+# The row model for one remote directory: a ".." row (unless at "/"), then dirs,
+# then files — each {type abspath display}, already dictionary-sorted by the core.
+# Split out from the widget code so the fs.list walk is testable headlessly.
+proc rbrowse_rows_for {dir} {
+	set resp [rio_call fs.list [dict create path $dir]]
+	if {![dict get $resp ok]} {
+		return [dict create ok 0 error [dict get $resp error message]]
+	}
+	set abs [dict get $resp result path]   ;# the core's normalized dir
+	set rows {}
+	if {$abs ne "/"} { lappend rows [list dir [file dirname $abs] "../"] }
+	foreach grp {dir file} {
+		foreach e [dict get $resp result entries] {
+			if {[dict get $e type] ne $grp} continue
+			set name [dict get $e name]
+			lappend rows [list $grp [file join $abs $name] \
+				[expr {$grp eq "dir" ? "$name/" : "  $name"}]]
+		}
+	}
+	return [dict create ok 1 dir $abs rows $rows]
+}
+
+# Where the browser opens: the seed's directory if it names an absolute path, else
+# the open project's root, else "/" (the Location bar reaches anywhere from there).
+proc rbrowse_start {seed} {
+	if {$seed ne "" && [file pathtype $seed] eq "absolute"} {
+		return [file dirname $seed]
+	}
+	set root [dict get [rio_call project.get {}] result root]
+	return [expr {$root ne "" ? $root : "/"}]
+}
+
+# Re-list $dir into the browser: fill the Location bar and the listbox from
+# rbrowse_rows_for, dropping files in dir mode. A bad path just beeps (the old
+# listing stays), so a mistyped Location can't strand the dialog.
+proc rbrowse_go {dir} {
+	set info [rbrowse_rows_for $dir]
+	if {![dict get $info ok]} { bell ; return }
+	set ::rbrowse_dir [dict get $info dir]
+	.rbrowse.loc delete 0 end
+	.rbrowse.loc insert end $::rbrowse_dir
+	.rbrowse.body.list delete 0 end
+	set ::rbrowse_rows {}
+	foreach row [dict get $info rows] {
+		lassign $row type abs display
+		if {$::rbrowse_mode eq "dir" && $type eq "file"} continue
+		.rbrowse.body.list insert end $display
+		lappend ::rbrowse_rows $row
+	}
+}
+
+# Double-click / Enter a row: descend into a dir; on a file, choose it (open mode)
+# or copy its name into the Name field (save mode).
+proc rbrowse_activate {} {
+	set sel [.rbrowse.body.list curselection]
+	if {$sel eq ""} return
+	lassign [lindex $::rbrowse_rows $sel] type abs display
+	if {$type eq "dir"} { rbrowse_go $abs ; return }
+	switch -- $::rbrowse_mode {
+		open { set ::rbrowse_result $abs ; destroy .rbrowse }
+		save { .rbrowse.name delete 0 end ; .rbrowse.name insert end [file tail $abs] }
+	}
+}
+
+# The Choose button: a directory (dir mode), the shown dir + typed Name (save), or
+# the selected file (open). An empty Name / no file selection just beeps.
+proc rbrowse_choose {} {
+	switch -- $::rbrowse_mode {
+		dir  { set ::rbrowse_result $::rbrowse_dir }
+		save {
+			set name [string trim [.rbrowse.name get]]
+			if {$name eq ""} { bell ; return }
+			set ::rbrowse_result [expr {[file pathtype $name] eq "absolute" \
+				? $name : [file join $::rbrowse_dir $name]}]
+		}
+		open {
+			set sel [.rbrowse.body.list curselection]
+			if {$sel eq ""} { bell ; return }
+			lassign [lindex $::rbrowse_rows $sel] type abs display
+			if {$type ne "file"} { bell ; return }
+			set ::rbrowse_result $abs
+		}
+	}
+	if {$::rbrowse_result ne ""} { destroy .rbrowse }
+}
+
+proc remote_browse_dialog {title mode {seed ""}} {
+	set w .rbrowse
 	destroy $w
 	toplevel $w
 	wm title $w $title
 	wm transient $w .
-	wm resizable $w 0 0
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
-	label $w.prompt -anchor w -font RioUIFont -text $label \
+
+	# Location bar — the current remote dir, editable to jump anywhere.
+	label $w.loclbl -anchor w -font RioUIFont -text "Location:" \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	entry $w.e -width 60 -font RioUIFont
-	$w.e insert end $seed
+	entry $w.loc -font RioUIFont -width 54
+	bind $w.loc <Return> { rbrowse_go [string trim [.rbrowse.loc get]] }
+
+	# The listing (an auto-hiding scrollbar, like the dock file pane).
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.rbrowse.body.list yview}
+	listbox $w.body.list -height 16 -width 54 -activestyle none -exportselection 0 \
+		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c editor.selection] \
+		-selectforeground [dict get $c ui.fg] \
+		-yscrollcommand {autoscroll .rbrowse.body.sb .rbrowse.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+
 	frame $w.btns -background [dict get $c ui.bg]
-	button $w.btns.ok     -text OK     -font RioUIFont \
-		-command {set ::rpath_result [.rpath.e get] ; destroy .rpath}
+	set oklbl [dict get {open Open save {Save here} dir {Choose folder}} $mode]
+	button $w.btns.ok     -text $oklbl -font RioUIFont -command rbrowse_choose
 	button $w.btns.cancel -text Cancel -font RioUIFont \
-		-command {set ::rpath_result "" ; destroy .rpath}
+		-command {set ::rbrowse_result "" ; destroy .rbrowse}
 	pack $w.btns.cancel $w.btns.ok -side right -padx 3
-	grid $w.prompt -row 0 -column 0 -sticky we -padx 8 -pady {8 2}
-	grid $w.e      -row 1 -column 0 -sticky we -padx 8
-	grid $w.btns   -row 2 -column 0 -sticky e  -padx 5 -pady {2 8}
-	bind $w.e <Return> {set ::rpath_result [.rpath.e get] ; destroy .rpath}
-	bind $w <Escape>   {set ::rpath_result "" ; destroy .rpath}
-	set ::rpath_result ""
+
+	grid $w.loclbl -row 0 -column 0 -sticky w    -padx 8 -pady {8 0}
+	grid $w.loc    -row 1 -column 0 -sticky we   -padx 8
+	grid $w.body   -row 2 -column 0 -sticky nsew -padx 8 -pady 4
+	set btnrow 3
+	if {$mode eq "save"} {
+		label $w.namelbl -anchor w -font RioUIFont -text "Name:" \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		entry $w.name -font RioUIFont -width 54
+		$w.name insert end [file tail $seed]
+		grid $w.namelbl -row 3 -column 0 -sticky w  -padx 8
+		grid $w.name    -row 4 -column 0 -sticky we -padx 8
+		set btnrow 5
+	}
+	grid $w.btns -row $btnrow -column 0 -sticky e -padx 5 -pady {2 8}
+	grid rowconfigure $w 2 -weight 1
+	grid columnconfigure $w 0 -weight 1
+
+	bind $w.body.list <Double-Button-1> rbrowse_activate
+	bind $w.body.list <Return>          rbrowse_activate
+	bind $w <Escape> {set ::rbrowse_result "" ; destroy .rbrowse}
+
+	set ::rbrowse_mode   $mode
+	set ::rbrowse_result ""
+	set ::rbrowse_rows   {}
+	rbrowse_go [rbrowse_start $seed]
+
 	catch {grab $w}
-	focus $w.e
+	focus $w.body.list
 	tkwait window $w
-	return $::rpath_result
+	return $::rbrowse_result
 }
 
 # --- dialog wrappers ---------------------------------------------------------
 # Each picks a path then calls a do_* action. The native chooser browses the local
-# disk; when the core is remote (its FS isn't ours) it gives way to a server-side
-# typed path (remote_path_dialog).
+# disk; when the core is remote (its FS isn't ours) it gives way to the remote file
+# browser (remote_browse_dialog), which walks the server's tree over fs.list.
 proc open_dialog {} {
 	if {$::core_remote} {
-		set p [remote_path_dialog "Open file" "File path on the server:"]
+		set p [remote_browse_dialog "Open file (remote)" open]
 	} else {
 		set p [tk_getOpenFile -title "Open file"]
 	}
@@ -1120,7 +1249,7 @@ proc open_dialog {} {
 }
 proc save_as_dialog {} {
 	if {$::core_remote} {
-		set p [remote_path_dialog "Save as" "Save to path on the server:" [bufget $::cur path]]
+		set p [remote_browse_dialog "Save as (remote)" save [bufget $::cur path]]
 	} else {
 		set p [tk_getSaveFile -title "Save as"]
 	}
@@ -1169,7 +1298,7 @@ proc parse_endpoint {hp} {
 }
 
 # The endpoint prompt: a host:port entry + an "open in a new window" checkbox.
-# Returns {hostport newwin}, or "" if cancelled. Modelled on remote_path_dialog.
+# Returns {hostport newwin}, or "" if cancelled. A themed modal like the others.
 proc connect_remote_dialog {} {
 	set w .connd
 	destroy $w

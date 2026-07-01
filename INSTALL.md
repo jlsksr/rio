@@ -132,9 +132,12 @@ wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server
 ```
 
 Notes:
-- The path argument lives on the **server**; browse and open files from the file
-  tree (the GUI can't stat the remote FS directly). The core is the document of
-  record — edits and saves happen on the server's disk.
+- The path argument lives on the **server**; the GUI can't stat the remote FS
+  directly, so it browses it through the core. Point-and-click either from the file
+  tree or from **Open / Save As / Open Folder**, which in remote mode become a
+  server-side browser (walking the core's disk, with a Location bar to type a known
+  path). The core is the document of record — edits and saves happen on the server's
+  disk.
 - If the tunnel maps a different remote port (e.g. `-L 7711:127.0.0.1:7712`), the
   **core listens on `7712`** on the server; the GUI still connects to your local
   `7711`.

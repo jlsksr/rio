@@ -1045,7 +1045,11 @@ The native choosers (`tk_getOpenFile`/`tk_getSaveFile`/`tk_chooseDirectory`) bro
 the *client* disk, so in remote mode they give way to a typed **server-path** prompt
 (`remote_path_dialog`); the **file-tree pane** (`fs.list` + `project.open`, already
 ops) is the point-and-click way in, unchanged. A path on the command line opens as a
-project folder (we can't stat a server path from the client).
+project folder (we can't stat a server path from the client). *(Later: the typed
+prompt became a full point-and-click **`remote_browse_dialog`** — it walks the
+server's tree over the same `fs.list` op the file pane uses, so the choosers
+browse the remote disk directly, with an editable Location bar that keeps the
+typed-path jump; this subsumed and retired `remote_path_dialog`. See D30 below.)*
 
 **Agent stays in-process this pass.** Its provider/key/policy plumbing isn't ops
 yet, so in remote mode the chat column is hidden and its menu entries greyed; the
@@ -1112,8 +1116,9 @@ the one place a cookie would later be added.
 
 **Filesystem of record.** A spawned local core shares our filesystem, so the GUI keeps
 native file choosers there; a `--connect` daemon may be elsewhere (e.g. SSH-forwarded),
-so it uses typed server-side paths (`::core_remote`). The file tree is the
-point-and-click way in either way.
+so it browses the server's disk over `fs.list` (`::core_remote` → `remote_browse_dialog`;
+originally typed-only server paths). The file tree is the point-and-click way in either
+way — and now so are the Open / Save As / Open Folder dialogs.
 
 **Lifecycle.** Closing the channel ends the session: a spawned child sees EOF on stdin
 and exits with the GUI (verified even on an abrupt kill); a daemon just drops the
@@ -1150,7 +1155,15 @@ and re-adopt from the remote core — a failed connect or a cancelled save leave
 live session untouched); an **"Open in a new window"** checkbox instead spawns a
 second `rio-gui --connect …`, reusing the startup path. Covered by
 `rio-gui/tests/reconnect.tcl` (a real second daemon, the dead-port safety property,
-and the live swap). *Pending:* a `--ssh host [path]` convenience wrapper (P4) —
+and the live swap). *Done — native remote browsing:* in remote mode the Open / Save
+As / Open Folder (and Compare-with-file) choosers are a point-and-click
+**`remote_browse_dialog`** that walks the core's filesystem over `fs.list` (the docked
+file pane's op — `..`, dirs, then files; dir-only in folder mode) with an editable
+Location bar for a known path, so you never type a blind server path. It retired the
+typed-only `remote_path_dialog`; `rbrowse_rows_for`/`rbrowse_start` are split out for
+headless testing, covered by `rio-gui/tests/browse.tcl` (the fs.list walk, the
+navigate/choose logic per mode, and a real-modal build/teardown). *Pending:* a
+`--ssh host [path]` convenience wrapper (P4) —
 today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
 `ssh host … server.tcl --stdio` by hand.
 
