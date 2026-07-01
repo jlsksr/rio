@@ -116,7 +116,7 @@ wish rio-gui/rio-gui.tcl [path ...]
 
 Run the core on the far box bound to **loopback** (the default), forward a port with
 SSH, and attach the GUI to the local end. SSH provides the auth and encryption — the
-core has none of its own (see §6).
+core has none of its own (see §7).
 
 **On the server** (after `rio-server-deploy.sh`):
 
@@ -138,13 +138,9 @@ Notes:
   server-side browser (walking the core's disk, with a Location bar to type a known
   path). The core is the document of record — edits and saves happen on the server's
   disk.
-- **Your workspace resumes.** Reopen a project and the files you had open (plus the
-  active tab) come back. That per-project state lives with the **core**
-  (`$XDG_DATA_HOME/rio/sessions/`, default `~/.local/share/rio/`), so it follows a
-  remote project onto the server too. View **preferences** — theme, line-wrap, dock
-  side, chat visibility — are the GUI's, in `$XDG_CONFIG_HOME/rio/prefs.json` (default
-  `~/.config/rio/`) on whichever box runs the GUI. Both are plain JSON; neither holds
-  your API key (that stays in the 0600 secrets store, §5).
+- **Sessions and preferences persist**, and because the workspace lives with the
+  **core**, resuming a project works over a remote core too — your open files follow
+  the project onto the server. Where these live and how to set global defaults: §6.
 - If the tunnel maps a different remote port (e.g. `-L 7711:127.0.0.1:7712`), the
   **core listens on `7712`** on the server; the GUI still connects to your local
   `7711`.
@@ -195,7 +191,50 @@ local or remote core.
 
 ---
 
-## 6. Lifecycle, shutdown & troubleshooting
+## 6. Preferences & defaults
+
+rio persists two kinds of state, split by owner (the design is [AGENTS.md](AGENTS.md)
+D31):
+
+- **Preferences** — theme, line-wrap, dock side/pane, chat-pane visibility. These are
+  **global** and belong to the GUI, in `$XDG_CONFIG_HOME/rio/prefs.json` (default
+  `~/.config/rio/prefs.json`) on the box running the GUI. They load at **every**
+  startup — with or without a project — so a bare `wish rio-gui/rio-gui.tcl file.txt`
+  opens with your saved wrap, theme, and layout.
+- **Workspace** — the files you had open in a project and the active tab. This is
+  **per-project** and belongs to the core, kept out of tree under
+  `$XDG_DATA_HOME/rio/sessions/` (default `~/.local/share/rio/sessions/`), keyed by
+  project root. It resumes only when a **project** is open (you launched at a folder,
+  or opened one); a bare file has no project, so nothing per-project is restored.
+
+Neither file ever holds your API key — that stays in the 0600 secrets store (§5).
+
+**Setting a default is just setting the value** — the last value *is* the default,
+saved the moment you change it:
+
+- **From the UI:** the **View** menu (Wrap Lines, the theme entries, Dock Left/Right,
+  Agent Chat) and the shortcuts (`Ctrl+Shift+W` wrap, `Ctrl+Shift+A` chat). Each
+  toggle rewrites `prefs.json` at once and is restored next launch.
+- **By hand:** edit `prefs.json` directly — it is plain JSON, parsed never executed:
+
+  ```json
+  {"theme":"solarized-dark","wrap":"1","dock_side":"left","dock_pane":"files","chat_shown":"1"}
+  ```
+
+  `wrap` `"1"` = word-wrap on, `"0"` = off; `theme` is a name from `themes/` (or
+  `default`); `dock_side` is `left`/`right`; `dock_pane` is `files`/`git`;
+  `chat_shown` `"1"`/`"0"`. The file appears once you first change a setting (or quit),
+  and you may create it by hand before the first run. Unknown or malformed keys are
+  ignored, and a corrupt file is skipped rather than fatal.
+
+> **Note.** There is not yet a *separate* hand-authored settings file distinct from
+> this machine-written one: `prefs.json` is both your defaults and rio's saved state,
+> so flipping a setting for one session changes your global default. For a simple
+> global toggle (like wrap) that is usually exactly what you want.
+
+---
+
+## 7. Lifecycle, shutdown & troubleshooting
 
 **Stopping things.**
 - *Mode A:* close the GUI window or *File ▸ Quit* — the pipe EOFs and the core exits
@@ -230,7 +269,7 @@ relevant `install_*` function — the script's verifier confirms the result.
 
 ---
 
-## 7. Platforms
+## 8. Platforms
 
 Linux (Debian, Alpine) and the BSDs are the deploy targets the scripts cover; the
 GUI also runs on Windows (Tcl/Tk), though the scripts don't automate that. The TUI
