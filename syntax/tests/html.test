@@ -44,6 +44,22 @@ test for_path-noext {a path with no extension has no highlighter} -body {
 	rio::syntax::for_path README
 } -result {}
 
+test lang_for_path-html {.html resolves to the HTML language name} -body {
+	rio::syntax::lang_for_path /x/index.html
+} -result HTML
+
+test lang_for_path-case {language lookup is case-insensitive on the extension} -body {
+	list [rio::syntax::lang_for_path FOO.XHTML] [rio::syntax::lang_for_path a.HTM]
+} -result {HTML HTML}
+
+test lang_for_path-none {an unknown extension has no language name} -body {
+	rio::syntax::lang_for_path notes.txt
+} -result {}
+
+test lang_for_path-noext {a path with no extension has no language name} -body {
+	rio::syntax::lang_for_path README
+} -result {}
+
 test is_token {token-type membership} -body {
 	list [rio::syntax::is_token tag] [rio::syntax::is_token nope]
 } -result {1 0}

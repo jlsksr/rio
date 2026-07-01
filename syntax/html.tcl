@@ -138,4 +138,4 @@ proc rio::syntax::html::_ifind {haystack needle start} {
 	return [string first [string tolower $needle] [string tolower $haystack] $start]
 }
 
-rio::syntax::register html {html htm xhtml xht} rio::syntax::html::scan
+rio::syntax::register HTML {html htm xhtml xht} rio::syntax::html::scan

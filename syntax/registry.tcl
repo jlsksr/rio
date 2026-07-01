@@ -35,7 +35,8 @@
 
 namespace eval rio::syntax {
 	variable scanners {}     ;# ext (lowercased, no dot) -> scanner proc
-	variable langs {}        ;# lang id -> {exts <list> scanner <proc>} (introspection)
+	variable extlang  {}     ;# ext (lowercased, no dot) -> language display name
+	variable langs {}        ;# lang name -> {exts <list> scanner <proc>} (introspection)
 }
 
 # The canonical TOKEN VOCABULARY. Highlighters emit only these type names; a theme
@@ -54,16 +55,21 @@ proc rio::syntax::start {} {
 	return [list "" ""]
 }
 
-# Register a highlighter: a language id, the file extensions it claims (bare, no
-# dot — matched case-insensitively), and its per-line scanner proc. A later
-# registration for the same extension WINS, which is what makes a user override
-# replace a shipped highlighter (the frontend loads shipped modules first, user
-# modules last).
+# Register a highlighter: a language name (human-readable — shown in the GUI status
+# bar), the file extensions it claims (bare, no dot — matched case-insensitively),
+# and its per-line scanner proc. A later registration for the same extension WINS,
+# which is what makes a user override replace a shipped highlighter (the frontend
+# loads shipped modules first, user modules last).
 proc rio::syntax::register {lang exts scan} {
 	variable scanners
+	variable extlang
 	variable langs
 	dict set langs $lang [dict create exts $exts scanner $scan]
-	foreach e $exts { dict set scanners [string tolower $e] $scan }
+	foreach e $exts {
+		set e [string tolower $e]
+		dict set scanners $e $scan
+		dict set extlang  $e $lang
+	}
 }
 
 # The scanner proc registered for a file path (by its extension), or "" when the
@@ -73,6 +79,18 @@ proc rio::syntax::for_path {path} {
 	set ext [string tolower [string trimleft [file extension $path] .]]
 	if {$ext ne "" && [dict exists $scanners $ext]} {
 		return [dict get $scanners $ext]
+	}
+	return ""
+}
+
+# The language display NAME registered for a file path (by its extension), or ""
+# when the file type has no highlighter — the frontend then shows a plain-text label.
+# Parallels for_path: same "later registration wins" and case-insensitive matching.
+proc rio::syntax::lang_for_path {path} {
+	variable extlang
+	set ext [string tolower [string trimleft [file extension $path] .]]
+	if {$ext ne "" && [dict exists $extlang $ext]} {
+		return [dict get $extlang $ext]
 	}
 	return ""
 }

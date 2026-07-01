@@ -115,6 +115,7 @@ set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "com
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
 set ::hl_scan ""          ;# per-line scanner for the active buffer's file type, or "" — no highlighting (D32)
+set ::hl_lang ""          ;# language display name for the active buffer, or "" — plain text (shown in the status bar)
 set ::hl_pending 0        ;# a coalesced (idle) re-highlight is queued (D32)
 set ::hl_enter {}         ;# per-line cache: hl_enter[i] = scan state ENTERING line i+1 (drives incremental re-highlight; D32)
 set ::hl_dirty 0          ;# lowest line an edit touched since the last pass (0 = clean)
@@ -1466,9 +1467,10 @@ proc refresh_status {} {
 	set meta [bufget $::cur meta]
 	set enc  [expr {[dict exists $meta encoding] ? [dict get $meta encoding] : "utf-8"}]
 	set eol  [expr {[dict exists $meta eol] ? [dict get $meta eol] : "lf"}]
-	.status configure -text [format "%s      %s  %s%s      %d buffer(s)" \
+	set lang [expr {$::hl_lang ne "" ? $::hl_lang : "plain text"}]
+	.status configure -text [format "%s      %s  %s%s      %s      %d buffer(s)" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
-		[llength $::order]]
+		$lang [llength $::order]]
 }
 proc refresh_tabs {} {
 	set c $::theme_colors
@@ -1687,11 +1689,14 @@ proc hl_user_dir {} {
 # Pick the scanner for the active buffer by its file extension ("" = no highlighter,
 # e.g. a scratch buffer or a plain-text file). Runs on open / switch.
 proc hl_select {} {
-	set ::hl_scan ""
+	set ::hl_scan "" ; set ::hl_lang ""
 	if {[info procs rio::syntax::for_path] eq ""} return
 	if {$::cur eq "" || ![dict exists $::buffers $::cur]} return
 	set path [bufget $::cur path]
-	if {$path ne ""} { set ::hl_scan [rio::syntax::for_path $path] }
+	if {$path ne ""} {
+		set ::hl_scan [rio::syntax::for_path $path]
+		set ::hl_lang [rio::syntax::lang_for_path $path]
+	}
 }
 
 # The active widget's current line count (1-based; a Tk text widget always has at

@@ -1345,6 +1345,18 @@ per-line `scan` contract cases; `highlight.tcl` gains incremental-scope checks (
 edit re-scans ≤2 lines via `::hl_scanned`; a top-of-file comment propagates to the end and
 back; a line delete keeps the cache aligned).
 
+**Amendment — the active language shows in the status bar (landed).** The bottom status
+strip now reports which highlighter is in effect (e.g. `HTML`), or `plain text` when the
+file type has no highlighter — the same VSCode-style affordance, at a glance. To feed it,
+the registry gains a name lookup that parallels `for_path`: `register`'s first argument is
+now a **human-readable language display name** (so `syntax/html.tcl` registers `HTML`, not
+`html`), stored in a new `ext -> name` map with the same "later registration wins" /
+case-insensitive matching, and `rio::syntax::lang_for_path {path}` returns it (`""` = none).
+GUI side, `hl_select` records `::hl_lang` beside `::hl_scan` and `refresh_status` renders it.
+The `langs` introspection dict (previously unused) is keyed by this name. Tests: `html.test`
+gains `lang_for_path-*`; `highlight.tcl` asserts the status bar shows `HTML` for an HTML file
+and `plain text` for a `.txt`.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

@@ -83,7 +83,8 @@ language, copy `syntax/html.tcl` as a template: write a per-line **scanner**,
 `scan {line state param}`, that returns `{spans nextstate nextparam}` — the coloured
 column ranges for that one line (a flat `c0 c1 type …` list, `type` from the fixed
 vocabulary in `syntax/registry.tcl`) plus the tokeniser state *entering the next
-line* — and `register` it for your file extensions at the bottom. Working one line at
+line* — and `register` it at the bottom: a human-readable language name (shown in
+the status bar, e.g. `HTML`), the file extensions it claims, and the scanner. Working one line at
 a time with a carried-over state is what makes multi-line constructs (open comments,
 here-docs) colour correctly *and* lets the editor re-highlight incrementally as you
 type; entering the first line the state is the empty pair (`rio::syntax::start`), so a

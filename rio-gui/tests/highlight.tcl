@@ -56,6 +56,8 @@ ok "open: value string tagged"   [has_tag_at string 1.21]    1 ;# inside "x"
 ok "open: entity tagged"         [expr {[llength [ranges entity]] > 0}] 1
 ok "open: comment tagged"        [has_tag_at comment 1.0]    1
 ok "open: text left un-tagged"   [has_tag_at tag 1.25]       0 ;# the 'h' of "hi"
+ok "status: language is HTML"    $::hl_lang HTML
+ok "status: bar shows language"  [string match *HTML* [.status cget -text]] 1
 
 # --- multi-line context: a comment spanning lines colours both lines ---------
 set mp [spit multi.html "<!-- line one\nstill comment -->\n<b>x</b>"]
@@ -69,6 +71,8 @@ set tp [spit notes.txt "<p>this is not html</p>\n"]
 do_open $tp
 ok "plain: no tokeniser"          $::hl_scan ""
 ok "plain: no syntax tags"        [expr {[llength [ranges tag]] + [llength [ranges string]]}] 0
+ok "status: plain lang empty"     $::hl_lang ""
+ok "status: bar shows plain text" [string match {*plain text*} [.status cget -text]] 1
 
 # --- a live edit re-highlights (coalesced on idle) ---------------------------
 do_open [spit edit.html "<p>x</p>"]
