@@ -79,13 +79,19 @@ covered in [AGENTS.md](AGENTS.md).
 highlighter is a small, self-contained file in `syntax/` — pure Tcl, no Tk, no
 external packages — that turns text into coloured spans; the frontend paints them
 with the active theme's colours (design: [AGENTS.md](AGENTS.md) D32). To add a
-language, copy `syntax/html.tcl` as a template: write a `tokenize {text}` proc that
-returns a flat list of `line.col line.col type` triples (the token *types* are the
-fixed vocabulary in `syntax/registry.tcl`), and `register` it for your file
-extensions at the bottom. Because a highlighter is picked by extension and a later
-registration wins, you can **replace** a shipped one without editing it: drop your
-version in `~/.config/rio/syntax/` and it shadows the built-in. Themes colour the
-token types through their `syntax.*` roles, so nothing is hard-coded to a palette.
+language, copy `syntax/html.tcl` as a template: write a per-line **scanner**,
+`scan {line state param}`, that returns `{spans nextstate nextparam}` — the coloured
+column ranges for that one line (a flat `c0 c1 type …` list, `type` from the fixed
+vocabulary in `syntax/registry.tcl`) plus the tokeniser state *entering the next
+line* — and `register` it for your file extensions at the bottom. Working one line at
+a time with a carried-over state is what makes multi-line constructs (open comments,
+here-docs) colour correctly *and* lets the editor re-highlight incrementally as you
+type; entering the first line the state is the empty pair (`rio::syntax::start`), so a
+scanner just treats state `""` as "start of text". Because a highlighter is picked by
+extension and a later registration wins, you can **replace** a shipped one without
+editing it: drop your version in `~/.config/rio/syntax/` and it shadows the built-in.
+Themes colour the token types through their `syntax.*` roles, so nothing is hard-coded
+to a palette.
 
 ## Getting started
 

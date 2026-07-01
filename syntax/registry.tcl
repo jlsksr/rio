@@ -12,18 +12,30 @@
 # dropping a better `perl.tcl` into the user's syntax dir shadows the shipped one
 # (same override pattern as themes, D24). No external packages — core Tcl only.
 #
-# Contract. A tokeniser is  proc <ns>::tokenize {text} -> {i0 i1 type i0 i1 type ...}
-# a flat list of triples: two `line.col` indices (1-based line, 0-based column —
-# rio's shared position format, D12, and exactly what a Tk text tag consumes) and
-# one TOKEN TYPE from the vocabulary below. Half-open [i0, i1). The tokeniser is a
-# pure function of the whole buffer text; it must carry its own multi-line state
-# (open comments, string bodies) so the result is context-correct.
+# Contract. A highlighter is a per-line SCANNER:
+#
+#     proc <ns>::scan {line state param} -> {spans nextstate nextparam}
+#
+# It scans ONE line of text that begins in tokeniser `state`/`param`, and returns:
+#   spans      a flat {c0 c1 type c0 c1 type ...} of half-open COLUMN ranges within
+#              the line (0-based columns — rio's shared position format, D12) each
+#              tagged with one TOKEN TYPE from the vocabulary below;
+#   nextstate  the opaque scan state ENTERING the next line (open comment, string
+#              body, …) and its `nextparam` carry.
+# Entering the FIRST line the state is the START pair (see `start`): a scanner must
+# treat state "" as "start of document / plain text". Per-line is the natural unit
+# for a state machine and it is what lets the frontend re-highlight INCREMENTALLY —
+# it caches each line's entry state and, after an edit, re-scans from the changed
+# line only until the state re-converges (see the GUI's hl_incremental).
+#
+# The whole-buffer `tokenize {scan text}` is DERIVED from the scanner (below), for
+# tests and any consumer that just wants the lot in one call.
 #
 # Pure: no Tk here — tests headless under tclsh.
 
 namespace eval rio::syntax {
-	variable tokenizers {}   ;# ext (lowercased, no dot) -> tokeniser proc
-	variable langs {}        ;# lang id -> {exts <list> tokenizer <proc>} (introspection)
+	variable scanners {}     ;# ext (lowercased, no dot) -> scanner proc
+	variable langs {}        ;# lang id -> {exts <list> scanner <proc>} (introspection)
 }
 
 # The canonical TOKEN VOCABULARY. Highlighters emit only these type names; a theme
@@ -36,32 +48,56 @@ proc rio::syntax::tokens {} {
 		operator function variable type constant]
 }
 
-# Register a highlighter: a language id, the file extensions it claims (bare, no
-# dot — matched case-insensitively), and its tokeniser proc. A later registration
-# for the same extension WINS, which is what makes a user override replace a
-# shipped highlighter (the frontend loads shipped modules first, user modules last).
-proc rio::syntax::register {lang exts tokenizer} {
-	variable tokenizers
-	variable langs
-	dict set langs $lang [dict create exts $exts tokenizer $tokenizer]
-	foreach e $exts { dict set tokenizers [string tolower $e] $tokenizer }
+# The START scan state — what a scanner is handed entering the first line. Kept in
+# one place so neither the frontend nor the tests hardcode it.
+proc rio::syntax::start {} {
+	return [list "" ""]
 }
 
-# The tokeniser proc registered for a file path (by its extension), or "" when the
+# Register a highlighter: a language id, the file extensions it claims (bare, no
+# dot — matched case-insensitively), and its per-line scanner proc. A later
+# registration for the same extension WINS, which is what makes a user override
+# replace a shipped highlighter (the frontend loads shipped modules first, user
+# modules last).
+proc rio::syntax::register {lang exts scan} {
+	variable scanners
+	variable langs
+	dict set langs $lang [dict create exts $exts scanner $scan]
+	foreach e $exts { dict set scanners [string tolower $e] $scan }
+}
+
+# The scanner proc registered for a file path (by its extension), or "" when the
 # file type has no highlighter (the caller then leaves the text un-highlighted).
 proc rio::syntax::for_path {path} {
-	variable tokenizers
+	variable scanners
 	set ext [string tolower [string trimleft [file extension $path] .]]
-	if {$ext ne "" && [dict exists $tokenizers $ext]} {
-		return [dict get $tokenizers $ext]
+	if {$ext ne "" && [dict exists $scanners $ext]} {
+		return [dict get $scanners $ext]
 	}
 	return ""
 }
 
-# Run a tokeniser over text. A one-line indirection so callers never invoke the
-# tokeniser proc by hand — the contract stays stated in exactly one place.
-proc rio::syntax::tokenize {tokenizer text} {
-	return [$tokenizer $text]
+# Scan one line with a scanner. A one-line indirection so callers never invoke the
+# scanner proc by hand — the contract stays stated in exactly one place.
+proc rio::syntax::scan_line {scan line state param} {
+	return [$scan $line $state $param]
+}
+
+# Whole-buffer convenience: drive the scanner over every line of `text` and flatten
+# to {line.col line.col type ...} triples (1-based line, 0-based column). Derived
+# from the per-line contract; used by the tests and any non-incremental consumer.
+proc rio::syntax::tokenize {scan text} {
+	set out {}
+	lassign [start] state param
+	set lineno 0
+	foreach line [split $text "\n"] {
+		incr lineno
+		lassign [scan_line $scan $line $state $param] spans state param
+		foreach {c0 c1 type} $spans {
+			if {$c1 > $c0} { lappend out $lineno.$c0 $lineno.$c1 $type }
+		}
+	}
+	return $out
 }
 
 # Is a valid token type? (For an applier that wants to ignore stray types.)

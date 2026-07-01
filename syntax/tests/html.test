@@ -7,8 +7,9 @@ set here [file dirname [info script]]
 source [file join $here .. registry.tcl]
 source [file join $here .. html.tcl]
 
-# Shorthands.
-proc hl {text} { rio::syntax::html::tokenize $text }
+# Shorthands.  hl drives the per-line scanner over the whole text via the registry's
+# derived convenience — the same path the pure (non-incremental) consumers use.
+proc hl {text} { rio::syntax::tokenize rio::syntax::html::scan $text }
 # Does the flat span list contain this exact {i0 i1 type} triple?
 proc has {spans i0 i1 type} {
 	foreach {a b t} $spans {
@@ -23,17 +24,17 @@ test tokens-vocabulary {the vocabulary is the documented set} -body {
 	rio::syntax::tokens
 } -result {comment string number keyword tag attribute entity meta operator function variable type constant}
 
-test for_path-html {.html resolves to the html tokeniser} -body {
+test for_path-html {.html resolves to the html scanner} -body {
 	rio::syntax::for_path /x/index.html
-} -result rio::syntax::html::tokenize
+} -result rio::syntax::html::scan
 
 test for_path-case {extension match is case-insensitive} -body {
 	rio::syntax::for_path FOO.XHTML
-} -result rio::syntax::html::tokenize
+} -result rio::syntax::html::scan
 
 test for_path-alts {htm/xht are html too} -body {
 	list [rio::syntax::for_path a.htm] [rio::syntax::for_path a.xht]
-} -result {rio::syntax::html::tokenize rio::syntax::html::tokenize}
+} -result {rio::syntax::html::scan rio::syntax::html::scan}
 
 test for_path-none {an unknown extension has no highlighter} -body {
 	rio::syntax::for_path notes.txt
@@ -46,6 +47,25 @@ test for_path-noext {a path with no extension has no highlighter} -body {
 test is_token {token-type membership} -body {
 	list [rio::syntax::is_token tag] [rio::syntax::is_token nope]
 } -result {1 0}
+
+test start-state {the start state is the empty pair} -body {
+	rio::syntax::start
+} -result {{} {}}
+
+# --- the per-line scanner contract (what incremental re-highlighting rides on) --
+
+test scan-carries-state {an unclosed comment leaves the next line in `comment`} -body {
+	# Scan line 1 from the start state; the comment stays open, so nextstate=comment.
+	lassign [rio::syntax::start] st pm
+	lassign [rio::syntax::scan_line rio::syntax::html::scan "<!-- open" $st $pm] spans st pm
+	list $spans $st
+} -result {{0 9 comment} comment}
+
+test scan-resumes-state {resuming in `comment` colours the line and closes it} -body {
+	# Feed the follow-on line the `comment` state the previous line ended in.
+	lassign [rio::syntax::scan_line rio::syntax::html::scan "still --> x" comment {}] spans st pm
+	list $spans $st
+} -result {{0 9 comment} text}
 
 # --- the html tokeniser --------------------------------------------------------
 

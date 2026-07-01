@@ -114,8 +114,12 @@ set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (S
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
-set ::hl_tokenizer ""     ;# tokeniser for the active buffer's file type, or "" — no highlighting (D32)
+set ::hl_scan ""          ;# per-line scanner for the active buffer's file type, or "" — no highlighting (D32)
 set ::hl_pending 0        ;# a coalesced (idle) re-highlight is queued (D32)
+set ::hl_enter {}         ;# per-line cache: hl_enter[i] = scan state ENTERING line i+1 (drives incremental re-highlight; D32)
+set ::hl_dirty 0          ;# lowest line an edit touched since the last pass (0 = clean)
+set ::hl_lastchanged 0    ;# highest line an edit touched; re-scan must reach past it before it may converge
+set ::hl_scanned 0        ;# lines the last incremental pass re-scanned (introspection / tests)
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -231,7 +235,7 @@ proc rio_result {op params} {
 proc apply_change {p} {
 	::rio_real_t replace [dict get $p start] [dict get $p end] [dict get $p text]
 	::rio_real_t see insert
-	hl_schedule   ;# the text changed — re-tokenise the active buffer (coalesced; D32)
+	hl_edit $p    ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
 }
 
 # Load the active buffer's canonical text into the widget (on switch / open).
@@ -245,7 +249,7 @@ proc load_buffer {} {
 		report_error [dict get $e message] [dict get $e code]
 	}
 	hl_select      ;# the file type may have changed with the buffer (D32)
-	hl_rehighlight ;# repaint now (a one-shot on switch/open, no need to coalesce)
+	hl_full        ;# repaint the whole buffer now and build the line-state cache (on switch/open)
 }
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
@@ -1520,7 +1524,7 @@ proc apply_theme {theme} {
 	# Syntax-highlighting tags (D32): one text tag per token type, coloured from the
 	# theme's syntax.* role (falling back to editor.fg — no visible colour — for any
 	# role a theme leaves unset). Reconfiguring here recolours existing highlighting
-	# live on a theme switch; hl_rehighlight raises the sel tag so a selection stays legible.
+	# live on a theme switch; the highlight passes raise the sel tag so a selection stays legible.
 	if {[info procs rio::syntax::tokens] ne ""} {
 		foreach _tok [rio::syntax::tokens] {
 			set _role syntax.$_tok
@@ -1628,13 +1632,25 @@ proc do_theme {name} {
 
 # ---------------------------------------------------------------------------
 # Syntax highlighting (AGENTS.md D32). Highlighting is PRESENTATION, so the GUI
-# owns it: pure, swappable tokeniser modules live in syntax/ (Tk-free — a future
-# TUI reuses them), and the GUI is the *applier*. It maps each token TYPE onto the
-# theme's syntax.* colour role as a text tag (apply_theme), and re-tokenises the
-# active buffer after edits. v1 re-highlights the WHOLE active buffer per change —
-# correct multi-line context (open comments, script bodies, quoted values all carry
-# state across lines) — coalesced on the idle handler so a burst of keystrokes
-# paints once; viewport/incremental scoping is a later refinement.
+# owns it: pure, swappable per-line scanner modules live in syntax/ (Tk-free — a
+# future TUI reuses them), and the GUI is the *applier*. It maps each token TYPE
+# onto the theme's syntax.* colour role as a text tag (apply_theme), and re-tokenises
+# the active buffer after edits.
+#
+# Re-highlighting is INCREMENTAL. A full pass (hl_full) runs only on open/switch: it
+# scans every line and, as it goes, caches the scan state ENTERING each line in
+# ::hl_enter. After an edit (hl_edit) only the changed line's state can differ, so
+# hl_incremental re-scans from the first dirty line DOWNWARD and stops as soon as a
+# line's freshly-computed entry state matches the cached one (past the edit) — the
+# state has re-converged, so every line below is unchanged. Typing thus re-tags a
+# handful of lines, not the whole file, while multi-line context (open comments,
+# script bodies, quoted values that carry state across lines) stays correct. Edits
+# are coalesced on the idle handler so a burst of keystrokes paints once.
+#
+# Viewport scoping (painting only the visible window, extending on scroll) is a
+# further refinement, still deferred: incremental already removes the per-edit
+# whole-buffer scan; viewport would only cap the one-time open scan on very large
+# files, at the cost of scroll-event machinery the editor doesn't yet need.
 # ---------------------------------------------------------------------------
 
 # Load the tokeniser modules: the registry (the contract) then every language
@@ -1668,36 +1684,108 @@ proc hl_user_dir {} {
 	return ""
 }
 
-# Pick the tokeniser for the active buffer by its file extension ("" = no
-# highlighter, e.g. a scratch buffer or a plain-text file). Runs on open / switch.
+# Pick the scanner for the active buffer by its file extension ("" = no highlighter,
+# e.g. a scratch buffer or a plain-text file). Runs on open / switch.
 proc hl_select {} {
-	set ::hl_tokenizer ""
+	set ::hl_scan ""
 	if {[info procs rio::syntax::for_path] eq ""} return
 	if {$::cur eq "" || ![dict exists $::buffers $::cur]} return
 	set path [bufget $::cur path]
-	if {$path ne ""} { set ::hl_tokenizer [rio::syntax::for_path $path] }
+	if {$path ne ""} { set ::hl_scan [rio::syntax::for_path $path] }
 }
 
-# Re-tokenise the active buffer and repaint its syntax tags. Clears the old spans
-# first; with no tokeniser it just leaves the text plain. Reads the text from the
-# widget (which already holds the buffer's canonical content) — no extra core call.
-proc hl_rehighlight {} {
-	set ::hl_pending 0
+# The active widget's current line count (1-based; a Tk text widget always has at
+# least line 1). ::hl_enter is kept the same length, so index i-1 is line i's state.
+proc hl_linecount {} {
+	return [lindex [split [::rio_real_t index "end-1c"] .] 0]
+}
+
+# Re-tag one line L from its already-known entry `state`/`param`: scan it, clear the
+# old syntax tags on just that line, repaint, and return the state ENTERING line L+1.
+proc hl_paint_line {L state param} {
+	set line [::rio_real_t get $L.0 "$L.0 lineend"]
+	lassign [rio::syntax::scan_line $::hl_scan $line $state $param] spans state param
+	foreach tok [rio::syntax::tokens] { ::rio_real_t tag remove syn:$tok $L.0 "$L.0 lineend" }
+	foreach {c0 c1 type} $spans { ::rio_real_t tag add syn:$type $L.$c0 $L.$c1 }
+	return [list $state $param]
+}
+
+# Full (re)highlight of the whole buffer, rebuilding the line-state cache from the
+# start state. Runs on open / switch; with no scanner it just leaves the text plain.
+# Reads text from the widget (which already holds the canonical content) — no core call.
+proc hl_full {} {
+	set ::hl_pending 0 ; set ::hl_dirty 0 ; set ::hl_lastchanged 0 ; set ::hl_enter {}
 	if {![winfo exists .ed.t] || [info procs rio::syntax::tokens] eq ""} return
 	foreach tok [rio::syntax::tokens] { ::rio_real_t tag remove syn:$tok 1.0 end }
-	if {$::hl_tokenizer eq ""} return
-	set text [::rio_real_t get 1.0 "end-1c"]
-	if {[catch {rio::syntax::tokenize $::hl_tokenizer $text} spans]} return
-	foreach {a b type} $spans { ::rio_real_t tag add syn:$type $a $b }
+	if {$::hl_scan eq ""} return
+	set last [hl_linecount]
+	lassign [rio::syntax::start] state param
+	for {set L 1} {$L <= $last} {incr L} {
+		lappend ::hl_enter [list $state $param]       ;# state entering line L
+		lassign [hl_paint_line $L $state $param] state param
+	}
 	catch {::rio_real_t tag raise sel}   ;# keep a selection legible over the colours
 }
 
-# Queue a coalesced re-highlight on the idle handler, so a run of keystrokes
-# triggers a single re-tokenise rather than one pass per character.
+# Record an edit for the next incremental pass. The core echoes every change as
+# {start end text}; from that we know the first line touched (sl) and the net change
+# in line count (delta). We splice ::hl_enter by delta so the cached entry states
+# BELOW the edit stay index-aligned with the widget — that alignment is what lets
+# hl_incremental trust the cache when testing for state convergence. Then we widen
+# the dirty range and queue a coalesced pass.
+proc hl_edit {p} {
+	if {$::hl_scan eq "" || $::hl_enter eq ""} { hl_schedule ; return }
+	set sl [lindex [split [dict get $p start] .] 0]
+	set el [lindex [split [dict get $p end]   .] 0]
+	set added [expr {[llength [split [dict get $p text] "\n"]] - 1}]
+	set delta [expr {$added - ($el - $sl)}]
+	if {$delta > 0} {
+		set pad {} ; for {set i 0} {$i < $delta} {incr i} { lappend pad [list "￿dirty" ""] }
+		set ::hl_enter [linsert $::hl_enter $sl {*}$pad]
+	} elseif {$delta < 0} {
+		set ::hl_enter [lreplace $::hl_enter $sl [expr {$sl - $delta - 1}]]
+	}
+	if {$::hl_dirty < 1 || $sl < $::hl_dirty} { set ::hl_dirty $sl }
+	set lc [expr {$sl + $added}]
+	if {$lc > $::hl_lastchanged} { set ::hl_lastchanged $lc }
+	hl_schedule
+}
+
+# Incremental re-highlight (the idle handler). Re-scan from the first dirty line down,
+# repainting each line and updating its cached entry state, and stop as soon as — past
+# the edited region — a line's fresh entry state matches the one already cached: the
+# scan state has re-converged, so everything below is unaffected and needs no work.
+proc hl_incremental {} {
+	set ::hl_pending 0
+	if {![winfo exists .ed.t] || [info procs rio::syntax::tokens] eq ""} return
+	if {$::hl_scan eq ""} { set ::hl_dirty 0 ; return }
+	if {$::hl_enter eq ""} { hl_full ; return }
+	set start $::hl_dirty ; set last $::hl_lastchanged
+	set ::hl_dirty 0 ; set ::hl_lastchanged 0
+	if {$start < 1} return
+	set nlines [hl_linecount]
+	if {$start > $nlines} return
+	if {[llength $::hl_enter] != $nlines} { hl_full ; return }  ;# cache drifted — rebuild safely
+	set ::hl_scanned 0
+	lassign [lindex $::hl_enter [expr {$start - 1}]] state param
+	for {set L $start} {$L <= $nlines} {incr L} {
+		lassign [hl_paint_line $L $state $param] state param
+		incr ::hl_scanned
+		if {$L == $nlines} break            ;# no line below to carry state into
+		set next [list $state $param]
+		set old [lindex $::hl_enter $L]      ;# cached state entering line L+1
+		lset ::hl_enter $L $next
+		if {$L >= $last && $next eq $old} break   ;# past the edit and re-converged
+	}
+	catch {::rio_real_t tag raise sel}
+}
+
+# Queue a coalesced incremental pass on the idle handler, so a run of keystrokes
+# triggers a single re-scan rather than one pass per character.
 proc hl_schedule {} {
 	if {$::hl_pending} return
 	set ::hl_pending 1
-	after idle hl_rehighlight
+	after idle hl_incremental
 }
 
 # ---------------------------------------------------------------------------

@@ -11,25 +11,13 @@
 
 namespace eval rio::syntax::html {}
 
-# tokenize TEXT -> {line.col line.col type ...}  (the rio::syntax contract).
-proc rio::syntax::html::tokenize {text} {
-	set out {}
-	set state text      ;# text | comment | meta | tag | str | raw
-	set param {}        ;# per-state carry (tag element, quote char, raw element)
-	set lineno 0
-	foreach line [split $text "\n"] {
-		incr lineno
-		lassign [_scan_line $line $state $param] spans state param
-		foreach {c0 c1 type} $spans {
-			if {$c1 > $c0} { lappend out $lineno.$c0 $lineno.$c1 $type }
-		}
-	}
-	return $out
-}
-
-# Scan ONE line starting in `state`/`param`; return {spans nextstate nextparam},
-# where spans is a flat {c0 c1 type ...} of half-open COLUMN ranges within the line.
-proc rio::syntax::html::_scan_line {line state param} {
+# scan ONE line starting in `state`/`param`; return {spans nextstate nextparam},
+# where spans is a flat {c0 c1 type ...} of half-open COLUMN ranges within the line
+# (the rio::syntax contract). States: text | comment | meta | tag | str | raw. The
+# START state "" falls through to the `default` (text) arm, so line 1 needs no
+# special-casing. `param` carries per-state data (tag element, quote char, raw
+# element).
+proc rio::syntax::html::scan {line state param} {
 	set spans {}
 	set n [string length $line]
 	set i 0
@@ -150,4 +138,4 @@ proc rio::syntax::html::_ifind {haystack needle start} {
 	return [string first [string tolower $needle] [string tolower $haystack] $start]
 }
 
-rio::syntax::register html {html htm xhtml xht} rio::syntax::html::tokenize
+rio::syntax::register html {html htm xhtml xht} rio::syntax::html::scan

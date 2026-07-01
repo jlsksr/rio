@@ -1286,9 +1286,10 @@ quoted values (`string`), `&entities;`, and `<script>`/`<style>` bodies treated 
 an inline `<` in JavaScript never spawns a phantom tag. The GUI re-highlights the **whole
 active buffer** per change (correct multi-line context), coalesced on the idle handler so
 a burst of keystrokes paints once; **viewport/incremental** scoping is a noted later
-refinement (as undo-coalescing is in the doc model). Only the main editor is highlighted
-for now (not the compare panes). A file with no registered highlighter, or a scratch
-buffer with no path, simply shows plain text.
+refinement (as undo-coalescing is in the doc model). *(**Amended below** — the per-change
+re-highlight is now **incremental**; only the one-time viewport question remains deferred.)*
+Only the main editor is highlighted for now (not the compare panes). A file with no
+registered highlighter, or a scratch buffer with no path, simply shows plain text.
 
 **Implemented:** `syntax/registry.tcl` (the registry, `for_path`, the token vocabulary) +
 `syntax/html.tcl` (the (X)HTML tokeniser) + the `syntax.*` roles in `rio::theme::default`
@@ -1305,6 +1306,44 @@ easy for someone to write or replace a language without touching the core. Putti
 swappable frontend modules gets all three — instant local paint, theme harmony, and a
 drop-in extension point — while honouring the D30 client/core split and the D22/D24 rule
 that rendering is the frontend's job.
+
+**Amendment — incremental re-highlighting (landed).** The v1 "re-highlight the whole
+active buffer per change" is retired: an edit near the top of a long file was O(buffer)
+work each keystroke-burst. Two changes:
+
+- **The contract is now a per-line SCANNER**, not a whole-buffer function: a highlighter
+  provides `<ns>::scan {line state param} -> {spans nextstate nextparam}`, scanning one
+  line and returning its column spans plus the scan state *entering the next line* (the
+  start state is `rio::syntax::start` — the empty pair; a scanner treats state `""` as
+  "start of document"). Per-line is the natural unit for a state machine and it is *less*
+  code for the author (no whole-buffer loop). The whole-buffer `rio::syntax::tokenize {scan
+  text}` still exists but is now **derived** by the registry driving the scanner, for the
+  tests and any non-incremental consumer. `(X)HTML`'s existing per-line `_scan_line` simply
+  became the public `scan` — the change was mechanical.
+- **The GUI re-highlights incrementally.** It caches, per line, the scan state entering
+  that line (`::hl_enter`). A **full** pass (`hl_full`) runs only on open/switch and builds
+  the cache. On an edit (`hl_edit`) it splices the cache to stay index-aligned with the
+  widget (from the change's first line + net line-count delta), then `hl_incremental`
+  re-scans from the first dirty line **downward and stops as soon as — past the edited
+  region — a line's fresh entry state equals the cached one**: the state has re-converged,
+  so every line below is unaffected. Typing thus re-tags a line or two; an unclosed comment
+  opened at the top correctly repaints to the end and no further. Still coalesced on idle.
+
+**Viewport** scoping (painting only the visible window, extending on scroll) stays deferred
+*on purpose*: incremental already removes the per-edit whole-buffer scan, which was the
+actual cost. Viewport would only cap the **one-time** open scan on very large files, and it
+needs scroll-event machinery and a paint-frontier watermark the editor doesn't yet need —
+not worth the complexity against rio's "small and simple" budget until a real large-file
+pain shows up.
+
+**Implemented (amends the list above):** `syntax/registry.tcl` now defines the per-line
+`scan` contract + `scan_line` + `start`, with `tokenize` derived; `syntax/html.tcl` exposes
+`scan`. GUI side, `hl_rehighlight` is replaced by `hl_full` / `hl_incremental` / `hl_edit`
+(+ helpers `hl_paint_line`, `hl_linecount`) over the `::hl_enter` cache; `apply_change`
+calls `hl_edit`, `load_buffer` calls `hl_full`. Tests: `html.test` gains the `start` + the
+per-line `scan` contract cases; `highlight.tcl` gains incremental-scope checks (a local
+edit re-scans ≤2 lines via `::hl_scanned`; a top-of-file comment propagates to the end and
+back; a line delete keeps the cache aligned).
 
 ---
 
