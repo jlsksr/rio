@@ -1,0 +1,136 @@
+# Tests for the per-project workspace store (rio::workspace) and the workspace.*
+# ops (AGENTS.md D31): "resume my working space" — which files were open in a
+# project and which tab was active, kept out of tree under the data dir, keyed by
+# the open project root, pruned to paths that still exist. Local only.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+
+# Point the store at a throwaway dir for the whole file.
+set ::dir [file join [::tcltest::temporaryDirectory] riows-[clock clicks]]
+set rio::workspace::override_dir $::dir
+
+# A throwaway project tree with two real files (so pruning has something to keep).
+proc make_tree {} {
+	set d [file join [::tcltest::temporaryDirectory] riowsproj-[clock clicks]]
+	file mkdir $d
+	close [open [file join $d a.txt] w]
+	close [open [file join $d b.txt] w]
+	return $d
+}
+
+# --- the pure store (rio::workspace) ----------------------------------------
+
+test ws-absent-empty {a project with no saved session reads back empty} -body {
+	rio::workspace::get /no/such/project
+} -result {open {} active {}}
+
+test ws-roundtrip {save then get returns the same open list and active} -body {
+	rio::workspace::save /proj/one [list /proj/one/a.txt /proj/one/b.txt] /proj/one/b.txt
+	set s [rio::workspace::get /proj/one]
+	list [dict get $s open] [dict get $s active]
+} -result {{/proj/one/a.txt /proj/one/b.txt} /proj/one/b.txt}
+
+test ws-paths-with-spaces {paths containing spaces survive the JSON round-trip} -body {
+	rio::workspace::save /proj/sp [list "/a dir/x y.txt"] "/a dir/x y.txt"
+	dict get [rio::workspace::get /proj/sp] open
+} -result {{/a dir/x y.txt}}
+
+test ws-empty-open {an empty open list round-trips as empty} -body {
+	rio::workspace::save /proj/empty {} ""
+	rio::workspace::get /proj/empty
+} -result {open {} active {}}
+
+test ws-overwrite {a second save replaces the first} -body {
+	rio::workspace::save /proj/ow [list /x/1] /x/1
+	rio::workspace::save /proj/ow [list /x/2] /x/2
+	dict get [rio::workspace::get /proj/ow] open
+} -result {/x/2}
+
+test ws-key-stable-per-root {each root maps to its own file; the same root is stable} -body {
+	list [expr {[rio::workspace::_path /proj/aaa] eq [rio::workspace::_path /proj/aaa]}] \
+		[expr {[rio::workspace::_path /proj/aaa] ne [rio::workspace::_path /proj/bbb]}]
+} -result {1 1}
+
+test ws-forget {forget drops the saved session} -body {
+	rio::workspace::save /proj/gone [list /x/1] /x/1
+	rio::workspace::forget /proj/gone
+	rio::workspace::get /proj/gone
+} -result {open {} active {}}
+
+test ws-corrupt-reads-empty {a corrupt session file reads back empty, not an error} -body {
+	set p [rio::workspace::_path /proj/corrupt]
+	file mkdir [file dirname $p]
+	set f [open $p w]; puts $f "@@ not valid json @@"; close $f
+	rio::workspace::get /proj/corrupt
+} -result {open {} active {}}
+
+test ws-dir-perms-0700 {the sessions dir is mode 0700} -constraints unix -body {
+	rio::workspace::save /proj/perm {} ""
+	format %04o [expr {[file attributes $::dir -permissions] & 0777}]
+} -result 0700
+
+# --- through the in-process core (the workspace.* ops) ----------------------
+
+test ws-op-no-project-saves-nothing {workspace.save with no project open is a no-op} -setup {
+	rio::project::close
+} -body {
+	set resp [dict get [rio::core::call workspace.save \
+		[dict create open "/x/1"]] response]
+	dict get $resp result saved
+} -result 0
+
+test ws-op-no-project-get-empty {workspace.get with no project open is empty} -setup {
+	rio::project::close
+} -body {
+	set resp [dict get [rio::core::call workspace.get {}] response]
+	list [dict get $resp result open] [dict get $resp result active]
+} -result {{} {}}
+
+test ws-op-save-get-roundtrip {save keyed by the open root, then get reads it back} -setup {
+	set ::tree [make_tree]; rio::project::open $::tree
+} -body {
+	set a [file join $::tree a.txt]
+	set b [file join $::tree b.txt]
+	rio::core::call workspace.save [dict create open "$a\n$b" active $b]
+	set resp [dict get [rio::core::call workspace.get {}] response]
+	list [expr {[dict get $resp result open] eq [list $a $b]}] \
+		[expr {[dict get $resp result active] eq $b}]
+} -cleanup { rio::project::close; file delete -force $::tree } -result {1 1}
+
+test ws-op-newline-splits-and-drops-empty {the newline-joined open param splits; empty segments drop} -setup {
+	set ::tree [make_tree]; rio::project::open $::tree
+} -body {
+	set a [file join $::tree a.txt]
+	# trailing + doubled newline: no empty entries should survive the split
+	rio::core::call workspace.save [dict create open "$a\n\n"]
+	expr {[dict get [dict get [rio::core::call workspace.get {}] response] result open] eq [list $a]}
+} -cleanup { rio::project::close; file delete -force $::tree } -result 1
+
+test ws-op-prunes-missing-paths {get drops paths that no longer exist} -setup {
+	set ::tree [make_tree]; rio::project::open $::tree
+} -body {
+	set a    [file join $::tree a.txt]
+	set gone [file join $::tree gone.txt]
+	rio::core::call workspace.save [dict create open "$a\n$gone" active $gone]
+	set resp [dict get [rio::core::call workspace.get {}] response]
+	# a.txt stays; gone.txt is pruned; a pruned active falls back to ""
+	list [expr {[dict get $resp result open] eq [list $a]}] \
+		[expr {[dict get $resp result active] eq ""}]
+} -cleanup { rio::project::close; file delete -force $::tree } -result {1 1}
+
+test ws-ops-registered {workspace.save and workspace.get are in the live registry} -body {
+	expr {"workspace.save" in [rio::dispatch::opnames] \
+		&& "workspace.get" in [rio::dispatch::opnames]}
+} -result 1
+
+test ws-get-wire {workspace.get encodes to JSON with an open array + active string} -body {
+	set result [dict create open [list /p/a.txt /p/b.txt] active /p/b.txt]
+	rio::wire::response [dict create id 1 ok true op workspace.get result $result]
+} -result {{"id":"1","ok":true,"result":{"open":["/p/a.txt","/p/b.txt"],"active":"/p/b.txt"}}}
+
+file delete -force $::dir
+cleanupTests

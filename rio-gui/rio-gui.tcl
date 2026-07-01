@@ -105,6 +105,7 @@ set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
+set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
@@ -112,6 +113,7 @@ set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .e
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
+set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -345,6 +347,7 @@ proc do_open {path} {
 		tk_messageBox -icon info -type ok -title rio \
 			-message "Mixed line endings; the file will be saved as [dict get $res eol]."
 	}
+	session_save   ;# the open-file set changed — record it for resume (D31)
 	return 1
 }
 
@@ -555,6 +558,7 @@ proc show_pane {which} {
 		populate_nav
 	}
 	style_selector
+	prefs_save
 }
 
 # Re-pack the dock against ::dock_side, with the editor filling the rest. Packing
@@ -574,6 +578,7 @@ proc place_dock {} {
 	} else {
 		pack .ed -side left -fill both -expand 1
 	}
+	prefs_save
 }
 
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
@@ -608,6 +613,7 @@ proc apply_wrap {} {
 		gridscroll .ed.hsb {*}[::rio_real_t xview]   ;# show only if a line overflows
 	}
 	cmp_apply_wrap
+	prefs_save
 }
 
 # The compare panes have no horizontal scrollbar, so wrap is the only way to read
@@ -1060,6 +1066,7 @@ proc do_close {} {
 		set ni [expr {$idx >= [llength $::order] ? [llength $::order] - 1 : $idx}]
 		activate [lindex $::order $ni]
 	}
+	session_save   ;# the open-file set changed — record it for resume (D31)
 }
 # Close any tab (the × button): focus it first so a discard prompt is in context.
 proc close_tab {id} { activate $id ; do_close }
@@ -1121,6 +1128,10 @@ proc rbrowse_start {seed} {
 # listing stays), so a mistyped Location can't strand the dialog.
 proc rbrowse_go {dir} {
 	set info [rbrowse_rows_for $dir]
+	# rbrowse_rows_for pumps the event loop (an fs.list round-trip). If the dialog was
+	# cancelled meanwhile — Escape, WM close, a slow remote listing the user gave up on
+	# — its widgets are gone; bail rather than crash on a stale ".rbrowse.loc".
+	if {![winfo exists .rbrowse.loc]} return
 	if {![dict get $info ok]} { bell ; return }
 	set ::rbrowse_dir [dict get $info dir]
 	.rbrowse.loc delete 0 end
@@ -1229,9 +1240,13 @@ proc remote_browse_dialog {title mode {seed ""}} {
 	set ::rbrowse_rows   {}
 	rbrowse_go [rbrowse_start $seed]
 
-	catch {grab $w}
-	focus $w.body.list
-	tkwait window $w
+	# The first rbrowse_go may have been cancelled mid-flight (an Escape during its
+	# fs.list), taking the dialog with it — only grab/focus/wait if it's still here.
+	if {[winfo exists $w]} {
+		catch {grab $w}
+		focus $w.body.list
+		tkwait window $w
+	}
 	return $::rbrowse_result
 }
 
@@ -1269,6 +1284,8 @@ proc maybe_discard {} {
 	}
 }
 proc do_quit {} {
+	prefs_save      ;# persist view state + the workspace before we go (D31)
+	session_save
 	foreach id $::order {
 		if {[bufget $id modified]} {
 			activate $id
@@ -1584,10 +1601,113 @@ proc apply_theme {theme} {
 proc do_theme {name} {
 	set resp [rio_call theme.get [dict create name $name]]
 	if {[dict get $resp ok]} {
+		set ::theme_name $name
 		apply_theme [dict get $resp result]
+		prefs_save
 	} else {
 		report_error "Theme '$name': [dict get $resp error message]" \
 			[dict get $resp error code]
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Sessions & preferences (AGENTS.md D31). Two halves, split by owner:
+#
+#   * PREFERENCES — how the editor looks: theme, wrap, dock side/pane, chat
+#     visibility. Pure view state the core knows nothing about, so the GUI owns it,
+#     in $XDG_CONFIG_HOME/rio/prefs.json (beside the user themes dir). Plain JSON
+#     data, parsed never executed (D21); loaded at startup, saved on each change.
+#
+#   * WORKSPACE — which files were open in a project + the active tab. Document
+#     state, so the CORE owns it (workspace.* ops, keyed by project root, kept OUT
+#     OF TREE under its data dir). That is why a resume Just Works over a remote
+#     core: the session lives WITH the project, on the server (D30/D31).
+#
+# Neither ever holds a secret (the API key stays in the 0600 store, D26). Writes are
+# gated on ::rio_started so the appliers that also run during boot don't persist the
+# defaults back over what was just loaded.
+# ---------------------------------------------------------------------------
+proc prefs_path {} {
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		set base $::env(XDG_CONFIG_HOME)
+	} elseif {[info exists ::env(HOME)]} {
+		set base [file join $::env(HOME) .config]
+	} else { return "" }
+	return [file join $base rio prefs.json]
+}
+
+# Load saved preferences over the defaults. A missing or corrupt file leaves the
+# defaults intact — a bad prefs file must never stop the editor starting. Only known
+# keys with valid values are honoured; anything else is ignored.
+proc prefs_load {} {
+	set path [prefs_path]
+	if {$path eq "" || ![file exists $path]} return
+	if {[catch {
+		set f [open $path r] ; fconfigure $f -encoding utf-8
+		set d [json::json2dict [::read $f]] ; close $f
+	}]} return
+	if {[dict exists $d theme]}      { set ::theme_name [dict get $d theme] }
+	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
+	if {[dict exists $d chat_shown]} { set ::chat_shown [expr {[dict get $d chat_shown] ? 1 : 0}] }
+	if {[dict exists $d dock_side] && [dict get $d dock_side] in {left right}} {
+		set ::dock_side [dict get $d dock_side]
+	}
+	if {[dict exists $d dock_pane] && [dict get $d dock_pane] in {files git}} {
+		set ::dock_pane [dict get $d dock_pane]
+	}
+}
+
+# Persist the current preferences. Called from each view-state applier (do_theme,
+# apply_wrap, place_dock, show_pane) — the single choke point per setting — so any
+# menu or keyboard toggle records itself. Values are flat strings (rio::wire::obj);
+# 0/1 flags read back cleanly through expr.
+proc prefs_save {} {
+	if {!$::rio_started} return
+	set path [prefs_path]
+	if {$path eq ""} return
+	catch {
+		file mkdir [file dirname $path]
+		set json [rio::wire::obj [dict create \
+			theme      $::theme_name \
+			wrap       $::wrap_lines \
+			dock_side  $::dock_side \
+			dock_pane  $::dock_pane \
+			chat_shown $::chat_shown]]
+		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
+		puts -nonewline $f $json ; close $f
+	}
+}
+
+# Save the open project's workspace: the paths of the open tabs (untitled/unsaved
+# tabs, which have no path, are omitted) and the active tab's path. The core keys it
+# by the open project root and no-ops when none is open, so this is safe to call
+# unconditionally. `open` rides the wire as a newline-joined string (workspace.*).
+proc session_save {} {
+	if {!$::rio_started} return
+	set paths {}
+	foreach id $::order {
+		set p [bufget $id path]
+		if {$p ne ""} { lappend paths $p }
+	}
+	set active [expr {$::cur ne "" ? [bufget $::cur path] : ""}]
+	catch {rio_call workspace.save [dict create open [join $paths "\n"] active $active]}
+}
+
+# Restore the open project's workspace: reopen each saved file (the core has already
+# pruned any that vanished) and focus the saved active tab. do_open dedups against
+# open tabs and prunes the empty scratch buffer, so restoring onto a fresh launch
+# leaves exactly the saved set. Runs during boot only, while ::rio_started is still 0
+# — so the do_opens here don't each trigger a save.
+proc session_restore {} {
+	set resp [rio_call workspace.get {}]
+	if {![dict get $resp ok]} return
+	set res [dict get $resp result]
+	foreach p [dict get $res open] { do_open $p }
+	set active [dict get $res active]
+	if {$active ne ""} {
+		foreach id $::order {
+			if {[bufget $id path] eq $active} { activate $id ; break }
+		}
 	}
 }
 
@@ -1900,9 +2020,17 @@ proc .ed.t {args} {
 	}
 }
 
-# Apply the core's theme (the built-in default) before the first tab is drawn, so
-# every widget — and the tab bar refresh_tabs builds — uses the role table.
-apply_theme [dict get [rio_call theme.get {}] result]
+# Load saved preferences (theme, wrap, dock, chat) over the defaults, then apply the
+# theme before the first tab is drawn, so every widget — and the tab bar refresh_tabs
+# builds — uses the role table. A persisted theme that no longer exists falls back to
+# the default rather than erroring at startup (D31).
+prefs_load
+set _boot_theme [rio_call theme.get [dict create name $::theme_name]]
+if {![dict get $_boot_theme ok]} {
+	set ::theme_name default
+	set _boot_theme [rio_call theme.get {}]
+}
+apply_theme [dict get $_boot_theme result]
 
 # Adopt the core's existing buffer(s), then process the command line. In-process: a
 # directory argument opens as the project folder, a file opens in a tab. Remote: the
@@ -1926,12 +2054,21 @@ foreach f $argv {
 	}
 }
 
+# Resume the project's workspace: reopen the files that were open last time (D31).
+# Only meaningful once a project is open (argv opened one — or none, then this is a
+# no-op); the core prunes vanished paths, so a restore never errors on stale entries.
+# Still guarded by ::rio_started=0, so the do_opens here don't each re-save.
+session_restore
+
 # Let the window settle at its natural content size, then stop child geometry from
 # driving the toplevel. After this, resizing the dock (the sash) flexes the editor
 # rather than resizing the whole window — which is what made sash drags feed back
 # on themselves. The user can still resize the toplevel via the WM as usual.
 update idletasks
 pack propagate . 0
+
+# Startup is done: from here, view-state and workspace changes persist (D31).
+set ::rio_started 1
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }

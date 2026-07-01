@@ -15,6 +15,7 @@
 
 set ::env(RIO_GUI_HEADLESS) 1
 set argv {}                          ;# no --connect ⇒ default: spawn a local core
+source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 source [file join [file dirname [info script]] .. rio-gui.tcl]
 
 proc report_error {msg {code ""}} { set ::last_error $msg }

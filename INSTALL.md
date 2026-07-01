@@ -138,6 +138,13 @@ Notes:
   server-side browser (walking the core's disk, with a Location bar to type a known
   path). The core is the document of record — edits and saves happen on the server's
   disk.
+- **Your workspace resumes.** Reopen a project and the files you had open (plus the
+  active tab) come back. That per-project state lives with the **core**
+  (`$XDG_DATA_HOME/rio/sessions/`, default `~/.local/share/rio/`), so it follows a
+  remote project onto the server too. View **preferences** — theme, line-wrap, dock
+  side, chat visibility — are the GUI's, in `$XDG_CONFIG_HOME/rio/prefs.json` (default
+  `~/.config/rio/`) on whichever box runs the GUI. Both are plain JSON; neither holds
+  your API key (that stays in the 0600 secrets store, §5).
 - If the tunnel maps a different remote port (e.g. `-L 7711:127.0.0.1:7712`), the
   **core listens on `7712`** on the server; the GUI still connects to your local
   `7711`.

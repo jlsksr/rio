@@ -10,6 +10,7 @@
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/reconnect.tcl
 
 set ::env(RIO_GUI_HEADLESS) 1
+source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 set argv {}                          ;# no --connect ⇒ default: spawn local core A
 source [file join [file dirname [info script]] .. rio-gui.tcl]
 

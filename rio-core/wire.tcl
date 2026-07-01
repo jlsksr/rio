@@ -132,6 +132,12 @@ proc rio::wire::_result_agent_history {result} {
 }
 rio::wire::result_encoder agent.history rio::wire::_result_agent_history
 
+# workspace.get: `open` is an array of path strings; `active` is a string leaf.
+proc rio::wire::_result_workspace_get {result} {
+	return "{\"open\":[strarr [dict get $result open]],\"active\":[str [dict get $result active]]}"
+}
+rio::wire::result_encoder workspace.get rio::wire::_result_workspace_get
+
 # A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
 # ok replies) selects a shape-specific result encoder; without one, the result
 # is a flat object.

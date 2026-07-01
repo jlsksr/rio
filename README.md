@@ -43,6 +43,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
+- **Sessions** — reopen a project and rio brings back the files you had open and the
+  active tab, plus your view preferences (theme, line-wrap, dock side, chat). The
+  preferences live with the GUI; the open-file set lives with the project on the core,
+  so a **remote session resumes too**. Both are plain data, never your API key.
 - **Local & remote, one transport** — the GUI always talks to a core over a
   channel. **Locally there is nothing to start**: it spawns its own private core as
   a child process automatically. To edit on **another box**, run the core there

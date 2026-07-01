@@ -10,6 +10,7 @@
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/remote.tcl
 
 set ::env(RIO_GUI_HEADLESS) 1
+source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 
 # The "server side": load rio-core's socket server and start listening on an
 # ephemeral loopback port. This is the core a remote box would run.

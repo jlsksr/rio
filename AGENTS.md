@@ -557,7 +557,10 @@ Two kinds of state, kept separate:
   config (no arbitrary code execution on startup).
 - **Session/workspace state** (machine-written): recent files, window/pane sizes,
   open tabs, per-view cursor positions — written as **JSON** by rio, not meant for
-  hand-editing.
+  hand-editing. *(Realized by **D31**, which splits this by owner — view prefs under
+  config, the per-project open-file set under data — and stores the session **out of
+  tree** keyed by project root, superseding the "project-local session in `.rio/`"
+  sketch below for resume state.)*
 - **Secrets** (tokens/credentials, e.g. the Claude API key of D26): kept
   **out of both** the plain-text settings file and the synced session JSON, in a
   separate store under the data dir with **restrictive perms (0600)** — OS keychain
@@ -1162,7 +1165,10 @@ file pane's op — `..`, dirs, then files; dir-only in folder mode) with an edit
 Location bar for a known path, so you never type a blind server path. It retired the
 typed-only `remote_path_dialog`; `rbrowse_rows_for`/`rbrowse_start` are split out for
 headless testing, covered by `rio-gui/tests/browse.tcl` (the fs.list walk, the
-navigate/choose logic per mode, and a real-modal build/teardown). *Pending:* a
+navigate/choose logic per mode, and a real-modal build/teardown). *(Later hardened:
+`rbrowse_go` / `remote_browse_dialog` now bail cleanly if the dialog is cancelled while
+its `fs.list` is in flight — an Escape during a slow remote listing no longer crashes
+the proc.)* *Pending:* a
 `--ssh host [path]` convenience wrapper (P4) —
 today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
 `ssh host … server.tcl --stdio` by hand.
@@ -1175,6 +1181,64 @@ frontend** (no shared live state across windows — that is the daemon's job).
 listening socket removes the shared-host exposure *structurally* rather than patching
 it with auth — the POSIX-purist answer (compose with SSH and pipes). The wire layer
 (D2/D11) already let the core speak this; the GUI just stopped being a special case.
+
+---
+
+### D31 — Sessions & preferences: resume a working space, split by owner, out of tree
+
+Realizes the **session/workspace** half of D21 (and revises its storage), so launching
+rio at a project brings back *how the editor looked* and *what you had open*. The key
+move is splitting what D21 lumped together — "recent files, window/pane sizes, open
+tabs" — by **who owns it**, because the D30 client/core split makes that ownership
+matter:
+
+- **Preferences** — theme, line-wrap, dock side/pane, chat visibility. *Pure view
+  state* the core knows nothing about, so the **GUI owns it**, in
+  `$XDG_CONFIG_HOME/rio/prefs.json` (beside the user themes dir). Plain JSON, parsed
+  never executed (D21). Loaded at startup over the defaults; saved on each change
+  through the one applier per setting (`do_theme`, `apply_wrap`, `place_dock`,
+  `show_pane`). A missing/corrupt file, or a persisted theme that no longer exists,
+  falls back to defaults rather than stopping startup.
+- **Workspace** — the open files (in tab order) + the active tab, **per project**.
+  *Document state*, so the **core owns it**: the `workspace.*` ops
+  (`workspace.save` / `workspace.get`), keyed by the open project root, store it **out
+  of tree** under `$XDG_DATA_HOME/rio/sessions/<md5-of-root>.json`. Because the store
+  lives with the core, a resume **Just Works over a remote core** — the session follows
+  the project onto the server (D30), like the files it names. `workspace.get` prunes
+  paths that have since vanished (so a resume never spams "can't open") and no-ops when
+  no project is open.
+
+**Out of tree, not `.rio/`.** D21 sketched a per-project *in-tree* `.rio/` dir for
+project-local session; D31 keeps the *session* out of the repo instead — keyed by root
+under the data dir — so it never shows in `git status`, needs no `.gitignore`, and
+can't be committed by accident. (A `.rio/` for *shared, committable* project settings
+can still land later; that is a different thing from personal resume state.) Window
+geometry and pane pixel-widths are deliberately deferred (flaky across multi-monitor,
+low payoff) — an easy later extension.
+
+**Ownership boundaries respected.** Neither store ever holds a secret (the API key
+stays in the 0600 store, D26). Active-tab / tab-order is frontend-local (D22), so the
+GUI supplies it; the core only persists what it is told, keyed by the root it owns. The
+open-file list crosses the wire *inbound* as a newline-joined string (params are flat
+strings, and a path holds no newline — the conf format assumes the same) and returns
+*outbound* as a proper JSON array (a shape-aware encoder, D25).
+
+**Implemented:** `rio-core/workspace.tcl` (the pure keyed store) + `ops-workspace.tcl`
+(root-keying, stale-path pruning) + the `workspace.get` wire encoder (D25); GUI side in
+`rio-gui/rio-gui.tcl` (`prefs_load` / `prefs_save`, `session_save` / `session_restore`,
+gated on a `::rio_started` flag so the boot-time appliers don't persist defaults over
+what was just loaded; restore runs after the argv folder opens). Tests:
+`rio-core/tests/workspace.test` (store round-trip, keying, pruning, corrupt-file
+tolerance, the wire shape) and `rio-gui/tests/session.tcl` (prefs round-trip + the boot
+guard, and a full open → save → restore cycle through the spawned core). A shared
+`rio-gui/tests/sandbox.tcl` points every GUI test's XDG dirs at a throwaway path so the
+suite never touches (nor leaks into) the user's real config.
+
+**Why:** resume is table-stakes for "pick up where I left off," but the naive
+one-file-in-the-project-dir version breaks the moment the core is remote — view state
+is the client's, the open-file set is the project's. Splitting by owner puts each half
+where it already belongs (config dir vs the core's data dir), makes remote resume fall
+out for free, and keeps the repo clean.
 
 ---
 

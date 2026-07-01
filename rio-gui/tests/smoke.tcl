@@ -15,6 +15,7 @@
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
 set ::env(RIO_GUI_HEADLESS) 1
+source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 source [file join [file dirname [info script]] .. .. rio-core server.tcl]
 set ::port [rio::server::listen 0]
 set ::connect_to "127.0.0.1:$::port"
