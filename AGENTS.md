@@ -123,8 +123,11 @@ Guiding qualities:
 - Responsive layout: side panes sit horizontally on wide screens; collapse into
   vertically stacked sections on narrow terminals.
 - **GUI mode and TUI mode.**
-- **Optional** server mode (GUI/TUI connect to a headless core, like
-  `emacs-server` / `vscode-server`). Optional — in-process is the default.
+- **Optional** server mode: the GUI/TUI is *always* a client to a core over a
+  channel (D30), but the core can optionally run as a **persistent listening
+  daemon** (socket, like `emacs-server` / `vscode-server`) rather than a private
+  core spawned over a pipe. (Pre-D30 this read "in-process is the default" — there
+  is no in-process path anymore.)
 - A **language-agnostic plugin/extension *seam* designed in from day one** (D16):
   the protocol boundary is provided for up front so extensibility isn't bolted on
   later. *Building out* the full plugin platform (contribution API, manifests,
@@ -345,8 +348,13 @@ Three message kinds:
 - **Event** (core → client, unsolicited): `{event, params}` — broadcast to all
   attached views.
 
-Encoding is **JSON, one message per line** (JSONL framing) over the socket; the
-in-process path uses the same dict structure with no serialization cost.
+Encoding is **JSON, one message per line** (JSONL framing) over the channel;
+inside the core the same dict structure is passed directly, so op-to-op calls
+(dispatch, the agent calling a tool) pay no serialization cost — JSON lives only
+at the channel boundary. *(Post-D30 the frontend↔core hop is **always** a channel
+and always serializes; the zero-cost dict path survives only as the core's
+**internal** dispatch, not a frontend transport. D25's "in-process path" mentions
+mean this internal path.)*
 A streaming op (`agent.send`) emits a sequence of events keyed by a run id (the
 agent uses a per-conversation `turn`), terminated by a final event. Op
 namespaces: `buffer.*`, `fs.*` / `project.*`, `git.*`, `exec.*`, `agent.*`,
