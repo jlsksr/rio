@@ -139,6 +139,10 @@ Notes:
   **core listens on `7712`** on the server; the GUI still connects to your local
   `7711`.
 - `RIO_CONNECT=host:port` is an alternative to `--connect`.
+- You can also connect from an **already-running GUI**: **File ▸ Connect to Remote
+  Core…**, enter the `host:port`. By default it rewires that window to the remote
+  core (offering to save open tabs first); tick **Open in a new window** to keep the
+  current session and open the remote one alongside it.
 - A daemon serves several frontends, but there's **one core per attach**, no shared
   live cursor state across windows.
 

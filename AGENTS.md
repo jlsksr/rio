@@ -1142,7 +1142,15 @@ socket and `pipe.tcl` a full turn over the real spawned-child pipe. **Deploy
 consequence:** the agent's Claude HTTPS now runs *server-side*, so a headless core
 box needs `tcl-tls` too — `rio-server-deploy.sh` installs it and the verifier checks
 `package require tls` (a pre-P3 server, provisioned TLS-free, fails a Claude turn with
-"can't find package tls"). *Pending:* a `--ssh host [path]` convenience wrapper (P4) —
+"can't find package tls"). *Done — connect from a running GUI:* attaching to a daemon
+is no longer launch-only — **File ▸ Connect to Remote Core…** prompts for a
+`host:port` and, by default, **rewires the current window in place** (open the new
+socket first, save-check the open tabs, then drop the local core, swap `::core_chan`,
+and re-adopt from the remote core — a failed connect or a cancelled save leaves the
+live session untouched); an **"Open in a new window"** checkbox instead spawns a
+second `rio-gui --connect …`, reusing the startup path. Covered by
+`rio-gui/tests/reconnect.tcl` (a real second daemon, the dead-port safety property,
+and the live swap). *Pending:* a `--ssh host [path]` convenience wrapper (P4) —
 today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
 `ssh host … server.tcl --stdio` by hand.
 

@@ -39,7 +39,11 @@ package require json
 # Only the wire encoder is sourced here (Tk-free); the core lives in its own process.
 # ---------------------------------------------------------------------------
 set ::rio_dir [file dirname [info script]]
+set ::rio_self [file normalize [info script]]   ;# this script, for spawning a new window
 source [file join $::rio_dir .. rio-core wire.tcl]
+
+set ::core_endpoint "" ;# host:port when attached to a daemon (remote); "" when local (D30)
+set ::last_connect  "" ;# last host:port typed into "Connect to Remote Core…" (dialog seed)
 
 if {![info exists ::connect_to]} { set ::connect_to "" }
 set ci [lsearch -exact $argv --connect]
@@ -68,6 +72,8 @@ if {$::connect_to ne ""} {
 		puts stderr "  • If it's remote, tunnel first:  ssh -L $port:127.0.0.1:$port <server>"
 		exit 1
 	}
+	set ::core_endpoint $::connect_to
+	set ::last_connect  $::connect_to
 } else {
 	# Default: spawn a private local core and talk over its stdio (D30). We run under
 	# wish, so find a Tk-free tclsh — in PATH, else one beside our own interpreter.
@@ -1147,6 +1153,137 @@ proc do_quit {} {
 }
 
 # ---------------------------------------------------------------------------
+# Connect to a remote (listening) rio-core over a socket — the daemon mode of the
+# one channel transport (AGENTS.md D30). The core there is loopback-bound, so this
+# is normally the local end of an `ssh -L` tunnel. Reached from File ▸ Connect to
+# Remote Core…. By default THIS window rewires to the remote core; ticking "Open in
+# a new window" launches a second rio-gui instead, leaving this session untouched.
+# ---------------------------------------------------------------------------
+
+# Validate a "host:port" string. Returns {host port}, or "" if malformed (same rule
+# the --connect startup path uses).
+proc parse_endpoint {hp} {
+	lassign [split $hp :] host port
+	if {$host eq "" || ![string is integer -strict $port]} { return "" }
+	return [list $host $port]
+}
+
+# The endpoint prompt: a host:port entry + an "open in a new window" checkbox.
+# Returns {hostport newwin}, or "" if cancelled. Modelled on remote_path_dialog.
+proc connect_remote_dialog {} {
+	set w .connd
+	destroy $w
+	toplevel $w
+	wm title $w "Connect to remote core"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.prompt -anchor w -font RioUIFont -text "Remote core address (host:port):" \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	entry $w.e -width 40 -font RioUIFont
+	$w.e insert end [expr {$::last_connect ne "" ? $::last_connect : "127.0.0.1:7711"}]
+	set ::connd_new 0
+	checkbutton $w.new -text "Open in a new window (keep this session)" \
+		-variable ::connd_new -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.ok     -text Connect -font RioUIFont \
+		-command {set ::connd_result [list [.connd.e get] $::connd_new] ; destroy .connd}
+	button $w.btns.cancel -text Cancel  -font RioUIFont \
+		-command {set ::connd_result "" ; destroy .connd}
+	pack $w.btns.cancel $w.btns.ok -side right -padx 3
+	grid $w.prompt -row 0 -column 0 -sticky we -padx 8 -pady {8 2}
+	grid $w.e      -row 1 -column 0 -sticky we -padx 8
+	grid $w.new    -row 2 -column 0 -sticky w  -padx 8 -pady {4 0}
+	grid $w.btns   -row 3 -column 0 -sticky e  -padx 5 -pady {2 8}
+	bind $w.e <Return> {set ::connd_result [list [.connd.e get] $::connd_new] ; destroy .connd}
+	bind $w <Escape>   {set ::connd_result "" ; destroy .connd}
+	set ::connd_result ""
+	catch {grab $w}
+	focus $w.e
+	tkwait window $w
+	if {$::connd_result eq ""} return
+	lassign $::connd_result hp newwin
+	if {[parse_endpoint $hp] eq ""} {
+		report_error "Expected host:port, e.g. 127.0.0.1:7711 — got '$hp'." bad_request
+		return
+	}
+	if {$newwin} { spawn_remote_window $hp } else { reconnect_remote $hp }
+}
+
+# Launch a second rio-gui already attached to the remote core (reuses the --connect
+# startup path). This session is left running and untouched.
+proc spawn_remote_window {hp} {
+	set ::last_connect $hp
+	if {[catch {exec [info nameofexecutable] $::rio_self --connect $hp &} err]} {
+		report_error "Could not launch a new window: $err"
+	}
+}
+
+# Rewire THIS window to a remote core. Order is chosen for safety: open the new
+# socket FIRST, then save-check the outgoing tabs — only once both succeed do we
+# drop the current (local) core and swap. A failure or a cancel at either earlier
+# step leaves the existing session fully intact.
+proc reconnect_remote {hp} {
+	lassign [parse_endpoint $hp] host port
+	# 1. Open the new channel first, so a failed connect never costs us the core.
+	if {[catch {socket $host $port} newchan]} {
+		report_error "Cannot reach a rio core at $hp.\nIs one listening there — and, if it's remote, is the SSH tunnel up?" disconnected
+		return
+	}
+	# 2. Offer to save unsaved work on the outgoing session; Cancel aborts cleanly.
+	foreach id $::order {
+		if {[bufget $id modified]} {
+			activate $id
+			if {![maybe_discard]} { catch {close $newchan} ; return }
+		}
+	}
+	# 3. Commit: drop the old channel (a spawned child core sees EOF and exits), swap.
+	catch {fileevent $::core_chan readable {}}
+	catch {close $::core_chan}
+	set ::core_chan $newchan
+	set ::core_remote 1
+	set ::core_endpoint $hp
+	set ::last_connect $hp
+	fconfigure $::core_chan -buffering line -blocking 0 -translation lf -encoding utf-8
+	fileevent $::core_chan readable core_reader
+	reset_session_state
+}
+
+# Reset all per-session view state and rebuild from whatever core ::core_chan now
+# points at (used after an in-place reconnect). Mirrors the startup tail: the new
+# core owns its own buffers, project, and conversation, so we forget ours and adopt.
+proc reset_session_state {} {
+	if {$::compare_shown} { compare_close }
+	catch {pack forget .chat.approve}
+	set ::pending_turn ""
+	set ::chat_turn_open 0
+	set ::agent_auto_accept 0    ;# a fresh core defaults to gated writes
+	# Forget the old buffers/tabs and blank the editor; the new core has its own.
+	set ::cur ""
+	set ::buffers {}
+	set ::order {}
+	::rio_real_t delete 1.0 end
+	# Project/panes: the new core starts with no folder open unless it reports one.
+	set ::nav_dir ""
+	set ::nav_rows {}
+	set ::git_rows {}
+	# A different core means a fresh conversation — clear the transcript.
+	.chat.log configure -state normal
+	.chat.log delete 1.0 end
+	.chat.log configure -state disabled
+	set ::agent_provider echo    ;# the new core's default provider
+	# Rebuild exactly as at startup.
+	adopt_initial_buffers
+	show_pane $::dock_pane
+	apply_wrap
+	apply_provider
+	refresh_all
+}
+
+# ---------------------------------------------------------------------------
 # Modified flag, title, status, and the tab bar.
 # ---------------------------------------------------------------------------
 proc mark_modified {m} {
@@ -1164,7 +1301,10 @@ proc tab_name {id} {
 	return "$n[expr {[bufget $id modified] ? { *} : {}}]"
 }
 proc refresh_all   {} { refresh_tabs ; refresh_title ; refresh_status }
-proc refresh_title {} { wm title . "rio — [tab_name $::cur]" }
+proc refresh_title {} {
+	set suffix [expr {$::core_remote ? " — $::core_endpoint" : ""}]
+	wm title . "rio — [tab_name $::cur]$suffix"
+}
 proc refresh_status {} {
 	set p    [bufget $::cur path]
 	set name [expr {$p eq "" ? "untitled" : $p}]
@@ -1529,6 +1669,8 @@ menu .m.file -tearoff 0
 .m.file add command -label "Open Folder…" -accelerator Ctrl+Shift+O -command open_folder_dialog
 .m.file add command -label "Save"      -accelerator Ctrl+S       -command do_save
 .m.file add command -label "Save As…" -accelerator Ctrl+Shift+S -command save_as_dialog
+.m.file add separator
+.m.file add command -label "Connect to Remote Core…" -command connect_remote_dialog
 .m.file add separator
 .m.file add command -label "Close Tab" -accelerator Ctrl+W       -command do_close
 .m.file add command -label "Quit"      -accelerator Ctrl+Q       -command do_quit
