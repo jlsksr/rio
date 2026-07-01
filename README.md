@@ -70,8 +70,8 @@ locally, or a socket to a core running elsewhere (**server mode**, like
 Frontends are thin views — the core owns your files and broadcasts changes back.
 
 **Still to come:** git write ops (stage/commit), an agent run-command tool (with
-guardrails), the terminal frontend (below), and a polished
-install/packaging path.
+guardrails), the terminal frontend (below), and a polished install/packaging path.
+The fuller list of candidate work lives in [ROADMAP.md](ROADMAP.md).
 
 ## The two faces, one brain
 
@@ -96,5 +96,7 @@ Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lan
   troubleshooting.
 - **[AGENTS.md](AGENTS.md)** — the living design & decision log (the *why* behind
   every choice). Start here if you want the full picture.
+- **[ROADMAP.md](ROADMAP.md)** — possible next steps: planned features, known gaps,
+  and deliberately deferred refinements.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — for programmers who want to hack on rio
   itself: toolchain setup, how it's laid out, and how to run the tests.
