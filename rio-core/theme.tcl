@@ -24,7 +24,10 @@ namespace eval rio::theme {
 
 # The built-in default: the plain white-bg / black-fg "90s productivity" look
 # (D24), and the full role vocabulary every theme inherits and the GUI applies.
-# Fonts are NAMED fonts the GUI references by name, so a size change is live.
+# Fonts are NAMED fonts the GUI references by name, so a size change is live. The
+# `syntax.*` roles colour the highlighter token types (D32): they live in the same
+# role table (data) so themes harmonise highlighting to their palette, and any
+# theme predating D32 inherits this default set rather than showing no colour.
 proc rio::theme::default {} {
 	return [dict create \
 		colors [dict create \
@@ -41,7 +44,20 @@ proc rio::theme::default {} {
 			gutter.fg        #888888 \
 			chat.bg          white \
 			chat.fg          black \
-			accent           #1a73e8] \
+			accent           #1a73e8 \
+			syntax.comment   #6a737d \
+			syntax.string    #032f62 \
+			syntax.number    #005cc5 \
+			syntax.keyword   #d73a49 \
+			syntax.tag       #22863a \
+			syntax.attribute #6f42c1 \
+			syntax.entity    #e36209 \
+			syntax.meta      #6a737d \
+			syntax.operator  #d73a49 \
+			syntax.function  #6f42c1 \
+			syntax.variable  #e36209 \
+			syntax.type      #6f42c1 \
+			syntax.constant  #005cc5] \
 		fonts [dict create \
 			RioEditorFont [dict create family monospace size 12] \
 			RioUIFont     [dict create family monospace size 9] \

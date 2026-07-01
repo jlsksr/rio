@@ -28,3 +28,19 @@ chat.fg          = #000000
 
 # Acme's dark navy, for executable/plumbed text — here the accent on labels.
 accent           = #00007f
+
+# Syntax highlighting (D32): acme doesn't traditionally highlight, so keep it
+# restrained — the navy/olive/maroon of acme's own chrome on the paper-yellow body.
+syntax.comment   = #6a6a3a
+syntax.string    = #005500
+syntax.number    = #7f3f00
+syntax.keyword   = #00007f
+syntax.tag       = #00007f
+syntax.attribute = #5c3f00
+syntax.entity    = #7f0000
+syntax.meta      = #6a6a3a
+syntax.operator  = #00007f
+syntax.function  = #00007f
+syntax.variable  = #5c3f00
+syntax.type      = #00007f
+syntax.constant  = #7f3f00

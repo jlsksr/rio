@@ -75,6 +75,18 @@ The plugin interface is still being designed and *will* change, so it's not the
 place to start contributing yet. If you want to follow or shape that design, it's
 covered in [AGENTS.md](AGENTS.md).
 
+**Syntax highlighters, though, are a stable extension point you can use today.** A
+highlighter is a small, self-contained file in `syntax/` — pure Tcl, no Tk, no
+external packages — that turns text into coloured spans; the frontend paints them
+with the active theme's colours (design: [AGENTS.md](AGENTS.md) D32). To add a
+language, copy `syntax/html.tcl` as a template: write a `tokenize {text}` proc that
+returns a flat list of `line.col line.col type` triples (the token *types* are the
+fixed vocabulary in `syntax/registry.tcl`), and `register` it for your file
+extensions at the bottom. Because a highlighter is picked by extension and a later
+registration wins, you can **replace** a shipped one without editing it: drop your
+version in `~/.config/rio/syntax/` and it shadows the built-in. Themes colour the
+token types through their `syntax.*` roles, so nothing is hard-coded to a palette.
+
 ## Getting started
 
 rio is written in Tcl/Tk, so there's nothing to compile — but you do need the
@@ -123,6 +135,11 @@ suite uses Tcl's own `tcltest`:
 Tests live in `rio-core/tests/`, one `.test` file per area. If you add behaviour
 to the core, add a case alongside it; a change to how editing works should show
 up as a test that would have failed before.
+
+The syntax highlighters are pure Tcl too, so they have their own headless suite —
+no display needed:
+
+    tclsh syntax/tests/all.tcl
 
 The GUI has a headless smoke that drives the real frontend (open / edit through
 the dumb-view proxy / save / undo) without ever showing a window — it needs a

@@ -1,0 +1,117 @@
+# Tests for the (X)HTML highlighter and the registry (AGENTS.md D32). Pure Tcl —
+# the modules are Tk-free, so this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. html.tcl]
+
+# Shorthands.
+proc hl {text} { rio::syntax::html::tokenize $text }
+# Does the flat span list contain this exact {i0 i1 type} triple?
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans {
+		if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 }
+	}
+	return 0
+}
+
+# --- the registry --------------------------------------------------------------
+
+test tokens-vocabulary {the vocabulary is the documented set} -body {
+	rio::syntax::tokens
+} -result {comment string number keyword tag attribute entity meta operator function variable type constant}
+
+test for_path-html {.html resolves to the html tokeniser} -body {
+	rio::syntax::for_path /x/index.html
+} -result rio::syntax::html::tokenize
+
+test for_path-case {extension match is case-insensitive} -body {
+	rio::syntax::for_path FOO.XHTML
+} -result rio::syntax::html::tokenize
+
+test for_path-alts {htm/xht are html too} -body {
+	list [rio::syntax::for_path a.htm] [rio::syntax::for_path a.xht]
+} -result {rio::syntax::html::tokenize rio::syntax::html::tokenize}
+
+test for_path-none {an unknown extension has no highlighter} -body {
+	rio::syntax::for_path notes.txt
+} -result {}
+
+test for_path-noext {a path with no extension has no highlighter} -body {
+	rio::syntax::for_path README
+} -result {}
+
+test is_token {token-type membership} -body {
+	list [rio::syntax::is_token tag] [rio::syntax::is_token nope]
+} -result {1 0}
+
+# --- the html tokeniser --------------------------------------------------------
+
+test tag-attr-string-entity {a whole element: name, attr, value, entity, close} -body {
+	hl {<p class="x">hi &amp; bye</p>}
+} -result {1.0 1.2 tag 1.3 1.8 attribute 1.9 1.12 string 1.12 1.13 tag 1.16 1.21 entity 1.25 1.28 tag 1.28 1.29 tag}
+
+test text-uncoloured {plain text between tags emits no spans} -body {
+	hl {<b>hello world</b>}
+} -result {1.0 1.2 tag 1.2 1.3 tag 1.14 1.17 tag 1.17 1.18 tag}
+
+test doctype-meta {the doctype is one meta span} -body {
+	hl {<!DOCTYPE html>}
+} -result {1.0 1.15 meta}
+
+test pi-meta {an xml processing instruction is meta} -body {
+	set s [hl {<?xml version="1.0"?>}]
+	has $s 1.0 1.21 meta
+} -result 1
+
+test comment-single {a one-line comment} -body {
+	hl {<!-- hi -->}
+} -result {1.0 1.11 comment}
+
+test comment-multiline {a comment carries its state across lines} -body {
+	set s [hl "<!-- a\nb\nc --> <p>"]
+	list [has $s 1.0 1.6 comment] [has $s 2.0 2.1 comment] [has $s 3.0 3.5 comment] \
+		[has $s 3.6 3.8 tag]
+} -result {1 1 1 1}
+
+test entity-numeric {numeric and named entities} -body {
+	set s [hl {a &#169; b &amp; c}]
+	list [has $s 1.2 1.8 entity] [has $s 1.11 1.16 entity]
+} -result {1 1}
+
+test bare-amp {a lone ampersand is plain text, not an entity} -body {
+	hl {a & b}
+} -result {}
+
+test bare-lt {a lone '<' with a space is plain text, not a tag} -body {
+	hl {if a < b then}
+} -result {}
+
+test self-closing {a self-closing tag: name then the /> punctuation} -body {
+	hl {<br/>}
+} -result {1.0 1.3 tag 1.3 1.5 tag}
+
+test script-body-raw {an inline '<' in a <script> body does NOT open a tag} -body {
+	set s [hl {<script>if (a<b) f();</script><b>x</b>}]
+	# the real <b> after </script> IS a tag; nothing inside the body is.
+	list [has $s 1.0 1.7 tag] [has $s 1.30 1.32 tag] [has $s 1.12 1.14 tag]
+} -result {1 1 0}
+
+test style-body-raw {a <style> body is raw too} -body {
+	set s [hl "<style>a>b{x:1}</style>"]
+	# only the style open/close tags are coloured; the CSS body is left plain.
+	expr {[has $s 1.0 1.6 tag] && ![has $s 1.7 1.9 tag]}
+} -result 1
+
+test attr-value-multiline {a quoted value that spans lines stays a string} -body {
+	set s [hl "<a title=\"one\ntwo\">x</a>"]
+	list [has $s 1.9 1.13 string] [has $s 2.0 2.4 string] [has $s 2.4 2.5 tag]
+} -result {1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

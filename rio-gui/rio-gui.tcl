@@ -114,6 +114,8 @@ set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (S
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
+set ::hl_tokenizer ""     ;# tokeniser for the active buffer's file type, or "" — no highlighting (D32)
+set ::hl_pending 0        ;# a coalesced (idle) re-highlight is queued (D32)
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
@@ -229,6 +231,7 @@ proc rio_result {op params} {
 proc apply_change {p} {
 	::rio_real_t replace [dict get $p start] [dict get $p end] [dict get $p text]
 	::rio_real_t see insert
+	hl_schedule   ;# the text changed — re-tokenise the active buffer (coalesced; D32)
 }
 
 # Load the active buffer's canonical text into the widget (on switch / open).
@@ -241,6 +244,8 @@ proc load_buffer {} {
 		set e [dict get $resp error]
 		report_error [dict get $e message] [dict get $e code]
 	}
+	hl_select      ;# the file type may have changed with the buffer (D32)
+	hl_rehighlight ;# repaint now (a one-shot on switch/open, no need to coalesce)
 }
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
@@ -1512,6 +1517,17 @@ proc apply_theme {theme} {
 		-insertbackground [dict get $c editor.cursor] \
 		-selectbackground [dict get $c editor.selection]
 	.ed configure -background [dict get $c editor.bg]   ;# the scrollbar-corner gap
+	# Syntax-highlighting tags (D32): one text tag per token type, coloured from the
+	# theme's syntax.* role (falling back to editor.fg — no visible colour — for any
+	# role a theme leaves unset). Reconfiguring here recolours existing highlighting
+	# live on a theme switch; hl_rehighlight raises the sel tag so a selection stays legible.
+	if {[info procs rio::syntax::tokens] ne ""} {
+		foreach _tok [rio::syntax::tokens] {
+			set _role syntax.$_tok
+			set _col [expr {[dict exists $c $_role] ? [dict get $c $_role] : [dict get $c editor.fg]}]
+			::rio_real_t tag configure syn:$_tok -foreground $_col
+		}
+	}
 	# Chrome: status bar + tab container.
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -1608,6 +1624,80 @@ proc do_theme {name} {
 		report_error "Theme '$name': [dict get $resp error message]" \
 			[dict get $resp error code]
 	}
+}
+
+# ---------------------------------------------------------------------------
+# Syntax highlighting (AGENTS.md D32). Highlighting is PRESENTATION, so the GUI
+# owns it: pure, swappable tokeniser modules live in syntax/ (Tk-free — a future
+# TUI reuses them), and the GUI is the *applier*. It maps each token TYPE onto the
+# theme's syntax.* colour role as a text tag (apply_theme), and re-tokenises the
+# active buffer after edits. v1 re-highlights the WHOLE active buffer per change —
+# correct multi-line context (open comments, script bodies, quoted values all carry
+# state across lines) — coalesced on the idle handler so a burst of keystrokes
+# paints once; viewport/incremental scoping is a later refinement.
+# ---------------------------------------------------------------------------
+
+# Load the tokeniser modules: the registry (the contract) then every language
+# module. Shipped modules load first, then the user's own from
+# $XDG_CONFIG_HOME/rio/syntax/, so a drop-in file re-registering an extension
+# replaces the shipped highlighter (the same override idea as user themes, D24). A
+# broken module is reported, not fatal — it must never stop the editor from starting.
+proc hl_load {} {
+	set base [file join $::rio_dir .. syntax]
+	if {[catch {source [file join $base registry.tcl]} err]} {
+		puts stderr "rio-gui: syntax registry failed to load: $err" ; return
+	}
+	foreach dir [list $base [hl_user_dir]] {
+		if {$dir eq "" || ![file isdirectory $dir]} continue
+		foreach f [lsort [glob -nocomplain -directory $dir *.tcl]] {
+			if {[file tail $f] eq "registry.tcl"} continue
+			if {[catch {source $f} err]} {
+				puts stderr "rio-gui: syntax module [file tail $f] failed to load: $err"
+			}
+		}
+	}
+}
+
+# The user's drop-in highlighter dir (beside the user themes dir, D21 locations).
+proc hl_user_dir {} {
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		return [file join $::env(XDG_CONFIG_HOME) rio syntax]
+	} elseif {[info exists ::env(HOME)]} {
+		return [file join $::env(HOME) .config rio syntax]
+	}
+	return ""
+}
+
+# Pick the tokeniser for the active buffer by its file extension ("" = no
+# highlighter, e.g. a scratch buffer or a plain-text file). Runs on open / switch.
+proc hl_select {} {
+	set ::hl_tokenizer ""
+	if {[info procs rio::syntax::for_path] eq ""} return
+	if {$::cur eq "" || ![dict exists $::buffers $::cur]} return
+	set path [bufget $::cur path]
+	if {$path ne ""} { set ::hl_tokenizer [rio::syntax::for_path $path] }
+}
+
+# Re-tokenise the active buffer and repaint its syntax tags. Clears the old spans
+# first; with no tokeniser it just leaves the text plain. Reads the text from the
+# widget (which already holds the buffer's canonical content) — no extra core call.
+proc hl_rehighlight {} {
+	set ::hl_pending 0
+	if {![winfo exists .ed.t] || [info procs rio::syntax::tokens] eq ""} return
+	foreach tok [rio::syntax::tokens] { ::rio_real_t tag remove syn:$tok 1.0 end }
+	if {$::hl_tokenizer eq ""} return
+	set text [::rio_real_t get 1.0 "end-1c"]
+	if {[catch {rio::syntax::tokenize $::hl_tokenizer $text} spans]} return
+	foreach {a b type} $spans { ::rio_real_t tag add syn:$type $a $b }
+	catch {::rio_real_t tag raise sel}   ;# keep a selection legible over the colours
+}
+
+# Queue a coalesced re-highlight on the idle handler, so a run of keystrokes
+# triggers a single re-tokenise rather than one pass per character.
+proc hl_schedule {} {
+	if {$::hl_pending} return
+	set ::hl_pending 1
+	after idle hl_rehighlight
 }
 
 # ---------------------------------------------------------------------------
@@ -2019,6 +2109,11 @@ proc .ed.t {args} {
 		default { return [::rio_real_t {*}$args] }
 	}
 }
+
+# Load the syntax highlighters before the first apply_theme (which configures a
+# text tag per token type from the theme's syntax.* roles) and before any buffer
+# loads (which re-tokenises it) — D32.
+hl_load
 
 # Load saved preferences (theme, wrap, dock, chat) over the defaults, then apply the
 # theme before the first tab is drawn, so every widget — and the tab bar refresh_tabs

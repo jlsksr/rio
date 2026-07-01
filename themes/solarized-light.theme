@@ -16,3 +16,18 @@ gutter.fg        = #93a1a1
 chat.bg          = #fdf6e3
 chat.fg          = #657b83
 accent           = #268bd2
+
+# Syntax highlighting (D32): the same Solarized accents on the light base tone.
+syntax.comment   = #93a1a1
+syntax.string    = #2aa198
+syntax.number    = #d33682
+syntax.keyword   = #859900
+syntax.tag       = #268bd2
+syntax.attribute = #657b83
+syntax.entity    = #cb4b16
+syntax.meta      = #6c71c4
+syntax.operator  = #859900
+syntax.function  = #268bd2
+syntax.variable  = #b58900
+syntax.type      = #b58900
+syntax.constant  = #d33682

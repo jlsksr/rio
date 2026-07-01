@@ -1242,6 +1242,72 @@ out for free, and keeps the repo clean.
 
 ---
 
+### D32 — Syntax highlighting: pure swappable tokenisers in the frontend, colours as theme roles
+
+Highlighting is **presentation, not document state** — like the cursor and selection
+(D22) and the theme *applier* (D24), it is a frontend concern, so the tokenisers live in
+the **frontend**, not the core. (Considered and rejected: tokenising in the core and
+broadcasting spans on `buffer.changed`. It would hand every frontend highlighting for
+free, but it puts a per-edit round-trip in front of *colour* — visibly laggy over a
+remote core (D30) — and adds span encoders and viewport plumbing to the core, all to move
+a pure function that needs no core-only state.)
+
+The split mirrors themes exactly (D24 — *the core owns the data, the GUI applies it*):
+
+- **The core owns the syntax colour ROLES** (data): the `syntax.*` entries in the theme
+  role table (`syntax.comment`, `syntax.string`, `syntax.tag`, …). They ride in the same
+  table every theme inherits, so a theme harmonises highlighting to its own palette, a
+  theme predating D32 inherits the default set (never "no colour"), and a future TUI maps
+  the same roles onto a terminal palette. No parser change — a theme file overrides them
+  as ordinary `[colors]` entries.
+- **The frontend owns the TOKENISER + the applier.** A tokeniser is a **pure, Tk-free
+  module** (`syntax/<lang>.tcl`) that turns text into a flat list of `line.col line.col
+  type` spans (D12's shared position format — exactly what a Tk text tag consumes). It
+  carries its own multi-line state so the result is context-correct. The GUI applier maps
+  each span TYPE onto the theme's `syntax.<type>` colour as a `syn:<type>` text tag, and
+  re-tokenises the active buffer after an edit; a theme switch just reconfigures the tag
+  colours, so highlighting recolours live for free.
+
+**Swappable, and no external packages.** A highlighter registers itself for a set of file
+extensions through `syntax/registry.tcl` (the contract + the canonical token vocabulary).
+Shipped modules load first, then the user's own from `$XDG_CONFIG_HOME/rio/syntax/` (D21
+locations), and a later registration for an extension wins — so dropping in a better
+`perl.tcl` shadows the shipped one, the same override idea as user themes. Modules use
+core Tcl only (`string`/`regexp`/`dict`); a broken one is reported and skipped, never
+fatal. Because a module is Tk-free it is genuinely portable — the future TUI reuses the
+identical files with its own applier, so the logic never forks.
+
+**Pure, so testable headless.** The tokenisers run under a bare `tclsh`
+(`syntax/tests/all.tcl`), no display required.
+
+**v1 scope.** First language: **(X)HTML** (`syntax/html.tcl`) — comments, the doctype and
+processing instructions (`meta`), element names + angle brackets (`tag`), attribute names,
+quoted values (`string`), `&entities;`, and `<script>`/`<style>` bodies treated as raw so
+an inline `<` in JavaScript never spawns a phantom tag. The GUI re-highlights the **whole
+active buffer** per change (correct multi-line context), coalesced on the idle handler so
+a burst of keystrokes paints once; **viewport/incremental** scoping is a noted later
+refinement (as undo-coalescing is in the doc model). Only the main editor is highlighted
+for now (not the compare panes). A file with no registered highlighter, or a scratch
+buffer with no path, simply shows plain text.
+
+**Implemented:** `syntax/registry.tcl` (the registry, `for_path`, the token vocabulary) +
+`syntax/html.tcl` (the (X)HTML tokeniser) + the `syntax.*` roles in `rio::theme::default`
+and the three shipped themes; GUI side in `rio-gui/rio-gui.tcl` (`hl_load` at boot, the
+`syn:*` tag config in `apply_theme`, and `hl_select` / `hl_rehighlight` / `hl_schedule`
+hooked into `load_buffer` and `apply_change`). Tests: `syntax/tests/html.test` (the
+tokeniser + registry, pure `tclsh`) and `rio-gui/tests/highlight.tcl` (the applier end to
+end — tags painted from an opened file, plain files left untagged, a live edit
+re-highlighting, a theme switch recolouring the tags).
+
+**Why:** highlighting has to feel instant and harmonise with the theme, and it must be
+easy for someone to write or replace a language without touching the core. Putting the
+*data* (colours) with the core's theme table and the *pure logic* (tokenisers) in
+swappable frontend modules gets all three — instant local paint, theme harmony, and a
+drop-in extension point — while honouring the D30 client/core split and the D22/D24 rule
+that rendering is the frontend's job.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
