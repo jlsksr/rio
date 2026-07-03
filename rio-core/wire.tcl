@@ -15,11 +15,31 @@
 # array), that op declares its shape — we do not guess types from Tcl values.
 # Inbound parsing uses tcllib's json::json2dict, which is unambiguous.
 
-namespace eval rio::wire {}
+namespace eval rio::wire {
+	# The JSON string-escape map: the two metachars, the short escapes, and a
+	# \uXXXX for every remaining C0 control — RFC 8259 requires ALL of 0x00-0x1F
+	# escaped. Rare in practice, but an editor meets them (an ESC in a log file, a
+	# US-separated data file), and while tcllib's parser happens to tolerate them
+	# raw, a strict parser rejects the whole line — and D2's promise is that any
+	# language can sit at the far end of the channel. Built once at source time.
+	variable strmap [list \\ \\\\ \" \\\"]
+	for {set c 0} {$c < 32} {incr c} {
+		switch -- $c {
+			8       { lappend strmap \b \\b }
+			9       { lappend strmap \t \\t }
+			10      { lappend strmap \n \\n }
+			12      { lappend strmap \f \\f }
+			13      { lappend strmap \r \\r }
+			default { lappend strmap [format %c $c] [format {\u%04x} $c] }
+		}
+	}
+	unset c
+}
 
-# A JSON string literal. (Control chars beyond these are out of scope for now.)
+# A JSON string literal.
 proc rio::wire::str {s} {
-	return "\"[string map [list \\ \\\\ \" \\\" \n \\n \r \\r \t \\t] $s]\""
+	variable strmap
+	return "\"[string map $strmap $s]\""
 }
 
 # A flat Tcl dict -> a JSON object with string values.

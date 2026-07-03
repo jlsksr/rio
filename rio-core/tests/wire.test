@@ -14,6 +14,20 @@ test wire-str-escapes {quotes, backslashes, newlines, tabs are escaped} -body {
 	rio::wire::str "a\"b\\c\nd\te"
 } -result {"a\"b\\c\nd\te"}
 
+test wire-str-controls {raw C0 controls are \u-escaped (RFC 8259: all of 0x00-0x1F)} -body {
+	# ESC (0x1b), unit separator (0x1f), vertical tab (0x0b), backspace, formfeed —
+	# the kinds of bytes an opened log/data file carries. A strict (non-tcllib)
+	# JSON parser rejects a line holding any of them raw.
+	rio::wire::str "a\x1bb\x1fc\x0bd\be\ff"
+} -result {"a\u001bb\u001fc\u000bd\be\ff"}
+
+test wire-str-controls-roundtrip {control characters survive encode -> json2dict} -body {
+	set payload "esc\x1b us\x1f vt\x0b nul\x00 end"
+	set enc [rio::wire::event [dict create event buffer.changed \
+		params [dict create text $payload]]]
+	expr {[dict get [json::json2dict $enc] params text] eq $payload}
+} -result 1
+
 test wire-obj-flat {a flat dict becomes an object of string values} -body {
 	rio::wire::obj {start 1.0 end 1.0 text X}
 } -result {{"start":"1.0","end":"1.0","text":"X"}}

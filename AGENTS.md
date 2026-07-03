@@ -720,6 +720,10 @@ protocol, while leaving a clean path (per-op shape declarations) for richer
 payloads. Keeping JSON at the boundary preserves D11's zero-cost in-process path.
 Implemented in `rio-core/wire.tcl`; the socket transport (`server.tcl`) is the
 same dispatch as in-process (D2), proven by a real-socket round-trip test.
+*(Later hardened: `rio::wire::str` now `\u`-escapes every C0 control character —
+RFC 8259 requires all of 0x00-0x1F escaped. tcllib's parser tolerated them raw, so
+Tcl↔Tcl never noticed, but a strict JSON parser rejects the whole line, and D2's
+any-language-frontend promise rides on the wire being real JSON.)*
 
 ### D26 — Agent subsystem, first slice: `agent.*` protocol + provider interface; in-box Claude over the official Anthropic API
 
