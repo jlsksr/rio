@@ -25,7 +25,9 @@ proc rio::claude::http::_ensure_tls {} {
 }
 proc rio::claude::http::_tls_socket {args} {
 	set opts [list -autoservername 1 -require 1]
-	foreach ca {/etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt} {
+	# The system CA bundle, wherever this platform keeps it: Debian/Alpine,
+	# RHEL-family, then OpenBSD (also macOS) — rio's supported hosts (D4).
+	foreach ca {/etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem} {
 		if {[file exists $ca]} { lappend opts -cafile $ca ; break }
 	}
 	return [::tls::socket {*}$opts {*}$args]
