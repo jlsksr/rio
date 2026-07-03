@@ -230,6 +230,30 @@ proc rio_result {op params} {
 	return ""
 }
 
+# The wire protocol version this GUI speaks (AGENTS.md O2: the integer
+# session.hello reports; it bumps on a breaking change). Checked against every
+# core we attach to — a spawned child can't realistically mismatch (same repo),
+# but a daemon reached over --connect or an in-place reconnect (D30) can be any
+# age, and a version skew otherwise surfaces as ops quietly misparsing.
+set ::rio_protocol  2
+set ::core_protocol ""   ;# what the attached core reported (for the title of a bug report)
+
+# Greet the core (session.hello) and warn once if it speaks a different protocol.
+# Runs whenever a channel becomes live: at startup and after an in-place reconnect.
+# Not fatal — the user chose this core; they get a clear diagnostic, not a lockout.
+proc hello_core {} {
+	set resp [rio_call session.hello {}]
+	if {![dict get $resp ok]} {
+		report_error "The core didn't answer session.hello: [dict get $resp error message]" \
+			[dict get $resp error code]
+		return
+	}
+	set ::core_protocol [dict get $resp result protocol]
+	if {$::core_protocol ne $::rio_protocol} {
+		report_error "This core speaks wire protocol $::core_protocol, but this GUI expects $::rio_protocol — mixed versions may misbehave. Update the older side." protocol_mismatch
+	}
+}
+
 # Apply a change through the REAL widget command (bypassing the proxy). .t
 # replace takes line.col indices directly — the payoff of D12 sharing the Tk
 # text-widget index format: the view layer is nearly free.
@@ -1432,6 +1456,7 @@ proc reset_session_state {} {
 	.chat.log configure -state disabled
 	set ::agent_provider echo    ;# the new core's default provider
 	# Rebuild exactly as at startup.
+	hello_core                   ;# a daemon can be any age — check the protocol first
 	adopt_initial_buffers
 	show_pane $::dock_pane
 	apply_wrap
@@ -2227,6 +2252,7 @@ apply_theme [dict get $_boot_theme result]
 set ::nav_dir ""
 set ::nav_rows {}
 set ::git_rows {}
+hello_core                 ;# greet the core; warn on a wire-protocol mismatch (O2)
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate

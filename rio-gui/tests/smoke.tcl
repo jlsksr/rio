@@ -156,6 +156,19 @@ ok "error: failure reported once"    [llength $::captured]          1
 ok "error: code is no_buffer"        [lindex $::captured 0 0]        no_buffer
 activate $b1                                              ;# back to a live buffer
 
+# --- session.hello handshake (O2) ---------------------------------------------
+# Startup greeted the core over the channel and recorded its protocol version; a
+# core speaking a different version must warn (captured, since report_error is
+# overridden above) rather than quietly misparse ops later.
+ok "hello: core protocol recorded"   $::core_protocol $::rio_protocol
+set ::captured {}
+set ::rio_protocol 99 ; hello_core ; set ::rio_protocol 2
+ok "hello: mismatch warned once"     [llength $::captured] 1
+ok "hello: warning names versions"   \
+	[string match "*protocol 2*expects 99*" [lindex $::captured 0 1]] 1
+ok "hello: mismatch code"            [lindex $::captured 0 0] protocol_mismatch
+set ::captured {}
+
 # --- file pane (project root + lazy fs.list navigator) -----------------------
 # Build a throwaway tree, open it as the project folder, and drive the pane the
 # way a double-click would (select a row, call nav_activate).

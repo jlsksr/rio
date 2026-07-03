@@ -1556,6 +1556,11 @@ Both renderings come from the **same** region model (D13) and layout policy
   shape — `ops` is an array of *strings* — and reuses the result-encoder registry
   from `buffer.list` (a new `rio::wire::strarr` leaf). Client capabilities sent as
   params are accepted but not yet acted on; that negotiation can grow here.
+  *(Later: the GUI actually performs the handshake — `hello_core` greets every core
+  it attaches to, at startup and after an in-place reconnect (D30), and warns
+  plainly on a protocol mismatch instead of letting a version skew surface as ops
+  quietly misparsing. A spawned child can't realistically mismatch; a daemon
+  reached over `--connect` can be any age.)*
 
   **`buffer.list` + wire-array — implemented.** `buffer.list` returns
   `{buffers <array of {buffer,name,path,linecount}>}` from `rio::doc::inventory`
