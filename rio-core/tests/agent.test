@@ -305,6 +305,85 @@ test agent-edit-not-found {propose_edit whose old_string is absent is refused, u
 	list [dict get $r ok] [dict get $r summary]
 } -cleanup { rio::project::close } -result {0 {error: not found}}
 
+# --- the approval gate against a moving target --------------------------------
+# The editor stays live while a proposal awaits its decision, so the buffer can
+# change between propose and approve. apply_write re-locates the match at apply
+# time: a vanished match is refused (never applied at a stale position); a match
+# that merely MOVED (an edit elsewhere) still applies at its new location.
+
+test agent-write-stale-refused {approving after the matched text was edited away is refused} -setup {
+	set ::pdir [makeDirectory agst]
+	makeFile "alpha\nfoo\nbeta" f.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path f.txt old_string foo new_string FOO]
+	set ::wt_raw {{"path":"f.txt","old_string":"foo","new_string":"FOO"}}
+	set ::bid [dict get [rio::core::call file.open \
+		[dict create path [rio::project::resolve f.txt]]] response result buffer]
+} -body {
+	set s1 [start_write turn]
+	# The user types while the Approve bar is up: foo becomes bar in the buffer.
+	rio::core::call buffer.replace [dict create buffer $::bid start 2.0 end 2.3 text bar]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	set buftext [dict get [rio::core::call buffer.text [dict create buffer $::bid]] response result text]
+	list $s1 $s2 [ev_summary w1] [string match "*bar*" $buftext] [string match "*FOO*" $buftext]
+} -cleanup {
+	rio::core::call buffer.close [dict create buffer $::bid]
+	rio::project::close
+} -result {propose done {error: changed since proposal} 1 0}
+
+test agent-write-moved-match {an edit elsewhere just moves the match; approval applies at the new spot} -setup {
+	set ::pdir [makeDirectory agmv]
+	makeFile "alpha\nfoo\nbeta" g.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path g.txt old_string foo new_string FOO]
+	set ::wt_raw {{"path":"g.txt","old_string":"foo","new_string":"FOO"}}
+	set ::bid [dict get [rio::core::call file.open \
+		[dict create path [rio::project::resolve g.txt]]] response result buffer]
+} -body {
+	set s1 [start_write turn]
+	# A line inserted above shifts the match down one line before the approval.
+	rio::core::call buffer.replace [dict create buffer $::bid start 1.0 end 1.0 text "top\n"]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	# makeFile appends a newline, so the buffer's last line is empty.
+	set buftext [dict get [rio::core::call buffer.text [dict create buffer $::bid]] response result text]
+	list $s1 $s2 [ev_summary w1] $buftext
+} -cleanup {
+	rio::core::call buffer.close [dict create buffer $::bid]
+	rio::project::close
+} -result {propose done {edited g.txt (buffer+disk)} {top
+alpha
+FOO
+beta
+}}
+
+test agent-create-appeared-refused {approving a create after the file appeared on disk is refused} -setup {
+	set ::pdir [makeDirectory agca]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_create
+	set ::wt_input [dict create path fresh.txt content "agent\n"]
+	set ::wt_raw {{"path":"fresh.txt","content":"agent\n"}}
+} -body {
+	set s1 [start_write turn]
+	makeFile "user got there first" fresh.txt $::pdir
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	list $s1 $s2 [string match "error: exists" [ev_summary w1]] \
+		[string trim [dict get [rio::fs::read [file join $::pdir fresh.txt]] text]]
+} -cleanup { rio::project::close } -result {propose done 1 {user got there first}}
+
 test agent-edit-not-unique {propose_edit with a non-unique old_string is refused} -setup {
 	set ::pdir [makeDirectory agnu] ; makeFile "x\nx\n" f.txt $::pdir
 	rio::project::open $::pdir

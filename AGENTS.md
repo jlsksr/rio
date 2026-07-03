@@ -896,6 +896,22 @@ the prepare refusals, `fs.write` incl. parent-dir creation) and the Claude suite
 against `api.anthropic.com`, and the exposed-as-config UI for the write policy /
 the run-command tool with its allow-list guardrails (O4).
 
+**Amendment — an approved write re-resolves its target (landed).** The gate had a
+time-of-check/time-of-use hole: `prepare_write` located the edit's coordinates when
+the proposal was *built*, but the editor stays live while the turn's coroutine waits
+at the approval gate — so typing in the buffer before clicking Approve made the edit
+land at stale coordinates (and a create could silently overwrite a file that appeared
+meanwhile). Now the plan carries `old`/`new` rather than frozen positions, and
+`apply_write` re-resolves the ground truth when the decision arrives: it re-reads the
+file's *current* text (live buffer or disk — also re-deciding which, since the file
+may have been opened or closed in the interim), re-locates `old_string` under the
+same unique-match contract the user reviewed, and applies at the fresh position — so
+an edit elsewhere in the buffer merely moves the match, while a vanished or ambiguous
+match (or an appeared file, for a create) is **refused** with a "changed since
+proposal — re-propose" tool_result instead of ever applying at the wrong spot.
+Covered by three agent.test cases (stale-refused, moved-match-applies,
+create-appeared-refused).
+
 ### D27 — UI iconography: monochrome Unicode glyphs (no raster/`.ico`, no emoji)
 
 The handful of iconic affordances in the GUI use **monochrome Unicode symbol

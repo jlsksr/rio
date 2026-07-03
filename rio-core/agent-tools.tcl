@@ -15,7 +15,9 @@
 #
 # Rails: path inputs are confined to the open project root (absolute / ../ escapes
 # refused); read results are size-capped. The write surface reaches disk only
-# through fs.write, only after approval.
+# through fs.write, only after approval — and an approved edit is RE-LOCATED at
+# apply time (see apply_write): the editor stays live while a proposal awaits its
+# decision, so coordinates computed at prepare time may be stale.
 
 namespace eval rio::agent::tools {
 	variable max_bytes 100000    ;# per-read cap; larger reads are truncated + noted
@@ -125,11 +127,12 @@ proc rio::agent::tools::prepare_write {name input} {
 				return [_err "old_string is not unique in $rel ($c matches) — add surrounding context" "error: $c matches"]
 			}
 			set newfull [string map [list $old $new] $text]
+			# The plan carries old/new, NOT the located coordinates: apply_write
+			# re-locates the match when the approval lands, so a buffer that moved
+			# underneath the pending proposal can't be edited at a stale position.
 			return [dict create ok 1 name $name path $rel diff [_difftext $old $new] \
 				original $text proposed $newfull \
-				plan [dict create kind edit abs $abs bufid [dict get $cur bufid] \
-					start [dict get $loc start] end [dict get $loc end] \
-					new $new newfull $newfull]]
+				plan [dict create kind edit abs $abs old $old new $new]]
 		}
 		propose_create {
 			if {![dict exists $input content]} { return [_err "propose_create requires content" "error: missing content"] }
@@ -148,21 +151,43 @@ proc rio::agent::tools::prepare_write {name input} {
 # loop forwards on its emit so an open editor view updates. Edits to an open buffer
 # go through buffer.replace (undoable) and, when the disk flag is on, file.save;
 # edits to a closed file and all creates are written straight to disk via fs.write.
+#
+# The ground truth is RE-RESOLVED here, not reused from prepare_write: the editor
+# stays live while a proposal awaits its decision (the turn's coroutine is suspended
+# at the approval gate), so the text — and even whether the file is open in a buffer
+# — may have changed since the diff was built. An edit re-locates old_string under
+# the same unique-match contract the user reviewed and refuses if it no longer
+# holds; a create refuses if the file has appeared. Never apply at a stale position.
 proc rio::agent::tools::apply_write {plan} {
 	set abs  [dict get $plan abs]
 	set rel  [_rel $abs]
 	set disk [rio::agent::writes_disk]
 	if {[dict get $plan kind] eq "create"} {
+		if {[file exists $abs]} {
+			return [_err "$rel was created while the proposal awaited approval — use propose_edit" "error: exists"]
+		}
 		if {![_ok [rio::core::call fs.write [dict create path $abs text [dict get $plan content]]] msg]} {
 			return [_err "couldn't create $rel: $msg" "error: write failed"]
 		}
 		return [dict create ok 1 content "created $rel" summary "created $rel"]
 	}
-	# edit
-	set bufid [dict get $plan bufid]
+	# edit: locate the match afresh in the file's CURRENT text
+	set cur [_current_text $abs]
+	if {[dict get $cur ok] == 0} {
+		return [_err "$rel disappeared while the edit awaited approval" "error: no such file"]
+	}
+	set old  [dict get $plan old]
+	set new  [dict get $plan new]
+	set text [dict get $cur text]
+	set loc  [_locate $text $old]
+	if {[dict get $loc ok] == 0} {
+		return [_err "$rel changed while the edit awaited approval — the text to replace no longer matches; read it again and re-propose" \
+			"error: changed since proposal"]
+	}
+	set bufid [dict get $cur bufid]
 	if {$bufid ne ""} {
 		set out [rio::core::call buffer.replace [dict create buffer $bufid \
-			start [dict get $plan start] end [dict get $plan end] text [dict get $plan new]]]
+			start [dict get $loc start] end [dict get $loc end] text $new]]
 		if {![dict get [dict get $out response] ok]} {
 			return [_err "couldn't apply the edit to $rel" "error: edit failed"]
 		}
@@ -175,7 +200,7 @@ proc rio::agent::tools::apply_write {plan} {
 			summary "edited $rel ([expr {$disk ? {buffer+disk} : {buffer}}])" events $events]
 	}
 	# closed file: write straight to disk (stage-only has no buffer to land in)
-	if {![_ok [rio::core::call fs.write [dict create path $abs text [dict get $plan newfull]]] msg]} {
+	if {![_ok [rio::core::call fs.write [dict create path $abs text [string map [list $old $new] $text]]] msg]} {
 		return [_err "couldn't write $rel: $msg" "error: write failed"]
 	}
 	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)"]
