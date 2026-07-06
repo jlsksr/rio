@@ -1719,18 +1719,13 @@ proc tab_copy_path {id} {
 
 # Right-click a tab handle: a context menu of actions ABOUT THIS TAB (id, g) — nothing
 # about other tabs or regions (D33; the UI-design bar: a tab's menu stays scoped to
-# that tab). Rebuilt on each popup so the split item and Copy Path reflect the current
-# state. The split action is the same move whether or not a second group exists yet —
-# the label just reads honestly ("Split with This Tab" when unsplit, "Move to Other
-# Group" once split).
+# that tab). Rebuilt on each popup so Copy Path reflects the current state. "Move to
+# Other Group" is one label in both states: with one group the move creates the other
+# group, so the label still describes what happens — no context-sensitive wording.
 proc tab_context_menu {g id X Y} {
 	catch {destroy .tabmenu}
 	menu .tabmenu -tearoff 0
-	if {[llength $::groups] >= 2} {
-		.tabmenu add command -label "Move to Other Group" -command [list move_buffer_to_other $id $g]
-	} else {
-		.tabmenu add command -label "Split with This Tab" -command [list move_buffer_to_other $id $g]
-	}
+	.tabmenu add command -label "Move to Other Group" -command [list move_buffer_to_other $id $g]
 	if {[bufget $id path] ne ""} {
 		.tabmenu add command -label "Copy Path" -command [list tab_copy_path $id]
 	} else {

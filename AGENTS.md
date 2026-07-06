@@ -1479,6 +1479,12 @@ background — out of its group, so a non-active tab needn't be activated first,
 source keeps its own active tab unless the moved one *was* it. `split.tcl` gains the
 specific-non-active-tab move plus menu-construction / copy-path checks.
 
+*(Follow-on — one label, not two.)* The context-sensitive wording above was dropped: the
+menu item is always **Move to Other Group**. With a single group open the move creates
+the other group, so the one label still describes what happens — and it spares the user
+a state-dependent relabel of the same control (the simpler, more honest reading of the
+UI-design bar). `split.tcl`'s one-group case now also asserts "Move to Other Group".
+
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
 in the other group*, retiring bespoke `.cmp` code. Left out of v1 to keep the change

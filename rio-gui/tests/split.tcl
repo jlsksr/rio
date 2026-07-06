@@ -137,16 +137,16 @@ rename tk_popup _real_tk_popup
 proc tk_popup {args} {}
 tab_context_menu $gOther [gcur $gOther] 0 0
 ok "menu: four entries"            [.tabmenu index end] 3   ;# Move, Copy Path, sep, Close
-ok "menu: move label (2 groups)"   [.tabmenu entrycget 0 -label] "Move to Other Group"
+ok "menu: move label"              [.tabmenu entrycget 0 -label] "Move to Other Group"
 ok "menu: copy-path entry"         [.tabmenu entrycget 1 -label] "Copy Path"
 ok "menu: close label"             [.tabmenu entrycget 3 -label] "Close"
 # Copy Path puts the moved tab's real path on the clipboard.
 tab_copy_path [gcur $gOther]
 ok "menu: copy path to clipboard"  [clipboard get] $fileD
-# When not yet split the same action reads as a split invitation.
+# One label regardless of split state: with a single group the move creates the split.
 unsplit_editor
 tab_context_menu $::focus [gcur $::focus] 0 0
-ok "menu: split label (1 group)"   [.tabmenu entrycget 0 -label] "Split with This Tab"
+ok "menu: move label (1 group)"    [.tabmenu entrycget 0 -label] "Move to Other Group"
 rename tk_popup ""
 rename _real_tk_popup tk_popup
 
