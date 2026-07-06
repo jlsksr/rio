@@ -18,3 +18,11 @@ set ::env(XDG_DATA_HOME)   [file join $::sandbox_dir data]
 # Rename so the cleanup runs before the real exit, whatever code path calls exit.
 rename exit _sandbox_real_exit
 proc exit {{code 0}} { catch {file delete -force $::sandbox_dir} ; _sandbox_real_exit $code }
+
+# Focused-group handles for the editor split (AGENTS.md D33). The pre-split editor was
+# a single widget: tests drove edits through the .ed.t proxy and introspected the real
+# widget as ::rio_real_t. Both now resolve to whichever editor group has focus — the
+# same concept, one level of indirection. Defined here (bodies run at call time, after
+# rio-gui.tcl has loaded) so every suite that sources this keeps working unchanged.
+proc ::rio_real_t {args} { [gw $::focus] {*}$args }        ;# the focused real widget
+proc .ed.t        {args} { [gget $::focus path] {*}$args } ;# the focused edit proxy

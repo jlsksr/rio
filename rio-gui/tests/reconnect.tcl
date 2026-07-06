@@ -72,7 +72,7 @@ reconnect_remote 127.0.0.1:$portB
 ok "B: now remote"         $::core_remote 1
 ok "B: endpoint recorded"  $::core_endpoint 127.0.0.1:$portB
 ok "B: fresh core, no A buffers" [buf_text $::cur] ""
-ok "B: one adopted buffer" [llength $::order] 1
+ok "B: one adopted buffer" [llength [gorder $::focus]] 1
 ok "B: title shows endpoint" [expr {[string match "*127.0.0.1:$portB*" [wm title .]]}] 1
 # The link is live to B: an edit round-trips through the new socket and back.
 .ed.t insert 1.0 "Z"

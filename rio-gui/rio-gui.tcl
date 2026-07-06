@@ -93,10 +93,28 @@ if {$::connect_to ne ""} {
 fconfigure $::core_chan -buffering line -blocking 0 -translation lf -encoding utf-8
 fileevent $::core_chan readable core_reader
 
-# Per-buffer view state. The core holds the text; we hold the rest.
+# Per-buffer view state. The core holds the text; we hold the rest. `cursor`/`yview`
+# are per-buffer (a buffer lives in exactly one editor group in v1, D33), while tab
+# order and the active buffer are per-GROUP — see ::grp below.
 set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yview <frac>}
-set ::order   {} ;# buffer ids, in tab order
-set ::cur     "" ;# active buffer id
+
+# Editor groups (AGENTS.md D33). The center holds one or two editor groups side by
+# side; each is an independent text widget with its own tab strip, active buffer,
+# and highlight cache. In v1 a buffer belongs to exactly one group. Phase 2 runs a
+# SINGLE group (group 0), so the behaviour is identical to the pre-split editor;
+# phase 3 adds the second group and the split layout.
+#   ::grp   id -> a dict of the group's state:
+#     w       real text-widget command (the renamed Tk widget, edits bypass the proxy)
+#     path    the Tk widget path (the proxy) — for winfo/focus/bind
+#     frame   the group's container frame (.eg<id>)
+#     tabs    the group's tab-strip frame (.eg<id>.tabs)
+#     cur     active buffer id in this group
+#     order   buffer ids in this group, in tab order
+#     hl_*    the per-group incremental-highlight cache (was the ::hl_* globals, D32)
+set ::grp    {} ;# group id -> group-state dict (above)
+set ::groups {} ;# group ids, left-to-right
+set ::focus  "" ;# the focused group id (::cur mirrors its active buffer)
+set ::cur    "" ;# active buffer of the FOCUSED group — a mirror, kept by activate/focus_group
 
 # The side dock hosts ONE of the panes at a time (files | git) and sits on one
 # side of the editor (left | right). Both are user choices (View menu), not
@@ -114,16 +132,39 @@ set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (S
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
-set ::hl_scan ""          ;# per-line scanner for the active buffer's file type, or "" — no highlighting (D32)
-set ::hl_lang ""          ;# language display name for the active buffer, or "" — plain text (shown in the status bar)
-set ::hl_pending 0        ;# a coalesced (idle) re-highlight is queued (D32)
-set ::hl_enter {}         ;# per-line cache: hl_enter[i] = scan state ENTERING line i+1 (drives incremental re-highlight; D32)
-set ::hl_dirty 0          ;# lowest line an edit touched since the last pass (0 = clean)
-set ::hl_lastchanged 0    ;# highest line an edit touched; re-scan must reach past it before it may converge
-set ::hl_scanned 0        ;# lines the last incremental pass re-scanned (introspection / tests)
+# The per-group highlight cache (D32) now lives in ::grp under these keys, one set per
+# editor group (see new_group_state): hl_scan, hl_lang, hl_pending, hl_enter, hl_dirty,
+# hl_lastchanged, hl_scanned. Same meanings as the old ::hl_* globals, keyed per widget.
 
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
+
+# ---------------------------------------------------------------------------
+# Editor-group accessors (AGENTS.md D33). A group is a dict in ::grp; these keep the
+# editor procs terse — most take a group id defaulting to the focused one, resolve
+# its widget/cache through here, and never touch ::grp directly.
+# ---------------------------------------------------------------------------
+proc fg {}         { return $::focus }                 ;# the focused group id
+proc gget {g k}    { dict get $::grp $g $k }
+proc gset {g k v}  { dict set ::grp $g $k $v }
+proc gw {g}        { dict get $::grp $g w }            ;# real widget command (bypasses the proxy)
+proc gcur {g}      { dict get $::grp $g cur }          ;# active buffer id in group g
+proc gorder {g}    { dict get $::grp $g order }        ;# tab order in group g
+proc fgw {}        { gw $::focus }                     ;# the focused group's real widget
+
+# Which group currently shows buffer `id`, or "" if none (v1: at most one group).
+proc group_of {id} {
+	foreach g $::groups { if {[lsearch -exact [gorder $g] $id] >= 0} { return $g } }
+	return ""
+}
+
+# A fresh group-state dict: no buffer yet, an empty tab order, a clean highlight cache.
+# `w`/`path`/`frame`/`tabs` are filled in by make_editor_group once the widgets exist.
+proc new_group_state {} {
+	return [dict create w "" path "" frame "" tabs "" cur "" order {} \
+		hl_scan "" hl_lang "" hl_pending 0 hl_enter {} \
+		hl_dirty 0 hl_lastchanged 0 hl_scanned 0]
+}
 
 # ---------------------------------------------------------------------------
 # The single seam to the core (AGENTS.md D2/D30). One op call, one response; any
@@ -140,16 +181,18 @@ proc rio_call {op params} {
 # over the channel (D30) — including the agent's live stream (D26): an agent turn
 # is now ordinary broadcast traffic, so agent.* events route to the chat transcript
 # and a turn's approved-edit buffer.changed lands in the same buffer.changed case.
-# buffer.changed redraws the editor only when the changed buffer is the active one
-# (others reload from the core on tab switch — the rule that lets an async event for
-# a background buffer be ignored safely).
+# buffer.changed redraws whichever editor group is showing the changed buffer (D33):
+# an edit — a keystroke echo or an agent edit — lands in the group displaying that
+# buffer, even if it is not the focused one. A buffer no group shows (closed, or
+# never opened here) is ignored safely; it reloads from the core when next activated.
 proc dispatch_event {ev} {
 	set name [dict get $ev event]
 	if {[string match agent.* $name]} { chat_event $ev ; return }
 	switch -- $name {
 		buffer.changed {
 			set p [dict get $ev params]
-			if {[dict get $p buffer] eq $::cur} { apply_change $p }
+			set g [group_of [dict get $p buffer]]
+			if {$g ne ""} { apply_change $g $p }
 		}
 		project.opened { on_project_opened [dict get $ev params] }
 	}
@@ -254,27 +297,32 @@ proc hello_core {} {
 	}
 }
 
-# Apply a change through the REAL widget command (bypassing the proxy). .t
-# replace takes line.col indices directly — the payoff of D12 sharing the Tk
-# text-widget index format: the view layer is nearly free.
-proc apply_change {p} {
-	::rio_real_t replace [dict get $p start] [dict get $p end] [dict get $p text]
-	::rio_real_t see insert
-	hl_edit $p    ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
+# Apply a change to group `g`'s widget through the REAL widget command (bypassing the
+# proxy). .t replace takes line.col indices directly — the payoff of D12 sharing the Tk
+# text-widget index format: the view layer is nearly free. `see insert` only follows
+# the caret in the focused group (the caret in a background group isn't the user's).
+proc apply_change {g p} {
+	set t [gw $g]
+	$t replace [dict get $p start] [dict get $p end] [dict get $p text]
+	if {$g eq $::focus} { $t see insert }
+	hl_edit $g $p ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
 }
 
 # Load the active buffer's canonical text into the widget (on switch / open).
-proc load_buffer {} {
-	set resp [rio_call buffer.text [dict create buffer $::cur]]
-	::rio_real_t delete 1.0 end
+# Load group `g`'s active buffer text into its widget (bypassing the proxy) and
+# repaint. Runs on open / tab switch within the group.
+proc load_buffer {g} {
+	set t [gw $g]
+	set resp [rio_call buffer.text [dict create buffer [gcur $g]]]
+	$t delete 1.0 end
 	if {[dict get $resp ok]} {
-		::rio_real_t insert 1.0 [dict get $resp result text]
+		$t insert 1.0 [dict get $resp result text]
 	} else {
 		set e [dict get $resp error]
 		report_error [dict get $e message] [dict get $e code]
 	}
-	hl_select      ;# the file type may have changed with the buffer (D32)
-	hl_full        ;# repaint the whole buffer now and build the line-state cache (on switch/open)
+	hl_select $g   ;# the file type may have changed with the buffer (D32)
+	hl_full $g     ;# repaint the whole buffer now and build the line-state cache (on switch/open)
 }
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
@@ -290,41 +338,57 @@ proc buf_text {id} {
 # ---------------------------------------------------------------------------
 # Buffer / tab bookkeeping.
 # ---------------------------------------------------------------------------
-proc register_buffer {id path meta} {
+# Register a newly-opened buffer into group `g` (default: the focused group), at the
+# end of its tab order. The core owns the text; ::buffers holds the per-buffer view
+# facts, ::grp the group's tab order.
+proc register_buffer {id path meta {g ""}} {
+	if {$g eq ""} { set g $::focus }
 	dict set ::buffers $id \
 		[dict create path $path meta $meta modified 0 cursor 1.0 yview 0.0]
-	lappend ::order $id
+	gset $g order [linsert [gorder $g] end $id]
 }
 
-# Make `id` the active buffer: stash the outgoing buffer's cursor/viewport, swap
-# the widget to `id`, and restore its cursor/viewport.
-proc activate {id} {
-	if {$::cur ne "" && [dict exists $::buffers $::cur]} {
-		bufset $::cur cursor [::rio_real_t index insert]
-		bufset $::cur yview  [lindex [::rio_real_t yview] 0]
+# Make `id` active and focus its group: stash the outgoing buffer's cursor/viewport,
+# swap that group's widget to `id`, restore its cursor/viewport, and mark the group
+# focused (::cur mirrors it). `g` defaults to whichever group already holds `id`
+# (clicking a tab), falling back to the focused group.
+proc activate {id {g ""}} {
+	if {$g eq ""} {
+		set g [group_of $id]
+		if {$g eq ""} { set g $::focus }
 	}
+	set t [gw $g]
+	set out [gcur $g]
+	if {$out ne "" && [dict exists $::buffers $out]} {
+		bufset $out cursor [$t index insert]
+		bufset $out yview  [lindex [$t yview] 0]
+	}
+	gset $g cur $id
+	load_buffer $g
+	catch {$t mark set insert [bufget $id cursor]}
+	catch {$t yview moveto    [bufget $id yview]}
+	set ::focus $g
 	set ::cur $id
-	load_buffer
-	catch {::rio_real_t mark set insert [bufget $id cursor]}
-	catch {::rio_real_t yview moveto    [bufget $id yview]}
-	::rio_real_t see insert
-	focus .ed.t
+	$t see insert
+	focus [gget $g path]
 	refresh_all
 }
 
 proc close_buffer {id} {
 	rio_call buffer.close [dict create buffer $id]
+	set g [group_of $id]
 	set ::buffers [dict remove $::buffers $id]
-	set ::order [lsearch -all -inline -not -exact $::order $id]
+	if {$g ne ""} { gset $g order [lsearch -all -inline -not -exact [gorder $g] $id] }
 }
 
 # Drop a leftover empty, unsaved, untitled scratch buffer (so opening a file from
 # a fresh launch reuses the slot instead of leaving a blank tab behind). Refresh
-# the chrome if we dropped anything: close_buffer mutates ::order but doesn't
-# redraw, so a pruned tab would otherwise linger on screen, orphaned.
+# the chrome if we dropped anything: close_buffer mutates a group's order but doesn't
+# redraw, so a pruned tab would otherwise linger on screen, orphaned. Scans every
+# buffer (across groups) — a scratch may sit in either.
 proc prune_scratch {keep} {
 	set pruned 0
-	foreach id $::order {
+	foreach id [dict keys $::buffers] {
 		if {$id eq $keep} continue
 		if {[bufget $id path] eq "" && ![bufget $id modified] && [buf_text $id] eq ""} {
 			close_buffer $id
@@ -361,8 +425,8 @@ proc adopt_initial_buffers {} {
 }
 
 proc do_open {path} {
-	# Already open? Just switch to its tab.
-	foreach id $::order {
+	# Already open in some group? Just switch to its tab (activate focuses its group).
+	foreach id [dict keys $::buffers] {
 		if {$path ne "" && [bufget $id path] eq $path} { activate $id ; return 1 }
 	}
 	set resp [rio_call file.open [dict create path $path]]
@@ -596,23 +660,34 @@ proc show_pane {which} {
 }
 
 # Re-pack the dock against ::dock_side, with the editor filling the rest. Packing
-# the dock first claims its edge; .t then expands into what's left, so the same
-# two calls work for either side.
+# the dock first claims its edge; the center then expands into what's left, so the
+# same two calls work for either side.
 proc place_dock {} {
-	catch {pack forget .dock .sash .chat .csash .ed .cmp}
+	catch {pack forget .dock .sash .chat .csash .groups .cmp}
 	pack .dock -side $::dock_side -fill y
 	pack .sash -side $::dock_side -fill y     ;# between the dock and the editor
 	if {$::chat_shown} {
 		pack .chat  -side right -fill y       ;# chat column on the right (D14)
 		pack .csash -side right -fill y       ;# between the editor and the chat
 	}
-	# The center is the editor, or the compare view in its place while comparing (D28).
+	# The center is the editor-group container, or the compare view in its place
+	# while comparing (D28). The container itself holds one or two groups (D33).
 	if {$::compare_shown} {
 		pack .cmp -side left -fill both -expand 1
 	} else {
-		pack .ed -side left -fill both -expand 1
+		pack .groups -side left -fill both -expand 1
 	}
 	prefs_save
+}
+
+# Pack the editor groups left-to-right inside the .groups container. In v1 there are
+# at most two; each frame -expands so they share the width evenly. Called after a
+# split/unsplit changes ::groups (phase 3); with one group it just fills the center.
+proc relayout_groups {} {
+	foreach child [pack slaves .groups] { pack forget $child }
+	foreach g $::groups {
+		pack [gget $g frame] -side left -fill both -expand 1
+	}
 }
 
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
@@ -637,14 +712,18 @@ proc sash_drag {} {
 
 # Toggle line wrapping (View menu). With wrap on, lines fold at the word and the
 # horizontal scrollbar is meaningless, so it is hidden; with wrap off the bar comes
-# back for long lines. Configures the real widget (the proxy only guards edits).
+# back for long lines. Configures every group's real widget (the proxy only guards
+# edits) and its own horizontal scrollbar.
 proc apply_wrap {} {
-	if {$::wrap_lines} {
-		::rio_real_t configure -wrap word
-		grid remove .ed.hsb
-	} else {
-		::rio_real_t configure -wrap none
-		gridscroll .ed.hsb {*}[::rio_real_t xview]   ;# show only if a line overflows
+	set mode [expr {$::wrap_lines ? "word" : "none"}]
+	foreach g $::groups {
+		set t [gw $g] ; set hsb [gget $g frame].hsb
+		$t configure -wrap $mode
+		if {$::wrap_lines} {
+			grid remove $hsb
+		} else {
+			gridscroll $hsb {*}[$t xview]   ;# show only if a line overflows
+		}
 	}
 	cmp_apply_wrap
 	prefs_save
@@ -929,7 +1008,7 @@ proc compare_close {} {
 	if {!$::compare_shown} return
 	set ::compare_shown 0
 	place_dock
-	focus .ed.t
+	focus [gget $::focus path]
 }
 
 # Open the side-by-side review for a pending agent proposal (D28): pull both full
@@ -1105,27 +1184,33 @@ proc do_redo {} {
 	if {$res ne "" && [dict get $res changed]} { mark_modified 1 }
 }
 
-# Close the active buffer; guard unsaved changes, and keep at least one tab.
+# Close the active buffer of the focused group; guard unsaved changes. Keep at least
+# one tab in the group by minting a scratch when it would otherwise empty (phase 3
+# will instead collapse an emptied second group).
 proc do_close {} {
 	if {![maybe_discard]} return
+	set g $::focus
 	set victim $::cur
-	set idx [lsearch -exact $::order $victim]
+	set idx [lsearch -exact [gorder $g] $victim]
 	close_buffer $victim
-	if {![llength $::order]} {
+	set order [gorder $g]
+	if {![llength $order]} {
 		do_new
 	} else {
-		set ni [expr {$idx >= [llength $::order] ? [llength $::order] - 1 : $idx}]
-		activate [lindex $::order $ni]
+		set ni [expr {$idx >= [llength $order] ? [llength $order] - 1 : $idx}]
+		activate [lindex $order $ni] $g
 	}
 	session_save   ;# the open-file set changed — record it for resume (D31)
 }
-# Close any tab (the × button): focus it first so a discard prompt is in context.
+# Close any tab (the × button): focus its group first so a discard prompt is in context.
 proc close_tab {id} { activate $id ; do_close }
 
 proc cycle {dir} {
-	if {[llength $::order] < 2} return
-	set i [lsearch -exact $::order $::cur]
-	activate [lindex $::order [expr {($i + $dir) % [llength $::order]}]]
+	set g $::focus
+	set order [gorder $g]
+	if {[llength $order] < 2} return
+	set i [lsearch -exact $order $::cur]
+	activate [lindex $order [expr {($i + $dir) % [llength $order]}]] $g
 }
 
 # A protocol-native remote file/folder browser (AGENTS.md D29/D30). In remote mode
@@ -1337,7 +1422,7 @@ proc maybe_discard {} {
 proc do_quit {} {
 	prefs_save      ;# persist view state + the workspace before we go (D31)
 	session_save
-	foreach id $::order {
+	foreach id [dict keys $::buffers] {
 		if {[bufget $id modified]} {
 			activate $id
 			if {![maybe_discard]} return
@@ -1431,7 +1516,7 @@ proc reconnect_remote {hp} {
 		return
 	}
 	# 2. Offer to save unsaved work on the outgoing session; Cancel aborts cleanly.
-	foreach id $::order {
+	foreach id [dict keys $::buffers] {
 		if {[bufget $id modified]} {
 			activate $id
 			if {![maybe_discard]} { catch {close $newchan} ; return }
@@ -1457,11 +1542,15 @@ proc reset_session_state {} {
 	catch {pack forget .chat.approve}
 	set ::pending_turn ""
 	set ::chat_turn_open 0
-	# Forget the old buffers/tabs and blank the editor; the new core has its own.
-	set ::cur ""
+	# Forget the old buffers/tabs and blank every editor group; the new core has its
+	# own. (Phase 3 will also collapse a split back to a single group here.)
 	set ::buffers {}
-	set ::order {}
-	::rio_real_t delete 1.0 end
+	foreach g $::groups {
+		gset $g order {} ; gset $g cur ""
+		[gw $g] delete 1.0 end
+	}
+	set ::focus [lindex $::groups 0]
+	set ::cur ""
 	# Project/panes: the new core starts with no folder open unless it reports one.
 	set ::nav_dir ""
 	set ::nav_rows {}
@@ -1507,16 +1596,18 @@ proc refresh_status {} {
 	set meta [bufget $::cur meta]
 	set enc  [expr {[dict exists $meta encoding] ? [dict get $meta encoding] : "utf-8"}]
 	set eol  [expr {[dict exists $meta eol] ? [dict get $meta eol] : "lf"}]
-	set lang [expr {$::hl_lang ne "" ? $::hl_lang : "plain text"}]
+	set lang [expr {[gget $::focus hl_lang] ne "" ? [gget $::focus hl_lang] : "plain text"}]
 	.status configure -text [format "%s      %s  %s%s      %s      %d buffer(s)" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
-		$lang [llength $::order]]
+		$lang [dict size $::buffers]]
 }
+# The tab strip. Phase 2 renders the focused group's tabs into the single .tabs bar
+# (identical to the pre-split editor); phase 3 gives each group its own strip.
 proc refresh_tabs {} {
 	set c $::theme_colors
 	set fg [dict get $c tab.fg]
 	foreach w [winfo children .tabs] { destroy $w }
-	foreach id $::order {
+	foreach id [gorder $::focus] {
 		set active [expr {$id eq $::cur}]
 		set bg [expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		set f [frame .tabs.b$id -background $bg -borderwidth 1 \
@@ -1557,21 +1648,25 @@ proc apply_theme {theme} {
 	set c [dict get $theme colors]
 	set ::theme_colors $c
 	ensure_fonts [dict get $theme fonts]
-	# Editor surface.
-	::rio_real_t configure -font RioEditorFont \
-		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
-		-insertbackground [dict get $c editor.cursor] \
-		-selectbackground [dict get $c editor.selection]
-	.ed configure -background [dict get $c editor.bg]   ;# the scrollbar-corner gap
+	# Editor surface — every group's widget and its scrollbar-corner frame (D33).
 	# Syntax-highlighting tags (D32): one text tag per token type, coloured from the
 	# theme's syntax.* role (falling back to editor.fg — no visible colour — for any
 	# role a theme leaves unset). Reconfiguring here recolours existing highlighting
 	# live on a theme switch; the highlight passes raise the sel tag so a selection stays legible.
-	if {[info procs rio::syntax::tokens] ne ""} {
-		foreach _tok [rio::syntax::tokens] {
-			set _role syntax.$_tok
-			set _col [expr {[dict exists $c $_role] ? [dict get $c $_role] : [dict get $c editor.fg]}]
-			::rio_real_t tag configure syn:$_tok -foreground $_col
+	set _has_syntax [expr {[info procs rio::syntax::tokens] ne ""}]
+	foreach _g $::groups {
+		set _t [gw $_g]
+		$_t configure -font RioEditorFont \
+			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+			-insertbackground [dict get $c editor.cursor] \
+			-selectbackground [dict get $c editor.selection]
+		[gget $_g frame] configure -background [dict get $c editor.bg]
+		if {$_has_syntax} {
+			foreach _tok [rio::syntax::tokens] {
+				set _role syntax.$_tok
+				set _col [expr {[dict exists $c $_role] ? [dict get $c $_role] : [dict get $c editor.fg]}]
+				$_t tag configure syn:$_tok -foreground $_col
+			}
 		}
 	}
 	# Chrome: status bar + tab container.
@@ -1656,7 +1751,7 @@ proc apply_theme {theme} {
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
-	if {[llength $::order]} refresh_tabs
+	if {[dict size $::buffers]} refresh_tabs
 }
 
 # Switch themes live (View menu): re-fetch from the core and re-apply.
@@ -1726,111 +1821,127 @@ proc hl_user_dir {} {
 	return ""
 }
 
-# Pick the scanner for the active buffer by its file extension ("" = no highlighter,
-# e.g. a scratch buffer or a plain-text file). Runs on open / switch.
-proc hl_select {} {
-	set ::hl_scan "" ; set ::hl_lang ""
+# Pick the scanner for group `g`'s active buffer by its file extension ("" = no
+# highlighter, e.g. a scratch buffer or a plain-text file). Runs on open / switch.
+# The scanner + language name live in the group's cache, one per editor widget (D33).
+proc hl_select {g} {
+	gset $g hl_scan "" ; gset $g hl_lang ""
 	if {[info procs rio::syntax::for_path] eq ""} return
-	if {$::cur eq "" || ![dict exists $::buffers $::cur]} return
-	set path [bufget $::cur path]
+	set id [gcur $g]
+	if {$id eq "" || ![dict exists $::buffers $id]} return
+	set path [bufget $id path]
 	if {$path ne ""} {
-		set ::hl_scan [rio::syntax::for_path $path]
-		set ::hl_lang [rio::syntax::lang_for_path $path]
+		gset $g hl_scan [rio::syntax::for_path $path]
+		gset $g hl_lang [rio::syntax::lang_for_path $path]
 	}
 }
 
-# The active widget's current line count (1-based; a Tk text widget always has at
-# least line 1). ::hl_enter is kept the same length, so index i-1 is line i's state.
-proc hl_linecount {} {
-	return [lindex [split [::rio_real_t index "end-1c"] .] 0]
+# Widget `t`'s current line count (1-based; a Tk text widget always has at least line
+# 1). A group's hl_enter is kept the same length, so index i-1 is line i's state.
+proc hl_linecount {t} {
+	return [lindex [split [$t index "end-1c"] .] 0]
 }
 
-# Re-tag one line L from its already-known entry `state`/`param`: scan it, clear the
-# old syntax tags on just that line, repaint, and return the state ENTERING line L+1.
-proc hl_paint_line {L state param} {
-	set line [::rio_real_t get $L.0 "$L.0 lineend"]
-	lassign [rio::syntax::scan_line $::hl_scan $line $state $param] spans state param
-	foreach tok [rio::syntax::tokens] { ::rio_real_t tag remove syn:$tok $L.0 "$L.0 lineend" }
-	foreach {c0 c1 type} $spans { ::rio_real_t tag add syn:$type $L.$c0 $L.$c1 }
+# Re-tag one line L of widget `t` with scanner `scan`, from its already-known entry
+# `state`/`param`: scan it, clear the old syntax tags on just that line, repaint, and
+# return the state ENTERING line L+1.
+proc hl_paint_line {t scan L state param} {
+	set line [$t get $L.0 "$L.0 lineend"]
+	lassign [rio::syntax::scan_line $scan $line $state $param] spans state param
+	foreach tok [rio::syntax::tokens] { $t tag remove syn:$tok $L.0 "$L.0 lineend" }
+	foreach {c0 c1 type} $spans { $t tag add syn:$type $L.$c0 $L.$c1 }
 	return [list $state $param]
 }
 
-# Full (re)highlight of the whole buffer, rebuilding the line-state cache from the
-# start state. Runs on open / switch; with no scanner it just leaves the text plain.
-# Reads text from the widget (which already holds the canonical content) — no core call.
-proc hl_full {} {
-	set ::hl_pending 0 ; set ::hl_dirty 0 ; set ::hl_lastchanged 0 ; set ::hl_enter {}
-	if {![winfo exists .ed.t] || [info procs rio::syntax::tokens] eq ""} return
-	foreach tok [rio::syntax::tokens] { ::rio_real_t tag remove syn:$tok 1.0 end }
-	if {$::hl_scan eq ""} return
-	set last [hl_linecount]
+# Full (re)highlight of group `g`'s whole buffer, rebuilding its line-state cache from
+# the start state. Runs on open / switch; with no scanner it just leaves the text
+# plain. Reads text from the widget (which already holds the canonical content) — no
+# core call.
+proc hl_full {g} {
+	gset $g hl_pending 0 ; gset $g hl_dirty 0 ; gset $g hl_lastchanged 0 ; gset $g hl_enter {}
+	set t [gw $g]
+	if {![winfo exists [gget $g path]] || [info procs rio::syntax::tokens] eq ""} return
+	foreach tok [rio::syntax::tokens] { $t tag remove syn:$tok 1.0 end }
+	set scan [gget $g hl_scan]
+	if {$scan eq ""} return
+	set last [hl_linecount $t]
 	lassign [rio::syntax::start] state param
+	set enter {}
 	for {set L 1} {$L <= $last} {incr L} {
-		lappend ::hl_enter [list $state $param]       ;# state entering line L
-		lassign [hl_paint_line $L $state $param] state param
+		lappend enter [list $state $param]            ;# state entering line L
+		lassign [hl_paint_line $t $scan $L $state $param] state param
 	}
-	catch {::rio_real_t tag raise sel}   ;# keep a selection legible over the colours
+	gset $g hl_enter $enter
+	catch {$t tag raise sel}   ;# keep a selection legible over the colours
 }
 
-# Record an edit for the next incremental pass. The core echoes every change as
-# {start end text}; from that we know the first line touched (sl) and the net change
-# in line count (delta). We splice ::hl_enter by delta so the cached entry states
-# BELOW the edit stay index-aligned with the widget — that alignment is what lets
-# hl_incremental trust the cache when testing for state convergence. Then we widen
-# the dirty range and queue a coalesced pass.
-proc hl_edit {p} {
-	if {$::hl_scan eq "" || $::hl_enter eq ""} { hl_schedule ; return }
+# Record an edit in group `g` for its next incremental pass. The core echoes every
+# change as {start end text}; from that we know the first line touched (sl) and the net
+# change in line count (delta). We splice the group's hl_enter by delta so the cached
+# entry states BELOW the edit stay index-aligned with the widget — that alignment is
+# what lets hl_incremental trust the cache when testing for state convergence. Then we
+# widen the dirty range and queue a coalesced pass.
+proc hl_edit {g p} {
+	set scan [gget $g hl_scan] ; set enter [gget $g hl_enter]
+	if {$scan eq "" || $enter eq ""} { hl_schedule $g ; return }
 	set sl [lindex [split [dict get $p start] .] 0]
 	set el [lindex [split [dict get $p end]   .] 0]
 	set added [expr {[llength [split [dict get $p text] "\n"]] - 1}]
 	set delta [expr {$added - ($el - $sl)}]
 	if {$delta > 0} {
 		set pad {} ; for {set i 0} {$i < $delta} {incr i} { lappend pad [list "￿dirty" ""] }
-		set ::hl_enter [linsert $::hl_enter $sl {*}$pad]
+		set enter [linsert $enter $sl {*}$pad]
 	} elseif {$delta < 0} {
-		set ::hl_enter [lreplace $::hl_enter $sl [expr {$sl - $delta - 1}]]
+		set enter [lreplace $enter $sl [expr {$sl - $delta - 1}]]
 	}
-	if {$::hl_dirty < 1 || $sl < $::hl_dirty} { set ::hl_dirty $sl }
+	gset $g hl_enter $enter
+	set dirty [gget $g hl_dirty]
+	if {$dirty < 1 || $sl < $dirty} { gset $g hl_dirty $sl }
 	set lc [expr {$sl + $added}]
-	if {$lc > $::hl_lastchanged} { set ::hl_lastchanged $lc }
-	hl_schedule
+	if {$lc > [gget $g hl_lastchanged]} { gset $g hl_lastchanged $lc }
+	hl_schedule $g
 }
 
-# Incremental re-highlight (the idle handler). Re-scan from the first dirty line down,
-# repainting each line and updating its cached entry state, and stop as soon as — past
-# the edited region — a line's fresh entry state matches the one already cached: the
-# scan state has re-converged, so everything below is unaffected and needs no work.
-proc hl_incremental {} {
-	set ::hl_pending 0
-	if {![winfo exists .ed.t] || [info procs rio::syntax::tokens] eq ""} return
-	if {$::hl_scan eq ""} { set ::hl_dirty 0 ; return }
-	if {$::hl_enter eq ""} { hl_full ; return }
-	set start $::hl_dirty ; set last $::hl_lastchanged
-	set ::hl_dirty 0 ; set ::hl_lastchanged 0
+# Incremental re-highlight of group `g` (the idle handler). Re-scan from the first
+# dirty line down, repainting each line and updating its cached entry state, and stop
+# as soon as — past the edited region — a line's fresh entry state matches the one
+# already cached: the scan state has re-converged, so everything below is unaffected.
+proc hl_incremental {g} {
+	gset $g hl_pending 0
+	set t [gw $g]
+	if {![winfo exists [gget $g path]] || [info procs rio::syntax::tokens] eq ""} return
+	set scan [gget $g hl_scan]
+	if {$scan eq ""} { gset $g hl_dirty 0 ; return }
+	set enter [gget $g hl_enter]
+	if {$enter eq ""} { hl_full $g ; return }
+	set start [gget $g hl_dirty] ; set last [gget $g hl_lastchanged]
+	gset $g hl_dirty 0 ; gset $g hl_lastchanged 0
 	if {$start < 1} return
-	set nlines [hl_linecount]
+	set nlines [hl_linecount $t]
 	if {$start > $nlines} return
-	if {[llength $::hl_enter] != $nlines} { hl_full ; return }  ;# cache drifted — rebuild safely
-	set ::hl_scanned 0
-	lassign [lindex $::hl_enter [expr {$start - 1}]] state param
+	if {[llength $enter] != $nlines} { hl_full $g ; return }  ;# cache drifted — rebuild safely
+	set scanned 0
+	lassign [lindex $enter [expr {$start - 1}]] state param
 	for {set L $start} {$L <= $nlines} {incr L} {
-		lassign [hl_paint_line $L $state $param] state param
-		incr ::hl_scanned
+		lassign [hl_paint_line $t $scan $L $state $param] state param
+		incr scanned
 		if {$L == $nlines} break            ;# no line below to carry state into
 		set next [list $state $param]
-		set old [lindex $::hl_enter $L]      ;# cached state entering line L+1
-		lset ::hl_enter $L $next
+		set old [lindex $enter $L]           ;# cached state entering line L+1
+		lset enter $L $next
 		if {$L >= $last && $next eq $old} break   ;# past the edit and re-converged
 	}
-	catch {::rio_real_t tag raise sel}
+	gset $g hl_enter $enter
+	gset $g hl_scanned $scanned
+	catch {$t tag raise sel}
 }
 
-# Queue a coalesced incremental pass on the idle handler, so a run of keystrokes
-# triggers a single re-scan rather than one pass per character.
-proc hl_schedule {} {
-	if {$::hl_pending} return
-	set ::hl_pending 1
-	after idle hl_incremental
+# Queue a coalesced incremental pass on group `g`'s idle handler, so a run of
+# keystrokes triggers a single re-scan rather than one pass per character.
+proc hl_schedule {g} {
+	if {[gget $g hl_pending]} return
+	gset $g hl_pending 1
+	after idle [list hl_incremental $g]
 }
 
 # ---------------------------------------------------------------------------
@@ -1908,7 +2019,7 @@ proc prefs_save {} {
 proc session_save {} {
 	if {!$::rio_started} return
 	set paths {}
-	foreach id $::order {
+	foreach id [dict keys $::buffers] {
 		set p [bufget $id path]
 		if {$p ne ""} { lappend paths $p }
 	}
@@ -1928,7 +2039,7 @@ proc session_restore {} {
 	foreach p [dict get $res open] { do_open $p }
 	set active [dict get $res active]
 	if {$active ne ""} {
-		foreach id $::order {
+		foreach id [dict keys $::buffers] {
 			if {[bufget $id path] eq $active} { activate $id ; break }
 		}
 	}
@@ -2004,24 +2115,117 @@ bind .dock.git.list <<ListboxSelect>> git_select
 frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
 
-# The editor region: the text widget with vertical + horizontal scrollbars, gridded
-# in a container so the scrollbars hug the text (not the whole window). The text is
-# named .ed.t so the scrollbars can be its siblings; everything else still drives it
-# through that path (proxy) and ::rio_real_t (the real command). The horizontal bar
-# auto-hides (gridscroll) when no line overflows, and apply_wrap drops it entirely
-# while wrapping, where horizontal scrolling is meaningless.
-frame .ed
-text .ed.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
-	-background white -foreground black -insertbackground black \
-	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
-	-yscrollcommand {.ed.vsb set} -xscrollcommand {gridscroll .ed.hsb}
-scrollbar .ed.vsb -orient vertical   -command {.ed.t yview}
-scrollbar .ed.hsb -orient horizontal -command {.ed.t xview}
-grid .ed.t   -row 0 -column 0 -sticky nsew
-grid .ed.vsb -row 0 -column 1 -sticky ns
-grid .ed.hsb -row 1 -column 0 -sticky ew
-grid rowconfigure    .ed 0 -weight 1
-grid columnconfigure .ed 0 -weight 1
+# The editor region (AGENTS.md D33). The center is a .groups container that holds one
+# or two editor GROUPS side by side; each group is an independent text widget (with its
+# own scrollbars and highlight cache) built by make_editor_group. Each text widget is
+# renamed to a real command (::real<g>) and driven through a proxy proc at its Tk path
+# so class bindings still call `.eg<g>.t insert`, which the proxy turns into protocol
+# requests (the D3 dumb-view discipline, now per group). The horizontal bar auto-hides
+# (gridscroll) when no line overflows, and apply_wrap drops it entirely while wrapping.
+frame .groups
+
+# The per-widget proxy: an insert/delete becomes a buffer.replace on THIS group's
+# active buffer; everything else passes straight through to the real widget command.
+proc editor_proxy {g args} {
+	set rc [gw $g]
+	switch -- [lindex $args 0] {
+		insert {
+			# .t insert <index> <chars> ?tagList chars ...?
+			set idx   [$rc index [lindex $args 1]]
+			set chars [lindex $args 2]
+			if {$chars ne ""} {
+				if {[dict get [rio_call buffer.replace \
+					[dict create buffer [gcur $g] start $idx end $idx text $chars]] ok]} {
+					mark_modified 1
+				}
+			}
+			return ""
+		}
+		delete {
+			# .t delete <index1> ?index2?  — compute i2 WITHOUT expr. A Tk text index
+			# like "1.10" passed through expr is coerced to the float 1.1, silently
+			# corrupting the column: backspace would then no-op at every column 10, 20,
+			# 30, … (and forward/range deletes ending there too).
+			set i1 [$rc index [lindex $args 1]]
+			if {[llength $args] >= 3} {
+				set i2 [$rc index [lindex $args 2]]
+			} else {
+				set i2 [$rc index "[lindex $args 1]+1c"]
+			}
+			if {[$rc compare $i1 < $i2]} {
+				if {[dict get [rio_call buffer.replace \
+					[dict create buffer [gcur $g] start $i1 end $i2 text {}]] ok]} {
+					mark_modified 1
+				}
+			}
+			return ""
+		}
+		default { return [$rc {*}$args] }
+	}
+}
+
+# Editor keyboard shortcuts, bound on a group's text widget with `break` so the
+# widget's own class bindings (Tk's built-in Ctrl+O/Ctrl+Z etc.) don't also fire.
+# Bound per group so a shortcut acts on whichever group has keyboard focus.
+proc editor_bindings {w} {
+	bind $w <Control-n>         { do_new ; break }
+	bind $w <Control-o>         { open_dialog ; break }
+	bind $w <Control-O>         { open_folder_dialog ; break }
+	bind $w <Control-s>         { do_save ; break }
+	bind $w <Control-S>         { save_as_dialog ; break }
+	bind $w <Control-w>         { do_close ; break }
+	bind $w <Control-q>         { do_quit ; break }
+	bind $w <Control-z>         { do_undo ; break }
+	bind $w <Control-Z>         { do_redo ; break }
+	bind $w <Control-y>         { do_redo ; break }
+	bind $w <Control-Tab>       { cycle 1 ; break }
+	bind $w <Control-Shift-Tab> { cycle -1 ; break }
+	bind $w <Control-E>         { show_pane files ; break }
+	bind $w <Control-G>         { show_pane git ; break }
+	bind $w <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
+	bind $w <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
+}
+
+# Build editor group `g`: its frame (.eg<g>), text widget + scrollbars, the renamed
+# real command, the proxy, and the key/focus bindings. Registers the group in ::grp.
+# The literal font is replaced by RioEditorFont in the next apply_theme.
+proc make_editor_group {g} {
+	set f .eg$g
+	frame $f
+	text $f.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
+		-background white -foreground black -insertbackground black \
+		-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
+		-yscrollcommand [list $f.vsb set] -xscrollcommand [list gridscroll $f.hsb]
+	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
+	scrollbar $f.hsb -orient horizontal -command [list $f.t xview]
+	grid $f.t   -row 0 -column 0 -sticky nsew
+	grid $f.vsb -row 0 -column 1 -sticky ns
+	grid $f.hsb -row 1 -column 0 -sticky ew
+	grid rowconfigure    $f 0 -weight 1
+	grid columnconfigure $f 0 -weight 1
+	rename $f.t ::real$g
+	dict set ::grp $g [dict merge [new_group_state] \
+		[dict create w ::real$g path $f.t frame $f]]
+	proc $f.t {args} "editor_proxy $g {*}\$args"
+	editor_bindings $f.t
+	bind $f.t <Button-1> [list focus_group $g]   ;# clicking a group focuses it
+	return $g
+}
+
+# Make group `g` the focused one (::cur mirrors its active buffer). Tk moves keyboard
+# focus on a click itself; this just repoints our state and repaints the chrome.
+proc focus_group {g} {
+	if {$g eq $::focus} return
+	set ::focus $g
+	set ::cur [gcur $g]
+	refresh_all
+}
+
+# Create the first editor group; the split adds a second (phase 3).
+make_editor_group 0
+set ::groups {0}
+set ::focus 0
+relayout_groups
 
 # The compare / diff view (AGENTS.md D28): two read-only text panes side by side
 # with a single shared vertical scrollbar, packed in the center INSTEAD of .ed
@@ -2130,8 +2334,8 @@ label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .tabs   -side top -fill x
 pack .status -side bottom -fill x
-# .dock and .ed are packed by place_dock at startup (so the dock side is live).
-focus .ed.t
+# .dock and .groups are packed by place_dock at startup (so the dock side is live).
+focus [gget 0 path]
 
 menu .m ; . configure -menu .m
 menu .m.file -tearoff 0
@@ -2184,64 +2388,10 @@ menu .m.settings -tearoff 0
 .m.settings add checkbutton -label "Agent: Compare complex edits" \
 	-variable ::agent_compare_complex
 
-# Shortcuts bound on the text widget with `break`, so the widget's own class
-# bindings (e.g. Tk's built-in Ctrl+O/Ctrl+Z) don't also fire.
-bind .ed.t <Control-n>         { do_new ; break }
-bind .ed.t <Control-o>         { open_dialog ; break }
-bind .ed.t <Control-O>         { open_folder_dialog ; break }
-bind .ed.t <Control-s>         { do_save ; break }
-bind .ed.t <Control-S>         { save_as_dialog ; break }
-bind .ed.t <Control-w>         { do_close ; break }
-bind .ed.t <Control-q>         { do_quit ; break }
-bind .ed.t <Control-z>         { do_undo ; break }
-bind .ed.t <Control-Z>         { do_redo ; break }
-bind .ed.t <Control-y>         { do_redo ; break }
-bind .ed.t <Control-Tab>       { cycle 1 ; break }
-bind .ed.t <Control-Shift-Tab> { cycle -1 ; break }
-bind .ed.t <Control-E>         { show_pane files ; break }
-bind .ed.t <Control-G>         { show_pane git ; break }
-bind .ed.t <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
-bind .ed.t <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
+# The editor keyboard shortcuts and the edit-proxy are installed per group by
+# make_editor_group (editor_bindings + editor_proxy). Only the window-manager close
+# needs binding here.
 wm protocol . WM_DELETE_WINDOW do_quit
-
-# --- widget proxy: edits become protocol requests, never local mutations -----
-rename .ed.t ::rio_real_t
-proc .ed.t {args} {
-	switch -- [lindex $args 0] {
-		insert {
-			# .t insert <index> <chars> ?tagList chars ...?
-			set idx   [::rio_real_t index [lindex $args 1]]
-			set chars [lindex $args 2]
-			if {$chars ne ""} {
-				if {[dict get [rio_call buffer.replace \
-					[dict create buffer $::cur start $idx end $idx text $chars]] ok]} {
-					mark_modified 1
-				}
-			}
-			return ""
-		}
-		delete {
-			# .t delete <index1> ?index2?  — compute i2 WITHOUT expr. A Tk text
-			# index like "1.10" passed through expr is coerced to the float 1.1,
-			# silently corrupting the column: backspace would then no-op at every
-			# column 10, 20, 30, … (and forward/range deletes ending there too).
-			set i1 [::rio_real_t index [lindex $args 1]]
-			if {[llength $args] >= 3} {
-				set i2 [::rio_real_t index [lindex $args 2]]
-			} else {
-				set i2 [::rio_real_t index "[lindex $args 1]+1c"]
-			}
-			if {[::rio_real_t compare $i1 < $i2]} {
-				if {[dict get [rio_call buffer.replace \
-					[dict create buffer $::cur start $i1 end $i2 text {}]] ok]} {
-					mark_modified 1
-				}
-			}
-			return ""
-		}
-		default { return [::rio_real_t {*}$args] }
-	}
-}
 
 # Load the syntax highlighters before the first apply_theme (which configures a
 # text tag per token type from the theme's syntax.* roles) and before any buffer

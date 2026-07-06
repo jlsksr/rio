@@ -49,14 +49,14 @@ ok "theme: default comment hue"  [::rio_real_t tag cget syn:comment -foreground]
 # --- open an HTML file: the applier paints tags ------------------------------
 set hp [spit index.html {<!-- top --><p class="x">hi &amp; bye</p>}]
 do_open $hp
-ok "open: tokeniser selected"    [expr {$::hl_scan ne ""}] 1
+ok "open: tokeniser selected"    [expr {[gget $::focus hl_scan] ne ""}] 1
 ok "open: element name tagged"   [has_tag_at tag 1.12]        1 ;# the '<' of <p
 ok "open: attribute tagged"      [has_tag_at attribute 1.15] 1 ;# 'class'
 ok "open: value string tagged"   [has_tag_at string 1.21]    1 ;# inside "x"
 ok "open: entity tagged"         [expr {[llength [ranges entity]] > 0}] 1
 ok "open: comment tagged"        [has_tag_at comment 1.0]    1
 ok "open: text left un-tagged"   [has_tag_at tag 1.25]       0 ;# the 'h' of "hi"
-ok "status: language is HTML"    $::hl_lang HTML
+ok "status: language is HTML"    [gget $::focus hl_lang] HTML
 ok "status: bar shows language"  [string match *HTML* [.status cget -text]] 1
 
 # --- multi-line context: a comment spanning lines colours both lines ---------
@@ -69,9 +69,9 @@ ok "multiline: real tag after"    [has_tag_at tag 3.0]     1
 # --- a plain-text file gets no highlighter and no tags -----------------------
 set tp [spit notes.txt "<p>this is not html</p>\n"]
 do_open $tp
-ok "plain: no tokeniser"          $::hl_scan ""
+ok "plain: no tokeniser"          [gget $::focus hl_scan] ""
 ok "plain: no syntax tags"        [expr {[llength [ranges tag]] + [llength [ranges string]]}] 0
-ok "status: plain lang empty"     $::hl_lang ""
+ok "status: plain lang empty"     [gget $::focus hl_lang] ""
 ok "status: bar shows plain text" [string match {*plain text*} [.status cget -text]] 1
 
 # --- a live edit re-highlights (coalesced on idle) ---------------------------
@@ -79,28 +79,28 @@ do_open [spit edit.html "<p>x</p>"]
 ok "edit: before, one line tagged" [expr {[llength [ranges tag]] > 0}] 1
 .ed.t insert end-1c "\n<b>y</b>"     ;# add a second line via the dumb-view proxy
 update ; update idletasks             ;# flush the async change + the idle re-highlight
-ok "edit: idle re-highlight ran"   $::hl_pending 0
+ok "edit: idle re-highlight ran"   [gget $::focus hl_pending] 0
 ok "edit: new line's tag painted"  [has_tag_at tag 2.0] 1
 
 # --- incremental scope: a local edit re-scans only a line or two, not the file
 set many "<a>1</a>"
 for {set i 2} {$i <= 8} {incr i} { append many "\n<a>$i</a>" }   ;# 8 lines
 do_open [spit many.html $many]
-ok "incr: cache one entry per line" [llength $::hl_enter] 8
+ok "incr: cache one entry per line" [llength [gget $::focus hl_enter]] 8
 .ed.t insert 8.3 "X"                  ;# edit the LAST line (no state change below)
 update ; update idletasks
-ok "incr: local edit re-scans few"  [expr {$::hl_scanned <= 2}] 1
-ok "incr: still one entry per line"  [llength $::hl_enter] 8
+ok "incr: local edit re-scans few"  [expr {[gget $::focus hl_scanned] <= 2}] 1
+ok "incr: still one entry per line"  [llength [gget $::focus hl_enter]] 8
 .ed.t insert 1.0 "Z"                  ;# edit the FIRST line; state doesn't propagate
 update ; update idletasks
-ok "incr: top edit converges fast"  [expr {$::hl_scanned <= 2}] 1
+ok "incr: top edit converges fast"  [expr {[gget $::focus hl_scanned] <= 2}] 1
 ok "incr: untouched line 5 intact"  [has_tag_at tag 5.0] 1
 
 # --- state that OPENS at the top must propagate down until it re-converges ----
 .ed.t insert 1.0 "<!--"               ;# open a comment on line 1, never closed
 update ; update idletasks
 ok "incr: open comment reaches end" [has_tag_at comment 8.0] 1
-ok "incr: propagated to all lines"  [expr {$::hl_scanned >= 8}] 1
+ok "incr: propagated to all lines"  [expr {[gget $::focus hl_scanned] >= 8}] 1
 .ed.t insert 1.4 "-->"                ;# close it again on line 1
 update ; update idletasks
 ok "incr: closing clears line 8"    [has_tag_at comment 8.0] 0
@@ -109,7 +109,7 @@ ok "incr: line 8 tag restored"      [has_tag_at tag 8.0] 1
 # --- deleting a line keeps the cache aligned (later edits still correct) ------
 .ed.t delete 4.0 5.0                  ;# remove one whole line
 update ; update idletasks
-ok "incr: cache shrank with buffer" [llength $::hl_enter] [expr {[lindex [split [::rio_real_t index end-1c] .] 0]}]
+ok "incr: cache shrank with buffer" [llength [gget $::focus hl_enter]] [expr {[lindex [split [::rio_real_t index end-1c] .] 0]}]
 ok "incr: line after delete tagged" [has_tag_at tag 4.0] 1
 
 # --- switching back to a plain buffer clears the tags ------------------------

@@ -1431,13 +1431,28 @@ duplicate it. The center becomes a `panedwindow` holding one or two groups;
 **Per-group tab strips** (chosen over a shared bar): a tab lives in exactly one
 group, so ownership is always visible; a **Move to other side** action shifts it.
 New View-menu verbs: **Split editor**, **Unsplit**. Focus follows a click into a
-group; the status bar and title read the focused group. The same buffer may appear
-in both groups, so `buffer.changed` redraws *every* group showing that id.
+group; the status bar and title read the focused group. `buffer.changed` routes to
+whichever group shows the changed id (an agent edit can land in a background group);
+the redraw loops over groups, so it already generalizes if a buffer is ever shown in
+two at once.
 
 **Scope — v1 is exactly two groups**, matching D13's "two editor groups" (not
-N-way tiling). Split layout is **not persisted** across restarts in v1 (each launch
-opens a single group) — one less D31 prefs-schema change; sticky layout can come
-later if wanted.
+N-way tiling). A **buffer belongs to exactly one group** at a time (per-buffer view
+state — cursor/viewport — stays keyed by buffer, not by group·buffer); showing the
+*same* file in both groups is deferred with the per-group view-state it would need.
+Split layout is **not persisted** across restarts in v1 (each launch opens a single
+group) — one less D31 prefs-schema change; sticky layout can come later if wanted.
+
+**Landed in two steps.** Phase 2 (this commit) is a **behaviour-preserving refactor**:
+it introduces the group abstraction (`::grp` records: `w`, `path`, `frame`, `cur`,
+`order`, the per-group `hl_*` cache), a `make_editor_group` factory that builds each
+group's widget + scrollbars + edit-proxy + key/focus bindings, and routes every editor
+proc (`activate`, `load_buffer`, `apply_change`, the `hl_*` pass, wrap, theme,
+buffer.changed) through a group id — while instantiating a **single** group so the
+behaviour is byte-identical and all suites pass unchanged. `::cur` survives as a
+mirror of the focused group's active buffer (keeping the focused-only call sites —
+save/undo/status/proxy — terse). Phase 3 adds the second group, the split/unsplit
+layout, per-group tab strips, and the move-tab action.
 
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
