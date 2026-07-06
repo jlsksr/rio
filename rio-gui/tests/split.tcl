@@ -132,6 +132,16 @@ ok "ctx: source kept E active"     [gtext $g0] "EEE\n"
 ok "ctx: follows the moved tab"    $::focus $gOther
 ok "ctx: moved tab is shown"       [gtext $gOther] "DDD\n"
 
+# --- drag-and-drop drop resolver (group_of_widget) ---------------------------
+# The DnD gesture resolves a drop by walking up from the widget under the pointer to
+# its group frame. Drive that resolver directly (no synthetic pointer events): a
+# group's own text widget, tab strip, and frame all resolve to the group; an unrelated
+# widget resolves to "".
+ok "dnd: text widget -> its group"   [group_of_widget [gget $g0 path]] $g0
+ok "dnd: tab strip -> its group"     [group_of_widget [gget $gOther tabs]] $gOther
+ok "dnd: frame -> its group"         [group_of_widget [gget $g0 frame]] $g0
+ok "dnd: outside any group -> none"  [group_of_widget .groups] ""
+
 # The menu builds the expected entries (swallow the real popup — it's interactive).
 rename tk_popup _real_tk_popup
 proc tk_popup {args} {}

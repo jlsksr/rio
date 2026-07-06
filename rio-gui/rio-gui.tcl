@@ -1226,6 +1226,19 @@ proc other_group {g} {
 	return ""
 }
 
+# Which group's pane does widget `w` live under? Walk up from `w` to a group frame
+# (.eg<g>) and return its id, or "" if `w` is outside every group. `group_at` layers
+# the screen-coordinate lookup on top for drag-and-drop; the widget walk is split out
+# so it can be unit-tested without real pointer geometry (split.tcl).
+proc group_of_widget {w} {
+	while {$w ne ""} {
+		foreach g $::groups { if {$w eq [gget $g frame]} { return $g } }
+		set w [winfo parent $w]
+	}
+	return ""
+}
+proc group_at {X Y} { group_of_widget [winfo containing $X $Y] }
+
 # Tear down group `g`'s widgets and its leftover proxy proc, and drop it from ::grp.
 # (Destroying the frame removes the real widget command; the proxy at .eg<g>.t is a
 # plain proc, so it must be renamed away or the slot can't be rebuilt on a re-split.)
@@ -1741,6 +1754,51 @@ proc tab_context_menu {g id X Y} {
 # IN that group and focuses the group. The focused group's active tab is emphasised
 # with the accent colour, so which pane has focus is visible at a glance. Right-click
 # a tab for a context menu (move to the other group / close).
+# Drag a tab between groups (AGENTS.md D33 follow-on) — a second input gesture onto the
+# same move path as the context menu's "Move to Other Group". Press a tab, drag it over
+# the other group's pane, release to drop; below a ~5px threshold it stays a plain click
+# (activate). Cross-group only — within-group reordering is a separate roadmap item.
+# Tk's implicit pointer grab keeps motion/release flowing to the origin tab while the
+# button is down, so `winfo containing` sees across both panes. Feedback while dragging:
+# a hand cursor plus an accent tint on the target group's tab strip.
+proc tab_drag_start {id g X Y} {
+	set ::tabdrag [dict create id $id g $g x $X y $Y active 0 tint ""]
+}
+proc tab_drag_motion {X Y} {
+	if {![info exists ::tabdrag]} return
+	if {![dict get $::tabdrag active]} {
+		if {abs($X - [dict get $::tabdrag x]) < 5 && abs($Y - [dict get $::tabdrag y]) < 5} return
+		dict set ::tabdrag active 1
+		. configure -cursor hand2
+	}
+	set src  [dict get $::tabdrag g]
+	set over [group_at $X $Y]
+	set want [expr {($over ne "" && $over ne $src) ? $over : ""}]
+	set now  [dict get $::tabdrag tint]
+	if {$want ne $now} {
+		if {$now  ne ""} { tint_strip $now  0 }
+		if {$want ne ""} { tint_strip $want 1 }
+		dict set ::tabdrag tint $want
+	}
+}
+proc tab_drag_end {id g X Y} {
+	if {![info exists ::tabdrag]} { activate $id $g ; return }
+	set active [dict get $::tabdrag active]
+	set tint   [dict get $::tabdrag tint]
+	unset ::tabdrag
+	. configure -cursor ""
+	if {$tint ne ""} { tint_strip $tint 0 }
+	if {!$active} { activate $id $g ; return }   ;# a click, not a drag
+	set dst [group_at $X $Y]
+	if {$dst ne "" && $dst ne $g} { move_buffer_to_other $id $g }
+}
+# Highlight (`on`=1) or restore (`on`=0) group `g`'s tab strip as a drop target.
+proc tint_strip {g on} {
+	set c $::theme_colors
+	set bg [expr {$on ? [dict get $c accent] : [dict get $c tab.bar.bg]}]
+	catch {[gget $g tabs] configure -background $bg}
+}
+
 proc refresh_tabs {} {
 	set c $::theme_colors
 	set fg [dict get $c tab.fg]
@@ -1759,7 +1817,13 @@ proc refresh_tabs {} {
 				-font RioUIFont -padx 6 -pady 1
 			label $f.x -text "×" -background $bg -foreground $fg \
 				-font RioUIFont -padx 3
-			bind $f.l <Button-1> [list activate $id $g]
+			# Press/drag/release on the handle body: a plain click activates, a
+			# drag past the threshold moves the tab to the group under the pointer.
+			foreach w [list $f $f.l] {
+				bind $w <ButtonPress-1>   [list tab_drag_start $id $g %X %Y]
+				bind $w <B1-Motion>       [list tab_drag_motion %X %Y]
+				bind $w <ButtonRelease-1> [list tab_drag_end $id $g %X %Y]
+			}
 			bind $f.x <Button-1> [list close_tab $id $g]
 			# Right-click anywhere on the handle (frame, label, ×) for the context menu.
 			foreach w [list $f $f.l $f.x] {
