@@ -38,7 +38,7 @@ they are defaults, not mandates.
 | 4 | **Architecture shape?** | **Explicit layers with a documented seam** (e.g. core owns state, views are dumb, one transport) · Loose/emergent · Follow an existing framework's shape |
 | 5 | **Tests?** | **Real tests covering edge cases, runnable locally; full sweep must pass before anything is called "done"** · Smoke only · None for now |
 | 6 | **Local run/deploy?** | **Runnable & testable locally with no external services** · Needs a service (say which) · Cloud-only |
-| 7 | **Branching?** | **Branch per feature** · Commit straight to main · Trunk + short-lived branches |
+| 7 | **Branching?** | **Size-based: branch for non-trivial / multi-commit / multi-session work (merge `--no-ff` when done + green); small single-commit fixes go straight to `main`** · Always branch · Always commit to `main` |
 | 8 | **Who commits / who pushes?** | **Agent commits; I push** · Agent commits *and* pushes · I do both (agent leaves the tree clean) |
 | 9 | **Decision log?** | **Yes — append-and-annotate log of numbered decisions + open questions; never rewrite history** · Light (changelog only) · None |
 | 10 | **Docs to keep current?** | **README, CONTRIBUTING (for humans), INSTALL/deploy, ROADMAP, decision log** · README only · As-needed |
@@ -132,9 +132,20 @@ Concise chat replies; **do not shorten project docs** — they earn their length
 
 Configured by §1 Q7–Q8. Baseline:
 
-- **Branch per feature**; don't work directly on `main` for anything non-trivial.
+- **Branch by size, not by habit:**
+  - **Non-trivial / multi-commit / multi-session work → a feature branch.** Merge it
+    into `main` with `--no-ff` once it's *done and the full suite is green*, so history
+    carries one clean, revertable feature bubble.
+  - **Small, self-contained, single-commit changes → straight to `main`.** A branch
+    there is pure overhead.
+  - *Why the branch earns its keep even when merged immediately:* it keeps `main`
+    always green and deployable while a big change is mid-flight — which matters most
+    when deployment is "pull `main` and test". The isolation is banked *during*
+    development and the clean unit *at* the merge; merging the instant it's done loses
+    nothing.
 - **Agent commits; the human pushes.** Commit whenever a coherent step is done and
-  verified; never push unless the policy says the agent pushes.
+  verified; never push unless the policy says the agent pushes. (Merging a finished
+  branch into `main` locally is fine — pushing is still the human's.)
 - One focused commit per phase. Real message body (what + why), not "fix stuff".
 - Never force-push or rewrite shared history. Before deleting/overwriting anything you
   didn't create, look at it first and surface any contradiction instead of proceeding.
