@@ -23,6 +23,9 @@ Each entry notes its state:
 - **File-pane auto-refresh** — *gap.* The file tree doesn't update when the agent
   creates a file; it refreshes on the next manual reload. Fold into a proper
   file-pane pass.
+- **Tab reordering** — *planned.* Tabs can be dragged *between* groups (AGENTS.md
+  D33 follow-on), but not reordered *within* a group. Extend the same drag gesture to
+  splice a tab into a new position in its own strip.
 - **Undo-coalescing in the doc model** — *deferred.* Typing currently records
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
   noted refinement in the core document model.

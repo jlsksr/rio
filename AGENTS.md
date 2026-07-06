@@ -1485,6 +1485,24 @@ the other group, so the one label still describes what happens — and it spares
 a state-dependent relabel of the same control (the simpler, more honest reading of the
 UI-design bar). `split.tcl`'s one-group case now also asserts "Move to Other Group".
 
+*(Follow-on — drag a tab across, gesture #2 onto the same move path.)* Moving a tab
+between groups now also works by **dragging it**: press a tab, drag it over the other
+group's pane, release to drop. It is a second input gesture layered onto the existing,
+already-tested `move_buffer_to_other` — the menu item and the drag resolve to the same
+core-frozen operation, so the drop path adds no new move logic. Implementation is
+**pure Tk, no `tkdnd`** (limited-dependencies bar): press/motion/release bindings on the
+tab handle, a ~5px threshold below which it stays a plain activating click, and Tk's
+implicit pointer grab keeping motion/release flowing to the origin tab so
+`winfo containing` sees across both panes on release. A small `group_of_widget` walks
+from the widget under the pointer up to its `.eg<g>` frame (screen-coordinate lookup
+split out as `group_at` so the resolver is unit-tested without pointer geometry —
+`split.tcl`); feedback is a hand cursor plus an accent tint on the target strip. DnD
+clears the UI-design bar on its own terms: drag-a-tab is native to both the Win98/2000
+and the VS Code eras, and more discoverable than the menu. **Scope: cross-group drops
+only** — reordering a tab *within* its group is deliberately deferred (ROADMAP: "Tab
+reordering"), since it needs an insertion-point calculation the between-groups move does
+not.
+
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
 in the other group*, retiring bespoke `.cmp` code. Left out of v1 to keep the change
