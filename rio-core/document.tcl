@@ -91,10 +91,19 @@ proc rio::doc::inventory {} {
 # can build change events and, later, undo). Mutates the buffer in place. This is
 # the RAW primitive: it does not touch the undo history, so undo/redo can use it
 # to reverse an edit without themselves being recorded.
-proc rio::doc::replace {id start end text} {
+#
+# `_splice` may CLAMP an out-of-range column to its line's end; the effective
+# range can therefore differ from the caller's start/end. Pass `clampedVar` to
+# receive that effective {start end} — `edit` records it so undo reverses the
+# span the text actually occupies, not the raw (possibly out-of-range) request.
+proc rio::doc::replace {id start end text {clampedVar ""}} {
 	variable buffers
-	lassign [_splice [lines $id] $start $end $text] newlines removed
+	lassign [_splice [lines $id] $start $end $text] newlines removed cstart cend
 	dict set buffers $id lines $newlines
+	if {$clampedVar ne ""} {
+		upvar 1 $clampedVar clamped
+		set clamped [list $cstart $cend]
+	}
 	return $removed
 }
 
@@ -109,10 +118,13 @@ proc rio::doc::replace {id start end text} {
 # refinement; for now each edit is its own step.)
 
 # A recording edit — what user-facing ops call. Returns the removed text.
+# The record keeps the CLAMPED start/end (see `replace`): a client may send a
+# column past the line's end, and undo must reverse where the edit landed.
 proc rio::doc::edit {id start end text} {
 	variable buffers
-	set removed [replace $id $start $end $text]
-	set rec [dict create start $start end $end text $text removed $removed]
+	set removed [replace $id $start $end $text applied]
+	lassign $applied cstart cend
+	set rec [dict create start $cstart end $cend text $text removed $removed]
 	dict update buffers $id b {
 		dict lappend b undo $rec
 		dict set b redo {}
@@ -204,7 +216,9 @@ proc rio::doc::_splice {lines start end text} {
 		[lrange $lines 0 [expr {$sli - 1}]] \
 		$block \
 		[lrange $lines [expr {$eli + 1}] end]]
-	return [list $newlines $removed]
+	# Report the CLAMPED range alongside the result: sc/ec were pinned to their
+	# lines' bounds above, so "$sl.$sc"/"$el.$ec" is where the edit truly applied.
+	return [list $newlines $removed "$sl.$sc" "$el.$ec"]
 }
 
 # Extract the text spanning [sli.sc, eli.ec) from a line list (sli/eli 0-based).

@@ -1744,6 +1744,12 @@ Both renderings come from the **same** region model (D13) and layout policy
   primitive distinct from the raw `replace`, surfaced as the `edit.undo`/
   `edit.redo` ops (`rio-core/ops-undo.tcl`); each undo emits the same
   `buffer.changed` event a normal edit would, so views resync through one path.
+  *(Later hardened: the undo record keeps the **clamped** start/end, not the
+  caller's raw request. `_splice` pins an out-of-range column to its line's end
+  and now reports that effective range back through `replace`; `edit` records it,
+  so a non-GUI client sending a column past the line — the GUI always sends
+  widget-normalized indices — no longer leaves undo unable to reverse the span the
+  text actually occupied.)*
   **Remaining:** keystroke coalescing into undo groups, and large-file handling
   (lazy load?).
 - **O4 — Agent tool surface & safety.** (Scoped by D20 to the *core*

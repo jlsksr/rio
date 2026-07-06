@@ -79,6 +79,17 @@ test undo-empty {undo on a fresh buffer is a no-op} -body {
 	rio::doc::undo $b
 } -result {}
 
+test undo-clamped-index {an out-of-range column clamps, and undo still reverses it} -body {
+	# A non-GUI client can send a column past the line's end; _splice clamps it to
+	# end-of-line. The undo record must keep the CLAMPED span, or undo removes the
+	# wrong (empty) range and the insert survives.
+	set b [rio::doc::new "hello"]
+	rio::doc::edit $b 1.999 1.999 "!"
+	set after [rio::doc::text $b]
+	rio::doc::undo $b
+	list $after [rio::doc::text $b]
+} -result {hello! hello}
+
 # --- through the core / edit.* ops -------------------------------------------
 
 test undo-op-roundtrip {edit via buffer.replace, then edit.undo emits buffer.changed} -body {
