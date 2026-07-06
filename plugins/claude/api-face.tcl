@@ -24,7 +24,7 @@ namespace eval rio::claude::api {
 	variable config [dict create \
 		messages_url      https://api.anthropic.com/v1/messages \
 		anthropic_version 2023-06-01 \
-		model             claude-sonnet-4-6 \
+		model             claude-sonnet-5 \
 		max_tokens        4096 \
 		request_timeout   600000 \
 		secret_name       claude-api]
