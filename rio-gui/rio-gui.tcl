@@ -980,9 +980,26 @@ set ::claude_key_show 0     ;# the key dialog's reveal toggle
 
 # Tell the core which provider to run (agent.provider.set, D30). The agent lives in
 # the core wherever it runs, so this is an op, not an in-process swap; the chat
-# header then names the live choice.
+# header then names the live choice. Only ever called from a user action (the
+# Settings radio) — see adopt_agent_status for why we don't write at attach time.
 proc apply_provider {} {
 	rio_result agent.provider.set [dict create name $::agent_provider]
+	chat_status_update
+}
+
+# Adopt the core's LIVE agent settings into our menus instead of imposing ours.
+# The agent — provider, auto-accept, stored key — lives in the core (D26/D30), and
+# a daemon we attach to over --connect or an in-place reconnect may already have a
+# provider chosen and auto-accept set by whoever configured it. Writing our boot
+# default (echo, gated) over that at attach time would silently reset that core, so
+# at startup and after a reconnect we READ agent.status and mirror it into the
+# radio/checkbutton; a WRITE (apply_provider / autoaccept.set) happens only when the
+# user actually picks something.
+proc adopt_agent_status {} {
+	set st [rio_result agent.status {}]
+	if {$st eq ""} return   ;# error already surfaced; keep the current menu state
+	set ::agent_provider    [dict get $st provider]
+	set ::agent_auto_accept [dict get $st auto_accept]
 	chat_status_update
 }
 
@@ -1440,7 +1457,6 @@ proc reset_session_state {} {
 	catch {pack forget .chat.approve}
 	set ::pending_turn ""
 	set ::chat_turn_open 0
-	set ::agent_auto_accept 0    ;# a fresh core defaults to gated writes
 	# Forget the old buffers/tabs and blank the editor; the new core has its own.
 	set ::cur ""
 	set ::buffers {}
@@ -1454,13 +1470,12 @@ proc reset_session_state {} {
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
 	.chat.log configure -state disabled
-	set ::agent_provider echo    ;# the new core's default provider
 	# Rebuild exactly as at startup.
 	hello_core                   ;# a daemon can be any age — check the protocol first
 	adopt_initial_buffers
 	show_pane $::dock_pane
 	apply_wrap
-	apply_provider
+	adopt_agent_status           ;# take the new core's provider/auto-accept, don't reset it
 	refresh_all
 }
 
@@ -2257,7 +2272,7 @@ adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
-apply_provider             ;# tell the core our default provider (echo) + name it in the chat header (D30)
+adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {
 	if {$::core_remote} {
 		open_folder $f

@@ -1174,6 +1174,12 @@ policy are now **ops** — `agent.provider.set {name}`, `agent.key.set {key}` /
 auto_accept / key_set) — so a frontend (local **or** remote) drives them identically;
 the API key lives in the **core's** 0600 store (D21) wherever the core runs (run the
 core locally if you won't put a key on a given box — the GUI is the same either way).
+*(Later: the GUI **adopts** this state rather than imposing its own. At startup and
+after an in-place reconnect it READS `agent.status` and mirrors provider +
+auto-accept into the Settings menus (`adopt_agent_status`); it only WRITES
+(`agent.provider.set` / `agent.autoaccept.set`) on an explicit user action. It used
+to push its boot default (`echo`, gated) at attach time, which would silently reset
+the live provider of a daemon another client had already configured.)*
 `agent.send` stays a streaming op, but its events are now **ordinary broadcast
 traffic**: they arrive on the GUI's one channel reader and `dispatch_event` routes
 `agent.*` to the chat — there is no separate in-process streaming sink. The chat is

@@ -406,6 +406,18 @@ set ::agent_auto_accept 1 ; chat_status_update
 ok "status: shows auto-accept mode"   [.chat.status cget -text] "Claude   ·   auto-accept edits"
 set ::agent_auto_accept 0 ; chat_status_update
 
+# adopt_agent_status MIRRORS the core's live settings into the menus without
+# writing back — attaching to an already-configured core must not reset it (D30).
+# The core here has provider=claude (set just above); turn its auto-accept on, then
+# stale the menu vars and confirm adopt pulls the core's truth without a write.
+rio_result agent.autoaccept.set {on 1}
+set ::agent_provider echo ; set ::agent_auto_accept 0
+adopt_agent_status
+ok "adopt: mirrors core provider"     $::agent_provider claude
+ok "adopt: mirrors core auto-accept"  $::agent_auto_accept 1
+ok "adopt: left the core provider be" [rio::agent::provider_name] claude
+rio_result agent.autoaccept.set {on 0} ; adopt_agent_status   ;# back to gated for the key tests below
+
 # Claude selected with no key stored: a turn must surface the face's actionable
 # not_configured error (D26) — it never reaches the network.
 ok "provider: no key stored yet"      [rio::claude::api::configured] 0
