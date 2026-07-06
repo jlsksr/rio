@@ -1708,15 +1708,34 @@ proc refresh_status {} {
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [dict size $::buffers]]
 }
-# Right-click a tab handle: a context menu to move it to the other split group or
-# close it (D33). Rebuilt on each popup so the "Move" label reads "New Split" when
-# there is only one group yet. The menu acts on THIS tab (id, g) regardless of which
-# tab is active.
+# Copy a tab's file path to the clipboard (context menu). A no-op for an untitled
+# buffer, which has no path — the menu disables the item in that case.
+proc tab_copy_path {id} {
+	set path [bufget $id path]
+	if {$path eq ""} return
+	clipboard clear
+	clipboard append $path
+}
+
+# Right-click a tab handle: a context menu of actions ABOUT THIS TAB (id, g) — nothing
+# about other tabs or regions (D33; the UI-design bar: a tab's menu stays scoped to
+# that tab). Rebuilt on each popup so the split item and Copy Path reflect the current
+# state. The split action is the same move whether or not a second group exists yet —
+# the label just reads honestly ("Split with This Tab" when unsplit, "Move to Other
+# Group" once split).
 proc tab_context_menu {g id X Y} {
 	catch {destroy .tabmenu}
 	menu .tabmenu -tearoff 0
-	set dest [expr {[llength $::groups] >= 2 ? "Other Group" : "New Split"}]
-	.tabmenu add command -label "Move to $dest" -command [list move_buffer_to_other $id $g]
+	if {[llength $::groups] >= 2} {
+		.tabmenu add command -label "Move to Other Group" -command [list move_buffer_to_other $id $g]
+	} else {
+		.tabmenu add command -label "Split with This Tab" -command [list move_buffer_to_other $id $g]
+	}
+	if {[bufget $id path] ne ""} {
+		.tabmenu add command -label "Copy Path" -command [list tab_copy_path $id]
+	} else {
+		.tabmenu add command -label "Copy Path" -state disabled
+	}
 	.tabmenu add separator
 	.tabmenu add command -label "Close" -command [list close_tab $id $g]
 	tk_popup .tabmenu $X $Y

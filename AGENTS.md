@@ -1468,13 +1468,16 @@ reused on the next split. New headless suite `rio-gui/tests/split.tcl` covers
 open-in-both, per-group highlight, independent editing, focus switch, move/peel,
 close-to-collapse, and unsplit; the pre-existing suites still pass unchanged.
 
-*(Amendment — tab context menu.)* Right-clicking a tab handle opens a context menu
-with **Move to Other Group** (labelled *New Split* when there is only one group yet)
-and **Close**. It generalises the move to a *specific* tab: `move_buffer_to_other
-{id src}` (which `move_tab_other` now calls for the focused active tab) moves any tab
-— active or background — out of its group, so a non-active tab needn't be activated
-first, and the source keeps its own active tab unless the moved one *was* it.
-`split.tcl` gains the specific-non-active-tab move plus a menu-construction check.
+*(Amendment — tab context menu.)* Right-clicking a tab handle opens a context menu of
+actions **scoped to that tab** (the UI-design bar: a tab's menu holds nothing about
+other tabs — "Close Other Tabs" was rejected on those grounds): the split action
+(**Split with This Tab** when unsplit, **Move to Other Group** once split — the same
+move either way), **Copy Path** (disabled for an untitled buffer), and **Close**. The
+move is generalised to a *specific* tab: `move_buffer_to_other {id src}` (which
+`move_tab_other` now calls for the focused active tab) moves any tab — active or
+background — out of its group, so a non-active tab needn't be activated first, and the
+source keeps its own active tab unless the moved one *was* it. `split.tcl` gains the
+specific-non-active-tab move plus menu-construction / copy-path checks.
 
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
