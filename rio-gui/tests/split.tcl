@@ -116,6 +116,32 @@ ok "unsplit: one group again"      [llength $::groups] 1
 ok "unsplit: scratch folded in"    [llength [gorder [lindex $::groups 0]]] [expr {$before + 1}]
 ok "unsplit: focus valid"          [expr {$::focus in $::groups}] 1
 
+# --- context-menu move: a SPECIFIC, non-active tab (move_buffer_to_other) -----
+set g0 $::focus
+set fileD [tmpbytes "DDD\n"]
+set fileE [tmpbytes "EEE\n"]
+do_open $fileD ; set idD $::cur
+do_open $fileE                           ;# E is now active; D is a background tab in g0
+ok "ctx: D is non-active"          [expr {$idD ne [gcur $g0]}] 1
+move_buffer_to_other $idD $g0            ;# what right-click ▸ Move does to tab D
+ok "ctx: split created"            [llength $::groups] 2
+set gOther [other_group $g0]
+ok "ctx: D left its group"         [expr {[lsearch -exact [gorder $g0] $idD] < 0}] 1
+ok "ctx: D moved to other group"   [expr {[lsearch -exact [gorder $gOther] $idD] >= 0}] 1
+ok "ctx: source kept E active"     [gtext $g0] "EEE\n"
+ok "ctx: follows the moved tab"    $::focus $gOther
+ok "ctx: moved tab is shown"       [gtext $gOther] "DDD\n"
+
+# The menu builds the expected entries (swallow the real popup — it's interactive).
+rename tk_popup _real_tk_popup
+proc tk_popup {args} {}
+tab_context_menu $gOther [gcur $gOther] 0 0
+ok "menu: three entries"           [.tabmenu index end] 2   ;# 0=Move, 1=sep, 2=Close
+ok "menu: move label (2 groups)"   [.tabmenu entrycget 0 -label] "Move to Other Group"
+ok "menu: close label"             [.tabmenu entrycget 2 -label] "Close"
+rename tk_popup ""
+rename _real_tk_popup tk_popup
+
 puts ""
 if {$::fails == 0} { puts "ALL CHECKS PASSED" } else { puts "$::fails CHECK(S) FAILED" }
 exit [expr {$::fails > 0}]

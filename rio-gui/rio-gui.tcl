@@ -1287,14 +1287,13 @@ proc toggle_split {} {
 	if {[llength $::groups] >= 2} { unsplit_editor } else { split_editor }
 }
 
-# Move the focused group's active buffer to the other group (creating the split if
-# needed) and follow it there. If the source group empties, it collapses — so moving
-# the only tab is a harmless no-op round-trip, and peeling one off a multi-tab group
-# gives a real side-by-side (D33: a buffer lives in exactly one group).
-proc move_tab_other {} {
-	set src $::focus
-	set id [gcur $src]
-	if {$id eq ""} return
+# Move buffer `id` out of group `src` into the other group (creating the split if
+# needed) and follow it there. If `src` empties it collapses — so moving the only tab
+# is a harmless no-op round-trip, and peeling one off a multi-tab group gives a real
+# side-by-side (D33: a buffer lives in exactly one group). `id` need not be src's
+# active tab (the context menu can move any tab).
+proc move_buffer_to_other {id src} {
+	if {[lsearch -exact [gorder $src] $id] < 0} return
 	if {[llength $::groups] < 2} { add_group }
 	set dst [other_group $src]
 	gset $src order [lsearch -all -inline -not -exact [gorder $src] $id]
@@ -1303,12 +1302,18 @@ proc move_tab_other {} {
 		set ::groups [lsearch -all -inline -not -exact $::groups $src]
 		destroy_editor_group $src
 		relayout_groups
-	} else {
+	} elseif {[gcur $src] eq $id} {
+		# the moved buffer was src's active tab — pick a new active for src
 		gset $src cur [lindex [gorder $src] 0]
 		load_buffer $src
 	}
 	activate $id $dst
 	prefs_save
+}
+
+# View ▸ Move Tab to Other Group (Ctrl+]): move the focused group's active buffer.
+proc move_tab_other {} {
+	if {[gcur $::focus] ne ""} { move_buffer_to_other [gcur $::focus] $::focus }
 }
 
 # A protocol-native remote file/folder browser (AGENTS.md D29/D30). In remote mode
@@ -1703,10 +1708,25 @@ proc refresh_status {} {
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [dict size $::buffers]]
 }
+# Right-click a tab handle: a context menu to move it to the other split group or
+# close it (D33). Rebuilt on each popup so the "Move" label reads "New Split" when
+# there is only one group yet. The menu acts on THIS tab (id, g) regardless of which
+# tab is active.
+proc tab_context_menu {g id X Y} {
+	catch {destroy .tabmenu}
+	menu .tabmenu -tearoff 0
+	set dest [expr {[llength $::groups] >= 2 ? "Other Group" : "New Split"}]
+	.tabmenu add command -label "Move to $dest" -command [list move_buffer_to_other $id $g]
+	.tabmenu add separator
+	.tabmenu add command -label "Close" -command [list close_tab $id $g]
+	tk_popup .tabmenu $X $Y
+}
+
 # The tab strips (D33): each group draws its OWN tabs into its own strip
 # (.eg<g>.tabs). A tab's group is where it lives, so clicking it activates that buffer
 # IN that group and focuses the group. The focused group's active tab is emphasised
-# with the accent colour, so which pane has focus is visible at a glance.
+# with the accent colour, so which pane has focus is visible at a glance. Right-click
+# a tab for a context menu (move to the other group / close).
 proc refresh_tabs {} {
 	set c $::theme_colors
 	set fg [dict get $c tab.fg]
@@ -1727,6 +1747,10 @@ proc refresh_tabs {} {
 				-font RioUIFont -padx 3
 			bind $f.l <Button-1> [list activate $id $g]
 			bind $f.x <Button-1> [list close_tab $id $g]
+			# Right-click anywhere on the handle (frame, label, ×) for the context menu.
+			foreach w [list $f $f.l $f.x] {
+				bind $w <Button-3> [list tab_context_menu $g $id %X %Y]
+			}
 			pack $f.l -side left ; pack $f.x -side right
 			pack $f -side left -padx 1 -pady 1
 		}
