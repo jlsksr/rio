@@ -48,12 +48,17 @@ proc rio::claude::http::_headers {headers ctypeVar} {
 proc rio::claude::http::stream {req on_chunk on_done} {
 	if {[catch {_ensure_tls} e]} { {*}$on_done 0 $e ; return }
 	set hlist [_headers [dict get $req headers] ctype]
+	# -timeout is the WHOLE-request budget, and a streaming turn (a long
+	# generation, or several tool round-trips) can legitimately take minutes —
+	# too tight a cap severs it mid-stream and mislabels it a network error. Keep
+	# a generous default and let the face override it as data (D26 request_timeout).
+	set timeout [expr {[dict exists $req timeout] ? [dict get $req timeout] : 600000}]
 	if {[catch {
 		::http::geturl [dict get $req url] -method POST \
 			-query [dict get $req body] -type $ctype -headers $hlist \
 			-handler [list rio::claude::http::_on_data $on_chunk] \
 			-command [list rio::claude::http::_on_end $on_done] \
-			-timeout 120000
+			-timeout $timeout
 	} err]} {
 		{*}$on_done 0 $err
 	}

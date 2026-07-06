@@ -794,7 +794,11 @@ notice" pressure is far lower than the rejected OAuth path faced — but the sam
 discipline still applies and is cheap:
 - **Wire specifics are config data, not baked code** — endpoint, model, API
   version live in an overridable config block, so a model bump or version change is
-  a one-line edit, not a rebuild.
+  a one-line edit, not a rebuild. *(Later: the request-timeout budget joined the
+  config too — `request_timeout`, forwarded into the transport request. The whole
+  streaming turn shares one HTTP budget, so the default is deliberately generous
+  (10 min): a long generation or a multi-tool round-trip must not be severed
+  mid-stream and mislabelled a network failure.)*
 - **Failures are classified and actionable, never silent** — distinct,
   plain-language `agent.error` states for *not-configured* ("add a key in Settings ▸
   Claude API key"), *auth rejected — 401/403* ("check your API key"), *rate-limited

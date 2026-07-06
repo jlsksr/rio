@@ -8,10 +8,10 @@
 # inference code is shared, leaving room for other auth strategies later without a
 # rewrite.
 #
-# Resilience (D26): every volatile detail — endpoint, model, API version — lives in
-# `config` as DATA, overridable at runtime, so an upstream change is a one-line
-# edit, not a rebuild. Failures surface as classified agent.error events (from the
-# inference core) with an actionable next step.
+# Resilience (D26): every volatile detail — endpoint, model, API version, and the
+# request-timeout budget — lives in `config` as DATA, overridable at runtime, so an
+# upstream change is a one-line edit, not a rebuild. Failures surface as classified
+# agent.error events (from the inference core) with an actionable next step.
 #
 # Network is a SEAM (transport), so the whole flow is testable offline; the real
 # tcltls transport (transport.tcl) is the default.
@@ -26,6 +26,7 @@ namespace eval rio::claude::api {
 		anthropic_version 2023-06-01 \
 		model             claude-sonnet-4-6 \
 		max_tokens        4096 \
+		request_timeout   600000 \
 		secret_name       claude-api]
 
 	# Network seam: the real tcltls streaming transport (transport.tcl); tests

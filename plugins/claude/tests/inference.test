@@ -223,6 +223,23 @@ test claude-beta-included {anthropic-beta is sent when config sets it} -body {
 	dict get $::seen anthropic-beta
 } -result some-beta-2025
 
+# request_timeout is config-as-data (D26): forwarded into the transport request
+# when set, absent otherwise (so the transport applies its own generous default).
+test claude-timeout-forwarded {a configured request_timeout rides in the transport request} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set c [dict merge $::conf {request_timeout 987000}]
+	rio::claude::infer $c {{role user text hi}} {} {x-api-key K} capture_tp collect_post
+	dict get $::seen timeout
+} -result 987000
+
+test claude-timeout-absent {no timeout key when config sets none} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	rio::claude::infer $::conf {{role user text hi}} {} {x-api-key K} capture_tp collect_post
+	dict exists $::seen timeout
+} -result 0
+
 # --- tool_use streaming (D26 slice 4) ----------------------------------------
 
 # A stream where the model emits a tool_use block (id + name, with its input

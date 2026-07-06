@@ -29,10 +29,11 @@ namespace eval rio::claude {
 }
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
-# messages_url, anthropic_version, anthropic_beta, model, max_tokens, ?system?.
+# messages_url, anthropic_version, anthropic_beta, model, max_tokens, ?system?,
+# ?request_timeout?.
 # `auth` is a {header value} pair the face supplies (x-api-key <key> for the
 # API face). `transport` is `{*}$transport request on_chunk on_done`:
-#   request  = {url, headers, body}
+#   request  = {url, headers, body, ?timeout?}
 #   on_chunk = invoked with each response body chunk (bytes)
 #   on_done  = invoked {status err}: HTTP status (0 = couldn't connect), err text
 # `post` is the agent provider callback. Returns immediately; the turn completes
@@ -54,6 +55,11 @@ proc rio::claude::infer {conf conversation tools auth transport post} {
 		url     [dict get $conf messages_url] \
 		headers $headers \
 		body    [_request_json $conf $conversation $tools]]
+	# Forward the request-timeout budget only when configured; the transport keeps
+	# a generous default otherwise (D26: the wire specifics are data, not code).
+	if {[dict exists $conf request_timeout]} {
+		dict set req timeout [dict get $conf request_timeout]
+	}
 	{*}$transport $req [list rio::claude::_chunk $sid] [list rio::claude::_done $sid]
 	return
 }
