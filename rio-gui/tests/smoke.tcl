@@ -41,10 +41,11 @@ proc diskbytes {path} {
 	set f [open $path rb] ; set b [::read $f] ; close $f ; return $b
 }
 proc widget {} { ::rio_real_t get 1.0 end-1c }
-# The buffer ids currently backed by tab widgets (frames are named .tabs.b$id).
+# The buffer ids currently backed by tab widgets in the focused group's strip
+# (frames are named .eg<g>.tabs.b$id).
 proc tab_ids {} {
 	set ids {}
-	foreach w [winfo children .tabs] { lappend ids [string range [winfo name $w] 1 end] }
+	foreach w [winfo children [gget $::focus tabs]] { lappend ids [string range [winfo name $w] 1 end] }
 	return [lsort $ids]
 }
 
@@ -53,7 +54,7 @@ set p [tmpbytes "alpha\nbeta\n"]
 do_open $p
 # Opening from a fresh launch prunes the empty scratch buffer; the tab bar must
 # not leave an orphan tab behind (regression: a stale × tab crashed on click).
-ok "open: tabs match order"     [tab_ids]                [lsort $::order]
+ok "open: tabs match order"     [tab_ids]                [lsort [gorder $::focus]]
 ok "open: path recorded"        [bufget $::cur path]     $p
 ok "open: not modified"         [bufget $::cur modified] 0
 ok "open: core has file text"   [rio::doc::text $::cur]  "alpha\nbeta\n"
@@ -108,14 +109,14 @@ do_redo
 ok "redo: edit reapplied"       [rio::doc::text $::cur] ">a\nb\n"
 
 # --- multi-buffer / tabs -----------------------------------------------------
-set start [llength $::order]
+set start [llength [gorder $::focus]]
 set f1 [tmpbytes "FILE ONE\n"]
 set f2 [tmpbytes "FILE TWO\n"]
 do_open $f1
 set b1 $::cur
 do_open $f2
 set b2 $::cur
-ok "tabs: two new buffers"      [llength $::order] [expr {$start + 2}]
+ok "tabs: two new buffers"      [llength [gorder $::focus]] [expr {$start + 2}]
 ok "tabs: active is f2"         [bufget $::cur path] $f2
 ok "tabs: distinct buffers"     [expr {$b1 ne $b2}] 1
 
@@ -128,16 +129,16 @@ ok "tabs: f2 holds its own edit" [rio::doc::text $b2] "2FILE TWO\n"
 ok "tabs: switch shows f1"       [widget]            "1FILE ONE\n"
 
 # Reopening an already-open path switches rather than duplicating.
-set n [llength $::order]
+set n [llength [gorder $::focus]]
 do_open $f2
 ok "tabs: reopen switches"      [bufget $::cur path] $f2
-ok "tabs: no duplicate tab"     [llength $::order] $n
+ok "tabs: no duplicate tab"     [llength [gorder $::focus]] $n
 
 # Closing a tab drops it from the core too.
 set victim $::cur
 do_save                                  ;# avoid the discard prompt
 do_close
-ok "tabs: closed tab gone"      [lsearch -exact $::order $victim] -1
+ok "tabs: closed tab gone"      [lsearch -exact [gorder $::focus] $victim] -1
 ok "tabs: buffer freed in core" [rio::doc::exists $victim] 0
 
 # --- error surfacing ---------------------------------------------------------
@@ -149,8 +150,8 @@ set ::captured {}
 proc report_error {message {code ""}} { lappend ::captured [list $code $message] }
 set ghost [rio::doc::new "ghost"]
 rio::core::call buffer.close [dict create buffer $ghost]   ;# core drops it...
-set ::cur $ghost                                           ;# ...but a view still points at it
-set rc [catch {load_buffer} err]
+gset $::focus cur $ghost                                   ;# ...but a group still points at it
+set rc [catch {load_buffer $::focus} err]
 ok "error: load_buffer didn't crash" $rc                            0
 ok "error: failure reported once"    [llength $::captured]          1
 ok "error: code is no_buffer"        [lindex $::captured 0 0]        no_buffer
@@ -228,7 +229,7 @@ show_pane files
 ok "dock: default side is left"   [dict get [pack info .dock] -side] left
 set ::dock_side right ; place_dock
 ok "dock: moved to the right"     [dict get [pack info .dock] -side] right
-ok "dock: editor still expands"   [dict get [pack info .ed] -expand] 1
+ok "dock: editor still expands"   [dict get [pack info .groups] -expand] 1
 set ::dock_side left ; place_dock
 ok "dock: back to the left"       [dict get [pack info .dock] -side] left
 
@@ -243,14 +244,14 @@ ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
 # (gridscroll) when no line overflows, and wrapping drops it (no h-scroll wrapped).
 # The auto-hide logic is driven directly with fractions: in a withdrawn window the
 # text never reports real overflow, so we can't lean on live geometry here.
-proc hsb_shown {} { expr {[lsearch -exact [grid slaves .ed] .ed.hsb] >= 0} }
-ok "editor: vsb wired to text"   [::rio_real_t cget -yscrollcommand] {.ed.vsb set}
-ok "editor: hsb auto-hides"      [::rio_real_t cget -xscrollcommand] {gridscroll .ed.hsb}
+proc hsb_shown {} { expr {[lsearch -exact [grid slaves .eg0] .eg0.hsb] >= 0} }
+ok "editor: vsb wired to text"   [::rio_real_t cget -yscrollcommand] {.eg0.vsb set}
+ok "editor: hsb auto-hides"      [::rio_real_t cget -xscrollcommand] {gridscroll .eg0.hsb}
 ok "editor: default no wrap"     [::rio_real_t cget -wrap]           none
-gridscroll .ed.hsb 0.0 0.5 ; ok "editor: hsb shown when a line overflows" [hsb_shown] 1
-gridscroll .ed.hsb 0.0 1.0 ; ok "editor: hsb hidden when text fits"       [hsb_shown] 0
+gridscroll .eg0.hsb 0.0 0.5 ; ok "editor: hsb shown when a line overflows" [hsb_shown] 1
+gridscroll .eg0.hsb 0.0 1.0 ; ok "editor: hsb hidden when text fits"       [hsb_shown] 0
 # Re-show it, then wrapping must hide it regardless.
-gridscroll .ed.hsb 0.0 0.5
+gridscroll .eg0.hsb 0.0 0.5
 set ::wrap_lines 1 ; apply_wrap
 ok "editor: wrap word applied"        [::rio_real_t cget -wrap] word
 ok "editor: hsb hidden when wrapping" [hsb_shown] 0
@@ -457,7 +458,7 @@ proc cmp_rows {t} { return [lindex [split [$t index end-1c] .] 0] }
 
 compare_open "a\nb\nc\nd" "a\nB\nc\nd\ne" "left" "right"
 ok "compare: shown flag set"        $::compare_shown 1
-ok "compare: center shows .cmp"     [list [center_shows .cmp] [center_shows .ed]] {1 0}
+ok "compare: center shows .cmp"     [list [center_shows .cmp] [center_shows .groups]] {1 0}
 ok "compare: headers set"           [list [.cmp.l.hdr cget -text] [.cmp.r.hdr cget -text]] {left right}
 # Equal-length panes (fillers) so the lines stay aligned and scroll in lockstep.
 ok "compare: panes equal length"    [expr {[cmp_rows .cmp.l.t] == [cmp_rows .cmp.r.t]}] 1
@@ -490,7 +491,7 @@ ok "compare: scroll synced"         [expr {abs([lindex [.cmp.l.t yview] 0] - [li
 ok "compare: View menu has open"    [expr {![catch {.m.view index "Compare With File…"}]}] 1
 ok "compare: View menu has close"   [expr {![catch {.m.view index "Close Compare"}]}] 1
 compare_close
-ok "compare: close restores editor" [list [center_shows .ed] [center_shows .cmp]] {1 0}
+ok "compare: close restores editor" [list [center_shows .groups] [center_shows .cmp]] {1 0}
 ok "compare: close clears flag"     $::compare_shown 0
 # Agent-proposal routing: a *complex* proposed edit opens the compare view instead
 # of dumping the whole diff inline; a small one stays inline; the Settings toggle
@@ -535,7 +536,7 @@ do_theme solarized-dark
 ok "theme: dark editor bg applied"   [::rio_real_t cget -background]        "#002b36"
 ok "theme: dark cursor applied"      [::rio_real_t cget -insertbackground]  "#93a1a1"
 ok "theme: dark status bg applied"   [.status cget -background]             "#073642"
-ok "theme: dark tab bar applied"     [.tabs cget -background]               "#00212b"
+ok "theme: dark tab bar applied"     [[gget $::focus tabs] cget -background] "#00212b"
 ok "theme: dark chat bg applied"     [.chat.log cget -background]           "#002b36"
 
 do_theme acme

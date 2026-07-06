@@ -36,18 +36,18 @@ proc slurp {path} { set f [open $path r] ; set s [::read $f] ; close $f ; return
 # The file paths of the currently-open tabs, in tab order.
 proc open_paths {} {
 	set out {}
-	foreach id $::order { lappend out [bufget $id path] }
+	foreach id [gorder $::focus] { lappend out [bufget $id path] }
 	return $out
 }
 # The buffer id whose path matches, or "" — tabs are keyed by id, not path.
 proc row_id {path} {
-	foreach id $::order { if {[bufget $id path] eq $path} { return $id } }
+	foreach id [gorder $::focus] { if {[bufget $id path] eq $path} { return $id } }
 	return ""
 }
 # Ids of the file-backed tabs (skip the untitled scratch, path "").
 proc open_file_ids {} {
 	set out {}
-	foreach id $::order { if {[bufget $id path] ne ""} { lappend out $id } }
+	foreach id [gorder $::focus] { if {[bufget $id path] ne ""} { lappend out $id } }
 	return $out
 }
 

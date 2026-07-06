@@ -58,7 +58,7 @@ ok "remote: agent chat available" $::chat_shown 1
 # buffer.list (over the wire) and activated the first — the server's default buffer.
 ok "adopt: a buffer is active"    [expr {$::cur ne ""}] 1
 ok "adopt: cur is server default" $::cur $rio::ops::default
-ok "adopt: one tab to start"      [llength $::order] 1
+ok "adopt: one tab to start"      [llength [gorder $::focus]] 1
 
 # --- open a server-side file over the socket ---------------------------------
 set p [tmpbytes "alpha\nbeta\n"]
@@ -67,7 +67,7 @@ ok "open: path recorded"          [bufget $::cur path] $p
 ok "open: widget mirrors file"    [widget]             "alpha\nbeta\n"
 ok "open: server core has text"   [srvtext $::cur]     "alpha\nbeta\n"
 # The empty scratch buffer was pruned over the socket (buffer.text + buffer.close).
-ok "open: scratch pruned"         [llength $::order]   1
+ok "open: scratch pruned"         [llength [gorder $::focus]]   1
 
 # --- edit through the dumb-view proxy: the change round-trips the wire --------
 # .ed.t insert -> buffer.replace request -> the server edits + broadcasts
@@ -113,7 +113,7 @@ ok "compare: closed"              $::compare_shown 0
 # --- a second tab + buffer.list count stays in step --------------------------
 set q [tmpbytes "two\n"]
 do_open $q
-ok "tabs: second file opened"     [llength $::order] 2
+ok "tabs: second file opened"     [llength [gorder $::focus]] 2
 ok "tabs: server has both bufs" \
 	[expr {[llength [dict get [rio_call buffer.list {}] result buffers]] == 2}] 1
 file delete -force $q

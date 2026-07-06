@@ -23,6 +23,9 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
   buffers as tabs, scrollbars, and optional line wrap.
+- **Split editor** — show **two buffers side by side** in independent editor groups,
+  each with its own tabs, from the View menu (`Ctrl+\` to split, `Ctrl+]` to move a
+  tab across). Drag the divider to resize; closing a group's last tab unsplits.
 - **Files & git** — open a project folder and browse it in a side pane; view
   **git status and diffs** for the open repo (read-only for now). Files and git
   share one dockable, resizable side panel.

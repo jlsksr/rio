@@ -34,7 +34,7 @@ ok "pipe: core not embedded"      [info commands rio::doc::text] ""
 ok "pipe: wire encoder present"   [expr {[info commands rio::wire::str] ne ""}] 1
 ok "pipe: marked local"           $::core_remote 0
 ok "pipe: channel open"           [expr {[info exists ::core_chan] && $::core_chan in [chan names]}] 1
-ok "pipe: a buffer adopted"       [expr {$::cur ne "" && [llength $::order] == 1}] 1
+ok "pipe: a buffer adopted"       [expr {$::cur ne "" && [llength [gorder $::focus]] == 1}] 1
 ok "pipe: agent shown"            $::chat_shown 1
 
 # --- open / edit / save, all over the pipe -----------------------------------

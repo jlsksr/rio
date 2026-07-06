@@ -1016,6 +1016,11 @@ diff surface) are later enrichments; so is the D14 narrow-tier fallback from
 side-by-side to a unified diff. This first cut is the simplest honest one,
 matching how the file pane (O2) was scoped.
 
+*(Amendment — the "tabbed second editor group" deferred above is now realized by
+**D33**; that split is the general editor-group mechanism. The compare view stays
+its own bespoke read-only surface for now, but D33 notes the path to eventually
+folding it into a read-only buffer in the second group.)*
+
 **Conversation integrity — sealing abandoned tool calls.** Surfacing proposals
 in the compare view made it easy to *abandon* one — type a new message instead of
 deciding — which exposed a latent loop bug (D26): the assistant `tool_use` turn is
@@ -1394,6 +1399,84 @@ GUI side, `hl_select` records `::hl_lang` beside `::hl_scan` and `refresh_status
 The `langs` introspection dict (previously unused) is keyed by this name. Tests: `html.test`
 gains `lang_for_path-*`; `highlight.tcl` asserts the status bar shows `HTML` for an HTML file
 and `plain text` for a `.txt`.
+
+---
+
+### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
+
+Realizes the editor-center split that D13 reserved ("splittable into two editor
+groups for side-by-side / diff viewing") and that D28 deferred as the "tabbed
+second editor group". A user can show **two editable buffers side by side**, each
+its own tab strip — not the read-only compare overlay (D28), but ordinary tabs
+opened next to each other, VSCode-style.
+
+**The whole feature is frontend-local — the core does not change.** Per D22, "which
+buffer is active" is a frontend concept; the core already holds N independent
+buffers addressed by id, with no opinion about how many the frontend displays at
+once. So a split is a pure view concern (D3): edits, saves, highlighting inputs and
+`buffer.changed` events all keep flowing over the existing protocol by buffer id.
+No op, no core file, no plugin is touched — the same reason the file pane and
+compare view stayed GUI-side.
+
+**The mechanism — an editor *group* replaces the single-editor singleton.** The GUI
+today hard-codes one editor: one text widget (`::rio_real_t`/`.ed.t`), one active
+buffer (`::cur`), one highlight line-cache. These collapse into a **group** record
+`{widget, cur, hlcache}`; the GUI holds a list of **at most two** groups plus a
+`::focused_group`. Editor procs (`activate`, `load_buffer`, cursor/yview stash,
+save, modified, the `hl_*` cache, and the `buffer.changed` redraw) take a group and
+default to the focused one. This *removes* the three globals rather than adding a
+parallel `.ed2` — the anti-bloat discipline: generalize the singleton, don't
+duplicate it. The center becomes a `panedwindow` holding one or two groups;
+`place_dock` (which already swaps `.ed`↔`.cmp` for D28) grows the second seam.
+**Per-group tab strips** (chosen over a shared bar): a tab lives in exactly one
+group, so ownership is always visible; a **Move to other side** action shifts it.
+New View-menu verbs: **Split editor**, **Unsplit**. Focus follows a click into a
+group; the status bar and title read the focused group. `buffer.changed` routes to
+whichever group shows the changed id (an agent edit can land in a background group);
+the redraw loops over groups, so it already generalizes if a buffer is ever shown in
+two at once.
+
+**Scope — v1 is exactly two groups**, matching D13's "two editor groups" (not
+N-way tiling). A **buffer belongs to exactly one group** at a time (per-buffer view
+state — cursor/viewport — stays keyed by buffer, not by group·buffer); showing the
+*same* file in both groups is deferred with the per-group view-state it would need.
+Split layout is **not persisted** across restarts in v1 (each launch opens a single
+group) — one less D31 prefs-schema change; sticky layout can come later if wanted.
+
+**Landed in two steps.** Phase 2 is a **behaviour-preserving refactor**: it introduces
+the group abstraction (`::grp` records: `w`, `path`, `frame`, `tabs`, `cur`, `order`,
+the per-group `hl_*` cache), a `make_editor_group` factory that builds each group's
+widget + scrollbars + edit-proxy + key/focus bindings, and routes every editor proc
+(`activate`, `load_buffer`, `apply_change`, the `hl_*` pass, wrap, theme,
+buffer.changed) through a group id — while instantiating a **single** group so the
+behaviour is byte-identical and all suites pass unchanged. `::cur` survives as a
+mirror of the focused group's active buffer (keeping the focused-only call sites —
+save/undo/status/proxy — terse).
+
+Phase 3 makes it visible. The center is a **`.groups` panedwindow** (horizontal, a
+draggable sash between the two panes); each group's **tab strip is gridded inside its
+own frame** (`.eg<g>.tabs`) rather than a single global bar, so a tab's group is where
+it lives. The focused group's active tab is tinted with the **accent** role, so which
+pane has focus reads at a glance. Actions (View menu + keys): **Split Editor**
+(`Ctrl+\`) opens a second group with a fresh scratch and focuses it; **Move Tab to
+Other Group** (`Ctrl+]`) peels the focused buffer across, creating the split if needed;
+**Unsplit** folds the second group's tabs back into the first. A group that empties —
+via close or move — **collapses** into the other (the sole group instead keeps a
+scratch), and a reconnect (`reset_session_state`) collapses back to one group before
+adopting the new core. Group ids are the free slot in `{0,1}`, so a collapsed slot is
+reused on the next split. New headless suite `rio-gui/tests/split.tcl` covers
+open-in-both, per-group highlight, independent editing, focus switch, move/peel,
+close-to-collapse, and unsplit; the pre-existing suites still pass unchanged.
+
+**Deferred (noted):** folding the D28 compare view into this mechanism — once real
+groups exist, "compare" could become *open the proposed text as a read-only buffer
+in the other group*, retiring bespoke `.cmp` code. Left out of v1 to keep the change
+focused; it is the direction that reduces total code, not adds to it.
+
+**Why:** delivers a long-reserved, genuinely useful capability entirely on the
+existing seam — core frozen, GUI doing what a view is meant to do — and pays down
+the single-editor assumption by turning it into a small explicit abstraction that
+the eventual compare-view consolidation can reuse.
 
 ---
 
