@@ -1,12 +1,19 @@
 # rio
 
-A small, cross-platform IDE: a fast, no-nonsense text editor with first-class
-git and AI-agent integration — a desktop **GUI** today, a **terminal** frontend
-planned, both sharing one UI-less core.
+A small, cross-platform IDE, **written from scratch** in Tcl/Tk: a fast,
+no-nonsense text editor with first-class git and AI-agent integration — a desktop
+**GUI** today, a **terminal** frontend planned, both sharing one UI-less core.
 
-> **North star:** *VSCode's quality, with 90s productivity-software discipline,
-> in a fraction of the code, written in Tcl/Tk.* A lightweight VSCode in spirit —
-> not a clone, a distillation. Small feature set, small readable codebase, fast.
+rio aims for the **sweet spot between Windows 2000-era productivity software and a
+modern IDE like Visual Studio Code**: the instant start, plain menus, and
+fits-in-your-head restraint of a desktop app from the era that booted before you
+blinked — carrying the VSCode ideas worth keeping (split editing, side-by-side
+diffs, syntax highlighting, a propose-and-approve agent) without the Electron, the
+telemetry, or the plugin bazaar.
+
+> **North star:** *VSCode's quality, with Windows 2000-era productivity-software
+> discipline, in a fraction of the code, written from scratch in Tcl/Tk.* Not a
+> clone — a distillation. Small feature set, small readable codebase, fast.
 
 ## Status
 
@@ -24,8 +31,9 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
   buffers as tabs, scrollbars, and optional line wrap.
 - **Split editor** — show **two buffers side by side** in independent editor groups,
-  each with its own tabs, from the View menu (`Ctrl+\` to split, `Ctrl+]` to move a
-  tab across). Drag the divider to resize; closing a group's last tab unsplits.
+  each with its own tabs (`Ctrl+\` to split). **Drag a tab from one group to the
+  other**, or move it from the View menu (`Ctrl+]`) or a tab's right-click menu. Drag
+  the divider to resize; closing a group's last tab unsplits.
 - **Files & git** — open a project folder and browse it in a side pane; view
   **git status and diffs** for the open repo (read-only for now). Files and git
   share one dockable, resizable side panel.
