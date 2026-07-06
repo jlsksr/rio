@@ -45,8 +45,8 @@ rio::agent::tools::_def buffer_list read buffer.list \
 	{{"type":"object","properties":{}}}
 
 rio::agent::tools::_def buffer_text read buffer.text \
-	"Return the current (possibly unsaved) text of an open buffer. Pass a buffer id from buffer_list; omit it for the active buffer." \
-	{{"type":"object","properties":{"buffer":{"type":"string","description":"Buffer id from buffer_list (omit for the active buffer)."}}}}
+	"Return the current (possibly unsaved) text of an open buffer. Always pass a buffer id from buffer_list — there is no notion of an \"active\" buffer here." \
+	{{"type":"object","properties":{"buffer":{"type":"string","description":"Buffer id from buffer_list."}},"required":["buffer"]}}
 
 rio::agent::tools::_def propose_edit write "" \
 	"Propose an edit to a project file: replace old_string with new_string. old_string must match EXACTLY ONCE in the file — include enough surrounding context to be unique. The user reviews a diff and approves or rejects before anything changes." \
