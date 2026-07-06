@@ -1606,11 +1606,11 @@ proc apply_theme {theme} {
 		-background [dict get $c ui.bg] -spacing1 4 -spacing3 2
 	.chat.log tag configure you-label   -font RioUIFont -foreground [dict get $c chat.fg] \
 		-background [dict get $c editor.selection] -spacing1 4 -spacing3 2
-	.chat.log tag configure error-label -font RioUIFont -foreground "#cc0000"
+	.chat.log tag configure error-label -font RioUIFont -foreground [dict get $c error]
 	.chat.log tag configure tool        -font RioUIFont -foreground [dict get $c gutter.fg]
-	.chat.log tag configure tool-error  -font RioUIFont -foreground "#cc0000"
-	.chat.log tag configure diff-add    -font RioUIFont -foreground "#118811"
-	.chat.log tag configure diff-del    -font RioUIFont -foreground "#cc0000"
+	.chat.log tag configure tool-error  -font RioUIFont -foreground [dict get $c error]
+	.chat.log tag configure diff-add    -font RioUIFont -foreground [dict get $c diff.added]
+	.chat.log tag configure diff-del    -font RioUIFont -foreground [dict get $c diff.removed]
 	.chat.approve configure -background [dict get $c chat.bg]
 	.chat.approve.lbl configure -font RioUIFont \
 		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
@@ -1629,8 +1629,8 @@ proc apply_theme {theme} {
 	foreach w {.cmp.l.t .cmp.r.t} {
 		$w configure -font RioEditorFont \
 			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
-		$w tag configure del    -background "#ffdddd" -foreground "#cc0000"
-		$w tag configure add    -background "#ddffdd" -foreground "#118811"
+		$w tag configure del    -background [dict get $c diff.removed.bg] -foreground [dict get $c diff.removed]
+		$w tag configure add    -background [dict get $c diff.added.bg] -foreground [dict get $c diff.added]
 		$w tag configure filler -background [dict get $c ui.bg]
 	}
 	.cmp.sb configure -background [dict get $c ui.bg]

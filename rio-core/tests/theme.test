@@ -13,6 +13,17 @@ test theme-default-vocabulary {the default carries colour roles and named fonts}
 		[dict get $t fonts RioEditorFont family] [dict get $t fonts RioEditorFont size]
 } -result {white black monospace 12}
 
+test theme-default-diff-roles {the default vocabulary includes the error + diff bands} -body {
+	set c [dict get [rio::theme::default] colors]
+	list err=[dict get $c error] add=[dict get $c diff.added] rm=[dict get $c diff.removed] \
+		addbg=[dict get $c diff.added.bg] rmbg=[dict get $c diff.removed.bg]
+} -result {err=#cc0000 add=#118811 rm=#cc0000 addbg=#ddffdd rmbg=#ffdddd}
+
+test theme-shipped-overrides-diff-roles {a dark theme can retint the diff bands} -body {
+	set c [dict get [rio::theme::load solarized-dark] colors]
+	list add=[dict get $c diff.added] rmbg=[dict get $c diff.removed.bg]
+} -result {add=#859900 rmbg=#3a1f28}
+
 test theme-from-conf {a parsed conf becomes a partial {base colors fonts}} -body {
 	set conf [rio::conf::parse \
 		"base = default\n\[colors\]\neditor.bg = #002b36\n\[fonts.RioEditorFont\]\nsize = 14"]

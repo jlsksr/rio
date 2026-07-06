@@ -667,6 +667,14 @@ per-section typography and instant, restart-free changes; refusing to execute
 theme files reuses D21's security/robustness stance; a built-in default keeps the
 look people love without a theme file present.
 
+*(Later: the chat's **error** text and the **diff/compare bands** joined the role
+vocabulary — `error`, `diff.added`, `diff.removed`, plus the compare pane's
+`diff.added.bg` / `diff.removed.bg`. They had been hardcoded pastels in the
+applier, which glared on a dark surface — exactly the D24 anti-pattern. Now they
+default to the old light values (so light themes are unchanged) and
+`solarized-dark` retints them from its own palette; a theme that omits them
+inherits the defaults, same as the `syntax.*` roles under D32.)*
+
 **Implemented (core, data side).** The role table is served as data so the GUI
 applier (and a future TUI) carry no theme-loading logic. `rio::conf` parses the
 shared `[section]`/`key = value` format (D21) — parsed, never executed.

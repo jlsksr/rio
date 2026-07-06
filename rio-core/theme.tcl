@@ -27,7 +27,11 @@ namespace eval rio::theme {
 # Fonts are NAMED fonts the GUI references by name, so a size change is live. The
 # `syntax.*` roles colour the highlighter token types (D32): they live in the same
 # role table (data) so themes harmonise highlighting to their palette, and any
-# theme predating D32 inherits this default set rather than showing no colour.
+# theme predating D32 inherits this default set rather than showing no colour. The
+# `error` and `diff.*` roles colour the chat's error text and edit diffs and the
+# compare pane's add/removed bands: they belong to the vocabulary for the same
+# reason — a dark theme can retint them instead of being stuck with light pastels
+# (a theme that omits them inherits these defaults).
 proc rio::theme::default {} {
 	return [dict create \
 		colors [dict create \
@@ -45,6 +49,11 @@ proc rio::theme::default {} {
 			chat.bg          white \
 			chat.fg          black \
 			accent           #1a73e8 \
+			error            #cc0000 \
+			diff.added       #118811 \
+			diff.removed     #cc0000 \
+			diff.added.bg    #ddffdd \
+			diff.removed.bg  #ffdddd \
 			syntax.comment   #6a737d \
 			syntax.string    #032f62 \
 			syntax.number    #005cc5 \

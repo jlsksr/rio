@@ -19,6 +19,15 @@ chat.bg          = #002b36
 chat.fg          = #839496
 accent           = #268bd2
 
+# Error text and diff/compare bands: Solarized's red and green, with the compare
+# bands tinted from the dark base so a changed line reads as a band without the
+# light pastels the default table carries (which would glare on this dark surface).
+error            = #dc322f
+diff.added       = #859900
+diff.removed     = #dc322f
+diff.added.bg    = #0a3b30
+diff.removed.bg  = #3a1f28
+
 # Syntax highlighting (D32): Solarized's accent hues on the dark base content tone.
 syntax.comment   = #586e75
 syntax.string    = #2aa198

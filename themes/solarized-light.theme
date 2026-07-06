@@ -17,6 +17,14 @@ chat.bg          = #fdf6e3
 chat.fg          = #657b83
 accent           = #268bd2
 
+# Error text and diff/compare bands: Solarized's red and green over pale tints of
+# the cream base, so the pair harmonises with the dark theme's Solarized accents.
+error            = #dc322f
+diff.added       = #859900
+diff.removed     = #dc322f
+diff.added.bg    = #e6ecd0
+diff.removed.bg  = #f6ddd4
+
 # Syntax highlighting (D32): the same Solarized accents on the light base tone.
 syntax.comment   = #93a1a1
 syntax.string    = #2aa198
