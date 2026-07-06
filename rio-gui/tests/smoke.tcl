@@ -41,10 +41,11 @@ proc diskbytes {path} {
 	set f [open $path rb] ; set b [::read $f] ; close $f ; return $b
 }
 proc widget {} { ::rio_real_t get 1.0 end-1c }
-# The buffer ids currently backed by tab widgets (frames are named .tabs.b$id).
+# The buffer ids currently backed by tab widgets in the focused group's strip
+# (frames are named .eg<g>.tabs.b$id).
 proc tab_ids {} {
 	set ids {}
-	foreach w [winfo children .tabs] { lappend ids [string range [winfo name $w] 1 end] }
+	foreach w [winfo children [gget $::focus tabs]] { lappend ids [string range [winfo name $w] 1 end] }
 	return [lsort $ids]
 }
 
@@ -535,7 +536,7 @@ do_theme solarized-dark
 ok "theme: dark editor bg applied"   [::rio_real_t cget -background]        "#002b36"
 ok "theme: dark cursor applied"      [::rio_real_t cget -insertbackground]  "#93a1a1"
 ok "theme: dark status bg applied"   [.status cget -background]             "#073642"
-ok "theme: dark tab bar applied"     [.tabs cget -background]               "#00212b"
+ok "theme: dark tab bar applied"     [[gget $::focus tabs] cget -background] "#00212b"
 ok "theme: dark chat bg applied"     [.chat.log cget -background]           "#002b36"
 
 do_theme acme

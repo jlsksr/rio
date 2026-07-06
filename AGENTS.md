@@ -1443,16 +1443,30 @@ state — cursor/viewport — stays keyed by buffer, not by group·buffer); show
 Split layout is **not persisted** across restarts in v1 (each launch opens a single
 group) — one less D31 prefs-schema change; sticky layout can come later if wanted.
 
-**Landed in two steps.** Phase 2 (this commit) is a **behaviour-preserving refactor**:
-it introduces the group abstraction (`::grp` records: `w`, `path`, `frame`, `cur`,
-`order`, the per-group `hl_*` cache), a `make_editor_group` factory that builds each
-group's widget + scrollbars + edit-proxy + key/focus bindings, and routes every editor
-proc (`activate`, `load_buffer`, `apply_change`, the `hl_*` pass, wrap, theme,
+**Landed in two steps.** Phase 2 is a **behaviour-preserving refactor**: it introduces
+the group abstraction (`::grp` records: `w`, `path`, `frame`, `tabs`, `cur`, `order`,
+the per-group `hl_*` cache), a `make_editor_group` factory that builds each group's
+widget + scrollbars + edit-proxy + key/focus bindings, and routes every editor proc
+(`activate`, `load_buffer`, `apply_change`, the `hl_*` pass, wrap, theme,
 buffer.changed) through a group id — while instantiating a **single** group so the
 behaviour is byte-identical and all suites pass unchanged. `::cur` survives as a
 mirror of the focused group's active buffer (keeping the focused-only call sites —
-save/undo/status/proxy — terse). Phase 3 adds the second group, the split/unsplit
-layout, per-group tab strips, and the move-tab action.
+save/undo/status/proxy — terse).
+
+Phase 3 makes it visible. The center is a **`.groups` panedwindow** (horizontal, a
+draggable sash between the two panes); each group's **tab strip is gridded inside its
+own frame** (`.eg<g>.tabs`) rather than a single global bar, so a tab's group is where
+it lives. The focused group's active tab is tinted with the **accent** role, so which
+pane has focus reads at a glance. Actions (View menu + keys): **Split Editor**
+(`Ctrl+\`) opens a second group with a fresh scratch and focuses it; **Move Tab to
+Other Group** (`Ctrl+]`) peels the focused buffer across, creating the split if needed;
+**Unsplit** folds the second group's tabs back into the first. A group that empties —
+via close or move — **collapses** into the other (the sole group instead keeps a
+scratch), and a reconnect (`reset_session_state`) collapses back to one group before
+adopting the new core. Group ids are the free slot in `{0,1}`, so a collapsed slot is
+reused on the next split. New headless suite `rio-gui/tests/split.tcl` covers
+open-in-both, per-group highlight, independent editing, focus switch, move/peel,
+close-to-collapse, and unsplit; the pre-existing suites still pass unchanged.
 
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer

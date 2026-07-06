@@ -680,13 +680,14 @@ proc place_dock {} {
 	prefs_save
 }
 
-# Pack the editor groups left-to-right inside the .groups container. In v1 there are
-# at most two; each frame -expands so they share the width evenly. Called after a
-# split/unsplit changes ::groups (phase 3); with one group it just fills the center.
+# Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are
+# at most two; each pane -stretches so they share the width, and the panedwindow gives
+# a draggable divider between them. Called after a split/unsplit changes ::groups; with
+# one group it just fills the center.
 proc relayout_groups {} {
-	foreach child [pack slaves .groups] { pack forget $child }
+	foreach p [.groups panes] { .groups forget $p }
 	foreach g $::groups {
-		pack [gget $g frame] -side left -fill both -expand 1
+		.groups add [gget $g frame] -stretch always -minsize 120
 	}
 }
 
@@ -1184,9 +1185,9 @@ proc do_redo {} {
 	if {$res ne "" && [dict get $res changed]} { mark_modified 1 }
 }
 
-# Close the active buffer of the focused group; guard unsaved changes. Keep at least
-# one tab in the group by minting a scratch when it would otherwise empty (phase 3
-# will instead collapse an emptied second group).
+# Close the active buffer of the focused group; guard unsaved changes. If this empties
+# one of two groups, the group collapses (unsplit); the sole group instead keeps at
+# least one tab by minting a scratch (D33).
 proc do_close {} {
 	if {![maybe_discard]} return
 	set g $::focus
@@ -1195,15 +1196,16 @@ proc do_close {} {
 	close_buffer $victim
 	set order [gorder $g]
 	if {![llength $order]} {
-		do_new
+		if {[llength $::groups] >= 2} { collapse_group $g } else { do_new }
 	} else {
 		set ni [expr {$idx >= [llength $order] ? [llength $order] - 1 : $idx}]
 		activate [lindex $order $ni] $g
 	}
 	session_save   ;# the open-file set changed — record it for resume (D31)
 }
-# Close any tab (the × button): focus its group first so a discard prompt is in context.
-proc close_tab {id} { activate $id ; do_close }
+# Close any tab (the × button): activate it in its group first so a discard prompt is
+# in context and do_close acts on the right group.
+proc close_tab {id {g ""}} { activate $id $g ; do_close }
 
 proc cycle {dir} {
 	set g $::focus
@@ -1211,6 +1213,102 @@ proc cycle {dir} {
 	if {[llength $order] < 2} return
 	set i [lsearch -exact $order $::cur]
 	activate [lindex $order [expr {($i + $dir) % [llength $order]}]] $g
+}
+
+# ---------------------------------------------------------------------------
+# Editor split (AGENTS.md D33): create/destroy the second group and move tabs across.
+# v1 is at most two groups; ids are the free slot in {0,1} so a collapsed group's slot
+# is reused on the next split.
+# ---------------------------------------------------------------------------
+# The other group (v1: at most two), or "" if `g` is the only one.
+proc other_group {g} {
+	foreach o $::groups { if {$o ne $g} { return $o } }
+	return ""
+}
+
+# Tear down group `g`'s widgets and its leftover proxy proc, and drop it from ::grp.
+# (Destroying the frame removes the real widget command; the proxy at .eg<g>.t is a
+# plain proc, so it must be renamed away or the slot can't be rebuilt on a re-split.)
+proc destroy_editor_group {g} {
+	set path [gget $g path] ; set w [gw $g]
+	catch {destroy [gget $g frame]}
+	catch {rename $path ""}
+	catch {rename $w ""}
+	dict unset ::grp $g
+}
+
+# Bring up an empty second editor group in the free slot, styled and wrap-synced to
+# match. Returns its id. Callers give it a buffer (split_editor) or move one in.
+proc add_group {} {
+	set g [expr {[lsearch -exact $::groups 0] < 0 ? 0 : 1}]
+	make_editor_group $g
+	lappend ::groups $g
+	relayout_groups
+	restyle_group $g
+	apply_wrap        ;# sync the new group's wrap mode + horizontal scrollbar
+	return $g
+}
+
+# Fold group `g` into the other one: its tabs move over (appended), its widgets are
+# destroyed, and focus lands on the survivor. Never collapses the sole group.
+proc collapse_group {g} {
+	set o [other_group $g]
+	if {$o eq ""} return
+	foreach id [gorder $g] { gset $o order [linsert [gorder $o] end $id] }
+	set ::groups [lsearch -all -inline -not -exact $::groups $g]
+	destroy_editor_group $g
+	relayout_groups
+	set ::focus $o
+	set ::cur [gcur $o]
+	refresh_all
+}
+
+# Split the editor: open a second group with a fresh scratch buffer and focus it. A
+# no-op if already split. (Use Move Tab to Other Group to send an open file across.)
+proc split_editor {} {
+	if {[llength $::groups] >= 2} return
+	set g [add_group]
+	set res [rio_result buffer.new {}]
+	if {$res eq ""} { collapse_group $g ; return }
+	register_buffer [dict get $res buffer] "" {} $g
+	activate [dict get $res buffer] $g
+	prefs_save
+}
+
+# Unsplit: fold the second group back into the first.
+proc unsplit_editor {} {
+	if {[llength $::groups] < 2} return
+	collapse_group [lindex $::groups end]
+	prefs_save
+}
+
+# View ▸ Split / Unsplit toggle (Ctrl+\).
+proc toggle_split {} {
+	if {[llength $::groups] >= 2} { unsplit_editor } else { split_editor }
+}
+
+# Move the focused group's active buffer to the other group (creating the split if
+# needed) and follow it there. If the source group empties, it collapses — so moving
+# the only tab is a harmless no-op round-trip, and peeling one off a multi-tab group
+# gives a real side-by-side (D33: a buffer lives in exactly one group).
+proc move_tab_other {} {
+	set src $::focus
+	set id [gcur $src]
+	if {$id eq ""} return
+	if {[llength $::groups] < 2} { add_group }
+	set dst [other_group $src]
+	gset $src order [lsearch -all -inline -not -exact [gorder $src] $id]
+	gset $dst order [linsert [gorder $dst] end $id]
+	if {![llength [gorder $src]]} {
+		set ::groups [lsearch -all -inline -not -exact $::groups $src]
+		destroy_editor_group $src
+		relayout_groups
+	} else {
+		gset $src cur [lindex [gorder $src] 0]
+		load_buffer $src
+	}
+	activate $id $dst
+	prefs_save
 }
 
 # A protocol-native remote file/folder browser (AGENTS.md D29/D30). In remote mode
@@ -1542,14 +1640,18 @@ proc reset_session_state {} {
 	catch {pack forget .chat.approve}
 	set ::pending_turn ""
 	set ::chat_turn_open 0
-	# Forget the old buffers/tabs and blank every editor group; the new core has its
-	# own. (Phase 3 will also collapse a split back to a single group here.)
-	set ::buffers {}
-	foreach g $::groups {
-		gset $g order {} ; gset $g cur ""
-		[gw $g] delete 1.0 end
+	# Collapse any split back to a single group — the new core is a fresh session — then
+	# forget the old buffers/tabs and blank the surviving group; the new core has its own.
+	while {[llength $::groups] > 1} {
+		set g [lindex $::groups end]
+		set ::groups [lrange $::groups 0 end-1]
+		destroy_editor_group $g
 	}
+	relayout_groups
 	set ::focus [lindex $::groups 0]
+	set ::buffers {}
+	gset $::focus order {} ; gset $::focus cur ""
+	[gw $::focus] delete 1.0 end
 	set ::cur ""
 	# Project/panes: the new core starts with no folder open unless it reports one.
 	set ::nav_dir ""
@@ -1601,25 +1703,33 @@ proc refresh_status {} {
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [dict size $::buffers]]
 }
-# The tab strip. Phase 2 renders the focused group's tabs into the single .tabs bar
-# (identical to the pre-split editor); phase 3 gives each group its own strip.
+# The tab strips (D33): each group draws its OWN tabs into its own strip
+# (.eg<g>.tabs). A tab's group is where it lives, so clicking it activates that buffer
+# IN that group and focuses the group. The focused group's active tab is emphasised
+# with the accent colour, so which pane has focus is visible at a glance.
 proc refresh_tabs {} {
 	set c $::theme_colors
 	set fg [dict get $c tab.fg]
-	foreach w [winfo children .tabs] { destroy $w }
-	foreach id [gorder $::focus] {
-		set active [expr {$id eq $::cur}]
-		set bg [expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
-		set f [frame .tabs.b$id -background $bg -borderwidth 1 \
-			-relief [expr {$active ? "raised" : "flat"}]]
-		label $f.l -text [tab_name $id] -background $bg -foreground $fg \
-			-font RioUIFont -padx 6 -pady 1
-		label $f.x -text "×" -background $bg -foreground $fg \
-			-font RioUIFont -padx 3
-		bind $f.l <Button-1> [list activate $id]
-		bind $f.x <Button-1> [list close_tab $id]
-		pack $f.l -side left ; pack $f.x -side right
-		pack $f -side left -padx 1 -pady 1
+	foreach g $::groups {
+		set strip [gget $g tabs]
+		$strip configure -background [dict get $c tab.bar.bg]
+		foreach w [winfo children $strip] { destroy $w }
+		set focused [expr {$g eq $::focus}]
+		foreach id [gorder $g] {
+			set active [expr {$id eq [gcur $g]}]
+			set bg [expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
+			set tfg [expr {$active && $focused ? [dict get $c accent] : $fg}]
+			set f [frame $strip.b$id -background $bg -borderwidth 1 \
+				-relief [expr {$active ? "raised" : "flat"}]]
+			label $f.l -text [tab_name $id] -background $bg -foreground $tfg \
+				-font RioUIFont -padx 6 -pady 1
+			label $f.x -text "×" -background $bg -foreground $fg \
+				-font RioUIFont -padx 3
+			bind $f.l <Button-1> [list activate $id $g]
+			bind $f.x <Button-1> [list close_tab $id $g]
+			pack $f.l -side left ; pack $f.x -side right
+			pack $f -side left -padx 1 -pady 1
+		}
 	}
 }
 
@@ -1644,35 +1754,40 @@ proc ensure_fonts {fonts} {
 	}
 }
 
+# Apply the active theme's colours/fonts to one editor group: its text surface,
+# scrollbar-corner frame, tab strip, and the D32 syntax tags. Shared by apply_theme
+# (all groups on a theme switch) and add_group (a freshly-split group). Reads the
+# role table from ::theme_colors, which apply_theme sets before calling this.
+proc restyle_group {g} {
+	set c $::theme_colors
+	set t [gw $g]
+	$t configure -font RioEditorFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor] \
+		-selectbackground [dict get $c editor.selection]
+	[gget $g frame] configure -background [dict get $c editor.bg]
+	[gget $g tabs]  configure -background [dict get $c tab.bar.bg]
+	if {[info procs rio::syntax::tokens] ne ""} {
+		foreach tok [rio::syntax::tokens] {
+			set role syntax.$tok
+			set col [expr {[dict exists $c $role] ? [dict get $c $role] : [dict get $c editor.fg]}]
+			$t tag configure syn:$tok -foreground $col
+		}
+	}
+}
+
 proc apply_theme {theme} {
 	set c [dict get $theme colors]
 	set ::theme_colors $c
 	ensure_fonts [dict get $theme fonts]
-	# Editor surface — every group's widget and its scrollbar-corner frame (D33).
-	# Syntax-highlighting tags (D32): one text tag per token type, coloured from the
-	# theme's syntax.* role (falling back to editor.fg — no visible colour — for any
-	# role a theme leaves unset). Reconfiguring here recolours existing highlighting
-	# live on a theme switch; the highlight passes raise the sel tag so a selection stays legible.
-	set _has_syntax [expr {[info procs rio::syntax::tokens] ne ""}]
-	foreach _g $::groups {
-		set _t [gw $_g]
-		$_t configure -font RioEditorFont \
-			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
-			-insertbackground [dict get $c editor.cursor] \
-			-selectbackground [dict get $c editor.selection]
-		[gget $_g frame] configure -background [dict get $c editor.bg]
-		if {$_has_syntax} {
-			foreach _tok [rio::syntax::tokens] {
-				set _role syntax.$_tok
-				set _col [expr {[dict exists $c $_role] ? [dict get $c $_role] : [dict get $c editor.fg]}]
-				$_t tag configure syn:$_tok -foreground $_col
-			}
-		}
-	}
-	# Chrome: status bar + tab container.
+	# Editor surface — every group's widget, frame, tab strip, and syntax tags (D33).
+	# Reconfiguring here recolours existing highlighting live on a theme switch; the
+	# highlight passes raise the sel tag so a selection stays legible over the colours.
+	foreach _g $::groups { restyle_group $_g }
+	# Chrome: status bar + dock divider. The tab strips live inside each group and are
+	# recoloured by refresh_tabs (called at the end of apply_theme).
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	.tabs configure -background [dict get $c tab.bar.bg]
 	.sash configure -background [dict get $c tab.bar.bg]   ;# the dock divider/grip
 	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
 	# yet); list selections borrow the editor's selection colour so the panes
@@ -2051,7 +2166,7 @@ proc session_restore {} {
 # table — the default theme reproduces this plain white-bg "90s productivity"
 # look (D24), and the View menu switches it live.
 # ---------------------------------------------------------------------------
-frame .tabs -background "#bbbbbb"
+# (Tabs are no longer a single top bar; each editor group draws its own strip, D33.)
 
 # The side dock: a selector row (Files | Git) above the two pane bodies, of which
 # show_pane packs exactly one. place_dock decides which edge it sits on.
@@ -2115,14 +2230,16 @@ bind .dock.git.list <<ListboxSelect>> git_select
 frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
 
-# The editor region (AGENTS.md D33). The center is a .groups container that holds one
-# or two editor GROUPS side by side; each group is an independent text widget (with its
-# own scrollbars and highlight cache) built by make_editor_group. Each text widget is
-# renamed to a real command (::real<g>) and driven through a proxy proc at its Tk path
-# so class bindings still call `.eg<g>.t insert`, which the proxy turns into protocol
-# requests (the D3 dumb-view discipline, now per group). The horizontal bar auto-hides
-# (gridscroll) when no line overflows, and apply_wrap drops it entirely while wrapping.
-frame .groups
+# The editor region (AGENTS.md D33). The center is a .groups panedwindow that holds one
+# or two editor GROUPS side by side with a draggable divider; each group is an
+# independent text widget (with its own tab strip, scrollbars, and highlight cache)
+# built by make_editor_group. Each text widget is renamed to a real command (::real<g>)
+# and driven through a proxy proc at its Tk path so class bindings still call
+# `.eg<g>.t insert`, which the proxy turns into protocol requests (the D3 dumb-view
+# discipline, now per group). The horizontal bar auto-hides (gridscroll) when no line
+# overflows, and apply_wrap drops it entirely while wrapping.
+panedwindow .groups -orient horizontal -borderwidth 0 \
+	-sashwidth 6 -sashrelief raised -opaqueresize 1
 
 # The per-widget proxy: an insert/delete becomes a buffer.replace on THIS group's
 # active buffer; everything else passes straight through to the real widget command.
@@ -2184,28 +2301,35 @@ proc editor_bindings {w} {
 	bind $w <Control-G>         { show_pane git ; break }
 	bind $w <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
 	bind $w <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
+	bind $w <Control-backslash> { toggle_split ; break }
+	bind $w <Control-bracketright> { move_tab_other ; break }
 }
 
-# Build editor group `g`: its frame (.eg<g>), text widget + scrollbars, the renamed
-# real command, the proxy, and the key/focus bindings. Registers the group in ::grp.
-# The literal font is replaced by RioEditorFont in the next apply_theme.
+# Build editor group `g`: its frame (.eg<g>) with a tab strip on top and the text
+# widget + scrollbars below, the renamed real command, the proxy, and the key/focus
+# bindings. Registers the group in ::grp. The literal font is replaced by
+# RioEditorFont in the next apply_theme. Each group owns its OWN tab strip (D33) — a
+# tab lives in exactly one group — so the strip is gridded inside the group frame,
+# spanning the text + scrollbar columns, with refresh_tabs filling it per group.
 proc make_editor_group {g} {
 	set f .eg$g
 	frame $f
+	frame $f.tabs -background "#bbbbbb"
 	text $f.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 		-background white -foreground black -insertbackground black \
 		-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 		-yscrollcommand [list $f.vsb set] -xscrollcommand [list gridscroll $f.hsb]
 	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
 	scrollbar $f.hsb -orient horizontal -command [list $f.t xview]
-	grid $f.t   -row 0 -column 0 -sticky nsew
-	grid $f.vsb -row 0 -column 1 -sticky ns
-	grid $f.hsb -row 1 -column 0 -sticky ew
-	grid rowconfigure    $f 0 -weight 1
+	grid $f.tabs -row 0 -column 0 -columnspan 2 -sticky ew
+	grid $f.t   -row 1 -column 0 -sticky nsew
+	grid $f.vsb -row 1 -column 1 -sticky ns
+	grid $f.hsb -row 2 -column 0 -sticky ew
+	grid rowconfigure    $f 1 -weight 1
 	grid columnconfigure $f 0 -weight 1
 	rename $f.t ::real$g
 	dict set ::grp $g [dict merge [new_group_state] \
-		[dict create w ::real$g path $f.t frame $f]]
+		[dict create w ::real$g path $f.t frame $f tabs $f.tabs]]
 	proc $f.t {args} "editor_proxy $g {*}\$args"
 	editor_bindings $f.t
 	bind $f.t <Button-1> [list focus_group $g]   ;# clicking a group focuses it
@@ -2332,9 +2456,9 @@ bind .csash <B1-Motion> csash_drag
 
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
-pack .tabs   -side top -fill x
 pack .status -side bottom -fill x
-# .dock and .groups are packed by place_dock at startup (so the dock side is live).
+# .dock and .groups are packed by place_dock at startup (so the dock side is live);
+# each group's tab strip lives inside its own frame (D33), not in a global top bar.
 focus [gget 0 path]
 
 menu .m ; . configure -menu .m
@@ -2366,6 +2490,10 @@ menu .m.view -tearoff 0
 	-variable ::wrap_lines -command apply_wrap
 .m.view add checkbutton -label "Agent Chat" -accelerator Ctrl+Shift+A \
 	-variable ::chat_shown -command apply_chat_visibility
+.m.view add separator
+.m.view add command -label "Split Editor"          -accelerator "Ctrl+\\" -command split_editor
+.m.view add command -label "Unsplit Editor"        -command unsplit_editor
+.m.view add command -label "Move Tab to Other Group" -accelerator "Ctrl+]" -command move_tab_other
 .m.view add separator
 .m.view add command -label "Compare With File…" -command compare_with_file_dialog
 .m.view add command -label "Close Compare" -accelerator Esc -command compare_close
