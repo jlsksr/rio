@@ -1512,6 +1512,16 @@ unit-tested (`tab_reorder`: order + centres + x → new order; `split.tcl`), whi
 `gorder` and repaints the strip; the active buffer and its text never move. This retires
 the deferral and the ROADMAP "Tab reordering" item.
 
+*(Follow-on — held-tab feedback + a 50/50 first split.)* Two rough edges the reorder
+gesture exposed. (a) An in-group drag had no visible held state (the target-strip tint
+only lights on a *cross*-group drag), so the dragged tab now gets a pressed, accent-tinted
+look for the duration of the drag (`mark_dragged`; the drag-end `refresh_tabs` repaints it
+away). (b) A freshly created split opened with a sliver second pane — Tk sizes the new
+pane from its requested width. `even_split` now centres the sash, but *only* where a split
+is **created** (`add_group`, after idle so the pane has a width): moving tabs between two
+existing panes never re-lays-out, so once the user drags the sash their layout is kept. Both
+are view-only polish — no core, no protocol.
+
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
 in the other group*, retiring bespoke `.cmp` code. Left out of v1 to keep the change

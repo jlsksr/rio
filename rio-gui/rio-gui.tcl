@@ -691,6 +691,17 @@ proc relayout_groups {} {
 	}
 }
 
+# Centre the sash so a fresh split opens 50/50 (Tk otherwise sizes the new pane from its
+# requested width, leaving it a sliver). Called only when a split is *created* (add_group)
+# — moving tabs between two existing panes never re-lays-out, so a user who has since
+# dragged the sash keeps their layout. Runs after idle so the panedwindow has its width.
+proc even_split {} {
+	if {[llength [.groups panes]] != 2} return
+	set w [winfo width .groups]
+	if {$w <= 1} return                       ;# not mapped yet (e.g. headless) — skip
+	.groups sash place 0 [expr {$w / 2}] 0
+}
+
 # Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
 # so we recompute it from the pointer measured against the TOPLEVEL'S stable edge
 # (not the dock's own, which moves as we resize it — referencing that fed back on
@@ -1259,6 +1270,7 @@ proc add_group {} {
 	relayout_groups
 	restyle_group $g
 	apply_wrap        ;# sync the new group's wrap mode + horizontal scrollbar
+	after idle even_split   ;# a new split opens 50/50; later user sash drags are kept
 	return $g
 }
 
@@ -1760,7 +1772,8 @@ proc tab_context_menu {g id X Y} {
 # dropping into the slot under the pointer. Below a ~5px threshold it stays a plain click
 # (activate). Tk's implicit pointer grab keeps motion/release flowing to the origin tab
 # while the button is down, so `winfo containing` sees across both panes. Feedback while
-# dragging: a hand cursor plus an accent tint on the OTHER group's tab strip.
+# dragging: the held tab gets a pressed accent look (mark_dragged) and the cursor becomes
+# a hand, and a cross-group drag also tints the OTHER group's tab strip.
 proc tab_drag_start {id g X Y} {
 	set ::tabdrag [dict create id $id g $g x $X y $Y active 0 tint ""]
 }
@@ -1770,6 +1783,7 @@ proc tab_drag_motion {X Y} {
 		if {abs($X - [dict get $::tabdrag x]) < 5 && abs($Y - [dict get $::tabdrag y]) < 5} return
 		dict set ::tabdrag active 1
 		. configure -cursor hand2
+		mark_dragged [dict get $::tabdrag g] [dict get $::tabdrag id]
 	}
 	set src  [dict get $::tabdrag g]
 	set over [group_at $X $Y]
@@ -1795,6 +1809,18 @@ proc tab_drag_end {id g X Y} {
 	} elseif {$dst ne ""} {
 		move_buffer_to_other $id $g              ;# dropped on the other pane -> move across
 	}
+	refresh_tabs                                 ;# clear the drag mark (no-op if a drop already repainted)
+}
+# Give the dragged tab a clear "held" look — a pressed (sunken) handle tinted with the
+# accent — so an in-group reorder has feedback too (a between-groups drag also tints the
+# target strip). One-way styling: the refresh_tabs at drag-end repaints it back to normal.
+proc mark_dragged {g id} {
+	set w [gget $g tabs].b$id
+	if {![winfo exists $w]} return
+	set c $::theme_colors
+	set a [dict get $c accent] ; set fg [dict get $c tab.active.bg]
+	$w configure -relief sunken -background $a
+	foreach sub [list $w.l $w.x] { catch {$sub configure -background $a -foreground $fg} }
 }
 # Highlight (`on`=1) or restore (`on`=0) group `g`'s tab strip as a drop target.
 proc tint_strip {g on} {
