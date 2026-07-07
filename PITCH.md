@@ -41,9 +41,9 @@ Every item below runs now, in the GUI:
   (no silent rewrites), range-based edits, undo/redo, tabbed buffers, scrollbars,
   optional line wrap.
 - **Split editor** — two buffers **side by side** in independent groups, each with its
-  own tabs (`Ctrl+\` to split). **Drag a tab from one group to the other**, or move it
-  from the View menu / a tab's right-click menu; drag the divider to resize; closing a
-  group's last tab unsplits.
+  own tabs (`Ctrl+\` to split). **Drag tabs to reorder within a group or move one across
+  to the other** (or the View menu / a tab's right-click menu); drag the divider to
+  resize; closing a group's last tab unsplits.
 - **Files & git** — open a project folder and browse it in a dockable, resizable side
   pane; view **git status and diffs** for the repo (read-only for now).
 - **Compare view** — a **side-by-side diff** of two documents, added/removed lines
@@ -114,7 +114,8 @@ use, in a codebase I can read in an afternoon.
 ## Status
 
 Early but real — editing with encoding/EOL preservation, tabbed buffers, a split
-editor with drag-between-groups, git status/diffs, a side-by-side compare view,
+editor with draggable tabs (reorder and move between groups), git status/diffs,
+a side-by-side compare view,
 theming, syntax highlighting, the agent (read + propose-edit), and a local *or*
 remote core all work today. Terminal frontend and git write ops are next.
 

@@ -142,6 +142,15 @@ ok "dnd: tab strip -> its group"     [group_of_widget [gget $gOther tabs]] $gOth
 ok "dnd: frame -> its group"         [group_of_widget [gget $g0 frame]] $g0
 ok "dnd: outside any group -> none"  [group_of_widget .groups] ""
 
+# --- within-group tab reorder (tab_reorder) ----------------------------------
+# The pure splice behind a same-group drop: move `id` to the slot implied by pointer-x
+# against the tabs' centres. Drive it directly with synthetic centres (no geometry).
+set cen {10 100 20 200 30 300}
+ok "reorder: drag to far right"    [tab_reorder {10 20 30} 20 $cen 350] {10 30 20}
+ok "reorder: drag to far left"     [tab_reorder {10 20 30} 20 $cen 50]  {20 10 30}
+ok "reorder: drag into middle"     [tab_reorder {10 20 30} 30 $cen 150] {10 30 20}
+ok "reorder: dropped in place"     [tab_reorder {10 20 30} 20 $cen 150] {10 20 30}
+
 # The menu builds the expected entries (swallow the real popup — it's interactive).
 rename tk_popup _real_tk_popup
 proc tk_popup {args} {}

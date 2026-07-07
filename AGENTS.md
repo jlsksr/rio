@@ -1498,10 +1498,19 @@ from the widget under the pointer up to its `.eg<g>` frame (screen-coordinate lo
 split out as `group_at` so the resolver is unit-tested without pointer geometry —
 `split.tcl`); feedback is a hand cursor plus an accent tint on the target strip. DnD
 clears the UI-design bar on its own terms: drag-a-tab is native to both the Win98/2000
-and the VS Code eras, and more discoverable than the menu. **Scope: cross-group drops
-only** — reordering a tab *within* its group is deliberately deferred (ROADMAP: "Tab
-reordering"), since it needs an insertion-point calculation the between-groups move does
-not.
+and the VS Code eras, and more discoverable than the menu. The first cut scoped this to
+cross-group drops only — see the reorder follow-on directly below.
+
+*(Follow-on — same gesture reorders within a group.)* The drop resolver now branches on
+where the tab lands: on the **other** group's pane it moves across (as above); back on
+its **own** pane it **reorders**, sliding into the slot under the pointer. The insertion
+index is simply "how many *other* tabs have their centre left of the drop-x" —
+drop-where-the-cursor-is. As with the move path, the geometry-free part is split out and
+unit-tested (`tab_reorder`: order + centres + x → new order; `split.tcl`), while
+`reorder_tab` reads the live tab centres and applies. Order is a pure *view* concern
+(the core neither knows nor cares about tab order — D22), so a reorder only re-splices
+`gorder` and repaints the strip; the active buffer and its text never move. This retires
+the deferral and the ROADMAP "Tab reordering" item.
 
 **Deferred (noted):** folding the D28 compare view into this mechanism — once real
 groups exist, "compare" could become *open the proposed text as a read-only buffer
