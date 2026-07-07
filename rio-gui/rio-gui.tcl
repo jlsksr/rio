@@ -1754,13 +1754,13 @@ proc tab_context_menu {g id X Y} {
 # IN that group and focuses the group. The focused group's active tab is emphasised
 # with the accent colour, so which pane has focus is visible at a glance. Right-click
 # a tab for a context menu (move to the other group / close).
-# Drag a tab between groups (AGENTS.md D33 follow-on) — a second input gesture onto the
-# same move path as the context menu's "Move to Other Group". Press a tab, drag it over
-# the other group's pane, release to drop; below a ~5px threshold it stays a plain click
-# (activate). Cross-group only — within-group reordering is a separate roadmap item.
-# Tk's implicit pointer grab keeps motion/release flowing to the origin tab while the
-# button is down, so `winfo containing` sees across both panes. Feedback while dragging:
-# a hand cursor plus an accent tint on the target group's tab strip.
+# Drag a tab (AGENTS.md D33 follow-on) — a second input gesture onto the move/reorder
+# paths. Press a tab and drag it: onto the OTHER group's pane it moves across (the same
+# path as the context menu's "Move to Other Group"); back onto its OWN pane it reorders,
+# dropping into the slot under the pointer. Below a ~5px threshold it stays a plain click
+# (activate). Tk's implicit pointer grab keeps motion/release flowing to the origin tab
+# while the button is down, so `winfo containing` sees across both panes. Feedback while
+# dragging: a hand cursor plus an accent tint on the OTHER group's tab strip.
 proc tab_drag_start {id g X Y} {
 	set ::tabdrag [dict create id $id g $g x $X y $Y active 0 tint ""]
 }
@@ -1790,13 +1790,45 @@ proc tab_drag_end {id g X Y} {
 	if {$tint ne ""} { tint_strip $tint 0 }
 	if {!$active} { activate $id $g ; return }   ;# a click, not a drag
 	set dst [group_at $X $Y]
-	if {$dst ne "" && $dst ne $g} { move_buffer_to_other $id $g }
+	if {$dst eq $g} {
+		reorder_tab $g $id $X                    ;# dropped on its own pane -> reorder
+	} elseif {$dst ne ""} {
+		move_buffer_to_other $id $g              ;# dropped on the other pane -> move across
+	}
 }
 # Highlight (`on`=1) or restore (`on`=0) group `g`'s tab strip as a drop target.
 proc tint_strip {g on} {
 	set c $::theme_colors
 	set bg [expr {$on ? [dict get $c accent] : [dict get $c tab.bar.bg]}]
 	catch {[gget $g tabs] configure -background $bg}
+}
+
+# Reorder tab `id` within its own group `g` to the slot under pointer-x `X`. The new
+# index is "how many OTHER tabs have their centre left of X" — drop-where-the-cursor-is.
+# `tab_reorder` does the pure list splice (unit-tested: no geometry); this reads the live
+# tab centres and applies. Order is a view concern, so only the strip repaints — the
+# active buffer and its text are untouched.
+proc reorder_tab {g id X} {
+	set centers [dict create]
+	foreach t [gorder $g] {
+		set w [gget $g tabs].b$t
+		if {[winfo exists $w]} { dict set centers $t [expr {[winfo rootx $w] + [winfo width $w] / 2}] }
+	}
+	set new [tab_reorder [gorder $g] $id $centers $X]
+	if {$new eq [gorder $g]} return              ;# dropped in place
+	gset $g order $new
+	refresh_tabs
+	prefs_save
+}
+# Pure splice: move `id` within `order` to the slot implied by `X` against tab `centers`
+# (a dict id->centre-x). Insertion index = count of OTHER tabs whose centre is left of X.
+proc tab_reorder {order id centers X} {
+	set k 0
+	foreach t $order {
+		if {$t eq $id} continue
+		if {[dict exists $centers $t] && $X > [dict get $centers $t]} { incr k }
+	}
+	return [linsert [lsearch -all -inline -not -exact $order $id] $k $id]
 }
 
 proc refresh_tabs {} {

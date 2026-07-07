@@ -31,9 +31,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
   buffers as tabs, scrollbars, and optional line wrap.
 - **Split editor** — show **two buffers side by side** in independent editor groups,
-  each with its own tabs (`Ctrl+\` to split). **Drag a tab from one group to the
-  other**, or move it from the View menu (`Ctrl+]`) or a tab's right-click menu. Drag
-  the divider to resize; closing a group's last tab unsplits.
+  each with its own tabs (`Ctrl+\` to split). **Drag tabs to reorder them within a
+  group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a
+  tab's right-click menu). Drag the divider to resize; closing a group's last tab
+  unsplits.
 - **Files & git** — open a project folder and browse it in a side pane; view
   **git status and diffs** for the open repo (read-only for now). Files and git
   share one dockable, resizable side panel.
