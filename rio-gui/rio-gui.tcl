@@ -173,8 +173,8 @@ proc new_group_state {} {
 # spawned core, or a daemon socket) — there is no in-process path, so local and
 # remote are the same code.
 # ---------------------------------------------------------------------------
-proc rio_call {op params} {
-	return [core_call $op $params]
+proc rio_call {op params {timeout_ms 0}} {
+	return [core_call $op $params $timeout_ms]
 }
 
 # Apply one core event to the view. Every event the core broadcasts arrives here
@@ -202,7 +202,7 @@ proc dispatch_event {ev} {
 # escaping the server replies with, rio::wire), then run the event loop until the
 # reply with our id lands. Ids are unique per call, so a keystroke typed while we
 # wait — itself a nested rio_call — resolves on its own id without disturbing this one.
-proc core_call {op params} {
+proc core_call {op params {timeout_ms 0}} {
 	set id r[incr ::reply_seq]
 	set ::pending($id) 1
 	if {[catch {
@@ -214,7 +214,17 @@ proc core_call {op params} {
 		return [dict create id $id ok false \
 			error [dict create code disconnected message "no connection to the core"]]
 	}
+	# A half-open link (a stale `ssh -L` forward: the socket is up, but nothing answers
+	# and no EOF ever arrives) would leave this vwait blocked forever. An optional
+	# deadline lets the caller bound the first exchange: on expiry we synthesise a
+	# `timeout` reply so the vwait returns and the caller can report it, not hang.
+	set timer ""
+	if {$timeout_ms > 0} {
+		set timer [after $timeout_ms [list set ::reply($id) [dict create id $id ok false \
+			error [dict create code timeout message "the core did not respond in time"]]]]
+	}
 	vwait ::reply($id)
+	if {$timer ne ""} { after cancel $timer }
 	unset -nocomplain ::pending($id)
 	set resp $::reply($id)
 	unset ::reply($id)
@@ -232,7 +242,10 @@ proc core_reader {} {
 	if {[dict exists $msg event]} {
 		dispatch_event $msg
 	} elseif {[dict exists $msg id]} {
-		set ::reply([dict get $msg id]) $msg
+		# Only wake a call still waiting: a reply arriving after its call already
+		# timed out (see core_call) is dropped, not left as a stale ::reply entry.
+		set id [dict get $msg id]
+		if {[info exists ::pending($id)]} { set ::reply($id) $msg }
 	}
 }
 
@@ -282,19 +295,32 @@ set ::rio_protocol  2
 set ::core_protocol ""   ;# what the attached core reported (for the title of a bug report)
 
 # Greet the core (session.hello) and warn once if it speaks a different protocol.
-# Runs whenever a channel becomes live: at startup and after an in-place reconnect.
-# Not fatal — the user chose this core; they get a clear diagnostic, not a lockout.
-proc hello_core {} {
-	set resp [rio_call session.hello {}]
+# Runs as the FIRST op on a live channel — at startup and after an in-place reconnect
+# — so it doubles as the liveness gate: socket(2) to a stale `ssh -L` forward succeeds
+# with nothing behind it, and an unbounded op would then hang on a blank window. We
+# bound the greeting (8 s); if the core never answers we say why instead of freezing.
+# `fatal` (startup) exits after the message — there's nothing to fall back to; reconnect
+# leaves the old session up. Returns 1 if the core greeted us, 0 otherwise.
+proc hello_core {{fatal 0}} {
+	set resp [rio_call session.hello {} 8000]
 	if {![dict get $resp ok]} {
-		report_error "The core didn't answer session.hello: [dict get $resp error message]" \
-			[dict get $resp error code]
-		return
+		set code [dict get $resp error code]
+		if {$code eq "timeout"} {
+			set msg [expr {$::core_remote \
+				? "Connected to $::core_endpoint, but no rio core answered.\n\nThe socket opened — most likely a stale SSH tunnel, or no core is running behind it. Check that the tunnel is still up (ssh -L …) and a core is listening on the server." \
+				: "The local core started but never answered — the install may be broken."}]
+		} else {
+			set msg "The core didn't answer session.hello: [dict get $resp error message]"
+		}
+		if {$fatal} { catch {wm withdraw .} ; report_error $msg $code ; exit 1 }
+		report_error $msg $code
+		return 0
 	}
 	set ::core_protocol [dict get $resp result protocol]
 	if {$::core_protocol ne $::rio_protocol} {
 		report_error "This core speaks wire protocol $::core_protocol, but this GUI expects $::rio_protocol — mixed versions may misbehave. Update the older side." protocol_mismatch
 	}
+	return 1
 }
 
 # Apply a change to group `g`'s widget through the REAL widget command (bypassing the
@@ -1691,8 +1717,10 @@ proc reset_session_state {} {
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
 	.chat.log configure -state disabled
-	# Rebuild exactly as at startup.
-	hello_core                   ;# a daemon can be any age — check the protocol first
+	# Rebuild exactly as at startup. hello_core also gates liveness (bounded): if the
+	# new core is silent (a stale tunnel), it has already told the user — stop here
+	# rather than hang the next op, leaving a blank-but-responsive session to retry.
+	if {![hello_core]} return    ;# a daemon can be any age — check protocol + reachability
 	adopt_initial_buffers
 	show_pane $::dock_pane
 	apply_wrap
@@ -2691,6 +2719,11 @@ hl_load
 # builds — uses the role table. A persisted theme that no longer exists falls back to
 # the default rather than erroring at startup (D31).
 prefs_load
+# Greet the core before any other op. This is the first exchange over the channel, so
+# it's also where a stale connection surfaces: a dead `ssh -L` forward accepts the
+# socket but never answers, and without this bounded handshake the GUI would hang with
+# a blank window (a real bug report). fatal → a clear dialog, then exit.
+hello_core 1
 set _boot_theme [rio_call theme.get [dict create name $::theme_name]]
 if {![dict get $_boot_theme ok]} {
 	set ::theme_name default
@@ -2705,7 +2738,6 @@ apply_theme [dict get $_boot_theme result]
 set ::nav_dir ""
 set ::nav_rows {}
 set ::git_rows {}
-hello_core                 ;# greet the core; warn on a wire-protocol mismatch (O2)
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate

@@ -1216,6 +1216,20 @@ the proc.)* *Pending:* a
 today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
 `ssh host … server.tcl --stdio` by hand.
 
+*(Follow-on — a bounded handshake, so a stale tunnel can't hang the window.)* A dead
+`ssh -L` forward is worse than a refused connection: `socket` **succeeds** (the local
+end accepts), but nothing answers behind it and no EOF ever arrives, so an unbounded
+`vwait` on the first op left the GUI frozen on a blank window — no error (a real report).
+Fix: `core_call` takes an optional deadline; `hello_core` (now the **first** op on any
+live channel, at startup and after reconnect) runs it with an 8 s bound and doubles as
+the liveness gate. On timeout it says why — at startup *fatal*, a clear dialog then exit
+(nothing to fall back to); on reconnect non-fatal, leaving the old session up. A late
+reply after a timeout is dropped (`core_reader` only wakes a call still `::pending`), and
+`session.hello` finally earns its keep as more than a protocol-version check (retires the
+review's B1: it was defined and tested but never called). `rio-gui/tests/remote.tcl`
+covers it with a listener that accepts but never replies. View/transport only — the core
+and wire are untouched.
+
 **Caveats (inherent).** Per-keystroke round-trip (the D3 dumb view) — imperceptible
 over a local pipe or a nearby tunnel, laggy across the world; and **one core per
 frontend** (no shared live state across windows — that is the daemon's job).

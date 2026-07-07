@@ -125,5 +125,21 @@ set resp [rio_call file.open [dict create path /nonexistent/rio-remote-xyz]]
 ok "error: failed op returns ok=false" [dict get $resp ok] false
 ok "error: error carries a code"       [expr {[dict get $resp error code] ne ""}] 1
 
+# --- a stale link (socket open, nothing answering) times out, doesn't hang ------
+# Simulate a half-open `ssh -L` forward: a listener that accepts but never replies.
+# A bounded core_call must return a `timeout` error instead of blocking forever — the
+# defence behind hello_core's startup gate against a blank, frozen window.
+set dead     [socket -server {apply {{s a p} {}}} -myaddr 127.0.0.1 0]
+set deadport [lindex [fconfigure $dead -sockname] 2]
+set silent   [socket 127.0.0.1 $deadport]
+fconfigure $silent -buffering line -blocking 0 -translation lf -encoding utf-8
+set realchan $::core_chan
+set ::core_chan $silent
+set tresp [core_call session.hello {} 300]
+set ::core_chan $realchan
+close $silent ; close $dead
+ok "timeout: stale link returns ok=false" [dict get $tresp ok]          false
+ok "timeout: error coded timeout"         [dict get $tresp error code]  timeout
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
