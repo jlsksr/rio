@@ -1466,11 +1466,14 @@ so every existing theme highlights them for free.
 - **`syntax/css.tcl`** (`.css`) — comments (`/* */`, multi-line), at-rules (`@media`, …) as
   `keyword`, strings, numbers/units and `#hex` colours as `number`, `!important` as `keyword`,
   **property names** inside a block as `attribute`, and function names (`url(`, `calc(`, …) as
-  `function`. It tracks block structure so a property is only coloured where a property goes,
-  and a small nesting-at-rule set resolves `@media { .x { … } }` (rule-list vs declaration
-  block) correctly. Selector text and value keywords are left plain **on purpose** — CSS has
-  too many bare identifiers to colour without guessing; a `#id` in selector context is
-  deliberately *not* read as a hex colour.
+  `function`. **Selectors are tinted**: element names (and `*`) as `tag`, `.class`/`#id` as
+  `type`, `:pseudo`/`::element` as `variable` — but *not* inside a nesting at-rule's prelude
+  (`@media screen and (…)`), where those words are a media query, not selectors (keyed off the
+  same `at` flag that decides the block kind). A `#id` in selector context tints as an id, and
+  is deliberately *not* mis-read as a hex colour. It tracks block structure so a property is
+  only coloured where a property goes, and a small nesting-at-rule set resolves
+  `@media { .x { … } }` (rule-list vs declaration block) correctly. Value keywords stay plain
+  **on purpose** — CSS has too many bare value identifiers to colour without guessing.
 - **`syntax/js.tcl`** (`.js .mjs .cjs .jsx`) — line (`//`) and block (`/* */`, multi-line)
   comments, `'`/`"` strings and backtick **template literals** (multi-line) as `string`,
   numbers (hex/oct/bin/float/exp/bigint) as `number`, reserved words as `keyword`, the
@@ -1480,9 +1483,10 @@ so every existing theme highlights them for free.
   line; noted as the one honest gap.
 
 Tests: `syntax/tests/css.test` and `syntax/tests/js.test` (pure `tclsh`, run by
-`syntax/tests/all.tcl`) — property/value/number/function colouring, at-rule nesting,
-multi-line comments and strings/templates, and the two deliberate non-colourings
-(`#id` selector, `/` division).
+`syntax/tests/all.tcl`) — property/value/number/function colouring, selector tinting
+(element/class/id/pseudo) with media-prelude suppression, at-rule nesting, multi-line
+comments and strings/templates, and the deliberate non-colourings (`#id` never a hex
+colour, `/` never a comment).
 
 ---
 

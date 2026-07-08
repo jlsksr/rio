@@ -6,11 +6,13 @@
 # It colours: comments (/* */), at-rules (@media, @import, …) as `keyword`, quoted
 # strings, numbers (with units) and hex colours (#abc, #aabbcc) as `number`, the
 # `!important` flag as `keyword`, property names inside a declaration block as
-# `attribute`, and function names (rgb(, url(, calc(, …) as `function`. Selector
-# text and value keywords are left plain — deliberately, to avoid mis-colouring the
-# many bare identifiers CSS allows. The block structure is tracked so a property
-# name is only coloured where a property actually goes (inside `{ … }`), and nested
-# at-rule blocks (@media { .x { … } }) resolve correctly.
+# `attribute`, and function names (rgb(, url(, calc(, …) as `function`. Selectors are
+# tinted too: element names (and `*`) as `tag`, `.class`/`#id` as `type`, and
+# `:pseudo`/`::pseudo-element` as `variable` — but NOT inside a nesting at-rule's
+# prelude (`@media screen and (…)`), where those words are a media query, not
+# selectors. Value keywords stay plain (CSS has too many bare value idents to guess).
+# The block structure is tracked so a property name is only coloured where a property
+# actually goes (inside `{ … }`), and nested blocks (@media { .x { … } }) resolve.
 
 namespace eval rio::syntax::css {}
 
@@ -131,8 +133,19 @@ proc rio::syntax::css::scan {line state param} {
 					dict set param at 0 ; incr i
 				} elseif {[string match {[0-9]} $ch] || ($ch eq "." && [string match {[0-9]} [string index $line [expr {$i + 1}]]])} {
 					incr i [_number $line $i spans]
+				} elseif {![dict get $param at] && [regexp -indices \
+						{^(?:\.[[:alnum:]_-]+|#[[:alnum:]_-]+|::?[[:alnum:]_-]+|[[:alpha:]][[:alnum:]_-]*|\*)} \
+						[string range $line $i end] m]} {
+					# A selector token — but NOT inside a nesting at-rule's prelude
+					# (`at`), where the words are a media/supports query, not selectors.
+					set len [expr {[lindex $m 1] + 1}]
+					# .class/#id -> type; :pseudo/::element -> variable; element or * -> tag.
+					set type tag
+					if {$ch eq "." || $ch eq "#"} { set type type }
+					if {$ch eq ":"} { set type variable }
+					lappend spans $i [expr {$i + $len}] $type ; incr i $len
 				} else {
-					incr i   ;# selector text (elements, .class, #id, :pseudo) left plain
+					incr i   ;# combinators, commas, at-rule prelude words: plain
 				}
 			}
 		}
