@@ -232,13 +232,19 @@ saved the moment you change it:
 > so flipping a setting for one session changes your global default. For a simple
 > global toggle (like wrap) that is usually exactly what you want.
 
-### Keyboard shortcuts (`keys.json`)
+### Keyboard shortcuts
 
-Every editor shortcut is data, remappable in **one** place:
-`$XDG_CONFIG_HOME/rio/keys.json` (default `~/.config/rio/keys.json`), a sibling of
-`prefs.json`. The file is **overrides only** — list just the commands you want to change;
-everything else keeps its default. It is optional (no file = all defaults), plain JSON,
-parsed never executed. Changes take effect at the next launch.
+Every editor shortcut is data, remappable in **one** place. Two ways to change them:
+
+- **The editor** — *Settings ▸ Keyboard Shortcuts…* lists every command; click a shortcut
+  and press the keys you want (press-to-capture, like a modern IDE), *Clear* to unbind, or
+  *Reset all to defaults*. **Save** applies immediately — no restart — and writes the file
+  below for you. Conflicts and unusable keys (a lone letter, a bare modifier) are refused
+  with a note.
+- **By hand** — edit `$XDG_CONFIG_HOME/rio/keys.json` (default `~/.config/rio/keys.json`),
+  a sibling of `prefs.json`. It is **overrides only** — list just the commands you want to
+  change; everything else keeps its default. Optional (no file = all defaults), plain JSON,
+  parsed never executed. A hand-edit takes effect at the next launch.
 
 ```json
 {

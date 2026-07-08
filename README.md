@@ -55,6 +55,9 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
+- **Custom keybindings** — every shortcut is one data table. Remap them in
+  *Settings ▸ Keyboard Shortcuts…* (press-to-capture, applied live, no restart) or by
+  hand in `~/.config/rio/keys.json`; the menus relabel themselves to match.
 - **Syntax highlighting** — colour by language, harmonised with the active theme
   (each theme carries its own `syntax.*` palette, so switching recolours code live).
   The highlighters are small, self-contained files in `syntax/` with no external
