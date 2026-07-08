@@ -1619,14 +1619,35 @@ separately coloured, and C# 11 raw strings (`"""…"""`) aren't tracked. Tests:
 string forms incl. verbatim's non-escaping backslash and a multi-line verbatim carry, chars/
 numbers, and comments.
 
-**Where this stands.** Eleven languages now ship — (X)HTML, CSS, JavaScript, Perl, Tcl, shell,
-Markdown, PHP, Python, C, C# — all on the one D32 per-line `scan` contract, with the registry and
-GUI untouched since the first two amendments (the drop-in loader picks each up by extension). The
-recurring design lesson across them: **when a token's meaning is positional or ambiguous, colour
-only what's unambiguous and leave the rest plain** — the `#`-comment/command-position rules
-(Tcl, shell), the regex/heredoc/raw-string gaps (JS, Perl, C#), the `@`-decorator vs matmul
-(Python), the media-query prelude (CSS). One shared suite, `syntax/tests/all.tcl`, now runs 191
-pure-`tclsh` checks; the GUI applier test loads all eleven modules.
+**Amendment — C++, Go, Rust, JSON ship (landed).** Four more on the same contract, no registry
+or GUI change. `syntax/cpp.tcl` (`.cpp .cxx .cc .hpp .hxx .hh .cppm .ixx` — deliberately *not*
+`.h`, which stays C, the extension being genuinely ambiguous) is C's highlighter grown up: the
+full C++ keyword/type set plus **raw string literals** `R"delim(…)delim"`, which span lines with
+their delimiter honoured (a `raw` state carrying the `)delim"` closing token as `param`); `<…>`
+template brackets are left plain (less-than/shift ambiguous). `syntax/go.tcl` (`.go`) adds
+back-quoted `` `…` `` raw strings (multi-line), the predeclared type names as `type`, `iota`/`nil`
+as `constant`, and a `type` NAME via `pend` (function names fall out of `name(`). `syntax/rust.tcl`
+(`.rs`) is the richest: `"…"` strings that span lines, raw strings `r"…"`/`r#"…"#` (any hash
+count, tracked in `param`), `#[…]`/`#![…]` attributes as `meta`, `macro!` invocations as
+`function`, and Rust's strict UpperCamelCase convention exploited to tint any `TypeName` as
+`type` — with two ambiguities resolved the D32 way: a `'a` with no closing quote is read as a
+LIFETIME (left plain) rather than an unterminated char literal, and `/* */` is treated as
+non-nesting (an honest, noted gap — Rust nests them). `syntax/json.tcl` (`.json .jsonc`) tints an
+object **key** (a string whose next non-blank char is `:`) as `attribute` and other strings as
+`string`, so keys and values read apart; `true`/`false`/`null` as `constant`, numbers per RFC
+8259, and — a pragmatic nicety for `.jsonc`/config files — `//` and `/* */` comments. Tests:
+`syntax/tests/{cpp,go,rust,json}.test` (46 cases) — raw strings and their multi-line carry,
+the char-vs-lifetime split, keys-vs-values, and each language's number forms.
+
+**Where this stands.** Fifteen languages now ship — (X)HTML, CSS, JavaScript, Perl, Tcl, shell,
+Markdown, PHP, Python, C, C#, C++, Go, Rust, JSON — all on the one D32 per-line `scan` contract,
+with the registry and GUI untouched since the first two amendments (the drop-in loader picks each
+up by extension). The recurring design lesson across them: **when a token's meaning is positional
+or ambiguous, colour only what's unambiguous and leave the rest plain** — the
+`#`-comment/command-position rules (Tcl, shell), the regex/heredoc/raw-string gaps (JS, Perl, C#),
+the `@`-decorator vs matmul (Python), the media-query prelude (CSS), the `'a` char-vs-lifetime and
+`<…>` template ambiguity (Rust, C++). One shared suite, `syntax/tests/all.tcl`, now runs 237
+pure-`tclsh` checks; the GUI applier test loads all fifteen modules.
 
 ---
 

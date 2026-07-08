@@ -1,0 +1,76 @@
+# Tests for the Go highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. go.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::go::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-go {.go resolves to the go scanner} -body {
+	rio::syntax::for_path a.go
+} -result rio::syntax::go::scan
+
+test lang_for_path-go {.go resolves to the Go language name} -body {
+	rio::syntax::lang_for_path /x/main.go
+} -result Go
+
+# --- keywords, types, constants, functions -------------------------------------
+
+test func-decl {func keyword, the defined name, and the return type} -body {
+	set s [hl {func add(a int) int { return 0 }}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.5 1.8 function] [has $s 1.11 1.14 type] [has $s 1.22 1.28 keyword]
+} -result {1 1 1 1}
+
+test type-decl {a type NAME is a type; struct is a keyword} -body {
+	set s [hl {type Point struct}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.5 1.10 type] [has $s 1.11 1.17 keyword]
+} -result {1 1 1}
+
+test constants {true/false/nil/iota are constants} -body {
+	set s [hl {x := nil; y := true}]
+	list [has $s 1.5 1.8 constant] [has $s 1.15 1.19 constant]
+} -result {1 1}
+
+# --- strings, runes, numbers ---------------------------------------------------
+
+test strings-and-rune {"…" strings and 'r' rune literals} -body {
+	set s [hl {s := "hi"; r := 'x'}]
+	list [has $s 1.5 1.9 string] [has $s 1.16 1.19 string]
+} -result {1 1}
+
+test raw-string-multiline {a back-quoted raw string carries across lines} -body {
+	set s [hl "s := `one\ntwo`"]
+	list [has $s 1.5 1.9 string] [has $s 2.0 2.4 string]
+} -result {1 1}
+
+test numbers {hex, underscore separators, and imaginary suffix} -body {
+	set s [hl {a, b, c := 0xFF, 1_000, 3i}]
+	list [has $s 1.11 1.15 number] [has $s 1.17 1.22 number] [has $s 1.24 1.26 number]
+} -result {1 1 1}
+
+# --- comments ------------------------------------------------------------------
+
+test line-comment {a // comment runs to end of line} -body {
+	set s [hl {x := 1 // note}]
+	has $s 1.7 1.14 comment
+} -result 1
+
+test block-comment-multiline {a /* */ comment carries across lines} -body {
+	set s [hl "a; /* one\ntwo */ b"]
+	list [has $s 1.3 1.9 comment] [has $s 2.0 2.6 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

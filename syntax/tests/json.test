@@ -1,0 +1,66 @@
+# Tests for the JSON highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. json.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::json::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-json {.json/.jsonc resolve to the json scanner} -body {
+	list [rio::syntax::for_path a.json] [rio::syntax::for_path a.jsonc]
+} -result {rio::syntax::json::scan rio::syntax::json::scan}
+
+test lang_for_path-json {.json resolves to the JSON language name} -body {
+	rio::syntax::lang_for_path /x/pkg.json
+} -result JSON
+
+# --- keys vs values ------------------------------------------------------------
+
+test key-vs-value {an object key is attribute; a string value is string} -body {
+	set s [hl {{"name": "rio"}}]
+	list [has $s 1.1 1.7 attribute] [has $s 1.9 1.14 string]
+} -result {1 1}
+
+test key-space-before-colon {a key is detected across whitespace before the colon} -body {
+	set s [hl {{"k"  : 1}}]
+	has $s 1.1 1.4 attribute
+} -result 1
+
+# --- literals and numbers ------------------------------------------------------
+
+test constants {true/false/null are constant} -body {
+	set s [hl {[true, false, null]}]
+	list [has $s 1.1 1.5 constant] [has $s 1.7 1.12 constant] [has $s 1.14 1.18 constant]
+} -result {1 1 1}
+
+test numbers {integer, negative, and exponent floats are numbers} -body {
+	set s [hl {[1, -2.5, 6.02e23]}]
+	list [has $s 1.1 1.2 number] [has $s 1.4 1.8 number] [has $s 1.10 1.17 number]
+} -result {1 1 1}
+
+# --- comments (JSONC) ----------------------------------------------------------
+
+test line-comment {a // comment runs to end of line} -body {
+	set s [hl {{"a": 1} // trailing}]
+	has $s 1.9 1.20 comment
+} -result 1
+
+test block-comment-multiline {a /* */ comment carries across lines} -body {
+	set s [hl "/* one\ntwo */ 3"]
+	list [has $s 1.0 1.6 comment] [has $s 2.0 2.6 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
