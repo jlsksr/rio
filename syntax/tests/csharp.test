@@ -1,0 +1,88 @@
+# Tests for the C# highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. csharp.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::csharp::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-cs {.cs/.csx resolve to the csharp scanner} -body {
+	list [rio::syntax::for_path a.cs] [rio::syntax::for_path a.csx]
+} -result {rio::syntax::csharp::scan rio::syntax::csharp::scan}
+
+test lang_for_path-cs {.cs resolves to the C# language name} -body {
+	rio::syntax::lang_for_path /x/Program.cs
+} -result "C#"
+
+# --- types/keywords, classes, functions ----------------------------------------
+
+test class-and-method {class names a type; a method call/def is a function} -body {
+	set s [hl {public class Foo { int Bar() {} }}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.7 1.12 keyword] [has $s 1.13 1.16 type] \
+		[has $s 1.19 1.22 type] [has $s 1.23 1.26 function]
+} -result {1 1 1 1 1}
+
+test new-type {a name after `new` is a type} -body {
+	set s [hl {var x = new List();}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.8 1.11 keyword] [has $s 1.12 1.16 type]
+} -result {1 1 1}
+
+test builtin-types-and-null {built-in type names are type; null is constant} -body {
+	set s [hl {string s = null;}]
+	list [has $s 1.0 1.6 type] [has $s 1.11 1.15 constant]
+} -result {1 1}
+
+# --- strings: regular, verbatim, interpolated ----------------------------------
+
+test regular-string {a "…" string with an escape} -body {
+	set s [hl {var a = "hi\n";}]
+	has $s 1.8 1.14 string
+} -result 1
+
+test verbatim-string {@"…" is verbatim — a backslash is NOT an escape} -body {
+	# the whole @"C:\path" is one string; the \ does not end or escape anything.
+	set s [hl {var b = @"C:\path";}]
+	has $s 1.8 1.18 string
+} -result 1
+
+test interpolated-string {$"…" is a string} -body {
+	set s [hl {var c = $"x={y}";}]
+	has $s 1.8 1.16 string
+} -result 1
+
+test verbatim-multiline {@"…" carries across lines} -body {
+	set s [hl "var s = @\"one\ntwo\";"]
+	list [has $s 1.8 1.13 string] [has $s 2.0 2.4 string]
+} -result {1 1}
+
+# --- chars, numbers, comments --------------------------------------------------
+
+test char-and-numbers {'c' char, hex, and a decimal suffix} -body {
+	set s [hl {char c = 'a'; int n = 0xFF; double d = 3.14m;}]
+	list [has $s 1.9 1.12 string] [has $s 1.22 1.26 number] [has $s 1.39 1.44 number]
+} -result {1 1 1}
+
+test doc-comment {/// and // both run to end of line} -body {
+	set s [hl {/// summary}]
+	has $s 1.0 1.11 comment
+} -result 1
+
+test block-comment-multiline {a /* */ comment carries across lines} -body {
+	set s [hl "a; /* one\ntwo */ b;"]
+	list [has $s 1.3 1.9 comment] [has $s 2.0 2.6 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

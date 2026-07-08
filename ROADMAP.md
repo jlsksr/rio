@@ -32,7 +32,7 @@ Each entry notes its state:
 - **More languages** — *ongoing.* Each highlighter is one self-contained
   `syntax/<lang>.tcl` file (per-line `scan` contract, AGENTS.md D32), so adding a
   language is isolated work — good first contributions. Shipped: (X)HTML, CSS,
-  JavaScript, Perl, Tcl, shell, Markdown, PHP, Python, C. Still wanted: C#, C++, JSON,
+  JavaScript, Perl, Tcl, shell, Markdown, PHP, Python, C, C#. Still wanted: C++, JSON,
   Go, Rust, etc.
 - **Viewport scoping** — *deferred* (AGENTS.md D32 amendment). Re-highlighting is
   now incremental, so per-edit cost is already small; viewport would only cap the

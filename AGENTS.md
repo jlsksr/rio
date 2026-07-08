@@ -1606,6 +1606,28 @@ tag is `type` (via `pend`). Tests: `syntax/tests/c.test` (13 cases) — the two 
 (with the include header), types vs keywords, `struct` tags, `…_t`, strings/chars, suffixed
 numbers, and multi-line block comments.
 
+**Amendment — C# ships (landed).** `syntax/csharp.tcl` (`.cs .csx`; registered under the display
+name `C#`), same contract. Like C it makes the type/keyword split (control/modifier words as
+`keyword`, built-in type names as `type`, `true`/`false`/`null` as `constant`, `name(` as
+`function`, a `class`/`struct`/`interface`/`enum`/`new` NAME as `type`). Its interesting part is
+**strings in all of C#'s forms**, routed through one `_string` helper: regular `"…"` (with `\`
+escapes), interpolated `$"…"`, verbatim `@"…"` — which spans lines (a `vstr` state) and treats
+`""` (not `\"`) as the escaped quote — and interpolated-verbatim `$@"…"`; plus `'c'` chars. `///`
+doc comments fall out of the `//` rule for free. Honest gaps: `$"…"` interpolation holes aren't
+separately coloured, and C# 11 raw strings (`"""…"""`) aren't tracked. Tests:
+`syntax/tests/csharp.test` (13 cases) — class/method/new-type, built-in types + null, all three
+string forms incl. verbatim's non-escaping backslash and a multi-line verbatim carry, chars/
+numbers, and comments.
+
+**Where this stands.** Eleven languages now ship — (X)HTML, CSS, JavaScript, Perl, Tcl, shell,
+Markdown, PHP, Python, C, C# — all on the one D32 per-line `scan` contract, with the registry and
+GUI untouched since the first two amendments (the drop-in loader picks each up by extension). The
+recurring design lesson across them: **when a token's meaning is positional or ambiguous, colour
+only what's unambiguous and leave the rest plain** — the `#`-comment/command-position rules
+(Tcl, shell), the regex/heredoc/raw-string gaps (JS, Perl, C#), the `@`-decorator vs matmul
+(Python), the media-query prelude (CSS). One shared suite, `syntax/tests/all.tcl`, now runs 191
+pure-`tclsh` checks; the GUI applier test loads all eleven modules.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
