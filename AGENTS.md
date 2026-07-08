@@ -1570,6 +1570,18 @@ INSTALL (incl. the 2000-line AGENTS.md). Tests: `syntax/tests/markdown.test` (17
 headings/rules/lists/quotes, the inline spans, the snake_case guard, links/images/autolinks,
 and multi-line fences (incl. a non-matching inner fence staying body).
 
+**Amendment — PHP ships (landed).** `syntax/php.tcl` (`.php .phtml …`), same contract. PHP is
+**embedded**, so it carries an outside/inside state: text outside `<?php … ?>` is HTML/plain
+and left un-highlighted (a later refinement could delegate it to `html.tcl`), the `<?php` /
+`<?=` / `?>` markers are `meta`, and inside gets full PHP. It colours `//`/`#` line and
+`/* … */` block comments, `'…'`/`"…"` strings (multi-line), `$var` (incl. `$this`, `$$v`) as
+`variable`, numbers, keywords, `true`/`false`/`null` as `constant`, a `function` NAME and a
+called name (`name(`) as `function`, and a class-ish name — after `new`/`class`/`extends`/… (via
+the `pend` mechanism) or a namespaced `\Ns\Class` — as `type`. Honest gap: here/nowdoc
+(`<<<EOT`) is not tracked (its marker reads plain). Tests: `syntax/tests/php.test` (16 cases) —
+the HTML/PHP boundary (outside stays plain, `<?= … ?>` tags meta), functions/classes/constants,
+namespaced types, variables/numbers, and all three comment styles + multi-line string/comment.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)

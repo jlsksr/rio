@@ -1,0 +1,109 @@
+# Tests for the PHP highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. php.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::php::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+proc anytype {spans type} {
+	foreach {a b t} $spans { if {$t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-php {.php/.phtml resolve to the php scanner} -body {
+	list [rio::syntax::for_path a.php] [rio::syntax::for_path a.phtml]
+} -result {rio::syntax::php::scan rio::syntax::php::scan}
+
+test lang_for_path-php {.php resolves to the PHP language name} -body {
+	rio::syntax::lang_for_path /x/index.php
+} -result PHP
+
+# --- the HTML/PHP boundary -----------------------------------------------------
+
+test open-tag {<?php is meta; code after it is PHP} -body {
+	set s [hl {<?php $x = 1;}]
+	list [has $s 1.0 1.5 meta] [has $s 1.6 1.8 variable] [has $s 1.11 1.12 number]
+} -result {1 1 1}
+
+test html-outside-plain {text outside <?php ?> is left plain; the tags are meta} -body {
+	set s [hl {<p>x</p><?= $y ?><b>z</b>}]
+	# only the <?= / ?> markers and the $y between them colour.
+	list [has $s 1.8 1.11 meta] [has $s 1.12 1.14 variable] [has $s 1.15 1.17 meta] \
+		[expr {![anytype $s function]}]
+} -result {1 1 1 1}
+
+# --- functions, classes, keywords, constants -----------------------------------
+
+test function {a function definition names it; a call is a function too} -body {
+	set s [hl {<?php function greet($n) { return foo($n); }}]
+	list [has $s 1.6 1.14 keyword] [has $s 1.15 1.20 function] [has $s 1.34 1.37 function]
+} -result {1 1 1}
+
+test class-type {class/extends name a type} -body {
+	set s [hl {<?php class Dog extends Animal {}}]
+	list [has $s 1.6 1.11 keyword] [has $s 1.12 1.15 type] [has $s 1.16 1.23 keyword] [has $s 1.24 1.30 type]
+} -result {1 1 1 1}
+
+test constants {true/false/null are constants} -body {
+	set s [hl {<?php if ($x === null) echo true;}]
+	list [has $s 1.6 1.8 keyword] [has $s 1.17 1.21 constant] [has $s 1.28 1.32 constant]
+} -result {1 1 1}
+
+test namespaced-type {a \Ns\Class name is a type} -body {
+	set s [hl {<?php $o = new \App\User();}]
+	list [has $s 1.11 1.14 keyword] [has $s 1.15 1.24 type]
+} -result {1 1}
+
+# --- variables, numbers --------------------------------------------------------
+
+test variables {$name and $this are variables} -body {
+	set s [hl {<?php $name = $this->x;}]
+	list [has $s 1.6 1.11 variable] [has $s 1.14 1.19 variable]
+} -result {1 1}
+
+test numbers {hex, float, underscored int} -body {
+	set s [hl {<?php $n = 0xFF + 3.14 + 1_000;}]
+	list [has $s 1.11 1.15 number] [has $s 1.18 1.22 number] [has $s 1.25 1.30 number]
+} -result {1 1 1}
+
+# --- comments and strings ------------------------------------------------------
+
+test line-comments {// and # run to end of line} -body {
+	set s [hl {<?php $x = 1; // note}]
+	has $s 1.14 1.21 comment
+} -result 1
+
+test hash-comment {a # comment} -body {
+	set s [hl {<?php $y; # tail}]
+	has $s 1.10 1.16 comment
+} -result 1
+
+test block-comment-multiline {a /* */ comment carries across lines} -body {
+	set s [hl "<?php\n/* one\ntwo */ \$z;"]
+	list [has $s 2.0 2.6 comment] [has $s 3.0 3.6 comment] [has $s 3.7 3.9 variable]
+} -result {1 1 1}
+
+test string-multiline {a "…" string carries across lines} -body {
+	set s [hl "<?php \$s = \"one\ntwo\";"]
+	list [has $s 1.11 1.15 string] [has $s 2.0 2.4 string]
+} -result {1 1}
+
+test single-quote {a '…' string does not need escape interpolation} -body {
+	set s [hl {<?php $s = 'plain';}]
+	has $s 1.11 1.18 string
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
