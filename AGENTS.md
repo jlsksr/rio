@@ -1536,6 +1536,23 @@ rule. Tests: `syntax/tests/tcl.test` (17 cases) — the command-position discipl
 argument `list`, `[…]` re-entry, code inside braces), the `#` gotcha both ways, variables, and
 `-flag` vs a bare minus.
 
+**Amendment — shell / Bash ships (landed).** `syntax/shell.tcl` (`.sh .bash .zsh .ksh .ash`),
+same contract, no registry/GUI change — and, like Tcl, driven by command position because a
+shell bareword is positional too. It colours `#` comments (only at word start, so `$#` and
+`foo#bar` are safe), `'…'`/`"…"`/`$'…'` strings and `` `…` `` command substitution as `string`
+(multi-line), `$var`/`${…}` and the special parameters (`$1 $@ $# $? $$ $! $* $0`) as
+`variable`, a `NAME=` assignment target as `variable`, reserved words (`if`/`then`/`for`/…) and
+builtins as `keyword`, any **other** command-position word (the command being run) as
+`function`, `-x`/`--long` options as `attribute`, and numbers. The one design choice worth
+recording: **`$( … )` / `$(( … ))` are not swallowed** — the `$` is left plain and the body is
+scanned as ordinary shell, so the inner command colours too (`out=$(ls -l)` colours `ls` and
+`-l`), the same "re-enter command position" idea as Tcl's `[ … ]`. A `for`/`case` loop variable
+stays plain (not every command-position keyword implies a command follows — only `then`/`do`/
+`else`/`if`/`elif`/`while`/`until` do). Verified over rio's own `rio-dev-deploy.sh` /
+`rio-server-deploy.sh`. Tests: `syntax/tests/shell.test` (16 cases) — command vs argument, the
+`#`/`$#`/`foo#bar` guards, assignments, `$( … )` re-entry, quotes (single non-interpolating),
+and options.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)

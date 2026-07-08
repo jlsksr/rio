@@ -1,0 +1,107 @@
+# Tests for the shell/Bash highlighter (AGENTS.md D32). Pure Tcl — the module is
+# Tk-free, so this runs under a bare tclsh with no display. (It highlights rio's *.sh.)
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. shell.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::shell::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+proc anytype {spans type} {
+	foreach {a b t} $spans { if {$t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-sh {.sh/.bash resolve to the shell scanner} -body {
+	list [rio::syntax::for_path deploy.sh] [rio::syntax::for_path a.bash]
+} -result {rio::syntax::shell::scan rio::syntax::shell::scan}
+
+test lang_for_path-sh {.sh resolves to the Shell language name} -body {
+	rio::syntax::lang_for_path /x/run.sh
+} -result Shell
+
+# --- command position ----------------------------------------------------------
+
+test command-name {a command-position word is a function; an argument stays plain} -body {
+	set s [hl {grep foo bar}]
+	list [has $s 1.0 1.4 function] [has $s 1.5 1.8 function]
+} -result {1 0}
+
+test builtin {a builtin in command position is a keyword} -body {
+	set s [hl {echo hi}]
+	has $s 1.0 1.4 keyword
+} -result 1
+
+test reserved-words {if/then/fi are keywords, and a command follows `then`} -body {
+	set s [hl {if x; then y; fi}]
+	list [has $s 1.0 1.2 keyword] [has $s 1.6 1.10 keyword] [has $s 1.11 1.12 function] [has $s 1.14 1.16 keyword]
+} -result {1 1 1 1}
+
+test for-var-plain {a `for` loop variable is not mis-coloured as a command} -body {
+	set s [hl {for i in a b; do echo $i; done}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.6 1.8 keyword] [expr {![has $s 1.4 1.5 function]}]
+} -result {1 1 1}
+
+# --- comments and the $# / foo#bar guards --------------------------------------
+
+test comment {a # at word start runs to end of line} -body {
+	hl {ls # list files}
+} -result {1.0 1.2 function 1.3 1.15 comment}
+
+test hash-midword {a # not at word start is not a comment} -body {
+	set s [hl {echo foo#bar}]
+	list [has $s 1.0 1.4 keyword] [anytype $s comment]
+} -result {1 0}
+
+# --- variables and assignments -------------------------------------------------
+
+test variables {plain, braced, and special parameters} -body {
+	set s [hl {echo $HOME ${x:-d} $1 $@ $?}]
+	list [has $s 1.5 1.10 variable] [has $s 1.11 1.18 variable] \
+		[has $s 1.19 1.21 variable] [has $s 1.22 1.24 variable] [has $s 1.25 1.27 variable]
+} -result {1 1 1 1 1}
+
+test assignment {a NAME= assignment target is a variable} -body {
+	set s [hl {PATH=/usr/bin}]
+	has $s 1.0 1.4 variable
+} -result 1
+
+test cmd-substitution {$( … ) is not swallowed — the inner command colours} -body {
+	set s [hl {out=$(ls -l)}]
+	list [has $s 1.0 1.3 variable] [has $s 1.6 1.8 function] [has $s 1.9 1.11 attribute]
+} -result {1 1 1}
+
+# --- strings, options, numbers -------------------------------------------------
+
+test quotes {single, double, and $'' strings; single does not interpolate} -body {
+	set s [hl {echo 'a $x' "b $y"}]
+	list [has $s 1.5 1.6 string] [has $s 1.6 1.11 string] [has $s 1.12 1.13 string] [has $s 1.13 1.18 string]
+} -result {1 1 1 1}
+
+test string-multiline {a "…" string carries across lines} -body {
+	set s [hl "echo \"one\ntwo\""]
+	list [has $s 1.5 1.6 string] [has $s 1.6 1.9 string] [has $s 2.0 2.4 string]
+} -result {1 1 1}
+
+test options {short and long options are attributes} -body {
+	set s [hl {ls -la --color}]
+	list [has $s 1.3 1.6 attribute] [has $s 1.7 1.14 attribute]
+} -result {1 1}
+
+test numbers {a bare number is a number} -body {
+	set s [hl {chmod 755 file}]
+	has $s 1.6 1.9 number
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
