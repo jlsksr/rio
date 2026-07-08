@@ -63,7 +63,7 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   The highlighters are small, self-contained files in `syntax/` with no external
   dependencies; a language is easy to add or **swap out** — drop a replacement in
   `~/.config/rio/syntax/` to override the shipped one. **(X)HTML, CSS, JavaScript,
-  Perl, Tcl, shell, Markdown, and PHP** ship.
+  Perl, Tcl, shell, Markdown, PHP, and Python** ship.
 - **Sessions** — reopen a project and rio brings back the files you had open and the
   active tab, plus your view preferences (theme, line-wrap, dock side, chat). The
   preferences live with the GUI; the open-file set lives with the project on the core,

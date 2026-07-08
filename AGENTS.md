@@ -1582,6 +1582,18 @@ the `pend` mechanism) or a namespaced `\Ns\Class` — as `type`. Honest gap: her
 the HTML/PHP boundary (outside stays plain, `<?= … ?>` tags meta), functions/classes/constants,
 namespaced types, variables/numbers, and all three comment styles + multi-line string/comment.
 
+**Amendment — Python ships (landed).** `syntax/python.tcl` (`.py .pyw .pyi`), same contract —
+and a clean one, since Python tokenises far more regularly than Perl/Tcl/shell. It colours `#`
+comments; `'…'`/`"…"` and **triple-quoted** `'''…'''`/`"""…"""` strings — with the `r`/`b`/`u`/
+`f` prefixes — as `string` (triples carry across lines via a `str3` state holding the delimiter);
+numbers (incl. `0o`/`0b`, complex `2j`, `_` separators); keywords; `True`/`False`/`None` as
+`constant`; a `def` NAME and a called name (`name(`) as `function`; a `class` NAME as `type`; and
+a `@decorator` as `function` — but only at line start, so the mid-line matrix-multiply `a @ b`
+is *not* mistaken for one (the same "disambiguate by position" care as elsewhere). f-string
+interpolation is not separately coloured (whole string one span) — a noted later refinement.
+Tests: `syntax/tests/python.test` (12 cases) — def/class/call, keywords/constants, the prefixed
+and triple-quoted strings (multi-line), numbers, and `@decorator` vs `@` matmul.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
