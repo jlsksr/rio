@@ -1488,6 +1488,28 @@ Tests: `syntax/tests/css.test` and `syntax/tests/js.test` (pure `tclsh`, run by
 comments and strings/templates, and the deliberate non-colourings (`#id` never a hex
 colour, `/` never a comment).
 
+**Amendment — Perl ships (landed).** `syntax/perl.tcl` (`.pl .pm .t .pod .psgi`), again on
+the same contract with no registry/GUI change. Perl's grammar is famously not cleanly
+tokenisable, so this follows the same discipline as the JS regex gap: **colour the
+unambiguous, leave the rest plain rather than guess wrong.** It colours `#` comments (with a
+`$#array` guard) and `=pod … =cut` POD blocks as `comment`; **sigil variables**
+(`$scalar @array %hash &sub`, plus `$_`, `@_`, `$1`, `$!`, `${…}`, `$#a`) as `variable` — the
+signature Perl look, and the reason `%`/`&` are only a variable when a name follows (else
+they're modulo/bit-and, left plain); numbers (hex/oct/bin/float, `_` separators); declaration
+/control/named-operator words as `keyword` and a curated built-in set as `function`; a
+`Foo::Bar` bareword and a `sub`/`package` NAME as `type`/`function`; and the **quote-like
+operators** `q qq qw qr qx m s tr y` (the operator word as `keyword`, the delimited body as
+`string`) via one engine handling same-char (`/…/`) and bracketed (`() [] {} <>`) delimiters,
+one- and two-part (`s/…/…/`), with multi-line carry. **Deliberate honest gaps** (nothing
+mis-coloured): here-docs (`<<"EOF"`) and a *bare* `/regex/` without a leading `m` — the `/` is
+division-ambiguous, exactly the JS case — read as plain text; `__END__`/`__DATA__` ends
+highlighting for the file tail. One Tcl-specific lesson worth recording: a literal `}`/`]`/`;`
+inside a *braced* proc body or an inline `[list …]` breaks Tcl's own brace/command parsing, so
+the delimiter-exclusion set is held in a double-quoted namespace string that `_isdelim`
+searches. Tests: `syntax/tests/perl.test` (24 cases) — sigils incl. the `$#`/modulo
+distinctions, POD carry, the quote-like engine (same-char + bracketed, one/two-part,
+multi-line), and the two deliberate non-colourings (`/` as division, `__END__` tail plain).
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)

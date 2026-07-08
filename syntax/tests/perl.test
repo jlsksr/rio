@@ -1,0 +1,155 @@
+# Tests for the Perl highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free,
+# so this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. perl.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::perl::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans {
+		if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 }
+	}
+	return 0
+}
+
+# --- the registry wiring -------------------------------------------------------
+
+test for_path-pl {.pl/.pm/.t resolve to the perl scanner} -body {
+	list [rio::syntax::for_path a.pl] [rio::syntax::for_path a.PM] [rio::syntax::for_path a.t]
+} -result {rio::syntax::perl::scan rio::syntax::perl::scan rio::syntax::perl::scan}
+
+test lang_for_path-pl {.pl resolves to the Perl language name} -body {
+	rio::syntax::lang_for_path /x/script.pl
+} -result Perl
+
+# --- variables: the signature sigils -------------------------------------------
+
+test scalar-var {a $scalar is a variable, and `my` a keyword} -body {
+	hl {my $x = 1;}
+} -result {1.0 1.2 keyword 1.3 1.5 variable 1.8 1.9 number}
+
+test sigils {array, hash, and package-qualified variables} -body {
+	set s [hl {@list %h $Foo::bar}]
+	list [has $s 1.0 1.5 variable] [has $s 1.6 1.8 variable] [has $s 1.9 1.18 variable]
+} -result {1 1 1}
+
+test special-vars {special punctuation and index sigils} -body {
+	set s [hl {$_ @_ $1 $! $#arr}]
+	list [has $s 1.0 1.2 variable] [has $s 1.3 1.5 variable] [has $s 1.6 1.8 variable] \
+		[has $s 1.9 1.11 variable] [has $s 1.12 1.17 variable]
+} -result {1 1 1 1 1}
+
+test modulo-not-var {a bare % (modulo) is not a variable} -body {
+	set s [hl {$a % $b}]
+	list [has $s 1.0 1.2 variable] [has $s 1.5 1.7 variable] [expr {[llength $s] == 6}]
+} -result {1 1 1}   ;# only the two scalars; the % emits nothing
+
+# --- comments and the $# guard -------------------------------------------------
+
+test comment {a # comment runs to end of line} -body {
+	set s [hl {$x = 1; # note}]
+	has $s 1.8 1.14 comment
+} -result 1
+
+test hash-index-not-comment {$#arr is a variable, not the start of a comment} -body {
+	set s [hl {$#arr and stuff}]
+	list [has $s 1.0 1.5 variable] [expr {![has $s 1.0 1.5 comment]}]
+} -result {1 1}
+
+# --- numbers, keywords, builtins, calls ----------------------------------------
+
+test numbers {hex, float, underscore, binary, octal} -body {
+	set s [hl {0xFF 3.14 1_000 0b101 0755}]
+	list [has $s 1.0 1.4 number] [has $s 1.5 1.9 number] [has $s 1.10 1.15 number] \
+		[has $s 1.16 1.21 number] [has $s 1.22 1.26 number]
+} -result {1 1 1 1 1}
+
+test keyword-builtin-call {control keyword, built-in, and a bareword call} -body {
+	set s [hl {return print greet()}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.7 1.12 function] [has $s 1.13 1.18 function]
+} -result {1 1 1}
+
+test named-operator {eq/and are named-operator keywords} -body {
+	set s [hl {if ($a eq $b and $c) { }}]
+	list [has $s 1.0 1.2 keyword] [has $s 1.7 1.9 keyword] [has $s 1.13 1.16 keyword]
+} -result {1 1 1}
+
+# --- sub / package names, class names ------------------------------------------
+
+test sub-name {a sub definition names the sub as a function} -body {
+	set s [hl {sub greet { }}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.4 1.9 function]
+} -result {1 1}
+
+test package-name {a package name (and a Foo::Bar class) is a type} -body {
+	set s [hl {package My::Thing;}]
+	list [has $s 1.0 1.7 keyword] [has $s 1.8 1.17 type]
+} -result {1 1}
+
+test class-call {a Foo::Bar bareword is a type} -body {
+	set s [hl {Other::Class->new}]
+	has $s 1.0 1.12 type
+} -result 1
+
+# --- quote-like operators ------------------------------------------------------
+
+test match-op {m/…/ colours the op as keyword and the body as string} -body {
+	set s [hl {$x =~ m/foo/}]
+	list [has $s 1.6 1.7 keyword] [expr {[has $s 1.7 1.8 string] && [has $s 1.8 1.12 string]}]
+} -result {1 1}
+
+test subst-op {s/…/…/ is two string sections after the keyword} -body {
+	set s [hl {s/a/b/g}]
+	# keyword s, then /, a/, b/ as string (the trailing g modifier stays plain).
+	list [has $s 1.0 1.1 keyword] [has $s 1.1 1.2 string] [has $s 1.2 1.4 string] [has $s 1.4 1.6 string]
+} -result {1 1 1 1}
+
+test qw-list {qw(...) is a keyword then a string body} -body {
+	set s [hl {qw(a b c)}]
+	list [has $s 1.0 1.2 keyword] [expr {[has $s 1.2 1.3 string] && [has $s 1.3 1.9 string]}]
+} -result {1 1}
+
+test subst-bracketed {s{...}{...} handles two bracketed sections} -body {
+	set s [hl "s{aa}{bb}"]
+	list [has $s 1.0 1.1 keyword] [has $s 1.2 1.5 string] [has $s 1.6 1.9 string]
+} -result {1 1 1}
+
+test division-not-regex {a bare / is division, never a regex} -body {
+	set s [hl {$a / $b}]
+	# no string spans at all — the / is left plain.
+	set anystr 0
+	foreach {a b t} $s { if {$t eq "string"} { set anystr 1 } }
+	set anystr
+} -result 0
+
+# --- multi-line state: strings, qw, POD ----------------------------------------
+
+test string-multiline {a "…" string carries across lines} -body {
+	set s [hl "my \$x = \"one\ntwo\";"]
+	list [has $s 1.8 1.9 string] [has $s 1.9 1.12 string] [has $s 2.0 2.4 string]
+} -result {1 1 1}
+
+test qw-multiline {a qw(...) list carries across lines} -body {
+	set s [hl "qw(one\ntwo)"]
+	list [has $s 1.0 1.2 keyword] [has $s 2.0 2.4 string]
+} -result {1 1}
+
+test pod-block {a =pod … =cut block is all comment, code resumes after} -body {
+	set s [hl "code();\n=pod\ndocs here\n=cut\nmore();"]
+	list [has $s 2.0 2.4 comment] [has $s 3.0 3.9 comment] [has $s 4.0 4.4 comment] \
+		[has $s 5.0 5.4 function]
+} -result {1 1 1 1}
+
+test end-marker {__END__ ends highlighting for the rest of the file} -body {
+	set s [hl "run();\n__END__\nignored \$stuff"]
+	list [has $s 2.0 2.7 keyword] [expr {![has $s 3.8 3.14 variable]}]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
