@@ -62,7 +62,8 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   (each theme carries its own `syntax.*` palette, so switching recolours code live).
   The highlighters are small, self-contained files in `syntax/` with no external
   dependencies; a language is easy to add or **swap out** — drop a replacement in
-  `~/.config/rio/syntax/` to override the shipped one. **(X)HTML** ships first.
+  `~/.config/rio/syntax/` to override the shipped one. **(X)HTML, CSS, and
+  JavaScript** ship.
 - **Sessions** — reopen a project and rio brings back the files you had open and the
   active tab, plus your view preferences (theme, line-wrap, dock side, chat). The
   preferences live with the GUI; the open-file set lives with the project on the core,

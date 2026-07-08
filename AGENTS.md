@@ -1458,6 +1458,32 @@ The `langs` introspection dict (previously unused) is keyed by this name. Tests:
 gains `lang_for_path-*`; `highlight.tcl` asserts the status bar shows `HTML` for an HTML file
 and `plain text` for a `.txt`.
 
+**Amendment — CSS and JavaScript ship (landed).** Two more languages, exercising the same
+per-line scanner contract with nothing added to the registry or the GUI (the drop-in loader
+picks them up by extension). Both stay inside the D32 token vocabulary — no new colour roles,
+so every existing theme highlights them for free.
+
+- **`syntax/css.tcl`** (`.css`) — comments (`/* */`, multi-line), at-rules (`@media`, …) as
+  `keyword`, strings, numbers/units and `#hex` colours as `number`, `!important` as `keyword`,
+  **property names** inside a block as `attribute`, and function names (`url(`, `calc(`, …) as
+  `function`. It tracks block structure so a property is only coloured where a property goes,
+  and a small nesting-at-rule set resolves `@media { .x { … } }` (rule-list vs declaration
+  block) correctly. Selector text and value keywords are left plain **on purpose** — CSS has
+  too many bare identifiers to colour without guessing; a `#id` in selector context is
+  deliberately *not* read as a hex colour.
+- **`syntax/js.tcl`** (`.js .mjs .cjs .jsx`) — line (`//`) and block (`/* */`, multi-line)
+  comments, `'`/`"` strings and backtick **template literals** (multi-line) as `string`,
+  numbers (hex/oct/bin/float/exp/bigint) as `number`, reserved words as `keyword`, the
+  literals as `constant`, and a called/defined identifier (`name(`) as `function`. **Regex
+  literals are intentionally not recognised** — `/…/` is indistinguishable from division
+  without a real parser, so it reads as plain text rather than risk mis-stringing a whole
+  line; noted as the one honest gap.
+
+Tests: `syntax/tests/css.test` and `syntax/tests/js.test` (pure `tclsh`, run by
+`syntax/tests/all.tcl`) — property/value/number/function colouring, at-rule nesting,
+multi-line comments and strings/templates, and the two deliberate non-colourings
+(`#id` selector, `/` division).
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)

@@ -1,0 +1,100 @@
+# Tests for the CSS highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free,
+# so this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. css.tcl]
+
+# hl drives the per-line scanner over the whole text via the registry's derived
+# convenience — the same path the pure (non-incremental) consumers use.
+proc hl {text} { rio::syntax::tokenize rio::syntax::css::scan $text }
+# Does the flat span list contain this exact {i0 i1 type} triple?
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans {
+		if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 }
+	}
+	return 0
+}
+
+# --- the registry wiring -------------------------------------------------------
+
+test for_path-css {.css resolves to the css scanner} -body {
+	rio::syntax::for_path /x/main.css
+} -result rio::syntax::css::scan
+
+test lang_for_path-css {.css resolves to the CSS language name} -body {
+	rio::syntax::lang_for_path /x/main.CSS
+} -result CSS
+
+# --- declarations: property names, values, numbers, functions ------------------
+
+test decl-property {a property name inside a block is `attribute`} -body {
+	set s [hl {a { color: red }}]
+	list [has $s 1.4 1.9 attribute] [has $s 1.11 1.14 attribute]
+} -result {1 0}   ;# `color` is a property; the value `red` is left plain
+
+test hex-colour {a #hex colour in a value is a number} -body {
+	set s [hl {a { color: #3af }}]
+	has $s 1.11 1.15 number
+} -result 1
+
+test id-selector-not-colour {a #id in selector context is NOT a hex number} -body {
+	hl {#bar { }}
+} -result {}   ;# selector text (incl. #id) is left plain — no number span
+
+test number-unit {a number keeps its unit/percent in one span} -body {
+	set s [hl {a { width: 50% ; top: 12px }}]
+	list [has $s 1.11 1.14 number] [has $s 1.22 1.26 number]
+} -result {1 1}
+
+test function-name {an identifier called as a function is `function`} -body {
+	set s [hl {a { background: url("x") }}]
+	list [has $s 1.16 1.19 function] [has $s 1.20 1.23 string]
+} -result {1 1}
+
+test important-flag {the !important flag is a keyword} -body {
+	set s [hl {a { color: red !important }}]
+	has $s 1.15 1.25 keyword
+} -result 1
+
+test custom-property {a --custom property name is `attribute`} -body {
+	set s [hl {a { --main: 1 }}]
+	has $s 1.4 1.10 attribute
+} -result 1
+
+# --- at-rules and nesting ------------------------------------------------------
+
+test at-rule {an @-rule keyword is coloured} -body {
+	set s [hl {@import "x.css";}]
+	list [has $s 1.0 1.7 keyword] [has $s 1.8 1.15 string]
+} -result {1 1}
+
+test at-media-nested {@media opens a rule-list, not a declaration block} -body {
+	# Inside @media the inner `top` is a property (decl), not a value; `.x` stays plain.
+	set s [hl {@media screen { .x { top: 0 } }}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.21 1.24 attribute] [has $s 1.26 1.27 number]
+} -result {1 1 1}
+
+# --- comments and strings across lines -----------------------------------------
+
+test comment-single {a one-line /* */ comment} -body {
+	hl {/* hi */}
+} -result {1.0 1.8 comment}
+
+test comment-multiline {a comment carries its state across lines} -body {
+	set s [hl "a { /* one\ntwo */ color: red }"]
+	list [has $s 1.4 1.10 comment] [has $s 2.0 2.6 comment] [has $s 2.7 2.12 attribute]
+} -result {1 1 1}
+
+test string-multiline {a quoted value spanning lines stays a string} -body {
+	set s [hl "a { content: \"one\ntwo\" }"]
+	list [has $s 1.13 1.17 string] [has $s 2.0 2.4 string]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

@@ -59,7 +59,8 @@ Every item below runs now, in the GUI:
 - **Custom keybindings** — every shortcut is one data table, remappable in a
   press-to-capture editor (applied live) or by hand in `keys.json`.
 - **Syntax highlighting** — per-language colour harmonised with the active theme;
-  highlighters are small self-contained files you can add or swap out. (X)HTML ships.
+  highlighters are small self-contained files you can add or swap out. (X)HTML, CSS,
+  and JavaScript ship.
 - **Sessions** — reopen a project and rio restores the open files, active tab, and your
   view preferences; a **remote session resumes too**.
 - **Local *or* remote, one transport** — locally there's nothing to start (the GUI
