@@ -1,0 +1,113 @@
+# Tests for the Tcl/Tk highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free,
+# so this runs under a bare tclsh with no display. (It highlights rio's own source.)
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. tcl.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::tcl::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans {
+		if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 }
+	}
+	return 0
+}
+proc anytype {spans type} {
+	foreach {a b t} $spans { if {$t eq $type} { return 1 } }
+	return 0
+}
+
+# --- the registry wiring -------------------------------------------------------
+
+test for_path-tcl {.tcl/.tm/.test resolve to the tcl scanner} -body {
+	list [rio::syntax::for_path a.tcl] [rio::syntax::for_path a.tm] [rio::syntax::for_path a.test]
+} -result {rio::syntax::tcl::scan rio::syntax::tcl::scan rio::syntax::tcl::scan}
+
+test lang_for_path-tcl {.tcl resolves to the Tcl language name} -body {
+	rio::syntax::lang_for_path /x/rio.tcl
+} -result Tcl
+
+# --- command position: the core Tcl discipline ---------------------------------
+
+test command-keyword {a core command in command position is a keyword} -body {
+	hl {set x 1}
+} -result {1.0 1.3 keyword 1.6 1.7 number}
+
+test arg-not-keyword {a command word used as an ARGUMENT is left plain} -body {
+	# `set list 5` — `list` is the variable name, not the `list` command.
+	set s [hl {set list 5}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.4 1.8 keyword]
+} -result {1 0}
+
+test bracket-reenters-command {inside [ … ] the first word is a command again} -body {
+	set s [hl {set n [llength $items]}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.7 1.14 keyword] [has $s 1.15 1.21 variable]
+} -result {1 1 1}
+
+test brace-body-is-code {a braced body is code, not a string — commands inside colour} -body {
+	set s [hl {if {1} {set x 2}}]
+	list [has $s 1.0 1.2 keyword] [has $s 1.8 1.11 keyword] [has $s 1.14 1.15 number]
+} -result {1 1 1}
+
+# --- the # comment gotcha ------------------------------------------------------
+
+test comment {a # in command position runs to end of line} -body {
+	hl {# a comment}
+} -result {1.0 1.11 comment}
+
+test hash-mid-command {a # NOT in command position is not a comment} -body {
+	set s [hl {puts "x" #y}]
+	list [has $s 1.0 1.4 keyword] [anytype $s comment]
+} -result {1 0}
+
+# --- variables -----------------------------------------------------------------
+
+test variables {scalar, braced, array-subscript, and namespaced vars} -body {
+	set s [hl {$a ${b} $arr(i) $ns::v}]
+	list [has $s 1.0 1.2 variable] [has $s 1.3 1.7 variable] \
+		[has $s 1.8 1.15 variable] [has $s 1.16 1.22 variable]
+} -result {1 1 1 1}
+
+test lone-dollar {a bare $ (no name) is not a variable} -body {
+	anytype [hl {puts $}] variable
+} -result 0
+
+# --- proc/else, options, numbers, strings --------------------------------------
+
+test proc-name {a proc definition names the proc as a function} -body {
+	set s [hl {proc greet {name} { }}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.5 1.10 function]
+} -result {1 1}
+
+test else-always {else/elseif colour even as if-arguments (not command position)} -body {
+	set s [hl {if {$x} { a } else { b }}]
+	has $s 1.14 1.18 keyword
+} -result 1
+
+test option-flag {a -option flag is an attribute} -body {
+	set s [hl {pack .b -side left -fill both}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.8 1.13 attribute] [has $s 1.19 1.24 attribute]
+} -result {1 1 1}
+
+test dash-not-flag {a bare minus (not a token-start dash) is left plain} -body {
+	# `1 - 2` — the minus is subtraction, not an option.
+	anytype [hl {expr {1 - 2}}] attribute
+} -result 0
+
+test numbers {hex, float, and decimal} -body {
+	set s [hl {expr {0xFF + 3.14 + 42}}]
+	list [has $s 1.6 1.10 number] [has $s 1.13 1.17 number] [has $s 1.20 1.22 number]
+} -result {1 1 1}
+
+test string-multiline {a "…" string carries across lines} -body {
+	set s [hl "set s \"one\ntwo\""]
+	list [has $s 1.6 1.7 string] [has $s 1.7 1.10 string] [has $s 2.0 2.4 string]
+} -result {1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

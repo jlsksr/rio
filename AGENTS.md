@@ -1510,6 +1510,32 @@ searches. Tests: `syntax/tests/perl.test` (24 cases) — sigils incl. the `$#`/m
 distinctions, POD carry, the quote-like engine (same-char + bracketed, one/two-part,
 multi-line), and the two deliberate non-colourings (`/` as division, `__END__` tail plain).
 
+**Amendment — Tcl ships, and highlights rio's own source (landed).** `syntax/tcl.tcl`
+(`.tcl .tm .test .itcl .tk`), same contract, no registry/GUI change. Tcl's two notorious
+gotchas *are* the design, and both come from the same fact — a bareword's meaning depends on
+its position, which a highlighter can't fully know without running the program:
+
+- **`#` is a comment only in command position.** Mid-command it is an ordinary character
+  (`puts "x" # y` has no comment). The scanner tracks command position (start of line, and
+  after `{`, `[`, `;`) and only starts a comment there.
+- **Braces `{ … }` are grouping, not a string.** Their body is usually *code* (a proc body,
+  an `if` script), so braces are left as plain punctuation and the scanner keeps tokenising
+  inside them — a proc body highlights like any other code (verified by running the module
+  over rio's own 3000-line GUI and core). This is the opposite call from a here-string
+  language, and it's the reason Tcl looks right where a naive "braces = string" would ruin it.
+
+Command position also disciplines the keyword set: core Tcl/Tk command words colour as
+`keyword` **only in command position**, so `set list 5` leaves the *variable* `list` plain
+(the alternative — colour every known word everywhere — mis-paints argument names constantly).
+`else`/`elseif` are the exception (always coloured — they read as `if` arguments, never
+variables). It also colours `$var`/`${v}`/`$arr(i)`/`$ns::v` as `variable`, `"…"` strings
+(multi-line) as `string`, numbers, a `proc` NAME as `function`, and `-option` flags (dash at a
+token boundary) as `attribute`. `[ … ]` re-enters command position, so `[llength $x]` colours
+`llength`. Non-command barewords (proc calls, argument words) stay plain — same "don't guess"
+rule. Tests: `syntax/tests/tcl.test` (17 cases) — the command-position discipline (keyword vs
+argument `list`, `[…]` re-entry, code inside braces), the `#` gotcha both ways, variables, and
+`-flag` vs a bare minus.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
