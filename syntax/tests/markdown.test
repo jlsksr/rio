@@ -1,0 +1,105 @@
+# Tests for the Markdown highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free,
+# so this runs under a bare tclsh with no display. (It highlights rio's own docs.)
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. markdown.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::markdown::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-md {.md/.markdown resolve to the markdown scanner} -body {
+	list [rio::syntax::for_path readme.md] [rio::syntax::for_path a.markdown]
+} -result {rio::syntax::markdown::scan rio::syntax::markdown::scan}
+
+test lang_for_path-md {.md resolves to the Markdown language name} -body {
+	rio::syntax::lang_for_path /x/README.md
+} -result Markdown
+
+# --- line-level constructs -----------------------------------------------------
+
+test heading {an ATX heading colours the whole line} -body {
+	hl {## A heading}
+} -result {1.0 1.12 keyword}
+
+test thematic-break {a --- rule is meta} -body {
+	hl {---}
+} -result {1.0 1.3 meta}
+
+test list-marker {a bullet marker is a keyword; the text is scanned for inline} -body {
+	set s [hl {- an item with **bold**}]
+	list [has $s 1.0 1.1 keyword] [has $s 1.15 1.23 keyword]
+} -result {1 1}
+
+test ordered-marker {a numbered list marker is a keyword} -body {
+	set s [hl {1. first item}]
+	has $s 1.0 1.2 keyword
+} -result 1
+
+test blockquote {a > marker is a comment; the rest is scanned inline} -body {
+	set s [hl {> quoted *word*}]
+	list [has $s 1.0 1.1 comment] [has $s 1.9 1.15 type]
+} -result {1 1}
+
+# --- inline spans --------------------------------------------------------------
+
+test emphasis {**strong** is keyword, *em* is type, ~~strike~~ is comment} -body {
+	set s [hl {a *em* b **str** c ~~del~~}]
+	list [has $s 1.2 1.6 type] [has $s 1.9 1.16 keyword] [has $s 1.19 1.26 comment]
+} -result {1 1 1}
+
+test underscore-emphasis {_em_ / __strong__ colour like their asterisk forms} -body {
+	set s [hl {_em_ and __strong__}]
+	list [has $s 1.0 1.4 type] [has $s 1.9 1.19 keyword]
+} -result {1 1}
+
+test snake-case-guard {underscores inside a word do NOT start emphasis} -body {
+	hl {call foo_bar_baz now}
+} -result {}
+
+test inline-code {`code` is a string} -body {
+	set s [hl {run `tclsh x` now}]
+	has $s 1.4 1.13 string
+} -result 1
+
+test link {[text](url) is type text + string url; images too} -body {
+	set s [hl {see [rio](https://x.io) ok}]
+	list [has $s 1.4 1.9 type] [has $s 1.9 1.23 string]
+} -result {1 1}
+
+test image {an ![alt](url) image colours the ! and brackets as type} -body {
+	set s [hl {![alt](a.png)}]
+	list [has $s 1.0 1.6 type] [has $s 1.6 1.13 string]
+} -result {1 1}
+
+test autolink {an <url> / <email> autolink is a string} -body {
+	set s [hl {see <http://x.io> and <a@b.io>}]
+	list [has $s 1.4 1.17 string] [has $s 1.22 1.30 string]
+} -result {1 1}
+
+# --- fenced code blocks (multi-line) -------------------------------------------
+
+test fenced-block {a ``` fence marks the fences; the body is left plain} -body {
+	set s [hl "text\n```tcl\nset x 1\n```\nmore"]
+	# fences (lines 2 and 4) are meta; the body line 3 has no spans.
+	list [has $s 2.0 2.6 meta] [has $s 4.0 4.3 meta] [expr {![has $s 3.0 3.7 keyword]}]
+} -result {1 1 1}
+
+test fence-needs-matching-close {a shorter/other fence does not close the block} -body {
+	# the ~~~ inside a ```-fenced block is body, not a close.
+	set s [hl "```\n~~~\ncode\n```"]
+	list [has $s 1.0 1.3 meta] [has $s 4.0 4.3 meta]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

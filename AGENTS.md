@@ -1553,6 +1553,23 @@ stays plain (not every command-position keyword implies a command follows — on
 `#`/`$#`/`foo#bar` guards, assignments, `$( … )` re-entry, quotes (single non-interpolating),
 and options.
 
+**Amendment — Markdown ships (landed).** `syntax/markdown.tcl` (`.md .markdown .mkd .mdown`),
+same contract. Markdown is prose, not code, so the design inverts the others': recognise the
+**line-level construct first** (heading, thematic break, blockquote, list, code fence), then
+scan the remainder for **inline spans**. It colours ATX headings (`# …`) as `keyword`;
+thematic breaks and code-fence lines as `meta`; blockquote `>` as `comment`; list markers
+(`-`/`*`/`+`/`1.`) as `keyword`; inline code `` `…` `` as `string`; `**strong**`/`__strong__`
+as `keyword` and `*em*`/`_em_` as `type`; `~~strike~~` as `comment`; `[text](url)` /
+`![alt](url)` as `type` (text) + `string` (url); and `<autolinks>` as `string`. Two care
+points worth recording: **`_` emphasis is guarded by word boundaries** so `foo_bar_baz`
+(snake_case) is left alone — the one place Markdown and code conventions collide; and a
+**fenced code block carries state** (the fence char + length) so only a matching, long-enough
+fence closes it, with the body left plain (re-highlighting a code block in its own language is
+a noted later refinement). Verified over rio's own README/AGENTS/ROADMAP/PITCH/CONTRIBUTING/
+INSTALL (incl. the 2000-line AGENTS.md). Tests: `syntax/tests/markdown.test` (17 cases) —
+headings/rules/lists/quotes, the inline spans, the snake_case guard, links/images/autolinks,
+and multi-line fences (incl. a non-matching inner fence staying body).
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
