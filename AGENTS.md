@@ -1594,6 +1594,18 @@ interpolation is not separately coloured (whole string one span) — a noted lat
 Tests: `syntax/tests/python.test` (12 cases) — def/class/call, keywords/constants, the prefixed
 and triple-quoted strings (multi-line), numbers, and `@decorator` vs `@` matmul.
 
+**Amendment — C ships (landed).** `syntax/c.tcl` (`.c .h`), same contract. It colours `//` and
+`/* … */` comments; **preprocessor** directives (`#include`, `#define`, …) as `meta`, with a
+`<header.h>` on an include line as `string`; `"…"` strings and `'c'` char literals as `string`;
+numbers (with `0x`/`0b` and int/float suffixes like `UL`/`f`); and it makes the C-idiomatic
+**type/keyword split** — control/storage words (`if`/`return`/`struct`/`typedef`/…) are
+`keyword`, but the built-in *type names* (`int`/`char`/`void`/…) and any `…_t` identifier are
+`type`, so a declaration reads with its types tinted distinctly from its control flow. `NULL`/
+`true`/`false` are `constant`; a called/defined `name(` is `function`; a `struct`/`union`/`enum`
+tag is `type` (via `pend`). Tests: `syntax/tests/c.test` (13 cases) — the two preprocessor forms
+(with the include header), types vs keywords, `struct` tags, `…_t`, strings/chars, suffixed
+numbers, and multi-line block comments.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)

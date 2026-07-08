@@ -1,0 +1,88 @@
+# Tests for the C highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. c.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::c::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-c {.c/.h resolve to the c scanner} -body {
+	list [rio::syntax::for_path a.c] [rio::syntax::for_path a.h]
+} -result {rio::syntax::c::scan rio::syntax::c::scan}
+
+test lang_for_path-c {.c resolves to the C language name} -body {
+	rio::syntax::lang_for_path /x/main.c
+} -result C
+
+# --- preprocessor --------------------------------------------------------------
+
+test include {#include is meta and the <header> is a string} -body {
+	set s [hl {#include <stdio.h>}]
+	list [has $s 1.0 1.8 meta] [has $s 1.9 1.18 string]
+} -result {1 1}
+
+test define {#define is meta; the value is scanned normally} -body {
+	set s [hl {#define MAX 100}]
+	list [has $s 1.0 1.7 meta] [has $s 1.12 1.15 number]
+} -result {1 1}
+
+# --- types, keywords, constants, functions -------------------------------------
+
+test types-and-func {built-in type names are type; a call/def is a function} -body {
+	set s [hl {int main(void) { return 0; }}]
+	list [has $s 1.0 1.3 type] [has $s 1.4 1.8 function] [has $s 1.9 1.13 type] [has $s 1.17 1.23 keyword]
+} -result {1 1 1 1}
+
+test keywords-const {control keywords and NULL} -body {
+	set s [hl {if (x) return NULL; else break;}]
+	list [has $s 1.0 1.2 keyword] [has $s 1.7 1.13 keyword] [has $s 1.14 1.18 constant] [has $s 1.20 1.24 keyword]
+} -result {1 1 1 1}
+
+test struct-tag {a struct/enum tag name is a type} -body {
+	set s [hl {struct Point p;}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.7 1.12 type]
+} -result {1 1}
+
+test custom-type {an …_t identifier is a type} -body {
+	set s [hl {uint32_t count = 0;}]
+	has $s 1.0 1.8 type
+} -result 1
+
+# --- strings, chars, numbers ---------------------------------------------------
+
+test string-and-char {"…" strings and 'c' char literals} -body {
+	set s [hl {char c = 'a'; char *s = "hi";}]
+	list [has $s 1.9 1.12 string] [has $s 1.24 1.28 string]
+} -result {1 1}
+
+test numbers-suffixed {hex and int/float suffixes are part of the number} -body {
+	set s [hl {a = 0xFF; b = 3.14f; c = 100UL;}]
+	list [has $s 1.4 1.8 number] [has $s 1.14 1.19 number] [has $s 1.25 1.30 number]
+} -result {1 1 1}
+
+# --- comments ------------------------------------------------------------------
+
+test line-comment {a // comment runs to end of line} -body {
+	set s [hl {x = 1; // note}]
+	has $s 1.7 1.14 comment
+} -result 1
+
+test block-comment-multiline {a /* */ comment carries across lines} -body {
+	set s [hl "a; /* one\ntwo */ b;"]
+	list [has $s 1.3 1.9 comment] [has $s 2.0 2.6 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
