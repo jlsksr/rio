@@ -237,8 +237,9 @@ saved the moment you change it:
 Every editor shortcut is data, remappable in **one** place. Two ways to change them:
 
 - **The editor** — *Settings ▸ Keyboard Shortcuts…* lists every command; click a shortcut
-  and press the keys you want (press-to-capture, like a modern IDE), *Clear* to unbind, or
-  *Reset all to defaults*. **Save** applies immediately — no restart — and writes the file
+  and press the keys you want (press-to-capture, like a modern IDE), *Clear* to unbind,
+  *Default* to restore one command's original chord, or *Reset all to defaults*. **Save**
+  applies immediately — no restart — and writes the file
   below for you. Conflicts and unusable keys (a lone letter, a bare modifier) are refused
   with a note.
 - **By hand** — edit `$XDG_CONFIG_HOME/rio/keys.json` (default `~/.config/rio/keys.json`),

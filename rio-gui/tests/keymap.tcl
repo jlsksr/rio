@@ -115,6 +115,12 @@ ok "overrides: remap present"   [dict get $ov close-tab] Control-k
 ok "overrides: unbind present"  [dict get $ov quit]      ""
 ok "overrides: only the diffs"  [dict size $ov]          2
 
+# --- keys_default: restore one command to its shipped default (per-row button) ---
+set ::keys_work [dict create close-tab Control-k quit ""]
+keys_default close-tab
+ok "one-default: restores chord" [dict get $::keys_work close-tab] Control-w
+ok "one-default: leaves others"  [dict get $::keys_work quit]      ""
+
 # --- keys_save round-trips through keys.json and deletes when empty ----------
 keys_save {close-tab Control-k}
 ok "save: wrote a file"    [file exists [keys_path]] 1

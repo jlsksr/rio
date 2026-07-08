@@ -2776,6 +2776,20 @@ proc keys_on_key {keysym state} {
 	keys_status "Set “[key_label $cmd]” to [chord_label $chord]. Save to apply."
 }
 proc keys_clear {cmd} { dict set ::keys_work $cmd "" ; keys_refresh_buttons ; keys_status "" }
+# Restore one command to its shipped default chord (the per-row counterpart of Reset all).
+# We note if the restored chord now duplicates another command's, but still apply it — it's
+# a deliberate "put it back" and the user can sort out the collision.
+proc keys_default {cmd} {
+	set chord [lindex [dict get $::keymap_default $cmd] 0]
+	dict set ::keys_work $cmd $chord
+	keys_refresh_buttons
+	set other [keys_conflict $::keys_work $cmd $chord]
+	if {$other ne ""} {
+		keys_status "Restored “[key_label $cmd]” to [chord_label $chord] — now also on “[key_label $other]”."
+	} else {
+		keys_status "Restored “[key_label $cmd]” to [chord_label $chord]."
+	}
+}
 proc keys_reset_all {} {
 	set ::keys_work {}
 	dict for {cmd spec} $::keymap_default { dict set ::keys_work $cmd [lindex $spec 0] }
@@ -2804,7 +2818,7 @@ proc keybindings_dialog {} {
 
 	label $w.hint -anchor w -font RioUIFont -justify left \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-text "Click a shortcut, then press the keys you want. Clear unbinds a command."
+		-text "Click a shortcut, then press the keys you want. Clear unbinds; Default restores the original."
 	grid $w.hint -row 0 -column 0 -sticky we -padx 8 -pady {8 4}
 
 	frame $w.body -background [dict get $c ui.bg]
@@ -2813,10 +2827,12 @@ proc keybindings_dialog {} {
 		label $w.body.l$cmd -text [key_label $cmd] -anchor w -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		button $w.body.k$cmd -width 20 -font RioUIFont -command [list keys_capture $cmd]
-		button $w.body.c$cmd -text "Clear" -font RioUIFont -command [list keys_clear $cmd]
+		button $w.body.c$cmd -text "Clear"   -font RioUIFont -command [list keys_clear $cmd]
+		button $w.body.d$cmd -text "Default" -font RioUIFont -command [list keys_default $cmd]
 		grid $w.body.l$cmd -row $r -column 0 -sticky w  -padx {2 12} -pady 1
 		grid $w.body.k$cmd -row $r -column 1 -sticky we -padx 2      -pady 1
 		grid $w.body.c$cmd -row $r -column 2 -sticky w  -padx {2 2}  -pady 1
+		grid $w.body.d$cmd -row $r -column 3 -sticky w  -padx {2 2}  -pady 1
 		incr r
 	}
 	grid $w.body -row 1 -column 0 -sticky nwe -padx 8
