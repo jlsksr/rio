@@ -34,7 +34,7 @@ proc run_turn {text {provider ::rio::agent::echo_provider}} {
 # the loop feeds the tool_result back (the latest user message carries a
 # tool_result block) it streams a final line and ends. Posts are synchronous —
 # the loop's `post` bridge defers them, so the contract is exercised faithfully.
-proc tool_provider {conversation tools post} {
+proc tool_provider {conversation tools system post} {
 	set last [lindex $conversation end]
 	set sawtool 0
 	if {[dict exists $last content]} {
@@ -54,7 +54,7 @@ proc tool_provider {conversation tools post} {
 # A fake write-using provider: first pass proposes the tool in ::wt_name/::wt_input/
 # ::wt_raw; after the loop feeds a tool_result back, it finishes. Drives the
 # approval gate (slice 5).
-proc write_provider {conversation tools post} {
+proc write_provider {conversation tools system post} {
 	set last [lindex $conversation end]
 	set sawtool 0
 	if {[dict exists $last content]} {
@@ -180,7 +180,7 @@ test agent-send-requires-text {agent.send without text is bad_request, no turn s
 } -result {false bad_request}
 
 test agent-error-from-provider {a provider failure surfaces as a classified agent.error} -setup {
-	proc ::down_provider {conversation tools post} { {*}$post error provider_down "boom" }
+	proc ::down_provider {conversation tools system post} { {*}$post error provider_down "boom" }
 } -body {
 	set out [run_turn "x" ::down_provider]
 	set ev [lindex [dict get $out evs] end]
@@ -512,7 +512,7 @@ test agent-proposal-stale {agent.proposal with nothing pending is a bad_request}
 # not in-process swaps. echo is built in; tests register a fake provider (and a
 # fake key-holding one) so the registry is exercised without the claude plugin.
 
-proc fake_provider {conversation tools post} { {*}$post delta "fake reply" ; {*}$post done end_turn }
+proc fake_provider {conversation tools system post} { {*}$post delta "fake reply" ; {*}$post done end_turn }
 proc fakekey_set {k} { set ::fakekey $k }
 proc fakekey_clear {} { set ::fakekey "" }
 proc fakekey_status {} { expr {[info exists ::fakekey] && $::fakekey ne ""} }

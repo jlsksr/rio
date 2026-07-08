@@ -51,7 +51,11 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   a new file, you review the **diff** and **Approve or Reject**, and on approval
   it applies (and, by default, saves). A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
-  every write waits for you (or opt into *Settings ▸ Auto-accept edits*).
+  every write waits for you (or opt into *Settings ▸ Auto-accept edits*). The
+  agent's **instructions are a plain, editable data file** (`agent/prompt.md`,
+  never your personal workflow baked in) — override it wholesale by dropping one in
+  `~/.config/rio/agent/`, and add project-specific guidance in a `.rio/agent.md` at
+  your project root.
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.

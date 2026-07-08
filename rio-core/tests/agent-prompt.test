@@ -1,0 +1,105 @@
+# Tests for the agent system-prompt composer (rio::agent::prompt, AGENTS.md D34):
+# the three layers (shipped base, XDG override, per-project `.rio/agent.md`) and
+# how compose() joins them. Pure filesystem — no network, no event loop.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# A throwaway dir per test, cleaned up after.
+proc mkdir {args} {
+	set d [file join [::tcltest::temporaryDirectory] rioprompt-[clock clicks][incr ::seq]]
+	file mkdir $d
+	return $d
+}
+proc writefile {path text} {
+	file mkdir [file dirname $path]
+	set fh [open $path w] ; fconfigure $fh -encoding utf-8 ; puts -nonewline $fh $text ; close $fh
+}
+
+# Every test starts from a known base-search override and no open project, so one
+# test's project root or override can't leak into the next.
+proc reset_prompt {} {
+	rio::agent::prompt::override_dirs ""
+	rio::project::close
+}
+
+# --- the shipped base loads (no override, no project) ------------------------
+
+test shipped-base {without any override the shipped agent/prompt.md is found} -setup {
+	reset_prompt
+} -body {
+	set s [rio::agent::prompt::compose]
+	list [expr {$s ne ""}] [string match {*propose*} $s]
+} -cleanup { reset_prompt } -result {1 1}
+
+# --- base override: a user file replaces the shipped one ----------------------
+
+test base-override {a prompt.md in the search dir is used as the base} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE INSTRUCTIONS"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE INSTRUCTIONS}
+
+test base-precedence {the first search dir with a prompt.md wins} -setup {
+	reset_prompt
+	set ::d1 [mkdir] ; set ::d2 [mkdir]
+	writefile [file join $::d1 prompt.md] "FROM ONE"
+	writefile [file join $::d2 prompt.md] "FROM TWO"
+	rio::agent::prompt::override_dirs [list $::d1 $::d2]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d1 $::d2 } -result {FROM ONE}
+
+# --- project layer: .rio/agent.md at the open root, appended ------------------
+
+test project-appended {an open project's .rio/agent.md is appended to the base} -setup {
+	reset_prompt
+	set ::b [mkdir]
+	writefile [file join $::b prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::b]
+	set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "PROJECT RULES"
+	rio::project::open $::proj
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::b $::proj } -result "BASE
+
+PROJECT RULES"
+
+test project-optional {no .rio/agent.md means the base stands alone} -setup {
+	reset_prompt
+	set ::b [mkdir]
+	writefile [file join $::b prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::b]
+	set ::proj [mkdir]
+	rio::project::open $::proj
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::b $::proj } -result {BASE}
+
+test project-only {a project layer with no base file yields just the project text} -setup {
+	reset_prompt
+	set ::b [mkdir]   ;# empty: no prompt.md
+	rio::agent::prompt::override_dirs [list $::b]
+	set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "ONLY PROJECT"
+	rio::project::open $::proj
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::b $::proj } -result {ONLY PROJECT}
+
+# --- nothing available: an empty prompt (safe degrade) -----------------------
+
+test none {no base file and no project composes to the empty string} -setup {
+	reset_prompt
+	set ::b [mkdir]   ;# empty
+	rio::agent::prompt::override_dirs [list $::b]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::b } -result {}
+
+cleanupTests

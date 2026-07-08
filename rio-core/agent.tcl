@@ -201,9 +201,12 @@ proc rio::agent::send {text emit} {
 # the typed messages it posts back (mapping each onto an agent.* event), records
 # the assistant turn, and — if the model asked for tools — runs them and loops.
 #
-# Provider contract — `{*}$provider conversation tools post`:
-#   tools = the available tool specs (rio::agent::tools::specs); a provider that
-#           doesn't do tools ignores it.
+# Provider contract — `{*}$provider conversation tools system post`:
+#   tools  = the available tool specs (rio::agent::tools::specs); a provider that
+#            doesn't do tools ignores it.
+#   system = the core-composed system prompt (rio::agent::prompt::compose, D34) —
+#            provider-agnostic instructions the provider sends however its API
+#            spells "system prompt"; a provider without one (echo) ignores it.
 #   {*}$post delta <text>                 a chunk of assistant text
 #   {*}$post tool  <id> <name> <in> <raw> a requested tool call (in = parsed dict,
 #                                         raw = the original input JSON)
@@ -216,12 +219,13 @@ proc rio::agent::_run {turn emit} {
 	variable maxsteps
 	set co [info coroutine]
 	set toolspecs [rio::agent::tools::specs]
+	set system [rio::agent::prompt::compose]
 	for {set step 0} {1} {incr step} {
 		set acc ""
 		set calls {}        ;# tool calls this step: {id name input raw} dicts
 		set stop ""
 		set failed 0
-		{*}$provider $conversation $toolspecs [list [namespace current]::_post $co]
+		{*}$provider $conversation $toolspecs $system [list [namespace current]::_post $co]
 		while {1} {
 			set msg [yield]
 			switch -- [lindex $msg 0] {
@@ -414,8 +418,9 @@ proc rio::agent::_resume {co msg} {
 # network. It echoes the latest user message back, streamed in word-sized chunks
 # on successive event-loop turns (so the async path is genuinely exercised), then
 # signals done. The trivial reference implementation of the provider contract;
-# the Claude faces (D26) replace it. It does no tools, so it ignores `tools`.
-proc rio::agent::echo_provider {conversation tools post} {
+# the Claude faces (D26) replace it. It does no tools and has no system prompt, so
+# it ignores `tools` and `system`.
+proc rio::agent::echo_provider {conversation tools system post} {
 	set last [lindex $conversation end]
 	set reply "echo: [_text_of $last]"
 	_echo_stream $post [regexp -all -inline {\S+\s*} $reply]

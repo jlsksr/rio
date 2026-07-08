@@ -19,8 +19,9 @@
 package require json
 
 namespace eval rio::claude::api {
-	# Config-as-data: the documented Anthropic Messages API. No `system` prompt is
-	# forced and no beta header is sent — this is the plain, supported request.
+	# Config-as-data: the documented Anthropic Messages API. No beta header is sent
+	# — this is the plain, supported request. The `system` prompt is not a static
+	# config key: the core composes it per turn and the provider merges it in (D34).
 	variable config [dict create \
 		messages_url      https://api.anthropic.com/v1/messages \
 		anthropic_version 2023-06-01 \
@@ -44,8 +45,8 @@ proc rio::claude::api::cget {key} {
 	return [dict get $config $key]
 }
 
-# --- the provider (agent contract: conversation tools post) ------------------
-proc rio::claude::api::provider {conversation tools post} {
+# --- the provider (agent contract: conversation tools system post) -----------
+proc rio::claude::api::provider {conversation tools system post} {
 	variable config
 	variable transport
 	set key [_api_key]
@@ -55,7 +56,11 @@ proc rio::claude::api::provider {conversation tools post} {
 		return
 	}
 	set auth [list x-api-key $key]
-	rio::claude::infer $config $conversation $tools $auth $transport $post
+	# The core owns the system prompt (D34); merge it into a LOCAL config copy so
+	# the persistent config dict stays clean. infer skips an empty `system`.
+	set conf $config
+	dict set conf system $system
+	rio::claude::infer $conf $conversation $tools $auth $transport $post
 }
 
 # Whether a key is stored (the GUI offers Set / Clear accordingly).

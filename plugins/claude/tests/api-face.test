@@ -26,7 +26,7 @@ test claude-api-not-configured {with no key the provider posts not_configured} -
 	rio::claude::api::clear_key
 } -body {
 	set ::posts {}
-	rio::claude::api::provider {{role user text hi}} {} collect_post
+	rio::claude::api::provider {{role user text hi}} {} {} collect_post
 	lindex [lindex $::posts 0] 1
 } -result not_configured
 
@@ -74,7 +74,7 @@ test claude-api-request {the request carries x-api-key and no oauth beta / no fo
 	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
 	set ::rio::claude::api::transport capture_tp
 } -body {
-	rio::claude::api::provider {{role user text hi}} {} collect_post
+	rio::claude::api::provider {{role user text hi}} {} {} collect_post
 	set hdrs [dict get $::seen headers]
 	set body [json::json2dict [dict get $::seen body]]
 	list [dict get $hdrs x-api-key] \

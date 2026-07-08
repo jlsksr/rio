@@ -1783,6 +1783,70 @@ the eventual compare-view consolidation can reuse.
 
 ---
 
+### D34 — The agent's system prompt: a core-owned, provider-agnostic "soul"
+
+Until now rio sent the model no system prompt (`No system prompt is forced`, the
+old claude-api note): the agent had rio's *tool descriptions* but no statement of
+how it should behave — how to use the propose→approve gate, or how to write code
+well. That is worth having, but it raised a real question of *placement*, because
+the obvious wrong answer is to bake one person's workflow into rio's shipped
+behaviour. The resolution is a **three-layer split**, and the load-bearing idea is
+that the three layers must not mix:
+
+1. **The rio agent contract** — how to act *in rio*: read freely, never write
+   directly, propose an edit the user approves/rejects as a diff, match the file
+   you're editing. This is not "personality," it's the harness telling the model
+   the rules of *this* environment; some of it already lived implicitly in the tool
+   descriptions (agent-tools.tcl).
+2. **Coding craft** — smallest change that works, don't invent APIs you haven't
+   read, prefer clarity, ask when genuinely ambiguous, say what changed briefly.
+   Portable across models; tasteful defaults.
+3. **User / project specifics** — a given codebase's conventions and don'ts, and a
+   user's own habits. This is exactly what must **not** ship in rio.
+
+**Placement follows rio's existing idiom: plain data files, never executed, small
+enough to read, overridable under `$XDG_CONFIG_HOME/rio/` — the same treatment as
+themes (D24) and highlighters (D32).** Layers 1+2 ship as `agent/prompt.md`
+(model-neutral markdown, loaded not run); drop a replacement at
+`$XDG_CONFIG_HOME/rio/agent/prompt.md` to override it wholesale. Layer 3 is an
+opt-in `.rio/agent.md` at the open project root — instructions that live *with the
+project*, not with rio, so a user's Perl-purist workflow (or any house style) is
+added without ever touching the shipped code. `rio::agent::prompt::compose`
+(rio-core/agent-prompt.tcl) reads base-then-project and joins them with a blank
+line; either layer may be absent, and with neither the prompt is empty and the
+provider sends none — a safe degrade to the pre-D34 behaviour.
+
+**The soul is a CORE concern, not a provider's.** The same instructions should
+shape a turn whether the provider is Claude, the echo stub, or a future local
+model, so the **loop composes the prompt once and pushes it to the provider** as a
+new fourth argument in the provider contract —
+`{*}$provider conversation tools system post`. This is the *same pattern the
+contract already uses for `tools`*: the loop hands the provider a capability and a
+provider that has no slot for it (echo) ignores it. The claude-api face merges
+`system` into a **local copy** of its config-as-data (D26) so the persistent config
+stays clean, and the shared inference core already skips an empty `system`. No new
+op, no wire change — the prompt never crosses the channel; it is composed core-side
+where the agent loop runs (so over a remote core it is the *core's* files —
+`agent/prompt.md`, the remote project's `.rio/agent.md` — that shape the turn,
+consistent with D30's "the agent lives in the core").
+
+**Why:** it gives rio a genuinely better default agent without a redesign, on a
+seam that already existed (the unused `system` field in inference.tcl), while
+answering the placement worry structurally — the three-layer split *is* the
+mechanism that keeps personal style out of rio's binary. New suite
+`rio-core/tests/agent-prompt.test` (7 cases) covers base load, override precedence,
+project append, each-layer-optional, and the empty degrade; the claude-api tests
+gained the fourth contract arg.
+
+**Deferred (noted):** a provider *may* later append a short model-specific coda to
+the shared base (the seam allows it — the face already builds a local config), but
+nothing needs one yet. Surfacing the base prompt in the GUI (a Settings view of the
+active instructions, editable like the keybindings editor D23) and a per-project
+`.rio/agent.md` scaffold are frontend polish left for later. None are on the
+critical path — the data files are readable and editable by hand today.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
