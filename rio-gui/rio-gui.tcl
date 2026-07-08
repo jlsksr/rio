@@ -2469,28 +2469,145 @@ proc editor_proxy {g args} {
 	}
 }
 
+# ---------------------------------------------------------------------------
+# Keymap (AGENTS.md D23): ONE table maps a logical command -> {chord action}. It is
+# the single source of truth for the editor's keyboard shortcuts AND for the
+# accelerator labels shown in the menus, so a remap moves both together. Users remap
+# by dropping a keys.json in the config dir (D21) — {"command":"chord", ...} overrides
+# the default chord per command; "" unbinds one. Chords are Tk event syntax minus the
+# <>: modifiers Control/Shift/Alt joined by '-', then the key (a letter, or a keysym
+# like Tab/backslash/bracketright). A capital letter carries an implicit Shift, the Tk
+# convention: Control-S is Ctrl+Shift+S. New commands slot in here as one line each —
+# the binder and the menus pick them up with no further wiring.
+# ---------------------------------------------------------------------------
+# The `action` is the KEY behaviour; a menu item may run a different -command (e.g.
+# split-editor's key toggles the split, its menu item only splits) and just borrows
+# this command's chord for its accelerator label.
+set ::keymap_default {
+	new            {Control-n            do_new}
+	open           {Control-o            open_dialog}
+	open-folder    {Control-O            open_folder_dialog}
+	save           {Control-s            do_save}
+	save-as        {Control-S            save_as_dialog}
+	close-tab      {Control-w            do_close}
+	quit           {Control-q            do_quit}
+	undo           {Control-z            do_undo}
+	redo           {Control-Z            do_redo}
+	redo-alt       {Control-y            do_redo}
+	next-tab       {Control-Tab          {cycle 1}}
+	prev-tab       {Control-Shift-Tab    {cycle -1}}
+	show-files     {Control-E            {show_pane files}}
+	show-git       {Control-G            {show_pane git}}
+	toggle-wrap    {Control-W            {set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap}}
+	toggle-chat    {Control-A            {set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility}}
+	split-editor   {Control-backslash    toggle_split}
+	move-tab-other {Control-bracketright move_tab_other}
+}
+set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); keymap_resolve fills it
+set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
+
+proc keys_path {} {
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		set base $::env(XDG_CONFIG_HOME)
+	} elseif {[info exists ::env(HOME)]} {
+		set base [file join $::env(HOME) .config]
+	} else { return "" }
+	return [file join $base rio keys.json]
+}
+
+# Is `chord` a usable binding? (An empty chord is a deliberate unbind.) Tk's `bind`
+# accepts almost any string — it treats unknown tokens as modifiers/keysyms that simply
+# never fire — so a probe-bind can't flag a typo. We instead check the shape ourselves:
+# every token before the key must be a known modifier. That catches the likely mistake
+# (a misspelled modifier); we don't try to enumerate every keysym, so a bogus *key*
+# still binds harmlessly and just never triggers.
+proc keymap_valid {chord} {
+	if {$chord eq ""} { return 1 }
+	set mods {Control Ctrl Shift Alt Meta Command Option \
+		Mod1 Mod2 Mod3 Mod4 Mod5 Lock Extended}
+	set parts [split $chord -]
+	foreach m [lrange $parts 0 end-1] { if {$m ni $mods} { return 0 } }
+	return [expr {[lindex $parts end] ne ""}]
+}
+
+# Merge user overrides (keys.json: command -> chord) over the defaults into ::keymap.
+# Only known commands with a Tk-valid chord are honoured; a missing/corrupt file, an
+# unknown command, or a bad chord is ignored (a broken keys.json must never stop the
+# editor). What was ignored is collected in ::keymap_bad for a single startup notice.
+proc keymap_resolve {} {
+	set ::keymap $::keymap_default
+	set ::keymap_bad {}
+	set path [keys_path]
+	if {$path eq "" || ![file exists $path]} return
+	if {[catch {
+		set f [open $path r] ; fconfigure $f -encoding utf-8
+		set over [json::json2dict [::read $f]] ; close $f
+	}]} { lappend ::keymap_bad "keys.json is not valid JSON — ignored" ; return }
+	dict for {cmd chord} $over {
+		if {![dict exists $::keymap_default $cmd]} {
+			lappend ::keymap_bad "unknown command \"$cmd\"" ; continue
+		}
+		if {![keymap_valid $chord]} {
+			lappend ::keymap_bad "\"$cmd\": invalid chord \"$chord\"" ; continue
+		}
+		lassign [dict get $::keymap $cmd] _ action
+		dict set ::keymap $cmd [list $chord $action]
+	}
+}
+
+# The chord bound to `cmd` in the resolved keymap ("" if unbound / unknown).
+proc key_chord {cmd} {
+	if {![dict exists $::keymap $cmd]} { return "" }
+	return [lindex [dict get $::keymap $cmd] 0]
+}
+
+# A human accelerator label for `cmd`, derived from its resolved chord so a remap
+# updates the menu automatically. "" when unbound (the menu then shows no accelerator).
+proc key_accel {cmd} { return [chord_label [key_chord $cmd]] }
+
+# Turn a Tk chord (Control-Shift-e, Control-backslash, Control-S) into a display label
+# (Ctrl+Shift+E, Ctrl+\, Ctrl+Shift+S). A lone capital letter carries an implicit Shift.
+proc chord_label {chord} {
+	if {$chord eq ""} { return "" }
+	set parts [split $chord -]
+	set key   [lindex $parts end]
+	set out {} ; set shift 0
+	foreach m [lrange $parts 0 end-1] {
+		switch -- $m {
+			Control - Ctrl    { lappend out Ctrl }
+			Shift             { set shift 1 }
+			Alt - Mod1 - Meta { lappend out Alt }
+			default           { lappend out $m }
+		}
+	}
+	if {[string length $key] == 1 && [string is upper $key]} { set shift 1 }
+	if {$shift} { lappend out Shift }
+	set order {}
+	foreach want {Ctrl Alt Shift} { if {$want in $out} { lappend order $want } }
+	lappend order [key_glyph $key]
+	return [join $order +]
+}
+
+# Display glyph for a single key: letters upper-cased, common keysyms to their symbol.
+proc key_glyph {key} {
+	set map [dict create \
+		backslash "\\" bracketright "]" bracketleft "\[" slash "/" grave "`" \
+		semicolon ";" comma "," period "." minus "-" equal "=" space "Space"]
+	if {[dict exists $map $key]}        { return [dict get $map $key] }
+	if {[string length $key] == 1}      { return [string toupper $key] }
+	return $key   ;# Tab, Escape, Return, F5, … shown as-is
+}
+
 # Editor keyboard shortcuts, bound on a group's text widget with `break` so the
 # widget's own class bindings (Tk's built-in Ctrl+O/Ctrl+Z etc.) don't also fire.
-# Bound per group so a shortcut acts on whichever group has keyboard focus.
+# Bound per group so a shortcut acts on whichever group has keyboard focus — driven
+# entirely by the resolved ::keymap, so nothing here changes when a command is added.
 proc editor_bindings {w} {
-	bind $w <Control-n>         { do_new ; break }
-	bind $w <Control-o>         { open_dialog ; break }
-	bind $w <Control-O>         { open_folder_dialog ; break }
-	bind $w <Control-s>         { do_save ; break }
-	bind $w <Control-S>         { save_as_dialog ; break }
-	bind $w <Control-w>         { do_close ; break }
-	bind $w <Control-q>         { do_quit ; break }
-	bind $w <Control-z>         { do_undo ; break }
-	bind $w <Control-Z>         { do_redo ; break }
-	bind $w <Control-y>         { do_redo ; break }
-	bind $w <Control-Tab>       { cycle 1 ; break }
-	bind $w <Control-Shift-Tab> { cycle -1 ; break }
-	bind $w <Control-E>         { show_pane files ; break }
-	bind $w <Control-G>         { show_pane git ; break }
-	bind $w <Control-W>         { set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap ; break }
-	bind $w <Control-A>         { set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility ; break }
-	bind $w <Control-backslash> { toggle_split ; break }
-	bind $w <Control-bracketright> { move_tab_other ; break }
+	dict for {cmd spec} $::keymap {
+		lassign $spec chord action
+		if {$chord eq ""} continue   ;# a deliberately unbound command
+		catch { bind $w <$chord> "$action ; break" }
+	}
 }
 
 # Build editor group `g`: its frame (.eg<g>) with a tab strip on top and the text
@@ -2532,6 +2649,10 @@ proc focus_group {g} {
 	set ::cur [gcur $g]
 	refresh_all
 }
+
+# Resolve the keymap (defaults + the user's keys.json) before any binding or menu is
+# built, so both the editor shortcuts and the menu accelerators read the same table.
+keymap_resolve
 
 # Create the first editor group; the split adds a second (phase 3).
 make_editor_group 0
@@ -2652,36 +2773,36 @@ focus [gget 0 path]
 menu .m ; . configure -menu .m
 menu .m.file -tearoff 0
 .m add cascade -label File -menu .m.file
-.m.file add command -label "New"       -accelerator Ctrl+N       -command do_new
-.m.file add command -label "Open…"    -accelerator Ctrl+O       -command open_dialog
-.m.file add command -label "Open Folder…" -accelerator Ctrl+Shift+O -command open_folder_dialog
-.m.file add command -label "Save"      -accelerator Ctrl+S       -command do_save
-.m.file add command -label "Save As…" -accelerator Ctrl+Shift+S -command save_as_dialog
+.m.file add command -label "New"       -accelerator [key_accel new]         -command do_new
+.m.file add command -label "Open…"    -accelerator [key_accel open]        -command open_dialog
+.m.file add command -label "Open Folder…" -accelerator [key_accel open-folder] -command open_folder_dialog
+.m.file add command -label "Save"      -accelerator [key_accel save]        -command do_save
+.m.file add command -label "Save As…" -accelerator [key_accel save-as]     -command save_as_dialog
 .m.file add separator
 .m.file add command -label "Connect to Remote Core…" -command connect_remote_dialog
 .m.file add separator
-.m.file add command -label "Close Tab" -accelerator Ctrl+W       -command do_close
-.m.file add command -label "Quit"      -accelerator Ctrl+Q       -command do_quit
+.m.file add command -label "Close Tab" -accelerator [key_accel close-tab]   -command do_close
+.m.file add command -label "Quit"      -accelerator [key_accel quit]        -command do_quit
 menu .m.edit -tearoff 0
 .m add cascade -label Edit -menu .m.edit
-.m.edit add command -label "Undo" -accelerator Ctrl+Z       -command do_undo
-.m.edit add command -label "Redo" -accelerator Ctrl+Shift+Z -command do_redo
+.m.edit add command -label "Undo" -accelerator [key_accel undo] -command do_undo
+.m.edit add command -label "Redo" -accelerator [key_accel redo] -command do_redo
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
-.m.view add command -label "Show Files" -accelerator Ctrl+Shift+E -command {show_pane files}
-.m.view add command -label "Show Git"   -accelerator Ctrl+Shift+G -command {show_pane git}
+.m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}
+.m.view add command -label "Show Git"   -accelerator [key_accel show-git]   -command {show_pane git}
 .m.view add separator
 .m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command place_dock
 .m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command place_dock
 .m.view add separator
-.m.view add checkbutton -label "Wrap Lines" -accelerator Ctrl+Shift+W \
+.m.view add checkbutton -label "Wrap Lines" -accelerator [key_accel toggle-wrap] \
 	-variable ::wrap_lines -command apply_wrap
-.m.view add checkbutton -label "Agent Chat" -accelerator Ctrl+Shift+A \
+.m.view add checkbutton -label "Agent Chat" -accelerator [key_accel toggle-chat] \
 	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
-.m.view add command -label "Split Editor"          -accelerator "Ctrl+\\" -command split_editor
+.m.view add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
 .m.view add command -label "Unsplit Editor"        -command unsplit_editor
-.m.view add command -label "Move Tab to Other Group" -accelerator "Ctrl+]" -command move_tab_other
+.m.view add command -label "Move Tab to Other Group" -accelerator [key_accel move-tab-other] -command move_tab_other
 .m.view add separator
 .m.view add command -label "Compare With File…" -command compare_with_file_dialog
 .m.view add command -label "Close Compare" -accelerator Esc -command compare_close
@@ -2771,3 +2892,9 @@ set ::rio_started 1
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }
+
+# If keys.json had entries we couldn't use, say so once — a silent skip would leave the
+# user's remap mysteriously ineffective. The editor still ran on the valid rest.
+if {[llength $::keymap_bad] && ![info exists ::env(RIO_GUI_HEADLESS)]} {
+	report_error "Some shortcuts in [keys_path] were ignored:\n  • [join $::keymap_bad "\n  • "]"
+}

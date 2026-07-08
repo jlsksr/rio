@@ -126,7 +126,8 @@ else to start:
 
 Open files with Ctrl+O (each lands in its own tab), New with Ctrl+N, switch tabs
 with Ctrl+Tab, close one with Ctrl+W, save with Ctrl+S, undo/redo with Ctrl+Z /
-Ctrl+Shift+Z. The View menu switches the colour theme live (default or the
+Ctrl+Shift+Z — all remappable in `keys.json` (a single table; see INSTALL.md).
+The View menu switches the colour theme live (default or the
 shipped examples in `themes/` — Solarized Dark/Light and Plan 9 Acme). The
 terminal version (Ck) doesn't exist yet; build-and-run steps for it will land
 here when it does.

@@ -627,6 +627,30 @@ config edit rather than a code change, and keep keymap churn out of the
 frontends. The concrete **default keymap** (and any modal-vs-modeless stance)
 stays open — that's the narrowed O6.
 
+*(Implemented — GUI keymap as one table.)* The GUI's shortcuts were briefly hardcoded
+twice over (the `bind`s in `editor_bindings` and again as literal `-accelerator` strings
+in the menus — two places to drift). They now come from a single `::keymap_default`
+table: `command → {chord action}`. `editor_bindings` binds each command's chord on every
+group's text widget (still with `; break`, so Tk's own class bindings don't double-fire),
+and every menu `-accelerator` is derived from the same table via `chord_label` (so a
+remap moves the key *and* its menu label together). A menu item may still run a different
+`-command` than its key (split-editor's key toggles, its menu only splits) — the menu
+just borrows the chord for display. Users remap in **`$XDG_CONFIG_HOME/rio/keys.json`**
+(D21 config home; a sibling of `prefs.json`, `themes/`, `syntax/`): `{"command":"chord"}`
+overrides one default chord, `""` unbinds. Adding a command is a one-line table entry —
+no second edit. **Robustness follows the prefs rule** (a broken config never stops the
+editor): a missing/corrupt file, an unknown command, or a mis-modified chord is skipped
+and collected in `::keymap_bad`, surfaced *once* as a post-startup notice so a botched
+remap isn't silently ignored. Chord validity only checks the *modifiers* — Tk's `bind`
+accepts almost any string (unknown tokens become keysyms that never fire), so a probe-bind
+can't flag a typo; validating the modifier tokens catches the likely mistake without
+enumerating every keysym. Covered by `rio-gui/tests/keymap.tcl` (defaults, label
+derivation, override/unbind, garbage rejection, and that the resolved map actually drives
+the per-widget bindings). The keymap is the frontend's view concern — no core, no wire.
+This narrows O6: the GUI default scheme is now concrete; the TUI's and any modal stance
+stay open. Live remap without restart, and a keybindings UI, are the obvious next steps
+(today: edit `keys.json`, relaunch).
+
 ### D24 — GUI theming: semantic roles in plain data files (themes are data, not code)
 
 The **GUI is themeable**, and a theme is a flat, human-readable data file — the

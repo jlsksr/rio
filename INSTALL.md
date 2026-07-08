@@ -232,6 +232,53 @@ saved the moment you change it:
 > so flipping a setting for one session changes your global default. For a simple
 > global toggle (like wrap) that is usually exactly what you want.
 
+### Keyboard shortcuts (`keys.json`)
+
+Every editor shortcut is data, remappable in **one** place:
+`$XDG_CONFIG_HOME/rio/keys.json` (default `~/.config/rio/keys.json`), a sibling of
+`prefs.json`. The file is **overrides only** — list just the commands you want to change;
+everything else keeps its default. It is optional (no file = all defaults), plain JSON,
+parsed never executed. Changes take effect at the next launch.
+
+```json
+{
+  "close-tab": "Control-k",
+  "save-as":   "Control-Shift-s",
+  "quit":      ""
+}
+```
+
+A value is a **chord** in Tk syntax: modifiers `Control` / `Shift` / `Alt` joined by
+`-`, then the key — a letter, or a keysym like `Tab`, `backslash`, `bracketright`. An
+empty string `""` unbinds the command (menu-only). The commands and their defaults:
+
+| Command          | Default            | Does                                  |
+|------------------|--------------------|---------------------------------------|
+| `new`            | `Control-n`        | New tab                               |
+| `open`           | `Control-o`        | Open file…                            |
+| `open-folder`    | `Control-Shift-o`  | Open folder as project…               |
+| `save`           | `Control-s`        | Save                                  |
+| `save-as`        | `Control-Shift-s`  | Save As…                              |
+| `close-tab`      | `Control-w`        | Close the current tab                 |
+| `quit`           | `Control-q`        | Quit                                  |
+| `undo`           | `Control-z`        | Undo                                  |
+| `redo`           | `Control-Shift-z`  | Redo                                  |
+| `redo-alt`       | `Control-y`        | Redo (alternate)                      |
+| `next-tab`       | `Control-Tab`      | Next tab                              |
+| `prev-tab`       | `Control-Shift-Tab`| Previous tab                          |
+| `show-files`     | `Control-Shift-e`  | Show the files pane                   |
+| `show-git`       | `Control-Shift-g`  | Show the git pane                     |
+| `toggle-wrap`    | `Control-Shift-w`  | Toggle line wrap                      |
+| `toggle-chat`    | `Control-Shift-a`  | Toggle the agent chat pane            |
+| `split-editor`   | `Control-backslash`| Toggle the editor split               |
+| `move-tab-other` | `Control-bracketright` | Move the tab to the other group   |
+
+A capital letter in a chord implies Shift the way Tk reads it, so `Control-Shift-s` and
+`Control-S` are the same binding; the menu shows either as `Ctrl+Shift+S`. If an entry
+names an unknown command or a chord with a misspelled modifier, rio ignores just that
+line (the rest still apply) and tells you once at startup — a bad `keys.json` never stops
+the editor. Full rationale in [AGENTS.md](AGENTS.md) D23.
+
 ---
 
 ## 7. Lifecycle, shutdown & troubleshooting
