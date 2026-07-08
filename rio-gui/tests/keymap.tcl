@@ -83,5 +83,78 @@ keymap_resolve
 ok "corrupt: falls back to default" [key_chord new]        Control-n
 ok "corrupt: noted once"            [llength $::keymap_bad] 1
 
+# --- friendly command labels (for the shortcuts editor) ----------------------
+ok "label: friendly name"    [key_label close-tab]  "Close tab"
+ok "label: unknown -> id"    [key_label nope]       nope
+
+# --- event_to_chord: a key event (%K keysym, %s state) -> chord --------------
+# state bits: Shift 0x1, Control 0x4, Alt/Mod1 0x8.
+ok "ev: ctrl+letter"          [event_to_chord k 4]           Control-k
+ok "ev: ctrl+shift+letter"    [event_to_chord K 5]           Control-Shift-k
+ok "ev: ctrl+alt"             [event_to_chord n 12]          Control-Alt-n
+ok "ev: named key kept"       [event_to_chord backslash 4]   Control-backslash
+ok "ev: bare function key ok" [event_to_chord F5 0]          F5
+ok "ev: bare letter refused"  [event_to_chord a 0]           ""
+ok "ev: bare modifier refused" [event_to_chord Control_L 4]  ""
+
+# --- keys_conflict: another command already using a chord --------------------
+set wk {new Control-n save Control-s close-tab Control-w}
+ok "conflict: detects other" [keys_conflict $wk new Control-s] save
+ok "conflict: free chord"    [keys_conflict $wk new Control-x] ""
+ok "conflict: same command"  [keys_conflict $wk new Control-n] ""
+ok "conflict: empty never"   [keys_conflict $wk new ""]        ""
+
+# --- keymap_overrides: minimal diff against the defaults ---------------------
+set wk2 {}
+dict for {cmd spec} $::keymap_default { dict set wk2 $cmd [lindex $spec 0] }
+ok "overrides: none at default" [keymap_overrides $wk2] ""
+dict set wk2 close-tab Control-k
+dict set wk2 quit ""
+set ov [keymap_overrides $wk2]
+ok "overrides: remap present"   [dict get $ov close-tab] Control-k
+ok "overrides: unbind present"  [dict get $ov quit]      ""
+ok "overrides: only the diffs"  [dict size $ov]          2
+
+# --- keys_save round-trips through keys.json and deletes when empty ----------
+keys_save {close-tab Control-k}
+ok "save: wrote a file"    [file exists [keys_path]] 1
+keymap_resolve
+ok "save: resolves back"   [key_chord close-tab]     Control-k
+keys_save {}
+ok "save: empty deletes"   [file exists [keys_path]] 0
+
+# --- live remap: keymap_apply_live rebinds widgets + menu, no restart --------
+set w [gget $::focus path]
+write_keys {{"close-tab": "Control-k"}}
+keymap_apply_live
+ok "live: new chord bound"    [string match *do_close* [bind $w <Control-k>]] 1
+ok "live: old chord cleared"  [bind $w <Control-w>] ""
+ok "live: menu label moved"   [.m.file entrycget "Close Tab" -accelerator] Ctrl+K
+write_keys {{}}
+keymap_apply_live
+ok "live: default re-bound"   [string match *do_close* [bind $w <Control-w>]] 1
+ok "live: override cleared"   [bind $w <Control-k>] ""
+ok "live: menu label restored" [.m.file entrycget "Close Tab" -accelerator] Ctrl+W
+
+# --- the shortcuts editor, driven end to end ---------------------------------
+# Open the real modal, then (once it's up, via the event loop tkwait runs) record a
+# chord and Save — calling the capture handlers directly, exactly as a keypress would.
+after 80 {
+	ok "dialog: window built"     [winfo exists .keys.body.kclose-tab] 1
+	keys_capture close-tab
+	keys_on_key k 4                       ;# as if the user pressed Ctrl+K
+	set ::probe [.keys.body.kclose-tab cget -text]
+	keys_dialog_save                      ;# writes keys.json, applies live, closes
+}
+keybindings_dialog                        ;# blocks until the after-script closes it
+ok "dialog: button showed chord"  $::probe Ctrl+K
+ok "dialog: saved + resolved"     [key_chord close-tab]                          Control-k
+ok "dialog: bound live on widget" [string match *do_close* [bind $w <Control-k>]] 1
+
+after 80 { keys_reset_all ; keys_dialog_save }
+keybindings_dialog
+ok "dialog: reset removes file"   [file exists [keys_path]]  0
+ok "dialog: reset restores default" [key_chord close-tab]    Control-w
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

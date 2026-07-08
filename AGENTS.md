@@ -651,6 +651,26 @@ This narrows O6: the GUI default scheme is now concrete; the TUI's and any modal
 stay open. Live remap without restart, and a keybindings UI, are the obvious next steps
 (today: edit `keys.json`, relaunch).
 
+*(Follow-on — live remap + a shortcuts editor.)* The "edit and relaunch" caveat is gone.
+Each `::keymap_default` entry now carries a third field, a human `label`, so the map can
+name itself in a UI (an override still changes only the chord; `keymap_resolve` `lreplace`s
+index 0 and keeps action+label). Two mechanisms turn a keymap change into a running-UI
+change with no restart: `keymap_rebind_all` clears the chords bound last time
+(`::keymap_live_chords` — `bind` overwrites but never removes, so a changed/unbound chord
+must be explicitly cleared) and re-binds the current set on every group; `keymap_refresh_menus`
+re-derives every accelerator. `keymap_apply_live` = re-read the file, then both — the one
+entry point after any runtime change, so file and UI never diverge. On top sits **Settings ▸
+Keyboard Shortcuts…**, a modal that edits a working copy (`::keys_work`, command→chord),
+records chords **press-to-capture** like a modern IDE (`event_to_chord` maps `%K`/`%s` →
+a chord, refusing a bare modifier or a lone printable that would hijack typing, live
+conflict-checked via `keys_conflict`), and on Save writes only the diff from the defaults
+(`keymap_overrides` → `keys_save`, deleting `keys.json` when nothing differs) then applies
+live. The pure pieces (`event_to_chord`, `keys_conflict`, `keymap_overrides`, live rebind,
+and the dialog driven end-to-end) are covered in `keymap.tcl`; the capture *binding* is a
+one-line `<KeyPress>` guard, verified by hand with a real `event generate` (headless it's
+a transient of the withdrawn root, so unmapped — the test drives the handlers directly).
+Still a pure frontend concern — no core, no wire.
+
 ### D24 — GUI theming: semantic roles in plain data files (themes are data, not code)
 
 The **GUI is themeable**, and a theme is a flat, human-readable data file — the

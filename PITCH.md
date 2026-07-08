@@ -56,6 +56,8 @@ Every item below runs now, in the GUI:
   its HTTPS stay server-side.
 - **Theming** — live-switchable themes (plain default, Solarized Dark/Light, Plan 9
   Acme), plain data files that are never executed.
+- **Custom keybindings** — every shortcut is one data table, remappable in a
+  press-to-capture editor (applied live) or by hand in `keys.json`.
 - **Syntax highlighting** — per-language colour harmonised with the active theme;
   highlighters are small self-contained files you can add or swap out. (X)HTML ships.
 - **Sessions** — reopen a project and rio restores the open files, active tab, and your
