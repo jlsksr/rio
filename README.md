@@ -87,7 +87,9 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server` — or, from an
   already-open GUI, **File ▸ Connect to Remote Core…**. Files open and save on
   whichever box the core runs on; browse them from the file tree or the point-and-click
-  Open/Save dialogs, which follow the core onto the remote disk.
+  Open/Save dialogs, which follow the core onto the remote disk. A **stale tunnel is
+  noticed within seconds** (not minutes): the GUI watches the link at the protocol
+  level and tells you to re-tunnel and reconnect instead of silently hanging.
 
 **Under the hood:** all the logic lives in a **UI-less core**, and the GUI is
 **always a client** to one over a channel — a pipe to a private core it spawns

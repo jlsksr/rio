@@ -204,7 +204,7 @@ proc dispatch_event {ev} {
 # wait — itself a nested rio_call — resolves on its own id without disturbing this one.
 proc core_call {op params {timeout_ms 0}} {
 	set id r[incr ::reply_seq]
-	set ::pending($id) 1
+	set ::pending($id) [clock milliseconds] ;# when it was sent — watch_tick ages it (D37)
 	if {[catch {
 		puts $::core_chan "{\"id\":[rio::wire::str $id],\"op\":[rio::wire::str $op],\"params\":[rio::wire::obj $params]}"
 		flush $::core_chan
@@ -237,6 +237,7 @@ proc core_call {op params {timeout_ms 0}} {
 proc core_reader {} {
 	if {[catch {gets $::core_chan line} n]} { core_lost ; return }
 	if {$n < 0} { if {[eof $::core_chan]} { core_lost } ; return }
+	set ::last_rx [clock milliseconds] ;# any received line proves the link alive (D37)
 	if {[string trim $line] eq ""} return
 	if {[catch {json::json2dict $line} msg]} return
 	if {[dict exists $msg event]} {
@@ -249,11 +250,13 @@ proc core_reader {} {
 	}
 }
 
-# The channel closed. Report it once, stop reading, and wake any call blocked on a
-# reply (with a disconnected error) so the GUI never hangs. The editor stays up so
-# nothing in view is lost; further ops fail fast through core_call.
-proc core_lost {} {
+# The channel closed (`eof`) — or the watchdog below declared it dead (`stale`).
+# Report it once, stop reading, and wake any call blocked on a reply (with a
+# disconnected error) so the GUI never hangs. The editor stays up so nothing in
+# view is lost; further ops fail fast through core_call.
+proc core_lost {{why eof}} {
 	if {![info exists ::core_chan]} return
+	watch_stop
 	catch {fileevent $::core_chan readable {}}
 	catch {close $::core_chan}
 	unset -nocomplain ::core_chan
@@ -261,7 +264,60 @@ proc core_lost {} {
 		set ::reply($id) [dict create id $id ok false \
 			error [dict create code disconnected message "lost the connection to the core"]]
 	}
-	report_error "Lost the connection to the core (it exited or the link dropped)." disconnected
+	if {$why eq "stale"} {
+		report_error "The link to the core at $::core_endpoint went stale — the socket is open but nothing answers (usually a dropped SSH tunnel).\n\nRe-establish the tunnel, then reconnect via File ▸ Connect to Remote Core…" disconnected
+	} else {
+		report_error "Lost the connection to the core (it exited or the link dropped)." disconnected
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Stale-link watchdog (AGENTS.md D37). A half-open socket — the classic stale
+# `ssh -L` forward — accepts writes and never EOFs, so without this the GUI only
+# learns the link is dead when TCP gives up, minutes later. hello_core already
+# bounds the FIRST exchange for exactly that reason; this extends the same idea
+# to the whole session, purely at the protocol layer (`after` timers + one cheap
+# op — no socket options, no keepalive). Armed only for a socket-attached core:
+# a spawned child is a pipe, and a pipe delivers EOF the moment the core dies.
+# Every watch_interval it checks, in order:
+#   1. a reply pending longer than reply_overdue — no op legitimately waits that
+#      long (streaming ops ack at once and stream as events), so the link is dead;
+#   2. nothing pending and nothing received for a full interval — probe with a
+#      bounded session.hello; only a `timeout` counts (a write failure already
+#      went through core_lost inside core_call).
+# The thresholds are globals so the headless suite can shrink them. reply_overdue
+# is generous on purpose: the core is single-threaded and a big reply on a slow
+# tunnel counts its transfer time.
+set ::watch_interval 10000 ;# ms between checks
+set ::reply_overdue  25000 ;# a reply pending longer than this means a dead link
+set ::ping_timeout    8000 ;# bound on the idle probe (same as hello_core's greeting)
+set ::watch_timer ""       ;# pending `after` id; "" while disarmed
+set ::last_rx 0            ;# [clock milliseconds] of the last line core_reader saw
+
+proc watch_start {} {
+	watch_stop
+	set ::last_rx [clock milliseconds]
+	set ::watch_timer [after $::watch_interval watch_tick]
+}
+proc watch_stop {} {
+	if {$::watch_timer ne ""} { after cancel $::watch_timer ; set ::watch_timer "" }
+}
+proc watch_tick {} {
+	set ::watch_timer ""
+	if {![info exists ::core_chan]} return
+	set now [clock milliseconds]
+	foreach id [array names ::pending] {
+		if {$now - $::pending($id) > $::reply_overdue} { core_lost stale ; return }
+	}
+	if {[array size ::pending] == 0 && $now - $::last_rx >= $::watch_interval} {
+		set resp [core_call session.hello {} $::ping_timeout]
+		if {![dict get $resp ok] && [dict get $resp error code] eq "timeout"} {
+			core_lost stale ; return
+		}
+	}
+	if {[info exists ::core_chan]} {
+		set ::watch_timer [after $::watch_interval watch_tick]
+	}
 }
 
 # Surface a core error to the user (the {code, message} taxonomy, AGENTS.md O2).
@@ -1850,6 +1906,7 @@ proc reconnect_remote {hp} {
 	set ::last_connect $hp
 	fconfigure $::core_chan -buffering line -blocking 0 -translation lf -encoding utf-8
 	fileevent $::core_chan readable core_reader
+	watch_start ;# a fresh socket link — re-arm the stale-link watchdog (D37)
 	reset_session_state
 }
 
@@ -3341,6 +3398,9 @@ prefs_load
 # socket but never answers, and without this bounded handshake the GUI would hang with
 # a blank window (a real bug report). fatal → a clear dialog, then exit.
 hello_core 1
+# The greeting bounded only the first exchange; the watchdog (D37) extends that
+# cover to the whole session. Socket-attached cores only — a pipe EOFs on its own.
+if {$::core_remote} watch_start
 set _boot_theme [rio_call theme.get [dict create name $::theme_name]]
 if {![dict get $_boot_theme ok]} {
 	set ::theme_name default

@@ -2015,6 +2015,65 @@ same argument that placed the engine there, surfacing as a search-results panel
 in a dock site once D35's tool-window mechanism exists; highlighting matches in
 the compare panes (same deferral as syntax highlighting there, D32).
 
+### D37 — Stale-link detection at the protocol layer, not the socket layer
+
+The reported failure: a GUI attached to a remote core through an `ssh -L`
+tunnel; the tunnel went stale. The socket stayed **half-open** — writes still
+succeeded into the kernel buffer, but no replies and no EOF ever arrived — so
+clicks silently did nothing, and only 5–10 minutes later did TCP itself give up
+and trip the generic "lost the connection" path. The question raised with the
+report was the right one: can the GUI notice this *without* new
+network/socket/system code?
+
+**Yes — the pieces already existed; they just only ran once.** `hello_core`
+bounds the *first* exchange on every fresh channel (8 s) for exactly this
+scenario — the comment beside it names the stale forward — but after the
+greeting every op waited unbounded. D37 extends the same idea to the whole
+session: a small **watchdog** in the GUI (`watch_start`/`watch_stop`/
+`watch_tick` beside `core_lost`), built entirely from what was there — the
+bounded-call timer `core_call` already had, `session.hello` as a free ping, and
+`core_lost` as the one teardown path. No socket options, no TCP keepalive, no
+OS-specific anything. Every 10 s it checks, in order:
+
+1. **An overdue reply** — a call pending longer than 25 s. This is a safe
+   verdict because no rio op legitimately holds its reply open: streaming ops
+   ack immediately and stream as *events* (D26), so even a full agent turn
+   never has a reply outstanding for minutes. The threshold is generous on
+   purpose — the core is single-threaded and a big reply on a slow tunnel
+   counts its transfer time. `core_call` now records *when* each call was sent
+   (the `::pending` value was previously an unread `1`).
+2. **An idle probe** — nothing pending *and* nothing received for a full
+   interval (`core_reader` stamps `::last_rx` on every line; streaming events
+   count as life, so a busy turn is never pinged) → one `session.hello` bounded
+   at 8 s. Only a `timeout` verdict counts; a write failure already went
+   through `core_lost` inside `core_call`.
+
+Either finding funnels into `core_lost` — same teardown as an EOF (pending
+calls woken with `disconnected`, editor stays up, nothing in view lost) — but
+with a message that says what actually happened and what to do: the link went
+stale, re-establish the tunnel, then *File ▸ Connect to Remote Core…* (the last
+endpoint is prefilled). Detection lands within ~35 s idle, ~25 s after a click
+— versus minutes before.
+
+**Armed only for a socket-attached core** (`::core_remote`, at startup and on
+an in-place reconnect). A spawned local core is a *pipe*, and a pipe delivers
+EOF the moment the child dies — the half-open pathology is socket-only, and
+keeping the watchdog off the local path keeps its false-positive surface at
+zero for the common case. **No auto-reconnect**, deliberately: the tunnel has
+to come back before a reconnect can succeed, and silently re-attaching to a
+daemon is new policy (session adoption, unsaved-buffer questions) that File ▸
+Connect already answers with the user in the loop.
+
+**Why:** the protocol layer is rio's own seam — the GUI already round-trips an
+op per keystroke, so "is anyone answering?" is a question the channel can
+answer by itself, with two timers and an op that already existed. The
+thresholds are plain globals so the headless suite can shrink them. Tests:
+`rio-gui/tests/stale.tcl` (11th suite) — a pure-Tcl black-hole server (accepts,
+reads, never replies) plays the stale tunnel; asserts a live core is never
+falsely disconnected across several probe rounds, a blocked call is woken with
+`disconnected` and the stale message reported once, subsequent ops fail fast,
+and the idle probe detects staleness with no user action at all.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
