@@ -6,6 +6,7 @@ editor.bg        = #fdf6e3
 editor.fg        = #657b83
 editor.cursor    = #586e75
 editor.selection = #eee8d5
+editor.findmatch = #f2de9c
 ui.bg            = #eee8d5
 ui.fg            = #586e75
 tab.bar.bg       = #d8d2c0

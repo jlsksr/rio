@@ -178,6 +178,119 @@ proc rio::doc::_advance {start text} {
 	return "$line.[string length [lindex $segs end]]"
 }
 
+# --- search (AGENTS.md D36) ---------------------------------------------------
+#
+# Literal text search, computed HERE because the core owns the canonical text
+# (D3): every frontend gets the same engine over the protocol instead of each
+# re-implementing it against its own mirror. The queries are STATELESS — where
+# the caret is, what was last searched, which match is highlighted are all
+# frontend-local (D22) — so the caller passes a position in and gets a match
+# back; no find state lives in the core. Matching works on character offsets
+# over the joined text, so a needle may span lines.
+
+# The char offset of line.col `idx` in a line list (a newline counts 1). A
+# search is a query, not an edit, so an out-of-range position CLAMPS rather
+# than raises: past the end means "the end".
+proc rio::doc::_offset {lines idx} {
+	lassign [_idx $idx] l c
+	set n [llength $lines]
+	if {$l < 1} { return 0 }
+	if {$l > $n} { set l $n ; set c [string length [lindex $lines end]] }
+	set off 0
+	for {set i 0} {$i < $l - 1} {incr i} {
+		incr off [expr {[string length [lindex $lines $i]] + 1}]
+	}
+	incr off [_clamp $c 0 [string length [lindex $lines [expr {$l - 1}]]]]
+	return $off
+}
+
+# The line.col position at char offset `off` in a line list.
+proc rio::doc::_at {lines off} {
+	set l 1
+	foreach line $lines {
+		set len [string length $line]
+		if {$off <= $len} { return "$l.$off" }
+		set off [expr {$off - $len - 1}]
+		incr l
+	}
+	return "[llength $lines].[string length [lindex $lines end]]"
+}
+
+# The next match of literal `needle` starting at or after `from` — or, with
+# `backwards`, the nearest match starting before it — wrapping around the
+# document. Returns {start end wrapped} or "" when the needle occurs nowhere.
+# `nocase` folds case (Tcl's simple one-to-one mapping, so offsets are stable).
+proc rio::doc::find {id needle from {nocase 0} {backwards 0}} {
+	set lines [lines $id]
+	if {$needle eq ""} { return "" }
+	set hay [join $lines "\n"]
+	set ndl $needle
+	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
+	set off [_offset $lines $from]
+	set wrapped 0
+	if {$backwards} {
+		set i -1
+		if {$off > 0} { set i [string last $ndl $hay [expr {$off - 1}]] }
+		if {$i < 0} { set i [string last $ndl $hay] ; set wrapped 1 }
+	} else {
+		set i [string first $ndl $hay $off]
+		if {$i < 0} { set i [string first $ndl $hay] ; set wrapped 1 }
+	}
+	if {$i < 0} { return "" }
+	return [dict create \
+		start   [_at $lines $i] \
+		end     [_at $lines [expr {$i + [string length $ndl]}]] \
+		wrapped $wrapped]
+}
+
+# Every match of `needle`, first to last, non-overlapping: a list of
+# {start end} dicts (empty for none) — a frontend paints and counts them.
+proc rio::doc::matches {id needle {nocase 0}} {
+	set lines [lines $id]
+	if {$needle eq ""} { return {} }
+	set hay [join $lines "\n"]
+	set ndl $needle
+	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
+	set len [string length $ndl]
+	set out {}
+	set i [string first $ndl $hay]
+	while {$i >= 0} {
+		lappend out [dict create \
+			start [_at $lines $i] end [_at $lines [expr {$i + $len}]]]
+		set i [string first $ndl $hay [expr {$i + $len}]]
+	}
+	return $out
+}
+
+# Replace every match of `needle` with `text`, as ONE recorded edit: Replace All
+# is one user action, so it is one undo step and one buffer.changed. The
+# replacement segments come from the ORIGINAL text, so case outside the matches
+# is untouched under `nocase`. Returns "" when nothing matched (no edit
+# recorded), else a change dict {count start end text removed} spanning the
+# whole document, ready to shape an event.
+proc rio::doc::replace_all {id needle text {nocase 0}} {
+	set lines [lines $id]
+	if {$needle eq ""} { return "" }
+	set old [join $lines "\n"]
+	set hay $old
+	set ndl $needle
+	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
+	set len [string length $ndl]
+	set out "" ; set count 0 ; set pos 0
+	set i [string first $ndl $hay]
+	while {$i >= 0} {
+		append out [string range $old $pos [expr {$i - 1}]] $text
+		incr count
+		set pos [expr {$i + $len}]
+		set i [string first $ndl $hay $pos]
+	}
+	if {!$count} { return "" }
+	append out [string range $old $pos end]
+	set endpos "[llength $lines].[string length [lindex $lines end]]"
+	edit $id 1.0 $endpos $out
+	return [dict create count $count start 1.0 end $endpos text $out removed $old]
+}
+
 # --- pure helpers (no buffer registry; unit-testable on a bare line list) ----
 
 # Apply a range replacement to a line list. Returns {newlines removed}.

@@ -58,3 +58,69 @@ proc rio::ops::buffer_replace {params} {
 	return [dict create result {} events [list $ev]]
 }
 rio::dispatch::register buffer.replace rio::ops::buffer_replace
+
+# --- search (AGENTS.md D36) ---------------------------------------------------
+# Stateless queries over the canonical text (D3): the caller carries the caret
+# and the options (D22), the core computes the matches. See rio::doc.
+
+# The non-empty search needle a search op requires, or a bad_request.
+proc rio::ops::_needle {params op} {
+	if {![dict exists $params needle] || [dict get $params needle] eq ""} {
+		rio::error::raise bad_request "$op requires a non-empty needle"
+	}
+	return [dict get $params needle]
+}
+
+# An optional boolean param as 0/1 (absent means off). Accepts JSON booleans
+# and 0/1 strings alike.
+proc rio::ops::_flag {params key} {
+	return [expr {[dict exists $params $key] && [dict get $params $key] ? 1 : 0}]
+}
+
+# buffer.find {needle, ?from?, ?nocase?, ?backwards?, ?buffer?} ->
+#   {found 0} | {found 1, start, end, wrapped} ; the next match from `from`
+# (default 1.0), wrapping around the document.
+proc rio::ops::buffer_find {params} {
+	set id [_bufid $params]
+	set needle [_needle $params buffer.find]
+	# No expr around the index: it would coerce a column like 1.10 to the
+	# float 1.1 (the editor_proxy delete-arm bug, met again on the core side).
+	set from 1.0
+	if {[dict exists $params from]} { set from [dict get $params from] }
+	set m [rio::doc::find $id $needle $from \
+		[_flag $params nocase] [_flag $params backwards]]
+	if {$m eq ""} { return [dict create result [dict create found 0]] }
+	return [dict create result [dict merge [dict create found 1] $m]]
+}
+rio::dispatch::register buffer.find rio::ops::buffer_find
+
+# buffer.matches {needle, ?nocase?, ?buffer?} -> {count, matches:[{start,end}]}
+# Every match, first to last — a frontend's highlight-all and match count. A
+# non-flat result (an array), so the wire layer registers a shape encoder (D25).
+proc rio::ops::buffer_matches {params} {
+	set id [_bufid $params]
+	set ms [rio::doc::matches $id [_needle $params buffer.matches] \
+		[_flag $params nocase]]
+	return [dict create result [dict create count [llength $ms] matches $ms]]
+}
+rio::dispatch::register buffer.matches rio::ops::buffer_matches
+
+# buffer.replace_all {needle, text, ?nocase?, ?buffer?} -> {count} ; replaces
+# every match as ONE recorded edit — one undo step, one buffer.changed — so a
+# Replace All undoes as the single action it was.
+proc rio::ops::buffer_replace_all {params} {
+	set id [_bufid $params]
+	set needle [_needle $params buffer.replace_all]
+	if {![dict exists $params text]} {
+		rio::error::raise bad_request "buffer.replace_all requires text"
+	}
+	set ch [rio::doc::replace_all $id $needle [dict get $params text] \
+		[_flag $params nocase]]
+	if {$ch eq ""} { return [dict create result [dict create count 0]] }
+	set ev [dict create event buffer.changed params [dict create buffer $id \
+		start [dict get $ch start] end [dict get $ch end] \
+		text [dict get $ch text] removed [dict get $ch removed]]]
+	return [dict create result [dict create count [dict get $ch count]] \
+		events [list $ev]]
+}
+rio::dispatch::register buffer.replace_all rio::ops::buffer_replace_all

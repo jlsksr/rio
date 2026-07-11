@@ -31,7 +31,8 @@ namespace eval rio::theme {
 # `error` and `diff.*` roles colour the chat's error text and edit diffs and the
 # compare pane's add/removed bands: they belong to the vocabulary for the same
 # reason — a dark theme can retint them instead of being stuck with light pastels
-# (a theme that omits them inherits these defaults).
+# (a theme that omits them inherits these defaults). `editor.findmatch` tints the
+# find bar's match highlight (D36), same treatment.
 proc rio::theme::default {} {
 	return [dict create \
 		colors [dict create \
@@ -39,6 +40,7 @@ proc rio::theme::default {} {
 			editor.fg        black \
 			editor.cursor    black \
 			editor.selection #c3d9ff \
+			editor.findmatch #ffe9a0 \
 			ui.bg            #dddddd \
 			ui.fg            black \
 			tab.bar.bg       #bbbbbb \

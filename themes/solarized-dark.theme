@@ -8,6 +8,7 @@ editor.bg        = #002b36
 editor.fg        = #839496
 editor.cursor    = #93a1a1
 editor.selection = #073642
+editor.findmatch = #4a3f16
 ui.bg            = #073642
 ui.fg            = #93a1a1
 tab.bar.bg       = #00212b

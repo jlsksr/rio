@@ -26,6 +26,12 @@ Each entry notes its state:
 - **Undo-coalescing in the doc model** — *deferred.* Typing currently records
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
   noted refinement in the core document model.
+- **Search extensions** — *deferred* (AGENTS.md D36). In-buffer Find/Replace
+  shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`);
+  still wanted: whole-word and regex options (a flag on the same ops), and
+  **Find in Files** — core-side like the in-buffer engine (in remote mode only
+  the core sees the project tree), surfacing as a search-results panel in a
+  dock site once D35's tool-window mechanism exists.
 - **Dock-site system for tool windows** — *design* (AGENTS.md D35). Tool panels
   (the agent chat today; a git log, search results, a REPL, extension panels later)
   become first-class views hosted by a small set of dock sites (left/right/bottom),

@@ -1877,7 +1877,7 @@ approve/reject bar, status, header — `.chat.*`, rio-gui.tcl) wired to a *diffe
 core subsystem, the agent loop (D20); it has no path, no encoding, nothing to save, no
 undo. Calling it a buffer forces one of two bad outcomes: special-case a fake buffer
 through `close_buffer`, save, `activate`, highlighting and the core's buffer registry;
-or teach the **core** about a non-file "chat buffer", dragging a GUI/agent concept into
+or teach the **core** about a non-file "chat buffer," dragging a GUI/agent concept into
 the clean file model. Both are worse than the current separation.
 
 **Why not fold tool panels into the editor-group tab strip.** A group today *is a
@@ -1918,6 +1918,102 @@ delicate GUI code before its consumers exist. The value today is the **decided s
 the chat pane stays exactly as it is (a dedicated pane, D14), and when the extension
 surface is built it lands as a dock site rather than as pseudo-document tabs. Recorded
 as a *direction*; see ROADMAP for the build item.
+
+---
+
+### D36 — Find / Replace: the engine in the core, a bar in the GUI
+
+rio had no Find. Not in a menu, not as an op — the Edit menu was Undo/Redo and
+nothing else. That put it *below* the 90s baseline the project claims (even
+Notepad has Find/F3/Replace/Go-To), and it wasn't even tracked as a gap. This
+decision adds in-buffer **Find, Find Next/Previous, Replace, and Replace All**,
+and fixes where each half of the feature lives — a placement question worth
+recording because the obvious approach (Tk's built-in `$t search` on the GUI's
+widget, frontend-only) was proposed first and is **wrong** for rio.
+
+**The engine is a core concern.** The core owns the canonical text (D3);
+searching a frontend's *mirror* of it is the dumb-view discipline leaking. The
+precedent is `diff.lines` (D28): a pure text computation every frontend needs
+runs core-side, once. So matching lives in the document model
+(rio-core/document.tcl) and is exposed as three **stateless** ops:
+
+- **`buffer.find {needle, ?from?, ?nocase?, ?backwards?}`** → the next match at
+  or after `from` (or the nearest one starting before it), **wrapping around**
+  the document; returns `{found, start, end, wrapped}`. Statelessness is the
+  D22 boundary honoured: *where the caret is* is frontend-local — two frontends
+  on one core each have their own — so the caller passes its position in and no
+  find state lives in the core. Matching is by character offset over the joined
+  text, so a needle may span lines; `nocase` uses Tcl's simple one-to-one case
+  mapping, so offsets stay stable.
+- **`buffer.matches {needle, ?nocase?}`** → `{count, matches:[{start,end}]}`,
+  every match first-to-last — the frontend's match count and highlight-all.
+  A non-flat result, so the wire layer registers a shape encoder (D25).
+- **`buffer.replace_all {needle, text, ?nocase?}`** → `{count}`; replaces every
+  match as **one recorded edit** — Replace All is one user action, so it is
+  one undo step and one `buffer.changed`, not N of each. The replacement
+  segments come from the original text, so case outside the matches survives
+  `nocase`. Zero matches means no edit and no event. (Single **Replace** needed
+  no new op at all: it is a found range plus the existing `buffer.replace`.)
+
+Two further reasons the core-side placement is load-bearing: a future TUI or
+third-party client (D2/D30: "any language at the far end") gets the same engine
+over the protocol instead of reimplementing it against its own view; and
+**find-in-files, when it comes, is *necessarily* core-side** (in remote mode
+only the core can see the project tree) — the in-buffer ops make project search
+an extension, not a second architecture. The latency worry dissolves on
+inspection: every keystroke already round-trips one `buffer.replace`, so one
+`buffer.find` per Find Next costs what typing costs.
+
+**The GUI grows a find bar, not a modal dialog.** One bar (Find row; a Replace
+row that Ctrl+H adds), packed above the status bar, acting on the **focused
+group** (D33). A bar over a dialog is the one deliberate departure from
+Notepad's modal Find box: it keeps the text visible and the matches painted
+*while you type the needle*, and it is the form both eras converged on
+(Netscape/IE find bars then, every editor now) — the 90s clarity kept is plain
+labelled controls, no icons but the × close (D27). Behaviour: matches are
+painted live on every needle keystroke (`buffer.matches`; the paint is capped
+at 1000 ranges so a one-letter needle can't stall the view — the count stays
+exact); the current match is the native selection with the caret on its far
+side; Enter/F3 step forward, Shift-Enter/Shift-F3 back, Esc closes; the count
+label reads "12 matches", "3 of 12", "· wrapped", "Replaced 5", "No matches".
+**Replace is the classic two-step**: if the selection *is* a match it replaces
+and steps, otherwise the first click only selects — a replace is always visible
+before it happens. An open bar stays honest against a changing buffer: any
+`buffer.changed` (typing, an agent edit, undo) schedules a recount coalesced on
+the idle loop, the same pattern as the incremental highlighter (D32), and a tab
+switch recounts for the newly focused buffer. All four commands live in the
+keymap table (D23) — Ctrl+F, Ctrl+H, F3, Shift+F3, remappable like everything
+else — and the Edit menu gains the four entries. The match paint is a
+`findmatch` text tag coloured by a new **`editor.findmatch` role** in the theme
+vocabulary (D24): the default is the familiar pale yellow, the three shipped
+themes retint it, and any theme that omits it inherits the default; the
+selection tag rides above it so the current match reads.
+
+**A bug worth recording, because it bit twice in one feature.** Tk text indices
+passed through `expr` decay: the ternary `[expr {$cond ? $idx : "1.0"}]` turns
+column 10 into column 1 ("1.10" → the float 1.1). This exact bug is documented
+at the editor proxy's delete arm — and both the GUI's find_step *and* the
+buffer.find op handler reintroduced it independently before tests caught them.
+The op-level regression test (`op-find-from-col-ten`) now pins it. Moral
+unchanged since the proxy: never let a line.col index near `expr`.
+
+**Why:** the single most-missed everyday editor feature, delivered on rio's own
+seams — the engine beside the document model it queries, the state where D22
+says state lives, the edits through the ops that already existed, the colours
+through the theme vocabulary, the keys through the keymap table. No new event,
+no protocol change beyond three ops. Tests: `rio-core/tests/find.test` (32
+cases: offset/position geometry, forward/backward/wrap/nocase/multi-line
+matching, replace-all's one-undo-step contract, op validation), two wire-shape
+cases in wire.test, and a new headless GUI suite `rio-gui/tests/find.tcl`
+(open/close modes, counting and painting, stepping with wrap, match-case, the
+two-step replace, replace-all + single undo, live recount after an edit, and
+the bar tracking the focused group across a split).
+
+**Deferred (noted):** whole-word and regex options (the bar's options row has
+room; the ops grow a flag when wanted); **Find in Files** — core-side by the
+same argument that placed the engine there, surfacing as a search-results panel
+in a dock site once D35's tool-window mechanism exists; highlighting matches in
+the compare panes (same deferral as syntax highlighting there, D32).
 
 ---
 

@@ -332,6 +332,12 @@ proc apply_change {g p} {
 	$t replace [dict get $p start] [dict get $p end] [dict get $p text]
 	if {$g eq $::focus} { $t see insert }
 	hl_edit $g $p ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
+	# An open find bar's matches just went stale — recount/repaint, coalesced
+	# like the highlight pass so a run of keystrokes costs one update (D36).
+	if {$::find_shown && !$::find_pending} {
+		set ::find_pending 1
+		after idle find_update
+	}
 }
 
 # Load the active buffer's canonical text into the widget (on switch / open).
@@ -398,6 +404,7 @@ proc activate {id {g ""}} {
 	$t see insert
 	focus [gget $g path]
 	refresh_all
+	if {$::find_shown} find_update   ;# the bar tracks the focused buffer (D36)
 }
 
 proc close_buffer {id} {
@@ -1222,6 +1229,164 @@ proc do_redo {} {
 	if {$res ne "" && [dict get $res changed]} { mark_modified 1 }
 }
 
+# ---------------------------------------------------------------------------
+# Find / Replace (AGENTS.md D36). The bar is a thin view: the MATCHING runs in
+# the core (buffer.find / buffer.matches — the core owns the canonical text,
+# D3), and the bar carries only the frontend-local state those ops are
+# stateless about (D22): the needle, the options, and the caret it passes as
+# `from`. Replace is the existing edit path — a found range plus a
+# buffer.replace; Replace All is one op and ONE undo step. The bar always acts
+# on the FOCUSED group; matches are painted with the `findmatch` tag
+# (editor.findmatch role, D24), the current match with the native selection.
+# ---------------------------------------------------------------------------
+set ::find_shown   0  ;# find bar visible? (Ctrl+F / Ctrl+H; Esc hides it)
+set ::find_case    0  ;# Match case checkbox (off = fold case, the familiar default)
+set ::find_starts  {} ;# match starts from the last find_update ("i of n" lookup)
+set ::find_pending 0  ;# a coalesced find_update is queued (see apply_change)
+
+# Show the bar (packing it above the status bar), with or without the Replace
+# row — Ctrl+F and Ctrl+H open the same bar in the two shapes. A single-line
+# editor selection pre-fills the needle (the 90s convention); the needle entry
+# gets focus with its text selected, so typing starts a fresh search.
+proc find_open {withReplace} {
+	set ::find_shown 1
+	pack .find -after .status -side bottom -fill x
+	if {$withReplace} {
+		grid .find.rl ; grid .find.re ; grid .find.rep ; grid .find.repall
+	} else {
+		grid remove .find.rl .find.re .find.rep .find.repall
+	}
+	set t [gw $::focus]
+	if {![catch {$t get sel.first sel.last} s] && $s ne "" \
+			&& [string first "\n" $s] < 0} {
+		.find.e delete 0 end
+		.find.e insert 0 $s
+	}
+	focus .find.e
+	.find.e selection range 0 end
+	.find.e icursor end
+	find_update
+}
+
+# Hide the bar, clear the match paint everywhere, and hand focus back.
+proc find_close {} {
+	if {!$::find_shown} return
+	set ::find_shown 0
+	pack forget .find
+	foreach g $::groups { [gw $g] tag remove findmatch 1.0 end }
+	set ::find_starts {}
+	focus [gget $::focus path]
+}
+
+# The count/status label at the bar's right ("12 matches", "3 of 12", …).
+proc find_status {msg} { .find.count configure -text $msg }
+
+# Recompute the matches for the focused group's buffer: repaint the findmatch
+# tag and refresh the count. Runs on every needle keystroke, on the case
+# toggle, on a tab switch, and (coalesced) after any buffer change — one
+# buffer.matches round-trip, the same cost as one typed character. Painting is
+# capped so a one-letter needle in a huge file cannot stall the view; the
+# count stays exact.
+proc find_update {} {
+	set ::find_pending 0
+	if {!$::find_shown} return
+	set g $::focus ; set t [gw $g]
+	$t tag remove findmatch 1.0 end
+	set ::find_starts {}
+	set needle [.find.e get]
+	if {$needle eq ""} { find_status "" ; return }
+	set resp [rio_call buffer.matches [dict create buffer [gcur $g] \
+		needle $needle nocase [expr {!$::find_case}]]]
+	if {![dict get $resp ok]} { find_status "" ; return }
+	set n [dict get $resp result count]
+	set painted 0
+	foreach m [dict get $resp result matches] {
+		lappend ::find_starts [dict get $m start]
+		if {[incr painted] <= 1000} {
+			$t tag add findmatch [dict get $m start] [dict get $m end]
+		}
+	}
+	find_status [expr {$n == 0 ? "No matches" : "$n match[expr {$n==1 ? "" : "es"}]"}]
+}
+
+# Jump to the next (or previous) match: ask the core for the match after the
+# current one — after the selection's edge, else the caret — select it, put
+# the caret on its far side, and scroll it into view. Search wraps around; the
+# label says so.
+proc find_step {backwards} {
+	if {!$::find_shown} { find_open 0 ; return }
+	set needle [.find.e get]
+	if {$needle eq ""} { focus .find.e ; return }
+	set g $::focus ; set t [gw $g]
+	if {$backwards} {
+		if {[catch {$t index sel.first} from]} { set from [$t index insert] }
+	} else {
+		if {[catch {$t index sel.last} from]} { set from [$t index insert] }
+	}
+	set resp [rio_call buffer.find [dict create buffer [gcur $g] needle $needle \
+		from $from nocase [expr {!$::find_case}] backwards $backwards]]
+	if {![dict get $resp ok]} return
+	set r [dict get $resp result]
+	if {![dict get $r found]} { find_status "No matches" ; return }
+	set s [dict get $r start] ; set e [dict get $r end]
+	$t tag remove sel 1.0 end
+	$t tag add sel $s $e
+	# No expr here: an index like 1.10 would coerce to the float 1.1 (see
+	# editor_proxy's delete arm for the original bite of this).
+	if {$backwards} { $t mark set insert $s } else { $t mark set insert $e }
+	$t see $s
+	set i [lsearch -exact $::find_starts $s]
+	set n [llength $::find_starts]
+	if {$i >= 0} {
+		set msg "[expr {$i + 1}] of $n"
+		if {[dict get $r wrapped]} { append msg " · wrapped" }
+		find_status $msg
+	}
+}
+proc find_next {} { find_step 0 }
+proc find_prev {} { find_step 1 }
+
+# Replace the current match, then jump to the next: if the selection IS a
+# match of the needle, replace it through the ordinary edit op; otherwise this
+# first click just selects the next match and the next click replaces it (the
+# classic two-step, so a replace is always visible before it happens).
+proc find_replace_one {} {
+	if {!$::find_shown} return
+	set needle [.find.e get]
+	if {$needle eq ""} { focus .find.e ; return }
+	set g $::focus ; set t [gw $g]
+	if {![catch {list [$t index sel.first] [$t index sel.last]} range]} {
+		lassign $range s e
+		set cur [$t get $s $e]
+		set same [expr {$::find_case ? [string equal $cur $needle] \
+		                             : [string equal -nocase $cur $needle]}]
+		if {$same} {
+			if {[dict get [rio_call buffer.replace [dict create buffer [gcur $g] \
+				start $s end $e text [.find.re get]]] ok]} { mark_modified 1 }
+		}
+	}
+	find_step 0
+}
+
+# Replace every match in one op (buffer.replace_all): one round-trip, one undo
+# step. The buffer.changed event repaints the widget before the reply lands
+# (events precede replies on the channel), so only the caret needs restoring.
+proc find_replace_all {} {
+	if {!$::find_shown} return
+	set needle [.find.e get]
+	if {$needle eq ""} { focus .find.e ; return }
+	set g $::focus ; set t [gw $g]
+	set at [$t index insert]
+	set resp [rio_call buffer.replace_all [dict create buffer [gcur $g] \
+		needle $needle text [.find.re get] nocase [expr {!$::find_case}]]]
+	if {![dict get $resp ok]} return
+	set n [dict get $resp result count]
+	if {$n > 0} { mark_modified 1 }
+	catch { $t mark set insert $at ; $t see insert }
+	find_update
+	find_status "Replaced $n"
+}
+
 # Close the active buffer of the focused group; guard unsaved changes. If this empties
 # one of two groups, the group collapses (unsplit); the sole group instead keeps at
 # least one tab by minting a scratch (D33).
@@ -1962,6 +2127,12 @@ proc restyle_group {g} {
 			$t tag configure syn:$tok -foreground $col
 		}
 	}
+	# The find bar's match paint (D36); the selection stays on top so the
+	# current match reads over the findmatch band.
+	set fm [expr {[dict exists $c editor.findmatch] \
+		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
+	$t tag configure findmatch -background $fm
+	$t tag raise sel
 }
 
 proc apply_theme {theme} {
@@ -2032,6 +2203,22 @@ proc apply_theme {theme} {
 	.chat.approve.cmp configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
 	.chat.isash configure -background [dict get $c tab.bar.bg]
+	# The find/replace bar (D36): UI chrome, entries on the editor surface.
+	.find configure -background [dict get $c ui.bg]
+	foreach w {.find.fl .find.rl .find.count .find.close .find.case} {
+		$w configure -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	}
+	.find.case configure -activebackground [dict get $c ui.bg] \
+		-activeforeground [dict get $c ui.fg]
+	foreach w {.find.next .find.prev .find.rep .find.repall} {
+		$w configure -font RioUIFont
+	}
+	foreach w {.find.e .find.re} {
+		$w configure -font RioChatFont \
+			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+			-insertbackground [dict get $c editor.cursor]
+	}
 	# The compare/diff view (D28): the panes take the editor surface, the headers the
 	# UI chrome (like the dock); row tags tint removed/added lines and grey the
 	# fillers so a changed line reads as a coloured band (VSCode-style).
@@ -2495,6 +2682,10 @@ set ::keymap_default {
 	undo           {Control-z            do_undo                                                       "Undo"}
 	redo           {Control-Z            do_redo                                                       "Redo"}
 	redo-alt       {Control-y            do_redo                                                        "Redo (alternate)"}
+	find           {Control-f            {find_open 0}                                                 "Find…"}
+	replace        {Control-h            {find_open 1}                                                 "Replace…"}
+	find-next      {F3                   find_next                                                     "Find next"}
+	find-prev      {Shift-F3             find_prev                                                     "Find previous"}
 	next-tab       {Control-Tab          {cycle 1}                                                     "Next tab"}
 	prev-tab       {Control-Shift-Tab    {cycle -1}                                                    "Previous tab"}
 	show-files     {Control-E            {show_pane files}                                             "Show files pane"}
@@ -2649,8 +2840,12 @@ proc keymap_refresh_menus {} {
 	.m.file entryconfigure "Save As…"     -accelerator [key_accel save-as]
 	.m.file entryconfigure "Close Tab"    -accelerator [key_accel close-tab]
 	.m.file entryconfigure "Quit"         -accelerator [key_accel quit]
-	.m.edit entryconfigure "Undo"         -accelerator [key_accel undo]
-	.m.edit entryconfigure "Redo"         -accelerator [key_accel redo]
+	.m.edit entryconfigure "Undo"          -accelerator [key_accel undo]
+	.m.edit entryconfigure "Redo"          -accelerator [key_accel redo]
+	.m.edit entryconfigure "Find…"         -accelerator [key_accel find]
+	.m.edit entryconfigure "Replace…"      -accelerator [key_accel replace]
+	.m.edit entryconfigure "Find Next"     -accelerator [key_accel find-next]
+	.m.edit entryconfigure "Find Previous" -accelerator [key_accel find-prev]
 	.m.view entryconfigure "Show Files"   -accelerator [key_accel show-files]
 	.m.view entryconfigure "Show Git"     -accelerator [key_accel show-git]
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
@@ -3012,6 +3207,51 @@ pack .chat.log    -side left   -fill both -expand 1
 frame .csash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .csash <B1-Motion> csash_drag
 
+# The find/replace bar (D36): built hidden; find_open packs it above the status
+# bar. Row 0 finds, row 1 replaces (gridded away in find-only mode). Plain
+# labelled controls and a × to close (D27) — the bar reads at a glance. Colours
+# are bootstrap; apply_theme restyles (entries take the editor surface).
+frame .find -borderwidth 1 -relief raised -background "#dddddd"
+label .find.fl -text "Find:"    -font {monospace 9} -anchor e -background "#dddddd"
+label .find.rl -text "Replace:" -font {monospace 9} -anchor e -background "#dddddd"
+entry .find.e  -font {monospace 11} -width 24
+entry .find.re -font {monospace 11} -width 24
+button .find.next -text "Next"     -font {monospace 9} -command find_next
+button .find.prev -text "Previous" -font {monospace 9} -command find_prev
+checkbutton .find.case -text "Match case" -font {monospace 9} \
+	-variable ::find_case -command find_update -background "#dddddd"
+label .find.count -font {monospace 9} -anchor w -background "#dddddd"
+label .find.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 \
+	-background "#dddddd"
+button .find.rep    -text "Replace"     -font {monospace 9} -command find_replace_one
+button .find.repall -text "Replace All" -font {monospace 9} -command find_replace_all
+grid .find.fl     -row 0 -column 0 -sticky e  -padx {6 2} -pady 2
+grid .find.e      -row 0 -column 1 -sticky ew -pady 2
+grid .find.next   -row 0 -column 2 -padx 2
+grid .find.prev   -row 0 -column 3 -padx 2
+grid .find.case   -row 0 -column 4 -padx 4
+grid .find.count  -row 0 -column 5 -sticky ew -padx 4
+grid .find.close  -row 0 -column 6 -sticky e  -padx {2 6}
+grid .find.rl     -row 1 -column 0 -sticky e  -padx {6 2} -pady {0 2}
+grid .find.re     -row 1 -column 1 -sticky ew -pady {0 2}
+grid .find.rep    -row 1 -column 2 -padx 2 -pady {0 2}
+grid .find.repall -row 1 -column 3 -columnspan 2 -sticky w -padx 2 -pady {0 2}
+grid columnconfigure .find 1 -weight 1
+grid columnconfigure .find 5 -weight 1
+bind .find.close <Button-1> find_close
+# Both entries: Enter steps (Shift-Enter steps back), Esc closes, F3 works too.
+# In the Replace entry, Enter replaces instead — you are aiming at a replace.
+foreach _w {.find.e .find.re} {
+	bind $_w <Return>       {find_next ; break}
+	bind $_w <Shift-Return> {find_prev ; break}
+	bind $_w <Escape>       {find_close ; break}
+	bind $_w <F3>           {find_next ; break}
+	bind $_w <Shift-F3>     {find_prev ; break}
+}
+bind .find.re <Return> {find_replace_one ; break}
+bind .find.e  <KeyRelease> find_update
+unset _w
+
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .status -side bottom -fill x
@@ -3036,6 +3276,11 @@ menu .m.edit -tearoff 0
 .m add cascade -label Edit -menu .m.edit
 .m.edit add command -label "Undo" -accelerator [key_accel undo] -command do_undo
 .m.edit add command -label "Redo" -accelerator [key_accel redo] -command do_redo
+.m.edit add separator
+.m.edit add command -label "Find…"         -accelerator [key_accel find]      -command {find_open 0}
+.m.edit add command -label "Replace…"      -accelerator [key_accel replace]   -command {find_open 1}
+.m.edit add command -label "Find Next"     -accelerator [key_accel find-next] -command find_next
+.m.edit add command -label "Find Previous" -accelerator [key_accel find-prev] -command find_prev
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
 .m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}

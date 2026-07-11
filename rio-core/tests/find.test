@@ -1,0 +1,200 @@
+# Tests for buffer search (rio::doc::find/matches/replace_all and the
+# buffer.find/buffer.matches/buffer.replace_all ops; AGENTS.md D36).
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# --- offset <-> position helpers ----------------------------------------------
+
+test find-offset {line.col to char offset, newlines count one} -body {
+	set lines {ab cd ef}
+	list [rio::doc::_offset $lines 1.0] [rio::doc::_offset $lines 1.2] \
+		[rio::doc::_offset $lines 2.1] [rio::doc::_offset $lines 3.2]
+} -result {0 2 4 8}
+
+test find-offset-clamps {an out-of-range position clamps, never raises} -body {
+	set lines {ab cd}
+	list [rio::doc::_offset $lines 0.5] [rio::doc::_offset $lines 1.99] \
+		[rio::doc::_offset $lines 9.0]
+} -result {0 2 5}
+
+test find-at {char offset back to line.col} -body {
+	set lines {ab cd ef}
+	list [rio::doc::_at $lines 0] [rio::doc::_at $lines 2] \
+		[rio::doc::_at $lines 3] [rio::doc::_at $lines 8]
+} -result {1.0 1.2 2.0 3.2}
+
+# --- model-level find ----------------------------------------------------------
+
+test find-forward {the next match at or after from} -body {
+	set b [rio::doc::new "one two one"]
+	rio::doc::find $b one 1.1
+} -result {start 1.8 end 1.11 wrapped 0}
+
+test find-at-from {a match starting exactly at from counts} -body {
+	set b [rio::doc::new "one two"]
+	rio::doc::find $b one 1.0
+} -result {start 1.0 end 1.3 wrapped 0}
+
+test find-wraps {no match ahead wraps to the document start} -body {
+	set b [rio::doc::new "one two"]
+	rio::doc::find $b one 1.4
+} -result {start 1.0 end 1.3 wrapped 1}
+
+test find-backward {the nearest match starting before from} -body {
+	set b [rio::doc::new "one two one"]
+	rio::doc::find $b one 1.8 0 1
+} -result {start 1.0 end 1.3 wrapped 0}
+
+test find-backward-wraps {backwards from the start wraps to the last match} -body {
+	set b [rio::doc::new "one two one"]
+	rio::doc::find $b one 1.0 0 1
+} -result {start 1.8 end 1.11 wrapped 1}
+
+test find-none {a needle that occurs nowhere finds nothing} -body {
+	set b [rio::doc::new "one two"]
+	rio::doc::find $b xyz 1.0
+} -result {}
+
+test find-nocase {nocase folds both sides} -body {
+	set b [rio::doc::new "One two ONE"]
+	list [rio::doc::find $b one 1.0] [rio::doc::find $b one 1.0 1]
+} -result {{} {start 1.0 end 1.3 wrapped 0}}
+
+test find-across-lines {matching spans lines; positions land on each} -body {
+	set b [rio::doc::new "ab\ncd\nef"]
+	rio::doc::find $b "b\nc" 1.0
+} -result {start 1.1 end 2.1 wrapped 0}
+
+test find-empty-doc {an empty document has no matches} -body {
+	set b [rio::doc::new ""]
+	rio::doc::find $b x 1.0
+} -result {}
+
+# --- model-level matches --------------------------------------------------------
+
+test matches-all {every match, first to last} -body {
+	set b [rio::doc::new "aXbXc"]
+	rio::doc::matches $b X
+} -result {{start 1.1 end 1.2} {start 1.3 end 1.4}}
+
+test matches-non-overlapping {matches never overlap} -body {
+	set b [rio::doc::new "aaaa"]
+	rio::doc::matches $b aa
+} -result {{start 1.0 end 1.2} {start 1.2 end 1.4}}
+
+test matches-multiline {matches across several lines} -body {
+	set b [rio::doc::new "x\nyx\nx"]
+	rio::doc::matches $b x
+} -result {{start 1.0 end 1.1} {start 2.1 end 2.2} {start 3.0 end 3.1}}
+
+test matches-none {no match is an empty list} -body {
+	set b [rio::doc::new "abc"]
+	rio::doc::matches $b q
+} -result {}
+
+# --- model-level replace_all -----------------------------------------------------
+
+test repall-basic {every occurrence replaced, count reported} -body {
+	set b [rio::doc::new "a cat, a cat"]
+	set ch [rio::doc::replace_all $b cat dog]
+	list [dict get $ch count] [rio::doc::text $b]
+} -result {2 {a dog, a dog}}
+
+test repall-nocase-keeps-context-case {nocase matches fold, the rest keeps case} -body {
+	set b [rio::doc::new "Cat and CAT and cat"]
+	set ch [rio::doc::replace_all $b cat dog 1]
+	list [dict get $ch count] [rio::doc::text $b]
+} -result {3 {dog and dog and dog}}
+
+test repall-none {no match: no edit, nothing recorded} -body {
+	set b [rio::doc::new "abc"]
+	set ch [rio::doc::replace_all $b q Z]
+	list $ch [rio::doc::text $b] [rio::doc::undo $b]
+} -result {{} abc {}}
+
+test repall-one-undo-step {a replace-all undoes as ONE step} -body {
+	set b [rio::doc::new "x1 x2\nx3"]
+	rio::doc::replace_all $b x Y
+	set after [rio::doc::text $b]
+	rio::doc::undo $b
+	list $after [rio::doc::text $b] [rio::doc::undo $b]
+} -result [list "Y1 Y2\nY3" "x1 x2\nx3" {}]
+
+test repall-grows {a replacement containing the needle does not loop} -body {
+	set b [rio::doc::new "aba"]
+	set ch [rio::doc::replace_all $b a aa]
+	list [dict get $ch count] [rio::doc::text $b]
+} -result {2 aabaa}
+
+test repall-multiline-needle {a needle spanning lines replaces across them} -body {
+	set b [rio::doc::new "ab\ncd"]
+	set ch [rio::doc::replace_all $b "b\nc" -]
+	list [dict get $ch count] [rio::doc::text $b]
+} -result {1 a-d}
+
+# --- the ops (handler-level; events shaped for the wire) -------------------------
+
+test op-find {buffer.find returns found+range+wrapped} -body {
+	set b [rio::doc::new "one two one"]
+	dict get [rio::ops::buffer_find \
+		[dict create buffer $b needle one from 1.4]] result
+} -result {found 1 start 1.8 end 1.11 wrapped 0}
+
+test op-find-not-found {buffer.find misses cleanly} -body {
+	set b [rio::doc::new "one"]
+	dict get [rio::ops::buffer_find \
+		[dict create buffer $b needle zzz from 1.0]] result
+} -result {found 0}
+
+test op-find-empty-needle {an empty needle is a bad_request} -body {
+	set b [rio::doc::new "one"]
+	catch {rio::ops::buffer_find [dict create buffer $b needle "" from 1.0]} msg opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test op-find-default-from {from defaults to the document start} -body {
+	set b [rio::doc::new "abc"]
+	dict get [rio::ops::buffer_find [dict create buffer $b needle b]] result start
+} -result 1.1
+
+test op-find-from-col-ten {a from column of 10 must not decay to 1 (expr float)} -body {
+	set b [rio::doc::new "alpha beta\nbeta end"]
+	dict get [rio::ops::buffer_find \
+		[dict create buffer $b needle beta from 1.10]] result start
+} -result 2.0
+
+test op-matches {buffer.matches returns count + ranges} -body {
+	set b [rio::doc::new "aXbX"]
+	dict get [rio::ops::buffer_matches [dict create buffer $b needle X]] result
+} -result {count 2 matches {{start 1.1 end 1.2} {start 1.3 end 1.4}}}
+
+test op-replace-all {buffer.replace_all reports the count and emits one event} -body {
+	set b [rio::doc::new "cat cat"]
+	set resp [rio::ops::buffer_replace_all \
+		[dict create buffer $b needle cat text dog]]
+	set ev [lindex [dict get $resp events] 0]
+	list [dict get $resp result count] [dict get $ev event] \
+		[dict get $ev params text] [rio::doc::text $b]
+} -result {2 buffer.changed {dog dog} {dog dog}}
+
+test op-replace-all-none {zero matches: count 0 and NO event} -body {
+	set b [rio::doc::new "abc"]
+	set resp [rio::ops::buffer_replace_all \
+		[dict create buffer $b needle q text Z]]
+	list [dict get $resp result count] [dict exists $resp events]
+} -result {0 0}
+
+test op-replace-all-needs-text {a missing replacement text is a bad_request} -body {
+	set b [rio::doc::new "abc"]
+	catch {rio::ops::buffer_replace_all [dict create buffer $b needle a]} msg opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test op-no-buffer {a vanished buffer raises no_buffer} -body {
+	catch {rio::ops::buffer_find [dict create buffer 99999 needle x]} msg opts
+	rio::error::code_of $opts
+} -result no_buffer
+
+cleanupTests

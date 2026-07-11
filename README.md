@@ -30,6 +30,12 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
   buffers as tabs, scrollbars, and optional line wrap.
+- **Find & Replace** — a find bar (`Ctrl+F`, `Ctrl+H` for the replace row) with
+  live match highlighting and a match count, `F3`/`Shift+F3` stepping with
+  wrap-around, match-case toggle, two-step Replace (see it selected, then
+  replace it), and **Replace All as a single undo step**. The search itself runs
+  in the core, so it works identically over a remote core — and any frontend
+  gets it over the protocol.
 - **Split editor** — show **two buffers side by side** in independent editor groups,
   each with its own tabs (`Ctrl+\` to split). **Drag tabs to reorder them within a
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a

@@ -9,6 +9,7 @@ editor.bg        = #ffffea
 editor.fg        = #000000
 editor.cursor    = #000000
 editor.selection = #eeee9e
+editor.findmatch = #e6e67a
 
 # Chrome (status, dock, panes) is the tag surface: acme's pale blue, black text.
 ui.bg            = #eaffff

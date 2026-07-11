@@ -93,6 +93,14 @@ proc rio::wire::_result_buffer_list {result} {
 }
 rio::wire::result_encoder buffer.list rio::wire::_result_buffer_list
 
+# buffer.matches: `count` is a string leaf; `matches` is an array of flat objects.
+proc rio::wire::_result_buffer_matches {result} {
+	set items {}
+	foreach m [dict get $result matches] { lappend items [obj $m] }
+	return "{\"count\":[str [dict get $result count]],\"matches\":[arr $items]}"
+}
+rio::wire::result_encoder buffer.matches rio::wire::_result_buffer_matches
+
 # session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
 proc rio::wire::_result_session_hello {result} {
 	set parts {}
