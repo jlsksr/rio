@@ -39,7 +39,8 @@ Each entry notes its state:
   model, kept distinct from the document editor groups (D33). Gives user-controlled
   placement and one universal embedding seam for D17/D18 UI contributions, without
   overloading the core `buffer` concept. Direction settled; not built — the chat stays
-  a dedicated pane (D14) until it lands.
+  a dedicated pane (D14) until it lands. Quality bar for these panes: the D36 find
+  bar — dynamic (appears only when needed), clean, minimal controls.
 
 ## Syntax highlighting
 
