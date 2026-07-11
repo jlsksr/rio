@@ -1860,6 +1860,67 @@ critical path — the data files are readable and editable by hand today.
 
 ---
 
+### D35 — Tool windows vs. documents: a dock-site system, not chat-as-buffer (direction)
+
+A tempting simplification came up: make the agent chat **just another tab** in the
+rightmost editor group, so the user places it with the very same drag/split/reorder
+machinery as a text tab — and let *future* extension panels (a git log, a search
+result list, a REPL) ride that same universal seam instead of each getting a bespoke
+pane. The instinct is right; the literal form is wrong, for two structural reasons and
+one *north-star* reason. This entry records the decision so the extension surface has
+a decided shape to land on. **Nothing is built here — this fixes the direction.**
+
+**Why not "chat is a buffer."** *Buffer* is a precise **core** concept (D3): a
+core-owned text document with a path, encoding, EOL, and undo/redo, broadcast to
+frontends via `buffer.changed`. The chat pane is a GUI-only composite (log, input,
+approve/reject bar, status, header — `.chat.*`, rio-gui.tcl) wired to a *different*
+core subsystem, the agent loop (D20); it has no path, no encoding, nothing to save, no
+undo. Calling it a buffer forces one of two bad outcomes: special-case a fake buffer
+through `close_buffer`, save, `activate`, highlighting and the core's buffer registry;
+or teach the **core** about a non-file "chat buffer", dragging a GUI/agent concept into
+the clean file model. Both are worse than the current separation.
+
+**Why not fold tool panels into the editor-group tab strip.** A group today *is a
+single text widget*: the D33 machinery (`gw` "the group's real widget," the widget
+proxy, the per-group highlight cache, cursor/viewport stash-restore — rio-gui.tcl §D33)
+assumes one editor per tab. Hosting heterogeneous view types would generalize the most
+delicate part of the GUI. So the honest restatement of the proposal is *"turn the
+editor group into a generic tabbed-panel container, of which the text editor is one
+view type"* — legitimate (it is roughly how VSCode hosts webview panels in editor
+groups), but a real refactor, not a rename.
+
+**The north-star reason (the load-bearing one).** Classic Win2000 / VS6-era
+productivity software drew a **hard line between documents and tool windows**:
+documents lived in the center with their tabs; tool windows (Output, Properties, Class
+View) were *docked* panes with their **own** tabs, and you did not drag them into the
+document strip. That separation *was* the clarity. Collapsing everything into one tab
+strip is the **modern / VSCode** instinct — pleasant, but it is the half of rio's
+"sweet spot" that leans away from the 90s discipline, not toward it. Given the choice,
+the more faithful answer keeps the two categories distinct.
+
+**Decision — two clean categories, unify only the tools.** *Documents* stay in the
+center editor groups exactly as D33 leaves them. *Tool windows* — the chat today; a git
+log, search results, a REPL, and third-party extension panels tomorrow — become
+first-class, hosted by a **dock-site system**: a small fixed set of sites (left / right
+/ bottom), each a tabbed container the user can move panels between. This is the Visual
+Studio docking model: it gives user-controlled placement *and* a single universal
+embedding seam for extensions, **without** overloading `buffer` or touching the
+editor-group invariants. rio already leans this way — a dockable files+git side panel
+and a toggleable right-hand chat column — so this promotes "tool pane" from two
+hand-built cases to one declared concept. It is also the natural render target for the
+declarative UI contributions of D17/D18: a plugin contributes a *panel into a dock
+site*, not a widget into the document area.
+
+**Why now, and why only on paper.** D33 (the split editor) is recent and intricate, and
+the plugin/extension interface is *explicitly still being shaped* (ROADMAP → "Plugin
+interface — design"), so building this now would be premature and would churn the most
+delicate GUI code before its consumers exist. The value today is the **decided shape**:
+the chat pane stays exactly as it is (a dedicated pane, D14), and when the extension
+surface is built it lands as a dock site rather than as pseudo-document tabs. Recorded
+as a *direction*; see ROADMAP for the build item.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

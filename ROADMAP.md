@@ -26,6 +26,14 @@ Each entry notes its state:
 - **Undo-coalescing in the doc model** — *deferred.* Typing currently records
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
   noted refinement in the core document model.
+- **Dock-site system for tool windows** — *design* (AGENTS.md D35). Tool panels
+  (the agent chat today; a git log, search results, a REPL, extension panels later)
+  become first-class views hosted by a small set of dock sites (left/right/bottom),
+  each a tabbed container the user can move panels between — the Visual Studio docking
+  model, kept distinct from the document editor groups (D33). Gives user-controlled
+  placement and one universal embedding seam for D17/D18 UI contributions, without
+  overloading the core `buffer` concept. Direction settled; not built — the chat stays
+  a dedicated pane (D14) until it lands.
 
 ## Syntax highlighting
 
