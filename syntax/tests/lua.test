@@ -1,0 +1,88 @@
+# Tests for the Lua highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. lua.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::lua::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-lua {.lua resolves to the lua scanner} -body {
+	rio::syntax::for_path a.lua
+} -result rio::syntax::lua::scan
+
+test lang_for_path-lua {.lua resolves to the Lua language name} -body {
+	rio::syntax::lang_for_path /x/init.lua
+} -result Lua
+
+# --- keywords, constants, builtins, functions ----------------------------------
+
+test func-decl {function keyword and the defined name} -body {
+	set s [hl {function add(a) return a end}]
+	list [has $s 1.0 1.8 keyword] [has $s 1.9 1.12 function] [has $s 1.16 1.22 keyword] [has $s 1.25 1.28 keyword]
+} -result {1 1 1 1}
+
+test constants {true/false/nil are constants, not keywords} -body {
+	set s [hl {local x = nil or true}]
+	list [has $s 1.10 1.13 constant] [has $s 1.14 1.16 keyword] [has $s 1.17 1.21 constant]
+} -result {1 1 1}
+
+test builtins {standard-library namespaces colour as type} -body {
+	set s [hl {print(string.format("%d", 1))}]
+	list [has $s 1.0 1.5 function] [has $s 1.6 1.12 type]
+} -result {1 1}
+
+test method-call {an obj:method( name is a function} -body {
+	set s [hl {obj:run(x)}]
+	has $s 1.4 1.7 function
+} -result 1
+
+# --- strings and numbers -------------------------------------------------------
+
+test strings {'…' and "…" with escapes} -body {
+	set s [hl {a = "hi\"" .. 'x'}]
+	list [has $s 1.4 1.10 string] [has $s 1.14 1.17 string]
+} -result {1 1}
+
+test numbers {decimal, float-exponent, and hex-with-p-exponent} -body {
+	set s [hl {a, b, c = 10, 1.5e3, 0xA.8p1}]
+	list [has $s 1.10 1.12 number] [has $s 1.14 1.19 number] [has $s 1.21 1.28 number]
+} -result {1 1 1}
+
+# --- comments ------------------------------------------------------------------
+
+test line-comment {a -- comment runs to end of line} -body {
+	set s [hl {x = 1 -- note}]
+	has $s 1.6 1.13 comment
+} -result 1
+
+test long-comment-multiline {a --[[ … ]] comment carries across lines} -body {
+	set s [hl "a --\[\[ one\ntwo ]] b"]
+	list [has $s 1.2 1.10 comment] [has $s 2.0 2.6 comment]
+} -result {1 1}
+
+# --- long-bracket strings ------------------------------------------------------
+
+test long-string-multiline {a [[ … ]] string carries across lines} -body {
+	set s [hl "a = \[\[one\ntwo\]\]"]
+	list [has $s 1.4 1.9 string] [has $s 2.0 2.5 string]
+} -result {1 1}
+
+test long-string-level {a ]] inside a [==[ … ]==] string is literal, not a close} -body {
+	set s [hl {a = [==[ x]] y ]==]}]
+	has $s 1.4 1.19 string
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

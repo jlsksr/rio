@@ -1649,6 +1649,19 @@ the `@`-decorator vs matmul (Python), the media-query prelude (CSS), the `'a` ch
 `<…>` template ambiguity (Rust, C++). One shared suite, `syntax/tests/all.tcl`, now runs 237
 pure-`tclsh` checks; the GUI applier test loads all fifteen modules.
 
+**Amendment — Lua ships (landed).** `syntax/lua.tcl` (`.lua`), same contract, no registry or GUI
+change. Its one distinctive mechanism is **long brackets**, shared by long strings `[[ … ]]` and
+long comments `--[[ … ]]`: an opener carries a *level* (the count of `=` between the brackets, so
+`[==[`), and only a `]==]` of the matching level closes it — a lower/higher-level `]]` in the body
+is literal. A single `long` state carries `{level kind}` across lines, kind being `string` or
+`comment`, so both reuse the `_longopen`/`_longclose` pair. Also: `--` line comments; `'…'`/`"…"`
+strings; numbers incl. `0x` hex floats with `p` exponents; `true`/`false`/`nil` as `constant`
+(not keyword, per Python/Go precedent); the standard-library namespaces (`string`, `table`, `math`,
+`io`, `os`, …) as `type` — Lua has no user types, so the predeclared global tables are the nearest
+analogue; and a `function` NAME plus any `name(` (incl. `obj:method(`) as `function`. Sixteen
+languages now ship; `syntax/tests/lua.test` (13 cases) covers the level-matched long brackets, the
+number forms, and the function/constant/builtin rules; the shared suite runs 250 checks.
+
 ---
 
 ### D33 — Editor split: two side-by-side editor groups, per-group tabs (GUI-only)
