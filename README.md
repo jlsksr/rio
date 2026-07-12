@@ -65,6 +65,14 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
   `themes/`, never executed.
+- **Editing modes** — the text area edits like **Windows** (Notepad/VSCode:
+  Ctrl+A selects all, Ctrl+V pastes — the default), like **Emacs/readline**
+  (Ctrl+A/E line motion, Ctrl+K kill, Ctrl+V really scrolls), or like **vi**
+  (modal: motions, counts, `d`/`c`/`y` operators, visual mode, a block cursor in
+  normal mode). One click in *Settings ▸ Editing Mode*, remembered across runs. A
+  mode is a small self-registering file in `modes/` — drop your own in
+  `~/.config/rio/modes/` to replace or add one. App shortcuts (save, find, …)
+  always win over the mode's keys.
 - **Custom keybindings** — every shortcut is one data table. Remap them in
   *Settings ▸ Keyboard Shortcuts…* (press-to-capture, applied live, no restart) or by
   hand in `~/.config/rio/keys.json`; the menus relabel themselves to match.

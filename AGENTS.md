@@ -625,7 +625,8 @@ coverage), which O1 validates. A default scheme ships; users can remap.
 **Why:** data-driven bindings give GUI/TUI parity for free, make remapping a
 config edit rather than a code change, and keep keymap churn out of the
 frontends. The concrete **default keymap** (and any modal-vs-modeless stance)
-stays open — that's the narrowed O6.
+stays open — that's the narrowed O6. *(Since answered: D38 — editing modes;
+the app-chord table here always wins over the active mode's keys.)*
 
 *(Implemented — GUI keymap as one table.)* The GUI's shortcuts were briefly hardcoded
 twice over (the `bind`s in `editor_bindings` and again as literal `-accelerator` strings
@@ -648,7 +649,8 @@ enumerating every keysym. Covered by `rio-gui/tests/keymap.tcl` (defaults, label
 derivation, override/unbind, garbage rejection, and that the resolved map actually drives
 the per-widget bindings). The keymap is the frontend's view concern — no core, no wire.
 This narrows O6: the GUI default scheme is now concrete; the TUI's and any modal stance
-stay open. Live remap without restart, and a keybindings UI, are the obvious next steps
+stay open *(the modal stance has since landed too — D38's editing modes, vi included)*.
+Live remap without restart, and a keybindings UI, are the obvious next steps
 (today: edit `keys.json`, relaunch).
 
 *(Follow-on — live remap + a shortcuts editor.)* The "edit and relaunch" caveat is gone.
@@ -2074,6 +2076,93 @@ falsely disconnected across several probe rounds, a blocked call is woken with
 `disconnected` and the stale message reported once, subsequent ops fail fast,
 and the idle probe detects staleness with no user action at all.
 
+### D38 — Editing modes: a bind-tag layer, loaded like syntax highlighters
+
+Until now the text area's editing feel was **whatever Tk's built-in `Text`
+class bindings do** — an accident, not a decision. On X11 that meant a partial
+emacs flavour (Ctrl+K kill-line, Ctrl+D delete-char) with Windows-style
+navigation, no select-all at all, and one real bug: **Ctrl+V looked like it
+broke scrolling** (thumb moved, view stayed at the top). The post-mortem, from
+reading Tk's own `tk.tcl`/`text.tcl` and a runtime probe: on X11 `<<Paste>>`
+maps `<Control-v>` and the page-scroll binding is **aqua-only**, so Ctrl+V was
+silently *pasting* at the caret (line 1.0) — the buffer grew, the thumb moved,
+and `apply_change`'s `see insert` pinned the view to the top. Nothing was
+wrong with the scroll wiring; the keys were never ours to begin with.
+
+D38 makes the keyboard a decision. rio ships three **editing modes** —
+**windows** (the default: Ctrl+A select-all, Ctrl+C/X/V clipboard with
+paste-replaces-selection, Ctrl+Backspace/Delete word deletes, Tk's emacs
+leftovers deliberately dead), **emacs** (Tk's readline extras kept, plus the
+line/char motions X11 Tk lacks — Ctrl+A/E/B/P — and Ctrl+V/Alt+V as real page
+scrolling, which *is* the bug fix), and **vi** (modal: normal/insert/visual,
+counts, motions `h j k l w b e 0 $ gg G`, operators `d c y` with motion
+targets and doubled forms, `x p u i a o O v`; block cursor in normal, a
+`-- INSERT --` status segment). Picked in **Settings ▸ Editing Mode**,
+persisted as one `prefs.json` key (D31 applier pattern, `apply_editmode`),
+default windows — the D-order intuition bar (a Win98/2000 + VSCode user)
+decides the out-of-box feel; the other camps are one menu click away.
+
+**The mechanism is one shared bind tag.** `make_editor_group` slots `RioMode`
+between the widget path and the `Text` class in every editor's bindtags:
+
+    .eg<g>.t   RioMode   Text   .   all
+
+That one line fixes the precedence *by construction*: app keymap chords (D23,
+bound on the widget path with `break`) always beat the mode — save/find/undo
+are sacrosanct in every mode, stated in the shortcuts dialog — mode bindings
+that `break` beat Tk's Text defaults (a physical chord on an earlier tag
+cleanly preempts Text's virtual `<<Paste>>`), and what a mode doesn't bind
+falls through to Tk untouched (emacs mode *is* mostly fall-through). A mode
+switch detaches the old mode, wipes the tag centrally (a mode can never leak a
+binding), and attaches the new one; the tag being shared means every group —
+including a split created later — is covered with no per-widget rebinding.
+
+**Modes are the second stable extension surface, on the D32 pattern — not
+D17 plugins.** A mode is a self-registering Tcl module
+(`modes/<name>.tcl`, `rio::modes::register name label attach detach`), loaded
+registry-first, shipped modules then user drop-ins from
+`$XDG_CONFIG_HOME/rio/modes/`, later registration wins, a broken module is
+skipped and never fatal — `modes_load` is `hl_load` line for line, and the
+picker menu is built from the registry so a drop-in appears with no wiring.
+*Considered and rejected:* waiting for the D17 plugin API — its D18 shape
+(declarative UI, "never raw Tk code") is structurally wrong for per-keystroke
+behaviour, and the highlighter loader is proven. Unlike syntax scanners the
+mode *modules* are explicitly frontend code (they bind, they call `tk::Text*`
+helpers); only the registry is pure Tcl, so a TUI reuses the registry with its
+own modules.
+
+Everything is frontend-local (D22): the core never learns which mode is
+active. vi's per-group state (a vi "window": normal/insert/visual, pending
+operator, count) lives beside the highlight cache (D33); its motions are
+computed **exclusively with Tk index arithmetic** — `$w index/compare`, the
+`tk::Text*` helpers — never `expr`, which corrupts `line.col` (the D36
+lesson, now stated in the module header). Operators call the group *proxy*,
+so a `dd` reaches the core as one `buffer.replace` = **one undo step**; the
+yank "register" is simply the X clipboard, which makes `dd`+`p` round-trip
+(linewise yanks carry a trailing newline as their marker) and lets a vi yank
+paste into other applications. The proxy grew a `replace` arm alongside
+`insert`/`delete` so paste-over-selection is also a single edit/undo. The
+Edit menu gained the Win98-canon Cut/Copy/Paste/Select All, calling the same
+shared procs the windows mode binds — menu and keys cannot drift.
+
+Deliberately not in vi v1 (ROADMAP): ex commands, named registers, macros,
+`.` repeat, marks, visual-line; emacs v1 has no kill ring. Insert state *is*
+Tk's Text editing — only Escape is intercepted — so typing, Backspace and
+selection behave identically across modes.
+
+**Why:** the keyboard feel of the text area is exactly the kind of behaviour
+D21 wants to be a user *choice*, and the pieces to make it one were all
+proven: the bindtags order gives layering for free, the D32 loader gives
+extensibility for free, the D31 prefs applier gives persistence for free.
+This also closes **O6**: the default scheme is the windows mode, and modal
+editing is offered as a first-class mode rather than a fork of the editor.
+Tests: `rio-gui/tests/modes.tcl` (registry, loader drop-ins/broken-module,
+windows clipboard through the core, emacs motions, the Ctrl-V regression both
+ways — emacs C-v scrolls and *never* pastes, windows C-v pastes) and
+`rio-gui/tests/vi.tcl` (90 checks: transitions + chrome, counts, motions,
+operators, doubled forms, both `p` arities, visual, aborts, clean detach with
+an operator pending, per-group state across a split).
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -2467,9 +2556,11 @@ Both renderings come from the **same** region model (D13) and layout policy
   output surfaced in `chat`.
 - **O5 — Config & session format.** ✅ **Resolved — D21** (plain key-value
   settings + JSON session state, XDG locations, per-project `.rio/`).
-- **O6 — Default keymap.** Binding *model* decided in D23 (data-driven, GUI/TUI
-  parity). **Remaining:** the concrete default key scheme and whether any modal
-  editing is offered — pinned down once there's an editor to feel.
+- **O6 — Default keymap.** ✅ **Resolved — D23 + D38.** Binding *model* in D23
+  (data-driven, GUI/TUI parity); the concrete default scheme and the modal
+  stance in D38: the **windows** editing mode is the default feel, and modal
+  editing ships as the first-class **vi** mode (emacs beside it), all three
+  swappable in Settings ▸ Editing Mode.
 - **O7 — Distribution & build.** Starpack/`vanillawish` packaging per platform;
   how `tcltls` (for Claude HTTPS) is bundled.
 - **O8 — Extension API versioning.** Stability/versioning policy for the

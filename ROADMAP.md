@@ -25,7 +25,13 @@ Each entry notes its state:
   file-pane pass.
 - **Undo-coalescing in the doc model** — *deferred.* Typing currently records
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
-  noted refinement in the core document model.
+  noted refinement in the core document model. (Also felt in vi mode: one
+  operator is one undo, but insert-state typing stays per-keystroke.)
+- **Editing-mode extensions** — *deferred* (AGENTS.md D38). The windows/emacs/vi
+  modes shipped; consciously left for later: vi ex commands (`:w` `:q`), named
+  registers, `.` repeat, macros, marks, visual-line — and a kill ring (`C-y`
+  yank) for the emacs mode. Each is an isolated addition to its `modes/*.tcl`
+  module.
 - **Search extensions** — *deferred* (AGENTS.md D36). In-buffer Find/Replace
   shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`);
   still wanted: whole-word and regex options (a flag on the same ops), and
