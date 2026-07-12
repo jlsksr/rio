@@ -94,6 +94,20 @@ editing it: drop your version in `~/.config/rio/syntax/` and it shadows the buil
 Themes colour the token types through their `syntax.*` roles, so nothing is hard-coded
 to a palette.
 
+**Editing modes are the second stable extension point** (design:
+[AGENTS.md](AGENTS.md) D38). A mode decides what the keyboard does inside the text
+area — rio ships `windows`, `emacs`, and `vi` in `modes/`, and yours works the same
+way: one self-registering Tcl file. Write an `attach` that installs `bind <tag> …`
+bindings (end a binding in `break` to beat Tk's Text defaults; leave it off to fall
+through to them) and a `detach` that clears any state you keep, then
+`rio::modes::register name label attach detach` at the bottom. Drop the file in
+`~/.config/rio/modes/` — it appears in *Settings ▸ Editing Mode* automatically, and
+registering an existing name replaces the shipped mode. Two rules of the road: the
+app shortcuts always fire before your mode's keys, and edits must go through the
+widget your binding receives (`%W`, the group's proxy) — that's what keeps a mode
+working against local and remote cores alike. `modes/vi.tcl` is the worked example
+of per-editor state; `modes/emacs.tcl` is the minimal one.
+
 ## Getting started
 
 rio is written in Tcl/Tk, so there's nothing to compile — but you do need the

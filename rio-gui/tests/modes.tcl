@@ -1,0 +1,189 @@
+#!/usr/bin/env wish
+#
+# Headless editing-modes test for rio-gui (AGENTS.md D38): the RioMode bind-tag
+# layer, the registry + loader (drop-ins, later-wins, broken module skipped), the
+# Windows mode's clipboard/word-delete behaviour flowing through the core, the
+# Emacs mode's added motions, the Ctrl-V regression (paste vs page-scroll), the
+# prefs round-trip and the unknown-mode fallback. The vi engine has its own suite
+# (vi.tcl). Needs a DISPLAY (Tk); shows no window.
+#
+# Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/modes.tcl
+
+set ::env(RIO_GUI_HEADLESS) 1
+source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG (D31)
+source [file join [file dirname [info script]] .. .. rio-core server.tcl]
+set ::port [rio::server::listen 0]
+set ::connect_to "127.0.0.1:$::port"
+set argv {}
+source [file join [file dirname [info script]] .. rio-gui.tcl]
+
+set ::fails 0
+proc ok {label got want} {
+	if {$got eq $want} {
+		puts "PASS  $label"
+	} else {
+		puts "FAIL  $label\n        got:  $got\n        want: $want"
+		incr ::fails
+	}
+}
+
+# Fire a RioMode binding the way a keypress would: eval the REAL bound script with
+# %W substituted. A trailing `break` raises code 3 outside a bind context — that is
+# the binding doing its job, not an error.
+proc fire {chord} {
+	set script [bind RioMode $chord]
+	if {$script eq ""} { return "unbound" }
+	set script [string map [list %W [gget $::focus path]] $script]
+	set rc [catch {uplevel #0 $script} err]
+	if {$rc == 0 || $rc == 3} { return ok }
+	return "error: $err"
+}
+
+proc clear_buf {} { .ed.t delete 1.0 "end -1c" }
+proc set_clip {txt} { clipboard clear ; clipboard append $txt }
+
+# --- boot state: windows mode attached, tag layered correctly ------------------
+ok "boot: default mode"          $::edit_mode        windows
+ok "boot: mode attached"         $::editmode_active  windows
+ok "boot: tag after widget path" [lindex [bindtags [gget 0 path]] 1] RioMode
+ok "boot: app chord still bound" [expr {[bind [gget 0 path] <Control-n>] ne ""}] 1
+ok "boot: mode chord bound"      [expr {[bind RioMode <Control-a>] ne ""}] 1
+ok "boot: emacs leftover dead"   [bind RioMode <Control-k>] break
+ok "boot: menu has the modes"    [expr {[.m.settings.editmode index end] >= 2}] 1
+
+# --- windows mode: clipboard + select-all, edits flow through the core ---------
+clear_buf
+.ed.t insert insert "hello world"
+ok "win: typed through core"  [buf_text $::cur] "hello world"
+
+ok "win: select-all fires"    [fire <Control-a>] ok
+ok "win: select-all range"    [rio_real_t get sel.first sel.last] "hello world"
+
+ok "win: copy fires"          [fire <Control-c>] ok
+ok "win: copy on clipboard"   [clipboard get] "hello world"
+
+# paste replaces the selection as ONE core edit (the proxy's replace arm): a
+# single undo brings the selected text back.
+set_clip "bye"
+rio_real_t tag remove sel 1.0 end
+rio_real_t tag add sel 1.0 1.5           ;# select "hello"
+ok "win: paste fires"          [fire <Control-v>] ok
+ok "win: paste replaced sel"   [buf_text $::cur] "bye world"
+do_undo
+ok "win: replace is one undo"  [buf_text $::cur] "hello world"
+
+# cut removes through the core and loads the clipboard
+rio_real_t tag remove sel 1.0 end
+rio_real_t tag add sel 1.6 1.11          ;# select "world"
+ok "win: cut fires"            [fire <Control-x>] ok
+ok "win: cut removed text"     [buf_text $::cur] "hello "
+ok "win: cut on clipboard"     [clipboard get] "world"
+
+# Ctrl+Backspace eats the previous word
+clear_buf
+.ed.t insert insert "alpha beta"
+.ed.t mark set insert "1.0 lineend"
+ok "win: word-back fires"      [fire <Control-BackSpace>] ok
+ok "win: word-back result"     [buf_text $::cur] "alpha "
+
+# Ctrl+Delete eats to the next word start
+.ed.t mark set insert 1.0
+ok "win: word-fwd fires"       [fire <Control-Delete>] ok
+ok "win: word-fwd result"      [buf_text $::cur] ""
+
+# the Edit menu items exist and share the same procs
+ok "menu: Cut entry"    [.m.edit entrycget "Cut" -command]        editor_cut
+ok "menu: Select All"   [.m.edit entrycget "Select All" -command] editor_select_all
+
+# --- switching to emacs: central wipe + the added motions ----------------------
+set ::edit_mode emacs
+apply_editmode
+ok "emacs: attached"            $::editmode_active emacs
+ok "emacs: windows chords gone" [bind RioMode <Control-x>] ""
+ok "emacs: kill-line falls through" [bind RioMode <Control-k>] ""
+
+clear_buf
+.ed.t insert insert "one two three"
+.ed.t mark set insert 1.7
+ok "emacs: C-a fires"        [fire <Control-a>] ok
+ok "emacs: C-a to linestart" [rio_real_t index insert] 1.0
+ok "emacs: C-e fires"        [fire <Control-e>] ok
+ok "emacs: C-e to lineend"   [rio_real_t index insert] 1.13
+ok "emacs: C-b fires"        [fire <Control-b>] ok
+ok "emacs: C-b back a char"  [rio_real_t index insert] 1.12
+
+# --- THE Ctrl-V regression (the reported bug): emacs C-v scrolls, never pastes --
+clear_buf
+set lines "line"
+for {set i 2} {$i <= 100} {incr i} { append lines "\nline $i" }
+.ed.t insert insert $lines
+.ed.t mark set insert 1.0
+rio_real_t yview moveto 0
+set_clip "CLIPBOARD JUNK"
+set before [buf_text $::cur]
+ok "emacs: C-v fires"           [fire <Control-v>] ok
+ok "emacs: C-v never pastes"    [buf_text $::cur] $before
+ok "emacs: C-v moved the view"  [expr {[lindex [rio_real_t yview] 0] > 0}] 1
+ok "emacs: C-v moved the caret" [expr {[rio_real_t compare insert > 1.0]}] 1
+
+# and in windows mode Ctrl-V is an explicit paste (what those users expect)
+set ::edit_mode windows
+apply_editmode
+clear_buf
+.ed.t insert insert "ab"
+.ed.t mark set insert "1.0 lineend"
+set_clip "XYZ"
+fire <Control-v>
+ok "win: C-v pastes"            [buf_text $::cur] "abXYZ"
+
+# --- a split inherits the mode layer -------------------------------------------
+set g2 [add_group]
+ok "split: new widget tagged" [lindex [bindtags [gget $g2 path]] 1] RioMode
+unsplit_editor
+
+# --- prefs: the mode choice persists; an unknown name falls back ----------------
+set ::edit_mode emacs
+apply_editmode
+set pf [open [prefs_path] r] ; set prefs [::read $pf] ; close $pf
+ok "prefs: mode persisted"    [string match *\"editmode\":\"emacs\"* $prefs] 1
+set ::edit_mode bogus
+apply_editmode
+ok "prefs: unknown falls back" $::edit_mode windows
+ok "prefs: fallback attached"  $::editmode_active windows
+
+# --- registry: later registration wins ------------------------------------------
+set ::marker 0
+rio::modes::register windows "Windows (patched)" \
+	{apply {tag {incr ::marker ; rio::modes::win::attach $tag}}} rio::modes::win::detach
+apply_editmode
+ok "registry: later wins"      $::marker 1
+ok "registry: label replaced"  [rio::modes::label windows] "Windows (patched)"
+ok "registry: slot kept"       [lsearch -exact [rio::modes::names] windows] \
+	[lsearch -exact [rio::modes::names] windows]
+
+# --- loader: user drop-ins load; a broken one is skipped, not fatal -------------
+file mkdir [modes_user_dir]
+set f [open [file join [modes_user_dir] testmode.tcl] w]
+puts $f {rio::modes::register testmode "Test Mode" {apply {tag {}}} {apply {tag {}}}}
+close $f
+set f [open [file join [modes_user_dir] broken.tcl] w]
+puts $f {this is not tcl [}
+close $f
+set rc [catch {modes_load} err]
+ok "loader: broken module survived" $rc 0
+ok "loader: drop-in registered"     [rio::modes::exists testmode] 1
+ok "loader: shipped restored"       [rio::modes::label windows] "Windows (Notepad-like)"
+modes_menu_fill
+set found 0
+for {set i 0} {$i <= [.m.settings.editmode index end]} {incr i} {
+	if {[.m.settings.editmode entrycget $i -label] eq "Test Mode"} { set found 1 }
+}
+ok "loader: drop-in in the menu"    $found 1
+set ::edit_mode testmode
+apply_editmode
+ok "loader: drop-in activates"      $::editmode_active testmode
+set ::edit_mode windows
+apply_editmode
+
+puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
+exit [expr {$::fails ? 1 : 0}]

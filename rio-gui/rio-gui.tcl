@@ -123,6 +123,9 @@ set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
+set ::edit_mode windows   ;# active editing mode (D38): windows | emacs | vi | a drop-in's name
+set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
+set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
@@ -1517,6 +1520,10 @@ proc add_group {} {
 	relayout_groups
 	restyle_group $g
 	apply_wrap        ;# sync the new group's wrap mode + horizontal scrollbar
+	# The shared RioMode tag already covers the new widget's keys; re-attaching
+	# (idempotent by contract, D38) lets the active mode set up its per-group
+	# state too — vi's cursor shape and normal/insert state for the new half.
+	if {$::editmode_active ne ""} { catch {rio::modes::attach $::editmode_active RioMode} }
 	after idle even_split   ;# a new split opens 50/50; later user sash drags are kept
 	return $g
 }
@@ -1979,9 +1986,11 @@ proc refresh_status {} {
 	set enc  [expr {[dict exists $meta encoding] ? [dict get $meta encoding] : "utf-8"}]
 	set eol  [expr {[dict exists $meta eol] ? [dict get $meta eol] : "lf"}]
 	set lang [expr {[gget $::focus hl_lang] ne "" ? [gget $::focus hl_lang] : "plain text"}]
-	.status configure -text [format "%s      %s  %s%s      %s      %d buffer(s)" \
+	set mode ""   ;# the editing mode's segment (vi's "-- INSERT --"), when it has one
+	if {$::editmode_status ne ""} { set mode "      $::editmode_status" }
+	.status configure -text [format "%s      %s  %s%s      %s      %d buffer(s)%s" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
-		$lang [dict size $::buffers]]
+		$lang [dict size $::buffers] $mode]
 }
 # Copy a tab's file path to the clipboard (context menu). A no-op for an untitled
 # buffer, which has no path — the menu disables the item in that case.
@@ -2368,6 +2377,78 @@ proc hl_user_dir {} {
 	return ""
 }
 
+# ---------------------------------------------------------------------------
+# Editing modes (AGENTS.md D38): windows / emacs / vi, loaded exactly like the
+# syntax highlighters — registry first, shipped modules, then user drop-ins that
+# shadow by re-registering. The active mode lives on the shared RioMode bind tag,
+# which make_editor_group slots between each text widget and Tk's Text class:
+#
+#     .eg<g>.t   RioMode   Text   .   all
+#
+# so the precedence is fixed by construction: app keymap chords (on the widget
+# path, D23) always beat the mode; mode bindings that `break` beat Tk's Text
+# defaults; mode bindings that don't fall through to them.
+# ---------------------------------------------------------------------------
+proc modes_load {} {
+	set base [file join $::rio_dir .. modes]
+	if {[catch {source [file join $base registry.tcl]} err]} {
+		puts stderr "rio-gui: modes registry failed to load: $err" ; return
+	}
+	foreach dir [list $base [modes_user_dir]] {
+		if {$dir eq "" || ![file isdirectory $dir]} continue
+		foreach f [lsort [glob -nocomplain -directory $dir *.tcl]] {
+			if {[file tail $f] eq "registry.tcl"} continue
+			if {[catch {source $f} err]} {
+				puts stderr "rio-gui: mode module [file tail $f] failed to load: $err"
+			}
+		}
+	}
+}
+
+# The user's drop-in modes dir (a sibling of the syntax and themes dirs, D21).
+proc modes_user_dir {} {
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		return [file join $::env(XDG_CONFIG_HOME) rio modes]
+	} elseif {[info exists ::env(HOME)]} {
+		return [file join $::env(HOME) .config rio modes]
+	}
+	return ""
+}
+
+# The one applier for ::edit_mode (the D31 pattern: menu radio and boot both land
+# here). Detach the outgoing mode, wipe the tag centrally — a mode can never leak
+# a binding — then attach the new one. A persisted mode that no longer exists
+# falls back to the default rather than erroring at startup (same spirit as the
+# theme fallback).
+proc apply_editmode {} {
+	if {[info commands rio::modes::exists] eq ""} return
+	if {![rio::modes::exists $::edit_mode]} {
+		if {![rio::modes::exists windows]} return
+		set ::edit_mode windows
+	}
+	if {$::editmode_active ne ""} {
+		catch { rio::modes::detach $::editmode_active RioMode }
+	}
+	foreach seq [bind RioMode] { bind RioMode $seq "" }
+	set ::editmode_status ""
+	rio::modes::attach $::edit_mode RioMode
+	set ::editmode_active $::edit_mode
+	refresh_status
+	prefs_save
+}
+
+# Fill the Settings ▸ Editing Mode cascade from the registry — one radio per
+# registered mode, so a user drop-in shows up with no menu wiring of its own.
+proc modes_menu_fill {} {
+	if {![winfo exists .m.settings.editmode]} return
+	.m.settings.editmode delete 0 end
+	if {[info commands rio::modes::names] eq ""} return
+	foreach name [rio::modes::names] {
+		.m.settings.editmode add radiobutton -label [rio::modes::label $name] \
+			-variable ::edit_mode -value $name -command apply_editmode
+	}
+}
+
 # Pick the scanner for group `g`'s active buffer by its file extension ("" = no
 # highlighter, e.g. a scratch buffer or a plain-text file). Runs on open / switch.
 # The scanner + language name live in the group's cache, one per editor widget (D33).
@@ -2536,6 +2617,7 @@ proc prefs_load {} {
 	if {[dict exists $d dock_pane] && [dict get $d dock_pane] in {files git}} {
 		set ::dock_pane [dict get $d dock_pane]
 	}
+	if {[dict exists $d editmode]} { set ::edit_mode [dict get $d editmode] }
 }
 
 # Persist the current preferences. Called from each view-state applier (do_theme,
@@ -2553,7 +2635,8 @@ proc prefs_save {} {
 			wrap       $::wrap_lines \
 			dock_side  $::dock_side \
 			dock_pane  $::dock_pane \
-			chat_shown $::chat_shown]]
+			chat_shown $::chat_shown \
+			editmode   $::edit_mode]]
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
 		puts -nonewline $f $json ; close $f
 	}
@@ -2709,8 +2792,62 @@ proc editor_proxy {g args} {
 			}
 			return ""
 		}
+		replace {
+			# .t replace <index1> <index2> <chars> — one edit, one undo step
+			# (paste over a selection). Same index discipline as delete: no expr.
+			set i1    [$rc index [lindex $args 1]]
+			set i2    [$rc index [lindex $args 2]]
+			set chars [lindex $args 3]
+			if {[$rc compare $i1 < $i2] || $chars ne ""} {
+				if {[dict get [rio_call buffer.replace \
+					[dict create buffer [gcur $g] start $i1 end $i2 text $chars]] ok]} {
+					mark_modified 1
+				}
+			}
+			return ""
+		}
 		default { return [$rc {*}$args] }
 	}
+}
+
+# ---------------------------------------------------------------------------
+# Shared clipboard actions on an editor widget (D38). One implementation serves
+# the Edit menu and whichever editing mode binds keys to them (the Windows mode
+# does), so menu and keyboard can never drift apart. `w` is a group's PROXY path:
+# the cut/paste edits run through editor_proxy and reach the core; copy only
+# reads. Paste REPLACES a selection (the Windows/VSCode convention — Tk's own
+# x11 <<Paste>> leaves it in place) as a single replace, i.e. one undo step.
+# ---------------------------------------------------------------------------
+proc editor_select_all {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	$w tag remove sel 1.0 end
+	$w tag add sel 1.0 "end -1c"
+}
+
+proc editor_copy {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	if {[llength [$w tag ranges sel]] == 0} return
+	clipboard clear
+	clipboard append [$w get sel.first sel.last]
+}
+
+proc editor_cut {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	if {[llength [$w tag ranges sel]] == 0} return
+	clipboard clear
+	clipboard append [$w get sel.first sel.last]
+	$w delete sel.first sel.last
+}
+
+proc editor_paste {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	if {[catch {clipboard get} txt] || $txt eq ""} return
+	if {[llength [$w tag ranges sel]] > 0} {
+		$w replace sel.first sel.last $txt
+	} else {
+		$w insert insert $txt
+	}
+	$w see insert
 }
 
 # ---------------------------------------------------------------------------
@@ -3070,7 +3207,7 @@ proc keybindings_dialog {} {
 
 	label $w.hint -anchor w -font RioUIFont -justify left \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-text "Click a shortcut, then press the keys you want. Clear unbinds; Default restores the original."
+		-text "Click a shortcut, then press the keys you want. Clear unbinds; Default restores the original.\nThese app shortcuts always win over the editing mode's keys (Settings ▸ Editing Mode)."
 	grid $w.hint -row 0 -column 0 -sticky we -padx 8 -pady {8 4}
 
 	frame $w.body -background [dict get $c ui.bg]
@@ -3137,6 +3274,10 @@ proc make_editor_group {g} {
 		[dict create w ::real$g path $f.t frame $f tabs $f.tabs]]
 	proc $f.t {args} "editor_proxy $g {*}\$args"
 	editor_bindings $f.t
+	# Slot the editing-mode tag between the widget (app chords) and the Text class
+	# (Tk defaults) — the D38 precedence order. The tag is SHARED, so whatever mode
+	# is attached covers this group with no per-widget rebinding.
+	bindtags $f.t [linsert [bindtags $f.t] 1 RioMode]
 	bind $f.t <Button-1> [list focus_group $g]   ;# clicking a group focuses it
 	return $g
 }
@@ -3334,6 +3475,14 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Undo" -accelerator [key_accel undo] -command do_undo
 .m.edit add command -label "Redo" -accelerator [key_accel redo] -command do_redo
 .m.edit add separator
+# The clipboard block (Win98 canon). No accelerators shown: the keys belong to the
+# editing mode (Ctrl+X/C/V in Windows mode; emacs and vi have their own ideas), so
+# a fixed label here could lie. The commands work in every mode.
+.m.edit add command -label "Cut"        -command editor_cut
+.m.edit add command -label "Copy"       -command editor_copy
+.m.edit add command -label "Paste"      -command editor_paste
+.m.edit add command -label "Select All" -command editor_select_all
+.m.edit add separator
 .m.edit add command -label "Find…"         -accelerator [key_accel find]      -command {find_open 0}
 .m.edit add command -label "Replace…"      -accelerator [key_accel replace]   -command {find_open 1}
 .m.edit add command -label "Find Next"     -accelerator [key_accel find-next] -command find_next
@@ -3376,6 +3525,10 @@ menu .m.settings -tearoff 0
 .m.settings add checkbutton -label "Agent: Compare complex edits" \
 	-variable ::agent_compare_complex
 .m.settings add separator
+# Keyboard behaviour clusters here: the editing mode decides what keys do inside
+# the text area (D38), the shortcuts editor remaps the app chords (D23).
+menu .m.settings.editmode -tearoff 0
+.m.settings add cascade -label "Editing Mode" -menu .m.settings.editmode
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by
@@ -3387,6 +3540,12 @@ wm protocol . WM_DELETE_WINDOW do_quit
 # text tag per token type from the theme's syntax.* roles) and before any buffer
 # loads (which re-tokenises it) — D32.
 hl_load
+
+# Load the editing modes the same way (D38): registry, shipped modules, user
+# drop-ins. Loaded before prefs so a persisted mode name can resolve; attached by
+# apply_editmode in the boot applier block below.
+modes_load
+modes_menu_fill
 
 # Load saved preferences (theme, wrap, dock, chat) over the defaults, then apply the
 # theme before the first tab is drawn, so every widget — and the tab bar refresh_tabs
@@ -3419,6 +3578,7 @@ adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
+apply_editmode             ;# attach the editing mode (windows default) to the RioMode tag (D38)
 adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {
 	if {$::core_remote} {
