@@ -41,6 +41,7 @@ package require json
 set ::rio_dir [file dirname [info script]]
 set ::rio_self [file normalize [info script]]   ;# this script, for spawning a new window
 source [file join $::rio_dir .. rio-core wire.tcl]
+source [file join $::rio_dir .. rio-core conf.tcl]  ;# repository manifests are conf DATA (D21/D39)
 
 set ::core_endpoint "" ;# host:port when attached to a daemon (remote); "" when local (D30)
 set ::last_connect  "" ;# last host:port typed into "Connect to Remote Core…" (dialog seed)
@@ -2705,6 +2706,448 @@ proc session_restore {} {
 }
 
 # ---------------------------------------------------------------------------
+# Extension repositories (AGENTS.md D39). The apt-sources model, over plain
+# HTTP: sources.list holds base URLs, each pointing at a webdir that hosts
+# rio-repository.conf (the marker+manifest), an optional `index`, and one
+# subdirectory per extension carrying rio-extension.conf + its payload files.
+# No central index, no accounts — provenance (source URL + version) is
+# recorded per installed extension in a local ledger, and same-name extensions
+# from different sources coexist in listings for the USER to choose between.
+#
+# The split of labour: the CORE fetches (repo.fetch — bounded, plain http, so
+# a remote core uses ITS network) and stores themes (theme.put/delete — theme
+# files are the core's to read); the GUI interprets — parses manifests (conf
+# DATA, never executed), asks consent, installs syntax/mode payloads into its
+# own drop-in dirs (they run in the FRONTEND), and keeps the ledger. Remote
+# caveat, recorded honestly: the ledger says "this GUI installed X onto its
+# core" — a second frontend on the same daemon doesn't see it (ROADMAP).
+#
+# Every REMOTE-SUPPLIED name (extension dir, name, kind, payload filename)
+# must pass ext_safe_name before it is joined into a URL or a path — that one
+# rule kills traversal and percent-encoding games at the format level.
+# ---------------------------------------------------------------------------
+
+set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed} (ledger_load)
+set ::repo_variants {}  ;# every installable variant found by the last scan
+set ::repo_dead {}      ;# {url error} per unreachable/non-repository source
+set ::repo_srcinfo {}   ;# source url -> {name description} from its manifest
+
+proc ext_safe_name {s} {
+	return [regexp {^[A-Za-z0-9][A-Za-z0-9._-]*$} $s]
+}
+
+# --- sources.list -------------------------------------------------------------
+proc sources_path {} {
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		set base $::env(XDG_CONFIG_HOME)
+	} elseif {[info exists ::env(HOME)]} {
+		set base [file join $::env(HOME) .config]
+	} else { return "" }
+	return [file join $base rio sources.list]
+}
+
+# One base URL per line, # comments — hand-editable; the Repositories… editor
+# writes the same format back.
+proc sources_load {} {
+	set path [sources_path]
+	if {$path eq "" || ![file exists $path]} { return {} }
+	set urls {}
+	if {[catch {
+		set f [open $path r] ; fconfigure $f -encoding utf-8
+		set text [::read $f] ; close $f
+	}]} { return {} }
+	foreach line [split $text "\n"] {
+		set t [string trim $line]
+		if {$t eq "" || [string index $t 0] eq "#"} continue
+		if {$t ni $urls} { lappend urls $t }
+	}
+	return $urls
+}
+
+proc sources_save {urls} {
+	set path [sources_path]
+	if {$path eq ""} return
+	catch {
+		file mkdir [file dirname $path]
+		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
+		puts $f "# rio extension repositories — one http:// base URL per line (D39)."
+		foreach u $urls { puts $f $u }
+		close $f
+	}
+}
+
+# --- the provenance ledger ----------------------------------------------------
+proc ledger_path {} {
+	if {[info exists ::env(XDG_DATA_HOME)] && $::env(XDG_DATA_HOME) ne ""} {
+		set base $::env(XDG_DATA_HOME)
+	} elseif {[info exists ::env(HOME)]} {
+		set base [file join $::env(HOME) .local share]
+	} else { return "" }
+	return [file join $base rio extensions.json]
+}
+
+# Machine-written JSON: {"kind/name": {source, dir, version, installed,
+# files:[…]}, …}. Corrupt or missing -> an empty ledger, never fatal — the
+# worst outcome is "rio forgot where an extension came from", not a crash.
+proc ledger_load {} {
+	set ::ext_ledger {}
+	set path [ledger_path]
+	if {$path eq "" || ![file exists $path]} return
+	if {[catch {
+		set f [open $path r] ; fconfigure $f -encoding utf-8
+		set d [json::json2dict [::read $f]] ; close $f
+		dict for {key e} $d {
+			foreach k {source dir version files installed} {
+				if {![dict exists $e $k]} { error "entry $key missing $k" }
+			}
+		}
+		set ::ext_ledger $d
+	}]} { set ::ext_ledger {} }
+}
+
+proc ledger_entry_json {e} {
+	set parts {}
+	foreach k {source dir version installed} {
+		lappend parts "[rio::wire::str $k]:[rio::wire::str [dict get $e $k]]"
+	}
+	lappend parts "\"files\":[rio::wire::strarr [dict get $e files]]"
+	return "{[join $parts ,]}"
+}
+
+proc ledger_save {} {
+	set path [ledger_path]
+	if {$path eq ""} return
+	catch {
+		file mkdir [file dirname $path]
+		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
+		puts -nonewline $f [rio::wire::objmap $::ext_ledger ledger_entry_json]
+		close $f
+	}
+}
+
+# --- fetching & scanning ------------------------------------------------------
+
+# The one fetch seam: repo.fetch through the core, never throwing — the return
+# is {ok 1 status <n> text <t>} or {ok 0 error <msg>}. Tests stub THIS proc
+# with a fixture table (no network in tests, D39).
+proc repo_fetch {url} {
+	set resp [rio_call repo.fetch [dict create url $url]]
+	if {[dict get $resp ok]} {
+		return [dict create ok 1 status [dict get $resp result status] \
+			text [dict get $resp result text]]
+	}
+	return [dict create ok 0 error [dict get $resp error message]]
+}
+
+# The `index` file: one extension-subdir name per line, # comments. A line
+# that fails the safe-name rule is skipped, not fatal — one bad entry must not
+# hide the rest of a repository.
+proc repo_parse_index {text} {
+	set dirs {}
+	foreach line [split $text "\n"] {
+		set t [string trim $line]
+		if {$t eq "" || [string index $t 0] eq "#"} continue
+		if {[ext_safe_name $t] && $t ni $dirs} { lappend dirs $t }
+	}
+	return $dirs
+}
+
+# The autoindex fallback: when a repository omits `index`, the server's own
+# directory listing stands in. One tolerant pass — every href ending in "/"
+# whose name passes the safe-name rule is a candidate subdirectory; that one
+# filter drops ../, absolute URLs, query links (Apache's ?C=N;O=D), and any
+# percent-encoded name in a single stroke. Verified against canned Apache,
+# nginx, and OpenBSD-httpd listings in the test suite.
+proc repo_parse_autoindex {html} {
+	set dirs {}
+	foreach {m name} [regexp -all -inline -nocase {href="([^"]+)/"} $html] {
+		if {[ext_safe_name $name] && $name ni $dirs} { lappend dirs $name }
+	}
+	return $dirs
+}
+
+# Scan ONE source: the marker manifest (required — anything without a parseable
+# rio-repository.conf carrying name= is "not a rio repository"), then the
+# extension list (index, else autoindex), then each extension's manifest.
+# Returns {ok 1 name <n> description <d> exts {<variant>…}} or {ok 0 error <e>};
+# a malformed extension manifest skips that extension, never the source.
+# A variant dict: {source dir name kind version author description files}.
+proc repo_source_scan {base} {
+	set base [string trimright $base /]
+	set r [repo_fetch $base/rio-repository.conf]
+	if {![dict get $r ok]} {
+		return [dict create ok 0 error [dict get $r error]]
+	}
+	if {[dict get $r status] != 200
+			|| [catch {rio::conf::parse [dict get $r text]} conf]
+			|| ![dict exists $conf "" name]} {
+		return [dict create ok 0 error "not a rio repository (no usable rio-repository.conf)"]
+	}
+	set srcname [dict get $conf "" name]
+	set srcdesc [expr {[dict exists $conf "" description] ? [dict get $conf "" description] : ""}]
+	set dirs {}
+	set ir [repo_fetch $base/index]
+	if {[dict get $ir ok] && [dict get $ir status] == 200} {
+		set dirs [repo_parse_index [dict get $ir text]]
+	} else {
+		set ar [repo_fetch $base/]
+		if {[dict get $ar ok] && [dict get $ar status] == 200} {
+			set dirs [repo_parse_autoindex [dict get $ar text]]
+		}
+	}
+	set exts {}
+	foreach d $dirs {
+		set mr [repo_fetch $base/$d/rio-extension.conf]
+		if {![dict get $mr ok] || [dict get $mr status] != 200} continue
+		if {[catch {rio::conf::parse [dict get $mr text]} mc]} continue
+		set top [expr {[dict exists $mc ""] ? [dict get $mc ""] : {}}]
+		set ok 1
+		foreach k {name kind version files} {
+			if {![dict exists $top $k]} { set ok 0 }
+		}
+		if {!$ok} continue
+		set name [dict get $top name]
+		set kind [dict get $top kind]
+		if {![ext_safe_name $name] || ![ext_safe_name $kind]} continue
+		set files {}
+		foreach f [split [dict get $top files]] {
+			if {$f eq ""} continue
+			if {![ext_safe_name $f]} { set ok 0 ; break }
+			lappend files $f
+		}
+		if {!$ok || ![llength $files]} continue
+		lappend exts [dict create \
+			source $base dir $d name $name kind $kind \
+			version [dict get $top version] \
+			author [expr {[dict exists $top author] ? [dict get $top author] : "unknown"}] \
+			description [expr {[dict exists $top description] ? [dict get $top description] : ""}] \
+			files $files]
+	}
+	return [dict create ok 1 name $srcname description $srcdesc exts $exts]
+}
+
+# Scan every configured source into ::repo_variants / ::repo_dead /
+# ::repo_srcinfo. A dead source is one honest row, never a failed scan.
+# `progress` (optional command prefix) is told each source URL as it starts —
+# the Extensions window's status line.
+proc repo_scan_all {{progress ""}} {
+	set ::repo_variants {}
+	set ::repo_dead {}
+	set ::repo_srcinfo {}
+	set srcs [sources_load]
+	set n 0
+	foreach src $srcs {
+		incr n
+		if {$progress ne ""} { {*}$progress $src $n [llength $srcs] }
+		set s [repo_source_scan $src]
+		if {![dict get $s ok]} {
+			lappend ::repo_dead [list $src [dict get $s error]]
+			continue
+		}
+		dict set ::repo_srcinfo $src [dict create \
+			name [dict get $s name] description [dict get $s description]]
+		foreach v [dict get $s exts] { lappend ::repo_variants $v }
+	}
+}
+
+# --- installing & removing ----------------------------------------------------
+
+# The kind -> install-target map: the ONLY version-specific piece of the whole
+# format (D39's forward-compatibility contract). A kind not listed here still
+# LISTS in the window — greyed "(needs a newer rio)" — it just can't install.
+proc ext_kind_known {kind} {
+	return [expr {$kind in {syntax mode theme}}]
+}
+
+proc ext_kind_dir {kind} {
+	switch -- $kind {
+		syntax { return [hl_user_dir] }
+		mode   { return [modes_user_dir] }
+	}
+	return ""
+}
+
+# Does any OTHER ledger entry of this kind own one of these payload filenames?
+# Payloads of one kind share a flat drop-in dir, so a name collision would let
+# extension B silently overwrite extension A's file — refuse instead.
+proc ext_file_owner {kind name files} {
+	dict for {key e} $::ext_ledger {
+		lassign [split $key /] ekind ename
+		if {$ekind ne $kind || $ename eq $name} continue
+		foreach f $files {
+			if {$f in [dict get $e files]} { return $ename }
+		}
+	}
+	return ""
+}
+
+# Install one variant (a dict out of ::repo_variants): consent -> fetch ALL
+# payloads -> write -> activate -> ledger. Returns 1 installed / 0 not.
+# Nothing is written until every payload arrived intact, and a half-failed
+# write rolls the files back — an install is all-or-nothing on disk.
+proc ext_install {variant} {
+	dict with variant {}  ;# source dir name kind version author description files
+	if {![ext_kind_known $kind]} {
+		report_error "'$name' has kind '$kind', which this rio doesn't know — it needs a newer rio."
+		return 0
+	}
+	set key $kind/$name
+	# Consent, stated honestly: code is code, data is data, and the source URL
+	# is the provenance the user is trusting.
+	if {$kind eq "theme"} {
+		set what "'$name' is a THEME: colour/font data, parsed and never executed."
+	} else {
+		set what "'$name' is Tcl CODE that will run inside your editor with your permissions."
+	}
+	set msg "Install $kind '$name' $version by $author?\n\n$what\n\nFrom: $source"
+	if {[dict exists $::ext_ledger $key]} {
+		set old [dict get $::ext_ledger $key]
+		set msg "$msg\n\nReplaces the installed '$name' [dict get $old version] from [dict get $old source]."
+	}
+	if {[tk_messageBox -icon warning -type yesno -title "rio — install extension" \
+			-message $msg] ne "yes"} { return 0 }
+	set owner [ext_file_owner $kind $name $files]
+	if {$owner ne ""} {
+		report_error "Cannot install '$name': its payload would overwrite files owned by the installed $kind '$owner'."
+		return 0
+	}
+	# Fetch everything first; only then touch disk.
+	set payload {}
+	foreach f $files {
+		set r [repo_fetch $source/$dir/$f]
+		if {![dict get $r ok] || [dict get $r status] != 200} {
+			set why [expr {[dict get $r ok] ? "HTTP [dict get $r status]" : [dict get $r error]}]
+			report_error "Install of '$name' aborted: $f could not be fetched ($why). Nothing was changed."
+			return 0
+		}
+		dict set payload $f [dict get $r text]
+	}
+	if {$kind eq "theme"} {
+		if {![ext_install_theme $name $payload]} { return 0 }
+	} else {
+		if {![ext_install_files $kind $name $payload]} { return 0 }
+	}
+	dict set ::ext_ledger $key [dict create \
+		source $source dir $dir version $version files $files \
+		installed [clock format [clock seconds] -format %Y-%m-%d]]
+	ledger_save
+	return 1
+}
+
+# Write syntax/mode payloads into the kind's drop-in dir, then reload that
+# machinery so the extension is live at once — install is drop-the-file, the
+# same act as D32/D38 by hand, just performed by rio. Failure rolls back:
+# previously-existing files are restored, fresh ones removed.
+proc ext_install_files {kind name payload} {
+	set dstdir [ext_kind_dir $kind]
+	if {$dstdir eq ""} { report_error "No user $kind directory resolvable (no HOME?)." ; return 0 }
+	set undo {}
+	if {[catch {
+		file mkdir $dstdir
+		dict for {f text} $payload {
+			set p [file join $dstdir $f]
+			if {[file exists $p]} {
+				set old [open $p r] ; fconfigure $old -encoding utf-8
+				lappend undo restore $p [::read $old] ; close $old
+			} else {
+				lappend undo delete $p ""
+			}
+			set out [open $p {WRONLY CREAT TRUNC}] ; fconfigure $out -encoding utf-8
+			puts -nonewline $out $text ; close $out
+		}
+	} err]} {
+		foreach {what p text} $undo {
+			catch {
+				if {$what eq "delete"} { file delete $p } else {
+					set out [open $p {WRONLY CREAT TRUNC}] ; fconfigure $out -encoding utf-8
+					puts -nonewline $out $text ; close $out
+				}
+			}
+		}
+		report_error "Install of '$name' failed writing files: $err. Rolled back."
+		return 0
+	}
+	ext_reload $kind
+	return 1
+}
+
+# Themes install CORE-side through theme.put — each payload file becomes the
+# theme named by its rootname (night.theme -> night), validated by the core
+# before anything lands. On a partial failure the already-put files of this
+# install are deleted again (best effort — the core validated them going in,
+# so in practice the first failure is also the last).
+proc ext_install_theme {name payload} {
+	set put {}
+	dict for {f text} $payload {
+		set tname [file rootname $f]
+		set resp [rio_call theme.put [dict create name $tname text $text]]
+		if {![dict get $resp ok]} {
+			foreach t $put { catch {rio_call theme.delete [dict create name $t]} }
+			report_error "Install of theme '$name' failed at $f: [dict get $resp error message]" \
+				[dict get $resp error code]
+			return 0
+		}
+		lappend put $tname
+	}
+	ext_reload theme
+	return 1
+}
+
+# Remove an installed extension by ledger key parts. Files (or core-side
+# themes) go first, the ledger entry last — a failed delete leaves the entry,
+# so Remove can be retried; a vanished file is already what delete wanted.
+proc ext_remove {kind name} {
+	set key $kind/$name
+	if {![dict exists $::ext_ledger $key]} { return 0 }
+	set e [dict get $::ext_ledger $key]
+	if {$kind eq "theme"} {
+		foreach f [dict get $e files] {
+			catch {rio_call theme.delete [dict create name [file rootname $f]]}
+		}
+	} else {
+		set dstdir [ext_kind_dir $kind]
+		foreach f [dict get $e files] {
+			catch {file delete [file join $dstdir $f]}
+		}
+	}
+	dict unset ::ext_ledger $key
+	ledger_save
+	ext_reload $kind
+	return 1
+}
+
+# Re-arm the machinery a kind plugs into, after an install or a removal:
+#   syntax — reload the scanner registry, re-pick and re-paint every group;
+#   mode   — reload, refill the menu, re-attach (apply_editmode falls back to
+#            windows if the active mode was just removed);
+#   theme  — refill the View menu; if the ACTIVE theme changed under us,
+#            re-apply it — or fall back to default if it was removed.
+proc ext_reload {kind} {
+	switch -- $kind {
+		syntax {
+			hl_load
+			foreach g $::groups { hl_select $g ; hl_full $g }
+		}
+		mode {
+			modes_load
+			modes_menu_fill
+			apply_editmode
+		}
+		theme {
+			themes_menu_fill
+			if {$::theme_name ne "default"} {
+				set resp [rio_call theme.get [dict create name $::theme_name]]
+				if {[dict get $resp ok]} {
+					apply_theme [dict get $resp result]
+				} else {
+					do_theme default
+				}
+			}
+		}
+	}
+}
+
+# ---------------------------------------------------------------------------
 # Build the UI. The literal colours/fonts here are just a bootstrap; apply_theme
 # (below, fed by the core's theme.get) reconfigures every widget from the role
 # table — the default theme reproduces this plain white-bg "90s productivity"
@@ -3581,6 +4024,7 @@ modes_menu_fill
 # builds — uses the role table. A persisted theme that no longer exists falls back to
 # the default rather than erroring at startup (D31).
 prefs_load
+ledger_load   ;# which extensions this GUI installed, with their provenance (D39)
 # Greet the core before any other op. This is the first exchange over the channel, so
 # it's also where a stale connection surfaces: a dead `ssh -L` forward accepts the
 # socket but never answers, and without this bounded handshake the GUI would hang with
