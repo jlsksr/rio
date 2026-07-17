@@ -108,6 +108,181 @@ widget your binding receives (`%W`, the group's proxy) — that's what keeps a m
 working against local and remote cores alike. `modes/vi.tcl` is the worked example
 of per-editor state; `modes/emacs.tcl` is the minimal one.
 
+And once you've written a highlighter, a mode, or a theme, you can **publish
+it from your own web server** — no store, no account. That's the next section.
+
+## Extension repositories
+
+Syntax highlighters, editing modes, and themes don't have to sit in your own
+config dir — they can be **shared**. rio's distribution model is deliberately
+the apt-sources one: there is **no central index, no account, no platform**. A
+repository is nothing but a **plain `http://`-reachable directory** with a
+couple of text files in it; every rio user who adds your URL under
+*View ▸ Extensions… ▸ Repositories…* can browse and install what you put
+there. Copying files into a webdir is the whole publishing story — and it will
+still work in thirty years, the way OpenBSD's plain-http mirrors do.
+
+This section is the spec: everything you need to publish extensions from your
+own web server, with no other help.
+
+### Hosting a repository
+
+Give any directory your web server serves this shape — shown here as a real,
+complete repository carrying one theme:
+
+    yourserver.example/rio/
+    ├── rio-repository.conf         # the marker: this dir IS a rio repository
+    ├── index                       # what's in it (optional, see below)
+    └── night-theme/                # one directory per extension
+        ├── rio-extension.conf      # the extension's manifest
+        └── night.theme             # its payload file(s)
+
+`rio-repository.conf` — **required**. Its presence is what makes the directory
+a repository; a source without a parseable one is refused ("not a rio
+repository"):
+
+    name = jbm's rio extensions
+    description = extensions I use and share
+    maintainer = jbm
+
+`index` — the extension list: one subdirectory name per line, `#` comments and
+blank lines allowed:
+
+    # what this repository carries
+    night-theme
+
+You may omit `index` entirely if your server generates directory listings
+(autoindex): rio falls back to parsing the listing, and the Apache, nginx, and
+OpenBSD `httpd` formats are all understood. An explicit `index` is still the
+sturdier choice — it works with listings disabled and lets you keep a
+directory staged but unpublished.
+
+`night-theme/rio-extension.conf` — the manifest, which is what the Extensions
+window shows:
+
+    name = night
+    kind = theme
+    version = 1.0
+    author = jbm
+    description = a very dark theme
+    files = night.theme
+
+`night-theme/night.theme` — the payload: exactly the file a user could have
+dropped into a config dir by hand:
+
+    base = solarized-dark
+
+    [colors]
+    editor.bg = #101018
+
+That's the whole thing. No registration, no upload step — the files under your
+URL *are* the repository.
+
+### The formats, precisely
+
+All three files use rio's conf format (AGENTS.md D21): `key = value` lines,
+`[section]` headers, `#` comments, UTF-8 — **data, parsed and never executed**.
+
+`rio-repository.conf`: `name` is required (shown as the repository's name);
+`description` and `maintainer` are optional and shown alongside.
+
+`rio-extension.conf`, per extension directory:
+
+| key           | required | meaning                                                        |
+| ------------- | -------- | -------------------------------------------------------------- |
+| `name`        | yes      | the extension's name — users see it as *kind/name*             |
+| `kind`        | yes      | what it is: `syntax`, `mode`, or `theme` today (open — below)  |
+| `version`     | yes      | an **opaque string** shown to users (`1.0`, `2026-07-17`, …) — rio displays it, never compares it |
+| `files`       | yes      | the payload filename(s), space-separated, beside the manifest  |
+| `author`      | shown    | your name or handle — displayed with every variant             |
+| `description` | shown    | one line about the extension                                   |
+
+Rules of the tree:
+
+- **One extension per directory.** Any number of payload files, but **no
+  subdirectories** inside an extension (v1).
+- **The safe-name rule.** Every name rio takes from a repository — an
+  extension directory, `name`, `kind`, each entry of `files` — must match
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`. That's a format rule, not a style tip: these
+  names get joined into URLs and into file paths on the user's machine, and
+  this one rule is what makes `../`, absolute paths, percent-encoding, and
+  spaces impossible by construction. Anything failing it is skipped.
+- **Plain `http://` only.** rio implements no TLS of its own. If your server
+  is https-only, serve the repository from a plain-http host or front it with
+  a proxy (relayd, nginx); repository TLS is a roadmap item, and the trust
+  section below is honest about what https would and wouldn't buy here.
+- Payloads are **text** (Tcl source, theme files); fetches are capped at 2 MB.
+
+What each kind installs as:
+
+- `syntax` — a highlighter module (the scanner contract above) → the user's
+  `~/.config/rio/syntax/`, exactly like a hand-dropped file.
+- `mode` — an editing mode (the modes contract above) → `~/.config/rio/modes/`.
+- `theme` — a theme file → the **core's** user themes dir, via the protocol
+  (`theme.put`) — themes are read by the core, which may be a remote box.
+
+### The forward-compatibility contract
+
+Two guarantees make a repository you publish today durable:
+
+- **Unknown keys are ignored.** rio reads the keys it knows and skips the
+  rest. A future rio adding manifest fields (entry points, declared
+  permissions — AGENTS.md D19) won't break the manifest you wrote today, and
+  you may carry extra keys of your own without harming older rios.
+- **Unknown kinds are listed, never errors.** The `kind` vocabulary is open on
+  purpose: the extension system has to carry future, community-contributed
+  kinds nobody has thought of yet — a deploy tool, a protocol bridge, whatever
+  comes. A rio that doesn't know a kind still lists the extension, greyed,
+  marked "needs a newer rio"; it just won't install it. Only the
+  kind→install-target mapping above is version-specific.
+
+### Testing your repository
+
+Add your own URL in *View ▸ Extensions… ▸ Repositories…* and watch the scan:
+everything you published should list, and installing your own extension is the
+honest end-to-end test. Without rio at hand, two curl one-liners tell you most
+of it:
+
+    curl http://yourserver.example/rio/rio-repository.conf   # does the marker parse?
+    curl http://yourserver.example/rio/index                 # does it list your dirs?
+
+### Updating & removing
+
+To ship a new version, update the payload files and **bump `version =`**. It's
+an opaque label, so date stamps serve as well as semvers. Users see your new
+version listed beside the one they installed and re-install to update — rio
+never auto-updates. To retire an extension, delete its directory (and its
+`index` line): it unlists, while existing installs keep working and stay
+removable — each user's rio remembers what it installed, and from where.
+
+### Trust, honestly
+
+- Installing a **syntax highlighter or an editing mode is installing Tcl code
+  that runs inside the user's editor**, with the user's permissions. rio says
+  exactly that at install time, next to your source URL. There is no sandbox
+  and no signing yet (roadmap): **your URL is your reputation**, and a user's
+  sources list is their trust list — exactly like apt's.
+- A **theme is data** — parsed, validated, never executed — and the consent
+  dialog says that too.
+- Every installed extension is **marked with its provenance** (source URL +
+  version). When two repositories offer the same name, rio lists both
+  variants, each labelled with author and source, and the user chooses.
+  Nothing is resolved by authority, because there is no authority.
+
+**`.well-known/rio-repository`** — specced now, consumed by a future rio: a
+plain-text file at your **host root**
+(`http://yourserver.example/.well-known/rio-repository`) listing, one per
+line, the repository paths on that host the operator vouches for:
+
+    /rio/
+
+A later rio can show a "host-validated" badge from it — and it's the natural
+hook for an official-approval marking after that. Publishing it today costs
+one static file and makes your repository ready for both.
+
+(The design rationale for all of this — and why it is emphatically *not* a
+marketplace — is AGENTS.md D39.)
+
 ## Getting started
 
 rio is written in Tcl/Tk, so there's nothing to compile — but you do need the
@@ -168,6 +343,11 @@ the dumb-view proxy / save / undo) without ever showing a window — it needs a
 display but stays off-screen:
 
     RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
+
+More focused GUI suites live beside it in `rio-gui/tests/` — for example
+`repos.tcl` drives the whole extension-repository flow (scan, consent,
+install, remove, the Extensions window) against fixture data, with no network
+involved.
 
 ## Sending a change
 

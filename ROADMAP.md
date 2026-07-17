@@ -46,7 +46,9 @@ Each entry notes its state:
   placement and one universal embedding seam for D17/D18 UI contributions, without
   overloading the core `buffer` concept. Direction settled; not built — the chat stays
   a dedicated pane (D14) until it lands. Quality bar for these panes: the D36 find
-  bar — dynamic (appears only when needed), clean, minimal controls.
+  bar — dynamic (appears only when needed), clean, minimal controls. The
+  **Extensions window (D39) is the first tenant-in-waiting**: it ships as a
+  non-modal tool window and re-hosts into a dock site when this lands.
 
 ## Syntax highlighting
 
@@ -61,6 +63,36 @@ Each entry notes its state:
   yet warranted.
 - **Highlight the compare/diff panes** — *deferred.* v1 highlights the main editor
   only; the side-by-side compare view is still plain.
+
+## Extensions & distribution
+
+Repositories shipped (AGENTS.md D39): plain-HTTP sources, the Extensions
+window, provenance-marked installs for syntax/modes/themes. Consciously left
+for later:
+
+- **Repository TLS / other transports** — *deferred.* v1 is plain `http://`
+  only; rio implements no TLS of its own (operators front a webdir with
+  relayd/nginx). Candidates when warranted: https via tcltls (already a core
+  dependency for the agent), ssh-fetched repositories, and git-backed sources
+  (dropped from v1 — see the D19 annotation).
+- **`.well-known/rio-repository` badges** — *planned.* The host-validation
+  file is specced (CONTRIBUTING) and costs publishers one line; consuming it —
+  a "host-validated" badge in the Extensions window, and an official-approval
+  marking on top — is not built.
+- **Signing / trust beyond provenance** — *design.* v1's trust model is apt's
+  (your sources list is your trust list, provenance shown, code named as
+  code). Anything stronger — signatures, pinning — needs a design that works
+  without a central authority.
+- **Plugin-kind installs** — *deferred* (D19). The `kind` vocabulary is open
+  and the manifest grows unknown keys compatibly, so protocol-participant
+  plugins (with declared permissions) can become installable kinds once the
+  plugin interface stabilises.
+- **Update checking** — *deferred.* rio never auto-updates; an update is
+  installing the newer-listed variant by hand. A "newer version available"
+  marker on installed rows would be a cheap, honest middle ground.
+- **Core-side ledger** — *gap.* The provenance ledger is GUI-side ("this GUI
+  installed X onto its core"); a second frontend on the same daemon doesn't
+  see it. Theme installs land core-side already; the ledger could follow.
 
 ## Git
 

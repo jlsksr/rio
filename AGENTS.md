@@ -520,6 +520,15 @@ consent); and
 when distribution is needed, lean on git/Forgejo rather than building (and
 operating) a marketplace platform.
 
+*(Since realized — D39, with one revision: distribution landed as plain-HTTP
+directory repositories, apt-sources style, and **git was dropped as the
+transport** — the durability bar ("works even if git disappears") and v1
+simplicity favoured bare webdirs, which a Forgejo raw-URL prefix still
+satisfies. The spirit of this decision — self-hostable, no platform to
+operate, the store is one config entry — is exactly what D39 shipped for
+syntax/modes/themes; manifest + permissions for *plugin*-kind extensions
+remain ahead, and D39's manifest format is built to grow those keys.)*
+
 ### D20 — Agent architecture: orchestration in core, providers & tools as plugins
 
 The agent splits along a **security / volatility** line:
@@ -2163,6 +2172,131 @@ ways — emacs C-v scrolls and *never* pastes, windows C-v pastes) and
 operators, doubled forms, both `p` arities, visual, aborts, clean detach with
 an operator pending, per-group state across a split).
 
+### D39 — Extension repositories: apt-sources over plain HTTP; never a marketplace
+
+rio had two stable extension surfaces (syntax D32, editing modes D38) plus
+themes (D24) — and no way to *share* one except copying a file by hand. D39 is
+the distribution story, realizing D19's stance ("no marketplace platform;
+self-hostable; the store is one config entry") in its simplest durable form:
+**the apt-sources model over plain HTTP**. The user keeps a `sources.list`
+(`$XDG_CONFIG_HOME/rio/sources.list`, one base URL per line, `#` comments —
+hand-editable, and edited by the GUI's *Repositories…* dialog); each URL names
+a **plain http-served directory**; there is **no central index and no central
+authority, by design**. The name is **"Repositories"** — emphatically not
+"marketplace": no store, no accounts, no platform to operate, nothing to shut
+down. The durability bar was explicit: *works in 20–30 years, like OpenBSD's
+plain-http mirrors, even if git disappears* — which is also why **git-backed
+sources were dropped from v1** (a Forgejo raw-URL prefix already qualifies as
+an http directory, so nothing is lost).
+
+**The formats** (all D21 conf — data, parsed, never executed; the complete
+publisher-facing spec lives in CONTRIBUTING.md "Extension repositories"):
+
+- `<base>/rio-repository.conf` — **required marker + manifest** (`name =`
+  required; `description =`, `maintainer =` shown). No parseable marker → the
+  source is refused as "not a rio repository" — a bare webdir is never
+  mistaken for one.
+- `<base>/index` — one extension-subdir name per line, `#` comments.
+  **Optional**: without it rio parses the server's autoindex listing (one
+  tolerant href pass, verified against canned Apache/nginx/OpenBSD-httpd
+  output). An explicit index is sturdier (listings off, staged-but-unlisted
+  dirs); the fallback keeps "just point it at a directory" honest.
+- `<base>/<extdir>/rio-extension.conf` — `name`/`kind`/`version`/`files`
+  required, `author`/`description` shown. `version` is an **opaque displayed
+  string, never compared** — rio offers what's listed and the user decides;
+  no dependency-resolver ambitions. Payload files sit beside the manifest:
+  one extension per directory, N files, no subdirs (v1), text only, fetches
+  capped at 2 MB.
+- **The safe-name rule**: every remote-supplied name (extdir, name, kind,
+  each file) must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`, checked before any
+  URL or path join — path traversal and percent-encoding die at the format
+  level, in one rule, on both sides (GUI scanner and core theme store).
+
+**The forward-compatibility contract**, stated structurally because the user's
+requirement was open-endedness ("our extension system should work with later
+community-contributed plugins we can't think of yet"): parsers **ignore
+unknown keys** in both conf files, and **unknown kinds list but don't
+install** — greyed "(needs a newer rio)" — so a future kind (a deploy tool, a
+protocol bridge) ships today's format without breaking today's rio. Only the
+v1 kind→install-target map is version-specific: `syntax` → the GUI's
+`~/.config/rio/syntax/`, `mode` → `~/.config/rio/modes/`, `theme` → the
+**core's** user themes dir.
+
+**The split of labour** follows D30's geometry. Fetching runs **core-side**:
+new `rio-core/http.tcl` (`rio::http::get` — bounded: ≤5 redirects with
+relative-Location resolution, 2 MB cap; a completed exchange incl. 404 is
+data, only no-answer is `io_error`) surfaced as the `repo.fetch` op — so a
+remote core fetches from *its* network and the GUI grows no network
+dependency (INSTALL.md's promise that a GUI-only box needs no tcltls holds).
+**Plain `http://` only — rio implements no TLS of its own** (user decision:
+operators front a webdir with relayd/nginx if they want https; rio-side TLS
+is a ROADMAP deferral; `https://` is a clean `bad_request` with that advice).
+Themes install core-side through new ops — `theme.list` / `theme.put`
+(validated before written) / `theme.delete` (user dir only; shipped themes
+are the installation, not user state) — which also turned the GUI's
+**hardcoded four-theme View menu dynamic** (filled from `theme.list`, radio
+snapping back on a failed switch). Syntax and modes install **GUI-side** into
+the existing drop-in dirs: an install is exactly the hand-drop D32/D38
+already honour, performed by rio.
+
+**No central index ⇒ collisions are a feature, honestly handled.** Same-name
+extensions from different sources coexist as separate *variants*, each
+labelled `version by author — source-host`; the user chooses ("Really good
+software just works like that"). Every install is recorded in a **provenance
+ledger** (`$XDG_DATA_HOME/rio/extensions.json`: `kind/name` → source, dir,
+version, files, date; corrupt → empty, never fatal), which powers the honest
+replace consent ("replaces X 1.0 from host"), the flat-dir collision refusal
+(a payload filename owned by a *different* installed extension refuses to
+install rather than silently overwrite), offline rows (an installed
+extension whose source vanished is synthesized from the ledger so Remove
+always works), and updates (= installing the newer-listed variant; rio never
+auto-updates). Recorded caveat: the ledger is GUI-side — "this GUI installed
+X onto its core" — so a second frontend on the same daemon doesn't see it; a
+core-side ledger is a ROADMAP item.
+
+**Consent is code-vs-data, with provenance.** Installing syntax/modes says
+"Tcl CODE that will run inside your editor" next to the source URL; themes
+say "data, never executed". Install is all-or-nothing: every payload is
+fetched before anything is written, and a half-failed write rolls back. No
+signing, no sandbox in v1 — the trust model is apt's (your sources list is
+your trust list), documented honestly in CONTRIBUTING. The
+**`.well-known/rio-repository`** hook is specced (host-root plain-text list
+of vouched repository paths — the operator confirming "these are mine") but
+consumed by no v1 code: it's the later basis for "host-validated" badges and
+official approval, costing publishers one static file today.
+
+**The UI is the Extensions window** (*View ▸ Extensions…*) — deliberated as a
+side-dock pane vs a window with the user: the dock's narrow fixed-width panes
+(files/git) can't carry a browse-and-compare surface, and VSCode's own
+answer (detail opens in an editor tab) needs D35 machinery that doesn't exist
+yet, so the honest v1 is a **non-modal toplevel** — rio's first D35-style
+tool window, to re-host into a dock site when D35 lands. Naming: the window
+is "Extensions" (what you browse), the sources are "Repositories" (where
+they come from). One row per (kind, name), aggregated; the detail section
+lists **every variant** with its own Install/Remove — the choose-between
+surface; unknown kinds greyed; one honest `!!` row per dead source.
+Non-modal means re-entry is real: `::repo_busy` gates one scan/install at a
+time (the sequential `core_call`s pump the event loop, so the editor stays
+live). The small *Repositories…* sources editor may be modal — it's a
+focused edit, not a browsing surface.
+
+**Why:** distribution had to exist for the extension surfaces to matter, and
+every alternative shape — a marketplace service, a curated index, git-clone
+plumbing — either creates an operator, a gatekeeper, or a dependency that can
+rot. A plain http directory has none: it outlives hosting fashions, any web
+server can serve it, a stranger can publish with three text files, and rio's
+own honesty rules (provenance shown, code named as code, collisions surfaced
+to the user) substitute for the authority a central index would fake. Tests:
+`rio-core/tests/http.test` (socket-free: resolution, refusals, validation),
+theme.test store additions, and `rio-gui/tests/repos.tcl` (~90 checks:
+parsers against canned listings, consent both ways, install/replace/remove
+end-to-end for all three kinds through the real registries and core, the
+collision refusal, ledger round-trip + corrupt tolerance, and the window —
+aggregation, variants, filter, busy guard, offline rows, the sources
+editor). Live-network behaviour is verified against a real webdir at release
+(no live HTTP in the test environment — the fetch seam is stubbed with
+fixture tables instead).
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -2572,11 +2706,13 @@ Both renderings come from the **same** region model (D13) and layout policy
 - **O10 — SDK & declarative-UI specifics.** Which SDK languages ship first
   (Tcl given; reference SDK — Python? Lua?) and the concrete schema/vocabulary
   for declarative UI contributions (D18).
-- **O11 — Store / distribution architecture.** Leaning git-based (plugin = git
-  repo; default catalog a self-hosted Forgejo, configurable, host-agnostic — see
-  D19). Open: clone/pull install + update flow, version/compat pinning, how
-  trust/signing works without a central authority, and whether any in-app
-  install UI is worth it vs. a documented `git`-and-config convention (D19).
+- **O11 — Store / distribution architecture.** ✅ **Resolved — D39** (revising
+  the git leaning): distribution is plain-HTTP directory repositories
+  (apt-sources model, no central index), with an in-app install UI (the
+  Extensions window) that proved worth building. Still open within it, tracked
+  in ROADMAP: trust/signing without a central authority (the
+  `.well-known/rio-repository` hook is specced), plugin-kind installs, and
+  update checking.
 - **O12 — MCP alignment.** Whether/how to map the provider and agent-tool
   interfaces onto MCP; rio as MCP client (consume MCP servers) and possibly MCP
   server (expose rio to other agents) (D20).
@@ -2673,3 +2809,14 @@ Don't let the same fact live in two docs where it can drift.
 - **MCP** — Model Context Protocol; a JSON-RPC standard for exposing
   tools/resources to LLM apps. Candidate basis for rio's provider/tool
   interfaces (D20, O12).
+- **extension repository** — a plain http-served directory carrying
+  `rio-repository.conf`, an optional `index`, and one subdirectory per
+  extension; named in the user's `sources.list`. No central index (D39).
+- **provenance ledger** — the GUI-side record of installed extensions
+  (`extensions.json`): which source URL and version each `kind/name` came
+  from, and its payload files (D39).
+- **Extensions window** — the non-modal *View ▸ Extensions…* browser: one row
+  per (kind, name), every variant with its provenance in the detail section;
+  rio's first D35-style tool window (D39).
+- **safe-name rule** — `^[A-Za-z0-9][A-Za-z0-9._-]*$`, required of every
+  remote-supplied name before any URL/path join (D39).
