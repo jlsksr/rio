@@ -285,7 +285,106 @@ ok "ledger: round-trips through JSON" $same 1
 set f [open [ledger_path] w] ; puts $f "{this is not json" ; close $f
 ledger_load
 ok "ledger: corrupt file -> empty, not fatal" $::ext_ledger {}
-ext_remove syntax zz   ;# leave the sandbox clean
+catch {file delete [file join [hl_user_dir] zz.tcl]}   ;# the corrupt ledger forgot this file
+hl_load
+
+# --- the Extensions window ---------------------------------------------------
+extensions_window
+ok "window: exists, non-modal"     [list [winfo exists .extw] [grab current]] {1 {}}
+ok "window: scan done, not busy"   $::repo_busy 0
+ok "window: status counts the scan" \
+	[string match "6 extension(s) from 2 repositories" [.extw.foot.status cget -text]] 1
+
+proc rowidx {kind name} {
+	for {set i 0} {$i < [llength $::extw_rows]} {incr i} {
+		set r [lindex $::extw_rows $i]
+		if {[dict exists $r key] && [dict get $r key] eq "$kind/$name"} { return $i }
+	}
+	return -1
+}
+set i [rowidx syntax zz]
+ok "window: same name aggregates"  [string match "*2 sources*" [.extw.body.list get $i]] 1
+ok "window: unknown kind labeled"  \
+	[string match "*needs a newer rio*" [.extw.body.list get [rowidx widget weird]]] 1
+set deadrows 0
+foreach r $::extw_rows { if {[dict exists $r dead]} { incr deadrows } }
+ok "window: dead sources shown"    $deadrows 3
+
+# selecting the zz row lists BOTH variants with their provenance
+.extw.body.list selection clear 0 end
+.extw.body.list selection set $i
+extw_select
+ok "window: variant A line"  [string match "*1.0 by alice — a.example*" [.extw.det.v0.l cget -text]] 1
+ok "window: variant B line"  [string match "*2.0 by bob — b.example*"   [.extw.det.v1.l cget -text]] 1
+ok "window: both installable" \
+	[list [winfo exists .extw.det.v0.in] [winfo exists .extw.det.v1.in]] {1 1}
+
+# install straight from the detail button (variant A)
+set ::mb_answers {yes}
+.extw.det.v0.in invoke
+ok "window: install via button"    [dict get $::ext_ledger syntax/zz source] $::A
+ok "window: row shows installed"   \
+	[string match "*\[installed\]*" [.extw.body.list get [rowidx syntax zz]]] 1
+ok "window: selection survived"    \
+	[string match "*\[installed\]*" [.extw.det.v0.mark cget -text]] 1
+ok "window: installed row has Remove, other Install" \
+	[list [winfo exists .extw.det.v0.rm] [winfo exists .extw.det.v1.in]] {1 1}
+
+# the filter narrows the list
+.extw.hdr.filter insert end night
+extw_fill
+ok "window: filter narrows"        [llength $::extw_rows] 1
+ok "window: filtered to night"     [dict get [lindex $::extw_rows 0] name] night
+.extw.hdr.filter delete 0 end
+extw_fill
+
+# the busy guard disables the action surface (non-modal => re-entry is real)
+extw_busy 1
+ok "window: busy disables header"  [.extw.hdr.refresh cget -state] disabled
+set before [dict get $::ext_ledger syntax/zz version]
+extw_install [rowidx syntax zz] 1   ;# must be a no-op while busy
+ok "window: busy blocks install"   [dict get $::ext_ledger syntax/zz version] $before
+extw_busy 0
+ok "window: idle re-enables"       [.extw.hdr.refresh cget -state] normal
+
+# the installed version vanishing from its source is said honestly
+sources_save [list $::B]
+extw_refresh
+.extw.body.list selection set [rowidx syntax zz]
+extw_select
+ok "window: not-listed-anymore line" \
+	[string match "*installed: 1.0*no longer listed*" [.extw.det.inst.l cget -text]] 1
+ok "window: it still offers Remove"  [winfo exists .extw.det.inst.rm] 1
+
+# source gone entirely: the row is synthesized from the ledger, Remove works
+sources_save {}
+extw_refresh
+set i [rowidx syntax zz]
+ok "window: offline row synthesized" [string match "*(offline)*" [.extw.body.list get $i]] 1
+.extw.body.list selection set $i
+extw_select
+.extw.det.v0.rm invoke
+ok "window: offline remove works"   [dict exists $::ext_ledger syntax/zz] 0
+ok "window: row gone after remove"  [rowidx syntax zz] -1
+
+# the Repositories… sources editor: add validates, remove removes, both persist
+after 100 {
+	.extsrc.add.url insert end http://e.example/more
+	extw_source_add
+	.extsrc.add.url insert end https://nope.example/tls
+	extw_source_add
+	set ::src_mid [sources_load]
+	.extsrc.body.list selection set 0
+	extw_source_remove
+	set ::src_after [sources_load]
+	destroy .extsrc
+}
+extw_sources_dialog
+ok "sources dialog: http added"     [expr {"http://e.example/more" in $::src_mid}] 1
+ok "sources dialog: https refused"  [string match "*https is not supported yet*" [mb_last]] 1
+ok "sources dialog: only http kept" [llength $::src_mid] 1
+ok "sources dialog: remove removes" $::src_after {}
+destroy .extw
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

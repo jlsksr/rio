@@ -3148,6 +3148,381 @@ proc ext_reload {kind} {
 }
 
 # ---------------------------------------------------------------------------
+# The Extensions window (AGENTS.md D39): View ▸ Extensions… — where the user
+# browses every configured repository, chooses BETWEEN same-name extensions
+# (different authors, different versions — each variant its own line with its
+# provenance), installs, and removes. Naming: the WINDOW is "Extensions" (what
+# you browse); the SOURCES are "Repositories" (where they come from) — the
+# header's `Repositories…` button edits sources.list.
+#
+# Deliberately a NON-MODAL toplevel (no grab, no tkwait): browsing repositories
+# is a side activity, not a question blocking the editor — and this is rio's
+# first D35-style tool window, to be re-hosted into a dock site when D35 lands.
+# Non-modal means re-entry is real: ::repo_busy guards it — one scan or install
+# at a time, action buttons disabled meanwhile (the sequential core_calls pump
+# the event loop, so the editor itself stays live throughout).
+#
+# The list aggregates ONE row per (kind, name); the detail below it lists every
+# VARIANT of the selected row. Unknown kinds are listed greyed ("needs a newer
+# rio" — the forward-compat contract), dead sources get one honest `!!` row
+# each, and an installed extension whose source vanished is synthesized from
+# the ledger so Remove always works.
+# ---------------------------------------------------------------------------
+
+set ::repo_busy 0     ;# a scan or install is running: action buttons disabled
+set ::extw_rows {}    ;# row dicts, index-aligned with the window's listbox
+
+proc host_of {url} {
+	if {[regexp -nocase {^http://([^/]+)} $url -> h]} { return $h }
+	return $url
+}
+
+proc extensions_window {} {
+	set w .extw
+	if {[winfo exists $w]} { raise $w ; focus $w.body.list ; return }
+	toplevel $w
+	wm title $w "Extensions"
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+
+	# Header: sources editor, refresh, filter.
+	frame $w.hdr -background [dict get $c ui.bg]
+	button $w.hdr.repos   -text "Repositories…" -font RioUIFont -command extw_sources_dialog
+	button $w.hdr.refresh -text "Refresh"       -font RioUIFont -command extw_refresh
+	label $w.hdr.flbl -text "Filter:" -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	entry $w.hdr.filter -font RioUIFont -width 18
+	pack $w.hdr.repos $w.hdr.refresh -side left -padx {0 4}
+	pack $w.hdr.filter $w.hdr.flbl -side right
+	bind $w.hdr.filter <KeyRelease> extw_fill
+
+	# The aggregated list: one row per (kind, name), plus the honest failures.
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.extw.body.list yview}
+	listbox $w.body.list -height 12 -width 72 -activestyle none -exportselection 0 \
+		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c editor.selection] \
+		-selectforeground [dict get $c ui.fg] \
+		-yscrollcommand {autoscroll .extw.body.sb .extw.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+	bind $w.body.list <<ListboxSelect>> extw_select
+
+	# The detail section: every variant of the selected row, with its own
+	# Install/Remove — where the user CHOOSES between authors and versions.
+	frame $w.det -background [dict get $c ui.bg]
+
+	frame $w.foot -background [dict get $c ui.bg]
+	label $w.foot.status -anchor w -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	button $w.foot.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.foot.close  -side right
+	pack $w.foot.status -side left -fill x -expand 1
+
+	grid $w.hdr  -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
+	grid $w.body -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.det  -row 2 -column 0 -sticky we   -padx 8 -pady 4
+	grid $w.foot -row 3 -column 0 -sticky we   -padx 8 -pady {2 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	bind $w <Escape> [list destroy $w]
+
+	extw_refresh
+	focus $w.body.list
+}
+
+proc extw_status {text} {
+	if {[winfo exists .extw.foot.status]} { .extw.foot.status configure -text $text }
+}
+
+# Toggle the busy guard: while a scan or install runs, every action button in
+# the window is disabled — re-entry through a second click is the non-modal
+# window's real hazard, and this is its one gate.
+proc extw_busy {on} {
+	set ::repo_busy $on
+	if {![winfo exists .extw]} return
+	set st [expr {$on ? "disabled" : "normal"}]
+	foreach b {.extw.hdr.repos .extw.hdr.refresh} { $b configure -state $st }
+	foreach f [winfo children .extw.det] {
+		foreach ch [winfo children $f] {
+			if {[winfo class $ch] eq "Button"} { $ch configure -state $st }
+		}
+	}
+}
+
+proc extw_refresh {} {
+	if {$::repo_busy} return
+	extw_busy 1
+	repo_scan_all {apply {{src n total} {
+		extw_status "fetching [host_of $src] ($n/$total)…"
+		update idletasks
+	}}}
+	extw_busy 0
+	extw_status "[llength $::repo_variants] extension(s) from [dict size $::repo_srcinfo] repositories"
+	extw_fill
+}
+
+# Aggregate the scan + ledger into display rows: one per (kind, name), sorted;
+# ledger-only entries (source offline or de-configured) synthesized so Remove
+# still works; one `!!` row per dead source at the bottom.
+proc extw_rows_build {} {
+	set bykey {}
+	foreach v $::repo_variants {
+		dict lappend bykey "[dict get $v kind]/[dict get $v name]" $v
+	}
+	dict for {key e} $::ext_ledger {
+		if {[dict exists $bykey $key]} continue
+		lassign [split $key /] kind name
+		dict set bykey $key [list [dict create \
+			source [dict get $e source] dir [dict get $e dir] name $name kind $kind \
+			version [dict get $e version] author "" \
+			description "installed; its repository is not configured or unreachable" \
+			files [dict get $e files] offline 1]]
+	}
+	set rows {}
+	foreach key [lsort [dict keys $bykey]] {
+		lassign [split $key /] kind name
+		set vars [dict get $bykey $key]
+		set desc ""
+		foreach v $vars {
+			if {[dict get $v description] ne ""} { set desc [dict get $v description] ; break }
+		}
+		lappend rows [dict create kind $kind name $name key $key \
+			variants $vars desc $desc]
+	}
+	foreach d $::repo_dead {
+		lappend rows [dict create dead 1 url [lindex $d 0] error [lindex $d 1]]
+	}
+	return $rows
+}
+
+# Fill the listbox from the rows, applying the filter; keep the selection on
+# the same (kind, name) across a refill if it survived it.
+proc extw_fill {} {
+	if {![winfo exists .extw.body.list]} return
+	set filter [string tolower [string trim [.extw.hdr.filter get]]]
+	set keep ""
+	set sel [.extw.body.list curselection]
+	if {$sel ne "" && [dict exists [lindex $::extw_rows $sel] key]} {
+		set keep [dict get [lindex $::extw_rows $sel] key]
+	}
+	set ::extw_rows {}
+	.extw.body.list delete 0 end
+	set c $::theme_colors
+	foreach row [extw_rows_build] {
+		if {[dict exists $row dead]} {
+			if {$filter ne "" && ![string match *$filter* [string tolower [dict get $row url]]]} continue
+			lappend ::extw_rows $row
+			.extw.body.list insert end "!! [dict get $row url] — unreachable"
+			.extw.body.list itemconfigure end -foreground [dict get $c error]
+			continue
+		}
+		if {$filter ne "" && ![string match *$filter* \
+			[string tolower "[dict get $row name] [dict get $row kind] [dict get $row desc]"]]} continue
+		lappend ::extw_rows $row
+		set vars [dict get $row variants]
+		if {[llength $vars] > 1} {
+			set from "[llength $vars] sources"
+		} else {
+			set from [host_of [dict get [lindex $vars 0] source]]
+			if {[dict exists [lindex $vars 0] offline]} { append from " (offline)" }
+		}
+		set marks ""
+		if {[dict exists $::ext_ledger [dict get $row key]]} { append marks " \[installed\]" }
+		if {![ext_kind_known [dict get $row kind]]} { append marks " (needs a newer rio)" }
+		.extw.body.list insert end \
+			[format "%-16s %-7s %s%s" [dict get $row name] [dict get $row kind] $from $marks]
+		if {![ext_kind_known [dict get $row kind]]} {
+			.extw.body.list itemconfigure end -foreground [dict get $c gutter.fg]
+		}
+	}
+	if {$keep ne ""} {
+		for {set i 0} {$i < [llength $::extw_rows]} {incr i} {
+			if {[dict exists [lindex $::extw_rows $i] key]
+					&& [dict get [lindex $::extw_rows $i] key] eq $keep} {
+				.extw.body.list selection set $i
+				break
+			}
+		}
+	}
+	extw_select
+}
+
+# Rebuild the detail section for the selected row: the extension's header line,
+# then one line per variant — `version by author — source-host` with Install,
+# or [installed] + Remove on the variant the ledger says is in place. An
+# installed version no longer listed by its source gets its own honest line.
+proc extw_select {} {
+	set det .extw.det
+	if {![winfo exists $det]} return
+	foreach ch [winfo children $det] { destroy $ch }
+	set c $::theme_colors
+	set sel [.extw.body.list curselection]
+	if {$sel eq "" || $sel >= [llength $::extw_rows]} return
+	set row [lindex $::extw_rows $sel]
+	if {[dict exists $row dead]} {
+		label $det.err -anchor w -justify left -font RioUIFont \
+			-text "[dict get $row url]\n[dict get $row error]" \
+			-background [dict get $c ui.bg] -foreground [dict get $c error]
+		pack $det.err -fill x
+		return
+	}
+	set head "[dict get $row name] — [dict get $row kind]"
+	if {[dict get $row desc] ne ""} { append head " — [dict get $row desc]" }
+	label $det.head -anchor w -font RioUIFont -text $head \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	pack $det.head -fill x -pady {0 2}
+	set entry ""
+	if {[dict exists $::ext_ledger [dict get $row key]]} {
+		set entry [dict get $::ext_ledger [dict get $row key]]
+	}
+	set st [expr {$::repo_busy ? "disabled" : "normal"}]
+	set i 0
+	set matched 0
+	foreach v [dict get $row variants] {
+		set f [frame $det.v$i -background [dict get $c ui.bg]]
+		set line "  [dict get $v version]"
+		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
+		append line " — [host_of [dict get $v source]]"
+		label $f.l -anchor w -font RioUIFont -text $line \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		set this_installed [expr {$entry ne "" \
+			&& [dict get $v source]  eq [dict get $entry source] \
+			&& [dict get $v version] eq [dict get $entry version]}]
+		if {$this_installed} {
+			set matched 1
+			label $f.mark -font RioUIFont -text "\[installed\]" \
+				-background [dict get $c ui.bg] -foreground [dict get $c accent]
+			button $f.rm -text Remove -font RioUIFont -state $st \
+				-command [list extw_remove [dict get $row kind] [dict get $row name]]
+			pack $f.rm $f.mark -side right -padx 2
+		} elseif {[dict exists $v offline]} {
+			button $f.rm -text Remove -font RioUIFont -state $st \
+				-command [list extw_remove [dict get $row kind] [dict get $row name]]
+			pack $f.rm -side right -padx 2
+		} elseif {[ext_kind_known [dict get $row kind]]} {
+			button $f.in -text Install -font RioUIFont -state $st \
+				-command [list extw_install $sel $i]
+			pack $f.in -side right -padx 2
+		}
+		pack $f.l -side left -fill x -expand 1
+		pack $f -fill x
+		incr i
+	}
+	if {$entry ne "" && !$matched && ![dict exists [lindex [dict get $row variants] 0] offline]} {
+		set f [frame $det.inst -background [dict get $c ui.bg]]
+		label $f.l -anchor w -font RioUIFont \
+			-text "  installed: [dict get $entry version] — [host_of [dict get $entry source]] (no longer listed there)" \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		button $f.rm -text Remove -font RioUIFont -state $st \
+			-command [list extw_remove [dict get $row kind] [dict get $row name]]
+		pack $f.rm -side right -padx 2
+		pack $f.l -side left -fill x -expand 1
+		pack $f -fill x
+	}
+}
+
+proc extw_install {rowidx vidx} {
+	if {$::repo_busy} return
+	set row [lindex $::extw_rows $rowidx]
+	set v [lindex [dict get $row variants] $vidx]
+	extw_busy 1
+	extw_status "installing [dict get $row name]…"
+	set done [ext_install $v]
+	extw_busy 0
+	extw_status [expr {$done ? "installed [dict get $row name] [dict get $v version]" : "not installed"}]
+	extw_fill
+}
+
+proc extw_remove {kind name} {
+	if {$::repo_busy} return
+	extw_busy 1
+	extw_status "removing $name…"
+	ext_remove $kind $name
+	extw_busy 0
+	extw_status "removed $name"
+	extw_fill
+}
+
+# The compact sources editor behind `Repositories…`: the URLs of sources.list
+# in a listbox, Remove for the selected one, an entry + Add below. Writes
+# sources.list on every change (it IS the hand-editable file — this dialog is
+# just a convenience over it). Modal is fine here: it's a small focused edit,
+# not a browsing surface. Closing refreshes the Extensions window's scan.
+proc extw_sources_dialog {} {
+	set w .extsrc
+	destroy $w
+	toplevel $w
+	wm title $w "Repositories"
+	wm transient $w .extw
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.hint -anchor w -justify left -font RioUIFont \
+		-text "Each repository is a plain http:// directory (see CONTRIBUTING.md to host one)." \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.extsrc.body.list yview}
+	listbox $w.body.list -height 8 -width 60 -activestyle none -exportselection 0 \
+		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c editor.selection] \
+		-selectforeground [dict get $c ui.fg] \
+		-yscrollcommand {autoscroll .extsrc.body.sb .extsrc.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+	frame $w.add -background [dict get $c ui.bg]
+	entry $w.add.url -font RioUIFont -width 44
+	button $w.add.add -text Add -font RioUIFont -command extw_source_add
+	pack $w.add.url -side left -fill x -expand 1
+	pack $w.add.add -side left -padx {4 0}
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.rm    -text "Remove selected" -font RioUIFont -command extw_source_remove
+	button $w.btns.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right
+	pack $w.btns.rm    -side left
+	grid $w.hint -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
+	grid $w.body -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.add  -row 2 -column 0 -sticky we   -padx 8 -pady 4
+	grid $w.btns -row 3 -column 0 -sticky we   -padx 8 -pady {2 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	foreach u [sources_load] { $w.body.list insert end $u }
+	bind $w.add.url <Return> extw_source_add
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.add.url
+	tkwait window $w
+	extw_refresh
+}
+
+proc extw_source_add {} {
+	set url [string trim [.extsrc.add.url get]]
+	if {$url eq ""} return
+	if {[regexp -nocase {^https://} $url]} {
+		report_error "https is not supported yet — repositories are plain http:// (an operator can front a webdir with a proxy; see CONTRIBUTING.md)."
+		return
+	}
+	if {![regexp -nocase {^http://} $url]} {
+		report_error "A repository URL starts with http:// — got: $url"
+		return
+	}
+	set urls [sources_load]
+	if {$url ni $urls} {
+		lappend urls $url
+		sources_save $urls
+		.extsrc.body.list insert end $url
+	}
+	.extsrc.add.url delete 0 end
+}
+
+proc extw_source_remove {} {
+	set sel [.extsrc.body.list curselection]
+	if {$sel eq ""} return
+	set url [.extsrc.body.list get $sel]
+	sources_save [lsearch -all -inline -not -exact [sources_load] $url]
+	.extsrc.body.list delete $sel
+}
+
+# ---------------------------------------------------------------------------
 # Build the UI. The literal colours/fonts here are just a bootstrap; apply_theme
 # (below, fed by the core's theme.get) reconfigures every widget from the role
 # table — the default theme reproduces this plain white-bg "90s productivity"
@@ -3983,6 +4358,8 @@ menu .m.view -tearoff 0
 # is up — installed themes (D39) appear here like shipped ones.
 menu .m.view.theme -tearoff 0
 .m.view add cascade -label "Theme" -menu .m.view.theme
+.m.view add separator
+.m.view add command -label "Extensions…" -command extensions_window
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
 .m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \
