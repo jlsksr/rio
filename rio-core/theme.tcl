@@ -148,3 +148,77 @@ proc rio::theme::_find {name} {
 	}
 	return ""
 }
+
+# --- the theme STORE (D39) ----------------------------------------------------
+#
+# Extension repositories install themes CORE-side (the core reads theme files;
+# a remote core reads its own disk, not the frontend's). The store is the
+# user's writable themes dir — the FIRST search dir, so an installed theme
+# shadows a shipped one of the same name, exactly like a hand-copied file.
+
+# A theme name that is safe to join into a path and a URL (D39's safe-name
+# rule). "default" is excluded: it names the built-in, which load never reads
+# from disk — a default.theme file would be dead weight pretending otherwise.
+proc rio::theme::valid_name {name} {
+	if {$name eq "default"} { return 0 }
+	return [regexp {^[A-Za-z0-9][A-Za-z0-9._-]*$} $name]
+}
+
+# The user's writable themes dir: where put/delete operate.
+proc rio::theme::userdir {} {
+	return [lindex [searchdirs] 0]
+}
+
+# Every loadable theme name: the built-in first, then the *.theme files across
+# the search path, each name once (the user dir shadows shipped by load order,
+# so a duplicate name is still ONE theme to a chooser).
+proc rio::theme::names {} {
+	set seen [dict create]
+	foreach d [searchdirs] {
+		foreach f [glob -nocomplain -directory $d *.theme] {
+			dict set seen [file rootname [file tail $f]] 1
+		}
+	}
+	return [concat default [lsort [dict keys $seen]]]
+}
+
+# Write a theme file into the user dir. The text is VALIDATED first — parsed
+# as conf and shaped as a theme — so the store never holds a file theme.list
+# advertises but load then rejects. The `base` it names is deliberately NOT
+# resolved here: the base may be installed after the child (install order is
+# the user's), and load reports a missing base cleanly when the theme is used.
+proc rio::theme::put {name text} {
+	if {![valid_name $name]} {
+		rio::error::raise bad_request "bad theme name: $name"
+	}
+	if {[catch {from_conf [rio::conf::parse $text]}]} {
+		rio::error::raise bad_request "not a valid theme: $name"
+	}
+	set dir [userdir]
+	if {[catch {
+		file mkdir $dir
+		set f [open [file join $dir $name.theme] w]
+		puts -nonewline $f $text
+		close $f
+	} err]} {
+		rio::error::raise io_error "cannot write theme $name: $err"
+	}
+}
+
+# Remove a theme from the user dir — and only from there: a shipped example is
+# part of the installation, not something a protocol call may delete.
+proc rio::theme::delete {name} {
+	if {![valid_name $name]} {
+		rio::error::raise bad_request "bad theme name: $name"
+	}
+	set p [file join [userdir] $name.theme]
+	if {![file isfile $p]} {
+		if {[_find $name] ne ""} {
+			rio::error::raise bad_request "theme $name is shipped with rio, not removable"
+		}
+		rio::error::raise bad_request "no such user theme: $name"
+	}
+	if {[catch {file delete $p} err]} {
+		rio::error::raise io_error "cannot delete theme $name: $err"
+	}
+}

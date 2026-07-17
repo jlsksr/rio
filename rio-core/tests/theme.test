@@ -89,4 +89,99 @@ test theme-load-base-chain {a theme inherits its declared base} -setup {
 	file delete -force $::fixt
 } -result {#ff0000 #002b36}
 
+# --- the theme store: userdir / names / put / delete (D39) --------------------
+
+test theme-valid-name {the safe-name rule: path metacharacters and "default" refused} -body {
+	list [rio::theme::valid_name night] [rio::theme::valid_name my-theme.2] \
+		[rio::theme::valid_name ../evil] [rio::theme::valid_name .hidden] \
+		[rio::theme::valid_name "a b"] [rio::theme::valid_name default]
+} -result {1 1 0 0 0 0}
+
+test theme-store-roundtrip {put writes into the user dir; load and names see it;
+		delete removes it again} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-user]
+	set ::themesdir [file normalize [file join [file dirname [info script]] .. .. themes]]
+	file mkdir $::user
+	set ::rio::theme::override_dirs [list $::user $::themesdir]
+} -body {
+	set r {}
+	lappend r [expr {[rio::theme::userdir] eq $::user}]
+	rio::theme::put night "base = solarized-dark\n\[colors\]\neditor.bg = #101018"
+	lappend r [expr {"night" in [rio::theme::names]}]
+	lappend r [dict get [rio::theme::load night] colors editor.bg]
+	rio::theme::delete night
+	lappend r [expr {"night" in [rio::theme::names]}] [file exists [file join $::user night.theme]]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {1 1 #101018 0 0}
+
+test theme-names-shadow-once {a user theme shadowing a shipped one is listed once,
+		and default is always first} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-shadow]
+	set ::themesdir [file normalize [file join [file dirname [info script]] .. .. themes]]
+	file mkdir $::user
+	set f [open [file join $::user solarized-dark.theme] w]
+	puts $f "\[colors\]\neditor.bg = #000000"
+	close $f
+	set ::rio::theme::override_dirs [list $::user $::themesdir]
+} -body {
+	set n [rio::theme::names]
+	list [lindex $n 0] \
+		[llength [lsearch -all -exact $n solarized-dark]] \
+		[dict get [rio::theme::load solarized-dark] colors editor.bg]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {default 1 #000000}
+
+test theme-put-traversal {a path-traversal name is bad_request before any write} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-evil]
+	file mkdir $::user
+	set ::rio::theme::override_dirs [list $::user]
+} -body {
+	catch {rio::theme::put ../evil "\[colors\]\neditor.bg = red"} e opts
+	list [rio::error::code_of $opts] [glob -nocomplain -directory [file dirname $::user] evil.theme]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {bad_request {}}
+
+test theme-put-garbage {unparseable text is refused: bad_request, nothing written} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-garbage]
+	file mkdir $::user
+	set ::rio::theme::override_dirs [list $::user]
+} -body {
+	catch {rio::theme::put junk "this line has no equals sign"} e opts
+	list [rio::error::code_of $opts] [file exists [file join $::user junk.theme]]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {bad_request 0}
+
+test theme-delete-shipped {a shipped theme is not removable through the store} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-del]
+	set ::themesdir [file normalize [file join [file dirname [info script]] .. .. themes]]
+	file mkdir $::user
+	set ::rio::theme::override_dirs [list $::user $::themesdir]
+} -body {
+	catch {rio::theme::delete solarized-dark} e opts
+	list [rio::error::code_of $opts] [string match "*shipped*" $e]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {bad_request 1}
+
+test theme-delete-missing {deleting a theme that isn't there is a clean bad_request} -setup {
+	set ::user [file join [::tcltest::temporaryDirectory] riothemes-miss]
+	file mkdir $::user
+	set ::rio::theme::override_dirs [list $::user]
+} -body {
+	catch {rio::theme::delete nowhere} e opts
+	list [rio::error::code_of $opts] [string match "no such user theme*" $e]
+} -cleanup {
+	set ::rio::theme::override_dirs ""
+	file delete -force $::user
+} -result {bad_request 1}
+
 cleanupTests

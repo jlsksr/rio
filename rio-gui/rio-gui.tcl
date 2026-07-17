@@ -127,6 +127,7 @@ set ::edit_mode windows   ;# active editing mode (D38): windows | emacs | vi | a
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
+set ::theme_choice default ;# the View ▸ Theme radio: tracks theme_name, snaps back on a failed switch (D39)
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
@@ -2315,12 +2316,40 @@ proc do_theme {name} {
 	set resp [rio_call theme.get [dict create name $name]]
 	if {[dict get $resp ok]} {
 		set ::theme_name $name
+		set ::theme_choice $name
 		apply_theme [dict get $resp result]
 		prefs_save
 	} else {
+		# The menu radio moved before we knew (a radiobutton sets its variable,
+		# then runs its command): snap it back to the theme still applied, so the
+		# menu never claims a theme the editor isn't wearing.
+		set ::theme_choice $::theme_name
 		report_error "Theme '$name': [dict get $resp error message]" \
 			[dict get $resp error code]
 	}
+}
+
+# Fill the View ▸ Theme cascade from the core's theme.list — one radio per
+# loadable theme, so a theme installed from a repository (D39) appears with no
+# menu wiring of its own (the modes_menu_fill pattern). An older remote core
+# without theme.list keeps the shipped four.
+proc themes_menu_fill {} {
+	if {![winfo exists .m.view.theme]} return
+	set names {default solarized-dark solarized-light acme}
+	set resp [rio_call theme.list {}]
+	if {[dict get $resp ok]} { set names [dict get $resp result themes] }
+	.m.view.theme delete 0 end
+	foreach name $names {
+		.m.view.theme add radiobutton -label [theme_label $name] \
+			-variable ::theme_choice -value $name -command [list do_theme $name]
+	}
+}
+
+# "solarized-dark" -> "Solarized Dark": menu labels derive from theme file names.
+proc theme_label {name} {
+	set words {}
+	foreach w [split $name -] { lappend words [string totitle $w] }
+	return [join $words " "]
 }
 
 # ---------------------------------------------------------------------------
@@ -3507,10 +3536,10 @@ menu .m.view -tearoff 0
 .m.view add command -label "Compare With File…" -command compare_with_file_dialog
 .m.view add command -label "Close Compare" -accelerator Esc -command compare_close
 .m.view add separator
-.m.view add command -label "Theme: Default"         -command {do_theme default}
-.m.view add command -label "Theme: Solarized Dark"  -command {do_theme solarized-dark}
-.m.view add command -label "Theme: Solarized Light" -command {do_theme solarized-light}
-.m.view add command -label "Theme: Plan 9 Acme"     -command {do_theme acme}
+# The Theme cascade is filled from the core (themes_menu_fill) once the channel
+# is up — installed themes (D39) appear here like shipped ones.
+menu .m.view.theme -tearoff 0
+.m.view add cascade -label "Theme" -menu .m.view.theme
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
 .m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \
@@ -3566,6 +3595,8 @@ if {![dict get $_boot_theme ok]} {
 	set _boot_theme [rio_call theme.get {}]
 }
 apply_theme [dict get $_boot_theme result]
+set ::theme_choice $::theme_name
+themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (D39)
 
 # Adopt the core's existing buffer(s), then process the command line. In-process: a
 # directory argument opens as the project folder, a file opens in a tab. Remote: the
