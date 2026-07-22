@@ -198,7 +198,7 @@ local or remote core.
 rio persists two kinds of state, split by owner (the design is [AGENTS.md](AGENTS.md)
 D31):
 
-- **Preferences** — theme, line-wrap, dock side/pane, chat-pane visibility. These are
+- **Preferences** — theme, line-wrap, wrapped-line indent, dock side/pane, chat-pane visibility. These are
   **global** and belong to the GUI, in `$XDG_CONFIG_HOME/rio/prefs.json` (default
   `~/.config/rio/prefs.json`) on the box running the GUI. They load at **every**
   startup — with or without a project — so a bare `wish rio-gui/rio-gui.tcl file.txt`
@@ -214,16 +214,18 @@ Neither file ever holds your API key — that stays in the 0600 secrets store (�
 **Setting a default is just setting the value** — the last value *is* the default,
 saved the moment you change it:
 
-- **From the UI:** the **View** menu (Wrap Lines, the theme entries, Dock Left/Right,
-  Agent Chat) and the shortcuts (`Ctrl+Shift+W` wrap, `Ctrl+Shift+A` chat). Each
-  toggle rewrites `prefs.json` at once and is restored next launch.
+- **From the UI:** the **View** menu (Wrap Lines, Indent Wrapped Lines, the theme
+  entries, Dock Left/Right, Agent Chat) and the shortcuts (`Ctrl+Shift+W` wrap,
+  `Ctrl+Shift+A` chat). Each toggle rewrites `prefs.json` at once and is restored next launch.
 - **By hand:** edit `prefs.json` directly — it is plain JSON, parsed never executed:
 
   ```json
-  {"theme":"solarized-dark","wrap":"1","dock_side":"left","dock_pane":"files","chat_shown":"1"}
+  {"theme":"solarized-dark","wrap":"1","wrap_indent":"1","dock_side":"left","dock_pane":"files","chat_shown":"1"}
   ```
 
-  `wrap` `"1"` = word-wrap on, `"0"` = off; `theme` is a name from `themes/` (or
+  `wrap` `"1"` = word-wrap on, `"0"` = off; `wrap_indent` `"1"` aligns a wrapped
+  line's continuation rows under its own indentation (only visible while `wrap` is
+  on), `"0"` leaves them at the left margin; `theme` is a name from `themes/` (or
   `default`); `dock_side` is `left`/`right`; `dock_pane` is `files`/`git`;
   `chat_shown` `"1"`/`"0"`. The file appears once you first change a setting (or quit),
   and you may create it by hand before the first run. Unknown or malformed keys are

@@ -123,6 +123,7 @@ set ::cur    "" ;# active buffer of the FOCUSED group — a mirror, kept by acti
 set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
+set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
 set ::edit_mode windows   ;# active editing mode (D38): windows | emacs | vi | a drop-in's name
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
@@ -393,6 +394,11 @@ proc apply_change {g p} {
 	$t replace [dict get $p start] [dict get $p end] [dict get $p text]
 	if {$g eq $::focus} { $t see insert }
 	hl_edit $g $p ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
+	if {$::wrap_indent} {   ;# re-size the wrap indent for just the lines this edit touched
+		set sl [lindex [split [dict get $p start] .] 0]
+		set added [expr {[llength [split [dict get $p text] "\n"]] - 1}]
+		wrapind_apply $t $sl [expr {$sl + $added}]
+	}
 	# An open find bar's matches just went stale — recount/repaint, coalesced
 	# like the highlight pass so a run of keystrokes costs one update (D36).
 	if {$::find_shown && !$::find_pending} {
@@ -416,6 +422,7 @@ proc load_buffer {g} {
 	}
 	hl_select $g   ;# the file type may have changed with the buffer (D32)
 	hl_full $g     ;# repaint the whole buffer now and build the line-state cache (on switch/open)
+	wrapind_group $g   ;# size the wrapped-line indents to this buffer's leading whitespace
 }
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
@@ -841,6 +848,80 @@ proc cmp_apply_wrap {} {
 	set w [expr {$::wrap_lines ? "word" : "none"}]
 	.cmp.l.t configure -wrap $w
 	.cmp.r.t configure -wrap $w
+}
+
+# ---------------------------------------------------------------------------
+# Wrap indent (View ▸ Indent Wrapped Lines). With line wrap on, Tk shows a
+# logical line's leading indentation on its FIRST display line only; the wrapped
+# continuation lines fall back to the left margin. With this on, each continuation
+# line is indented to sit under its own line's first non-whitespace character —
+# VSCode's "wrappingIndent: same". It is a pure display layer: a per-line
+# -lmargin2 tag sized to the line's leading whitespace, so it works on plain
+# (un-highlighted) files too. Tk tags ride with the text on insert/delete, so an
+# edit only recomputes the lines it actually touched (apply_change), never the
+# whole buffer. No visible effect while wrap is off — the tags simply wait.
+# ---------------------------------------------------------------------------
+
+# Visual column of a line's first non-whitespace char, tabs expanded to the
+# widget's default 8-column stops (make_editor_group sets no -tabs).
+proc wrapind_cols {line} {
+	set col 0
+	foreach ch [split $line ""] {
+		if {$ch eq " "}  { incr col ; continue }
+		if {$ch eq "\t"} { set col [expr {($col / 8 + 1) * 8}] ; continue }
+		break
+	}
+	return $col
+}
+
+# Pixels per monospace column of the editor font (rio's editor font is monospace
+# by design; a proportional font would only skew the alignment, never break it).
+proc wrapind_colpx {} { return [font measure RioEditorFont "0"] }
+
+# The wrapind:<cols> tags currently defined on widget t.
+proc wrapind_tags {t} {
+	set out {}
+	foreach tag [$t tag names] { if {[string match wrapind:* $tag]} { lappend out $tag } }
+	return $out
+}
+
+# (Re)compute the wrap indent for lines L1..L2 of t: drop any old wrapind tag on
+# each line, then — when enabled and the line is indented — tag it with a
+# wrapind:<cols> tag whose -lmargin2 matches that indentation. One shared tag per
+# distinct column count, created on demand.
+proc wrapind_apply {t L1 L2} {
+	if {$L2 < $L1} return
+	set tags [wrapind_tags $t]
+	for {set L $L1} {$L <= $L2} {incr L} {
+		foreach tag $tags { $t tag remove $tag $L.0 "$L.0 lineend" }
+		if {!$::wrap_indent} continue
+		set cols [wrapind_cols [$t get $L.0 "$L.0 lineend"]]
+		if {$cols == 0} continue
+		set tag wrapind:$cols
+		$t tag configure $tag -lmargin2 [expr {$cols * [wrapind_colpx]}]
+		$t tag add $tag $L.0 "$L.0 lineend"
+	}
+}
+
+# Whole-buffer refresh for group g (on open/switch and the menu toggle).
+proc wrapind_group {g} {
+	if {![winfo exists [gget $g path]]} return
+	set t [gw $g]
+	wrapind_apply $t 1 [hl_linecount $t]
+}
+
+# Reconfigure existing wrapind tags after a font change (pixels-per-column moved).
+proc wrapind_refont {t} {
+	set px [wrapind_colpx]
+	foreach tag [wrapind_tags $t] {
+		$t tag configure $tag -lmargin2 [expr {[lindex [split $tag :] 1] * $px}]
+	}
+}
+
+# View-menu toggle: re-tag every group, then persist (prefs_save self-gates on boot).
+proc apply_wrap_indent {} {
+	foreach g $::groups { wrapind_group $g }
+	prefs_save
 }
 
 # Highlight the active selector label (the inactive one recedes). Guarded so it
@@ -2194,6 +2275,7 @@ proc restyle_group {g} {
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor] \
 		-selectbackground [dict get $c editor.selection]
+	wrapind_refont $t   ;# the font's column width may have moved — keep margins in step
 	[gget $g frame] configure -background [dict get $c editor.bg]
 	[gget $g tabs]  configure -background [dict get $c tab.bar.bg]
 	if {[info procs rio::syntax::tokens] ne ""} {
@@ -2648,6 +2730,7 @@ proc prefs_load {} {
 	}]} return
 	if {[dict exists $d theme]}      { set ::theme_name [dict get $d theme] }
 	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
+	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d chat_shown]} { set ::chat_shown [expr {[dict get $d chat_shown] ? 1 : 0}] }
 	if {[dict exists $d dock_side] && [dict get $d dock_side] in {left right}} {
 		set ::dock_side [dict get $d dock_side]
@@ -2669,8 +2752,9 @@ proc prefs_save {} {
 	catch {
 		file mkdir [file dirname $path]
 		set json [rio::wire::obj [dict create \
-			theme      $::theme_name \
-			wrap       $::wrap_lines \
+			theme       $::theme_name \
+			wrap        $::wrap_lines \
+			wrap_indent $::wrap_indent \
 			dock_side  $::dock_side \
 			dock_pane  $::dock_pane \
 			chat_shown $::chat_shown \
@@ -4430,6 +4514,8 @@ menu .m.view -tearoff 0
 .m.view add separator
 .m.view add checkbutton -label "Wrap Lines" -accelerator [key_accel toggle-wrap] \
 	-variable ::wrap_lines -command apply_wrap
+.m.view add checkbutton -label "Indent Wrapped Lines" \
+	-variable ::wrap_indent -command apply_wrap_indent
 .m.view add checkbutton -label "Agent Chat" -accelerator [key_accel toggle-chat] \
 	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
@@ -4516,6 +4602,7 @@ adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
+apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
 apply_editmode             ;# attach the editing mode (windows default) to the RioMode tag (D38)
 adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {
