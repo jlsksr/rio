@@ -29,6 +29,12 @@ Each entry notes its state:
   registers, `.` repeat, macros, marks, visual-line — and a kill ring (`C-y`
   yank) for the emacs mode. Each is an isolated addition to its `modes/*.tcl`
   module.
+- **Column-editing extras** — *deferred* (AGENTS.md D40). Column/block editing
+  shipped (Ctrl+Shift+drag a vertical cursor; type/Backspace/Delete/Tab down the
+  column, one undo). Consciously left: rectangular clipboard (Ctrl+C/X/V carrying
+  the block), keyboard-built columns (Alt/Ctrl+Shift+arrows), tab/pixel-accurate
+  visual columns (v1 uses character columns), and arbitrary multi-caret
+  (Ctrl+click) — a straight generalisation of the same one-span-replace model.
 - **Search extensions** — *deferred* (AGENTS.md D36). In-buffer Find/Replace
   shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`);
   still wanted: whole-word and regex options (a flag on the same ops), and

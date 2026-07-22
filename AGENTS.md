@@ -2329,6 +2329,45 @@ editor). Live-network behaviour is verified against a real webdir at release
 (no live HTTP in the test environment — the fetch seam is stubbed with
 fixture tables instead).
 
+### D40 — Column / block editing: a vertical multi-line cursor, GUI-only
+
+Notepad++'s **column mode**: a rectangular (vertical) selection whose zero-width
+form is a caret spanning many lines — type and the character lands at that column
+on **every** line; Backspace/Delete/Tab act per line too; drag a width and typing
+overwrites that rectangular slice. rio ships this, **off by default**, a Settings
+checkbutton (`::col_on`, persisted with the other prefs).
+
+**Gesture: Ctrl+Shift+drag, deliberately *not* Alt+drag.** Notepad++'s real
+gesture is Alt+drag, but on Linux/X11 the window manager almost universally grabs
+Alt+drag to move the window, so it never reaches the app. Ctrl+Shift+drag is
+clash-free (and is what the requesting user reached for). Bound in the **windows**
+mode only — Notepad++ is a windows-style editor, and vi/emacs have their own
+block/rectangle notions; the pref gates the binding so it's inert until enabled.
+
+**No core changes — one span-replace is the whole trick.** rio already emits any
+multi-point edit as a *single* `buffer.replace` over the affected span with
+pre-transformed text; that is how `replace_all` and the D38 block-indent get "one
+undo step". A column op is the same shape: read `L1.0..L2.lineend`, apply the
+per-line edit (padding short lines with spaces — column mode's virtual space),
+rejoin, one `buffer.replace`. So a 40-line column edit is **one undo step, one
+`buffer.changed`**, and the core/protocol learn nothing new. Everything lives in
+`rio-gui.tcl` `col_*` procs on the group PROXY path; the windows mode binds the
+Ctrl+Shift gesture plus `<KeyPress>`/`<BackSpace>`/`<Delete>`/`<Tab>` hooks that
+consume the event *only* while a selection is live (`col_here`), else normal
+editing flows through. Rendering is two theme tags — `coltag` (the block, reusing
+the selection colour) and `colcaret` (a block cursor per line, the cursor colour);
+the caret line keeps Tk's own blinking bar. Repaint rides the same post-edit path
+as wrap-indent (the `buffer.changed` redraw drops the tags, `col_paint` re-adds).
+
+**v1 boundaries (ROADMAP).** Columns are *character* columns (a tab inside the
+band can look misaligned — pixel/tab-accurate columns deferred). Deliberately out:
+rectangular clipboard (Ctrl+C/X/V keep normal behaviour), keyboard-built columns
+(Alt/Ctrl+Shift+arrows), and arbitrary multi-caret (Ctrl+click) — the last is a
+straight generalisation of the one-span-replace model when wanted. Tests: the
+column group in `rio-gui/tests/modes.tcl` (caret-column typing with one-undo,
+virtual-space padding, block overwrite, per-line Delete/Backspace/Tab, the
+modifier/inactive/pref-off guards).
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

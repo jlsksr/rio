@@ -136,6 +136,66 @@ ok "win: no-sel Tab inserts"     [buf_text $::cur] "\tz"
 fire <Shift-Tab>
 ok "win: no-sel Shift dedents"   [buf_text $::cur] "z"
 
+# --- windows mode: column / block editing (D40) ------------------------------
+# Drive the model directly (headless can't post real Ctrl+Shift mouse drags): set
+# ::col_* state, then exercise the same procs the bindings call.
+set W [gget $::focus path]
+set ::col_on 1
+
+# zero-width caret column: a typed char lands at the column on every spanned line
+clear_buf
+.ed.t insert insert "abc\nde\nfghij"
+set ::col_w $W ; set ::col_anchor 1.1 ; set ::col_caret 3.1 ; set ::col_active 1
+ok "col: here on the widget"    [col_here $W] 1
+ok "col: typed consumed"        [col_typed $W X 0] 1
+ok "col: type down the column"  [buf_text $::cur] "aXbc\ndXe\nfXghij"
+do_undo
+ok "col: one undo reverts all"  [buf_text $::cur] "abc\nde\nfghij"
+
+# short lines are space-padded to reach the column (virtual space)
+clear_buf
+.ed.t insert insert "abcdef\ngh\nijklmn"
+set ::col_w $W ; set ::col_anchor 1.4 ; set ::col_caret 3.4 ; set ::col_active 1
+col_typed $W Z 0
+ok "col: pads short lines"       [buf_text $::cur] "abcdZef\ngh  Z\nijklZmn"
+
+# a width>0 block: typing overwrites that rectangular slice on each line
+clear_buf
+.ed.t insert insert "HELLO\nworld\nabcde"
+set ::col_w $W ; set ::col_anchor 1.1 ; set ::col_caret 3.3 ; set ::col_active 1
+col_typed $W _ 0
+ok "col: block overwrite"        [buf_text $::cur] "H_LO\nw_ld\na_de"
+
+# Delete removes the char at the column on each line; Backspace the one before it
+clear_buf
+.ed.t insert insert "aXbc\ndXe\nfXg"
+set ::col_w $W ; set ::col_anchor 1.1 ; set ::col_caret 3.1 ; set ::col_active 1
+col_key $W delfwd
+ok "col: delete fwd per line"    [buf_text $::cur] "abc\nde\nfg"
+clear_buf
+.ed.t insert insert "aXbc\ndXe\nfXg"
+set ::col_w $W ; set ::col_anchor 1.2 ; set ::col_caret 3.2 ; set ::col_active 1
+col_key $W delback
+ok "col: backspace per line"     [buf_text $::cur] "abc\nde\nfg"
+
+# Tab types a tab down the whole column
+clear_buf
+.ed.t insert insert "a\nb\nc"
+set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 3.0 ; set ::col_active 1
+col_edit insert \t
+ok "col: tab down the column"    [buf_text $::cur] "\ta\n\tb\n\tc"
+
+# guards: Ctrl-modified keys aren't typed; an inactive selection ignores keys;
+# and with the pref off the gesture is inert
+set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 1.0 ; set ::col_active 1
+ok "col: ctrl+key not typed"     [col_typed $W a 4] 0
+col_clear
+ok "col: clear ends selection"   $::col_active 0
+ok "col: key ignored when off"   [col_typed $W a 0] 0
+set ::col_on 0
+col_begin $W 0 0
+ok "col: begin inert when off"   $::col_active 0
+
 # the Edit menu items exist and share the same procs
 ok "menu: Cut entry"    [.m.edit entrycget "Cut" -command]        editor_cut
 ok "menu: Select All"   [.m.edit entrycget "Select All" -command] editor_select_all

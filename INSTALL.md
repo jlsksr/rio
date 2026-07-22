@@ -215,17 +215,20 @@ Neither file ever holds your API key — that stays in the 0600 secrets store (�
 saved the moment you change it:
 
 - **From the UI:** the **View** menu (Wrap Lines, Indent Wrapped Lines, the theme
-  entries, Dock Left/Right, Agent Chat) and the shortcuts (`Ctrl+Shift+W` wrap,
-  `Ctrl+Shift+A` chat). Each toggle rewrites `prefs.json` at once and is restored next launch.
+  entries, Dock Left/Right, Agent Chat), the **Settings** menu (Column Editing),
+  and the shortcuts (`Ctrl+Shift+W` wrap, `Ctrl+Shift+A` chat). Each toggle
+  rewrites `prefs.json` at once and is restored next launch.
 - **By hand:** edit `prefs.json` directly — it is plain JSON, parsed never executed:
 
   ```json
-  {"theme":"solarized-dark","wrap":"1","wrap_indent":"1","dock_side":"left","dock_pane":"files","chat_shown":"1"}
+  {"theme":"solarized-dark","wrap":"1","wrap_indent":"1","column_edit":"0","dock_side":"left","dock_pane":"files","chat_shown":"1"}
   ```
 
   `wrap` `"1"` = word-wrap on, `"0"` = off; `wrap_indent` `"1"` aligns a wrapped
   line's continuation rows under its own indentation (only visible while `wrap` is
-  on), `"0"` leaves them at the left margin; `theme` is a name from `themes/` (or
+  on), `"0"` leaves them at the left margin; `column_edit` `"1"` enables
+  Notepad++-style column/block editing (Ctrl+Shift+drag a vertical cursor, then
+  type/Backspace/Delete/Tab down the whole column), `"0"` off; `theme` is a name from `themes/` (or
   `default`); `dock_side` is `left`/`right`; `dock_pane` is `files`/`git`;
   `chat_shown` `"1"`/`"0"`. The file appears once you first change a setting (or quit),
   and you may create it by hand before the first run. Unknown or malformed keys are
