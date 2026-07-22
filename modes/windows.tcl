@@ -22,6 +22,14 @@ proc rio::modes::win::attach {tag} {
 	bind $tag <Shift-Insert>   {editor_paste %W ; break}
 	bind $tag <Control-BackSpace> {rio::modes::win::del_word_back %W ; break}
 	bind $tag <Control-Delete>    {rio::modes::win::del_word_fwd  %W ; break}
+	# Tab / Shift+Tab indent and dedent the selected lines as one core edit,
+	# preserving each line's existing whitespace (Tk's own <Tab> would delete the
+	# selection). With no selection Tab inserts a plain tab; Shift+Tab dedents the
+	# caret's line. <ISO_Left_Tab> is Shift+Tab on X11. (Ctrl+Tab / Ctrl+Shift+Tab
+	# stay the app's tab-cycle keys — a different chord, untouched here.)
+	bind $tag <Tab>            {editor_indent %W ; break}
+	bind $tag <Shift-Tab>      {editor_dedent %W ; break}
+	bind $tag <ISO_Left_Tab>   {editor_dedent %W ; break}
 	# Tk's built-in emacs leftovers, dead by design in this mode. (Ctrl+H and
 	# Ctrl+O are normally taken by the app keymap first — replace / open — but a
 	# user who frees those in keys.json still shouldn't fall into readline.)

@@ -3706,6 +3706,82 @@ proc editor_paste {{w ""}} {
 }
 
 # ---------------------------------------------------------------------------
+# Block indent / dedent (D38). The Windows mode binds these to Tab / Shift+Tab.
+# With a selection, every line the selection touches shifts by one tab as a
+# SINGLE core edit (one undo step, one round-trip): existing leading tabs and
+# spaces are kept and pushed along, never replaced — so a selection is indented,
+# never deleted (Tk's own <Tab> would delete it). Tab with no selection inserts a
+# plain tab at the caret (the Notepad feel); Shift+Tab with no selection dedents
+# the caret's line. The block edits go through the group PROXY (`w`) to the core.
+# Indenting/dedenting never changes the line count, so the block is re-selected
+# afterward — press Tab again to add another level.
+# ---------------------------------------------------------------------------
+proc editor_indent {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	if {[llength [$w tag ranges sel]] == 0} { $w insert insert \t ; $w see insert ; return }
+	editor_shift_lines $w 1
+}
+proc editor_dedent {{w ""}} {
+	if {$w eq ""} { set w [gget $::focus path] }
+	editor_shift_lines $w -1
+}
+
+# Shift the line span the selection (else the caret) covers by one indent level:
+# dir 1 adds a tab in front of each line, dir -1 removes one level. A selection
+# that ends at column 0 does NOT pull in that trailing line — its text is
+# untouched (the VSCode/Notepad++ rule).
+proc editor_shift_lines {w dir} {
+	set had_sel [expr {[llength [$w tag ranges sel]] > 0}]
+	if {$had_sel} {
+		set l1 [lindex [split [$w index sel.first] .] 0]
+		set le [split [$w index sel.last] .]
+		set l2 [lindex $le 0]
+		if {$l2 > $l1 && [lindex $le 1] == 0} { incr l2 -1 }
+	} else {
+		set caret [split [$w index insert] .]
+		set l1 [lindex $caret 0] ; set l2 $l1 ; set caretcol [lindex $caret 1]
+	}
+	set start $l1.0
+	set end   [$w index "$l2.0 lineend"]
+	set out {} ; set changed 0 ; set removedfirst 0 ; set i 0
+	foreach ln [split [$w get $start $end] \n] {
+		if {$dir > 0} {
+			# Don't grow a wholly blank line into trailing whitespace.
+			if {$ln eq ""} { lappend out $ln } else { lappend out "\t$ln" ; set changed 1 }
+		} else {
+			set s [editor_dedent_one $ln]
+			if {$i == 0} { set removedfirst [expr {[string length $ln] - [string length $s]}] }
+			if {$s ne $ln} { set changed 1 }
+			lappend out $s
+		}
+		incr i
+	}
+	if {!$changed} return
+	$w replace $start $end [join $out \n]
+	if {$had_sel} {
+		$w tag remove sel 1.0 end
+		$w tag add sel $l1.0 [$w index "$l2.0 lineend"]
+		$w mark set insert [$w index "$l2.0 lineend"]
+	} else {
+		# Caret-only dedent: keep the caret over the same character by pulling it
+		# left by however much whitespace this line lost (clamped to line start).
+		set col [expr {$caretcol - $removedfirst}] ; if {$col < 0} { set col 0 }
+		$w mark set insert $l1.$col
+	}
+	$w see insert
+}
+
+# One indent level off the front of a line: a leading tab, else up to a
+# tab-stop's worth (4) of leading spaces. A line with no leading whitespace is
+# returned unchanged.
+proc editor_dedent_one {ln} {
+	if {[string index $ln 0] eq "\t"} { return [string range $ln 1 end] }
+	set n 0
+	while {$n < 4 && [string index $ln $n] eq " "} { incr n }
+	return [string range $ln $n end]
+}
+
+# ---------------------------------------------------------------------------
 # Keymap (AGENTS.md D23): ONE table maps a logical command -> {chord action}. It is
 # the single source of truth for the editor's keyboard shortcuts AND for the
 # accelerator labels shown in the menus, so a remap moves both together. Users remap

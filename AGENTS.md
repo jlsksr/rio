@@ -2187,6 +2187,23 @@ ways — emacs C-v scrolls and *never* pastes, windows C-v pastes) and
 operators, doubled forms, both `p` arities, visual, aborts, clean detach with
 an operator pending, per-group state across a split).
 
+*(Amended 2026-07-23 — windows mode block-indent.)* The windows mode bound no
+`<Tab>`, so Tk's `<Tab>` (`tk::TextInsert`) **replaced a selection with a tab** —
+select some lines, press Tab, they vanish. Fixed on the D38 pattern: two shared
+`editor_indent`/`editor_dedent` procs (beside `editor_cut`/etc., so the menu could
+share them later), bound to `<Tab>`/`<Shift-Tab>` (+`<ISO_Left_Tab>`, X11's
+shifted Tab) in the windows mode. With a selection they shift **every line the
+selection touches** by one tab, keeping each line's existing leading tabs/spaces
+and pushing them along — done as one `$w replace` through the proxy, so a
+multi-line indent is **one core edit = one undo step**, and the block is
+re-selected so repeated Tab stacks levels. Rules matching VSCode/Notepad++: a
+wholly blank line isn't grown into trailing whitespace; a selection ending at
+column 0 doesn't pull in that trailing (untouched) line; Tab with no selection
+inserts a plain tab; Shift+Tab with no selection dedents the caret's line. Dedent
+strips one leading tab, else up to a 4-space tab stop. Ctrl+Tab / Ctrl+Shift+Tab
+(the app's tab-cycle chords, D23) are a different chord and untouched. Tests:
+the block-indent group in `rio-gui/tests/modes.tcl`.
+
 ### D39 — Extension repositories: apt-sources over plain HTTP; never a marketplace
 
 rio had two stable extension surfaces (syntax D32, editing modes D38) plus

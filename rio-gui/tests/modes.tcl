@@ -91,6 +91,51 @@ ok "win: word-back result"     [buf_text $::cur] "alpha "
 ok "win: word-fwd fires"       [fire <Control-Delete>] ok
 ok "win: word-fwd result"      [buf_text $::cur] ""
 
+# --- windows mode: Tab / Shift+Tab block-indent, keeping each line's whitespace --
+clear_buf
+.ed.t insert insert "a\n\tb\n  c"
+rio_real_t tag remove sel 1.0 end
+rio_real_t tag add sel 1.0 "end -1c"      ;# select all three lines
+ok "win: indent fires"          [fire <Tab>] ok
+ok "win: indent keeps ws"       [buf_text $::cur] "\ta\n\t\tb\n\t  c"
+ok "win: selection not deleted"  [expr {[llength [rio_real_t tag ranges sel]] > 0}] 1
+fire <Tab>                                 ;# a second Tab adds another level to the block
+ok "win: indent repeats"        [buf_text $::cur] "\t\ta\n\t\t\tb\n\t\t  c"
+do_undo
+ok "win: indent is one undo"    [buf_text $::cur] "\ta\n\t\tb\n\t  c"
+rio_real_t tag remove sel 1.0 end          ;# undo doesn't restore the selection; re-make it
+rio_real_t tag add sel 1.0 "end -1c"
+fire <Shift-Tab>                           ;# dedent one level: a leading tab off each line
+ok "win: dedent a level"        [buf_text $::cur] "a\n\tb\n  c"
+fire <Shift-Tab>                           ;# tabs gone, now up to a tab-stop of spaces
+ok "win: dedent spaces too"     [buf_text $::cur] "a\nb\nc"
+
+# a wholly blank line isn't grown into trailing whitespace
+clear_buf
+.ed.t insert insert "x\n\ny"
+rio_real_t tag remove sel 1.0 end
+rio_real_t tag add sel 1.0 "end -1c"
+fire <Tab>
+ok "win: blank line untouched"  [buf_text $::cur] "\tx\n\n\ty"
+
+# a selection ending at column 0 leaves that trailing line alone
+clear_buf
+.ed.t insert insert "p\nq\nr"
+rio_real_t tag remove sel 1.0 end
+rio_real_t tag add sel 1.0 3.0
+fire <Tab>
+ok "win: col-0 line excluded"   [buf_text $::cur] "\tp\n\tq\nr"
+
+# no selection: Tab inserts a plain tab; Shift+Tab dedents the caret's line
+clear_buf
+.ed.t insert insert "z"
+.ed.t mark set insert 1.0
+rio_real_t tag remove sel 1.0 end
+fire <Tab>
+ok "win: no-sel Tab inserts"     [buf_text $::cur] "\tz"
+fire <Shift-Tab>
+ok "win: no-sel Shift dedents"   [buf_text $::cur] "z"
+
 # the Edit menu items exist and share the same procs
 ok "menu: Cut entry"    [.m.edit entrycget "Cut" -command]        editor_cut
 ok "menu: Select All"   [.m.edit entrycget "Select All" -command] editor_select_all
