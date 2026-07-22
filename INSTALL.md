@@ -23,7 +23,9 @@ The **core** needs:
 | `git` *(optional)* | `git` | `git` | the git pane shells out to it |
 
 The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not**
-need `tcltls` — the agent's HTTPS happens wherever the *core* runs.
+need `tcltls` — the agent's HTTPS happens wherever the *core* runs. Extension
+repositories (D39) add **no dependency anywhere**: they are fetched over plain
+HTTP by the core, with Tcl's own `http` package.
 
 > `http` (used by the TLS transport) ships with Tcl itself — no separate package.
 

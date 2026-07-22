@@ -1,0 +1,77 @@
+# Tests for the bounded plain-HTTP GET (rio::http, AGENTS.md D39) and the
+# repo.fetch op over it. NO network, not even loopback: only the pure logic is
+# tested here — Location resolution, scheme refusal, parameter validation, the
+# dispatch registration. The wire-level behaviour (redirect chains, the 2 MB
+# cap, timeouts) is exercised against a real webdir at release verification
+# (D39); the GUI suite stubs repo.fetch entirely.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. dispatch.tcl]
+source [file join [file dirname [info script]] .. http.tcl]
+namespace eval rio::ops {}   ;# normally created by document.tcl, not loaded here
+source [file join [file dirname [info script]] .. ops-repo.tcl]
+
+# --- Location resolution ------------------------------------------------------
+test http-resolve-absolute {an absolute Location passes through} -body {
+	rio::http::_resolve http://a.example/x/y http://b.example/z
+} -result http://b.example/z
+
+test http-resolve-host-absolute {/path keeps the origin} -body {
+	rio::http::_resolve http://a.example:8080/x/y /z
+} -result http://a.example:8080/z
+
+test http-resolve-relative {a bare path resolves against the base's directory} -body {
+	rio::http::_resolve http://a.example/x/y z
+} -result http://a.example/x/z
+
+test http-resolve-relative-rootless {a bare path on a bare host resolves at /} -body {
+	rio::http::_resolve http://a.example z
+} -result http://a.example/z
+
+test http-resolve-protocol-relative {//host/path keeps the scheme (http)} -body {
+	rio::http::_resolve http://a.example/x //b.example/z
+} -result http://b.example/z
+
+test http-resolve-https-passes {an https Location passes through untouched —
+		`get` then refuses it honestly rather than rewriting it} -body {
+	rio::http::_resolve http://a.example/x https://b.example/z
+} -result https://b.example/z
+
+# --- scheme refusal in the fetcher itself -------------------------------------
+test http-get-refuses-non-http {get itself refuses a non-http url: io_error, no
+		connection attempted} -body {
+	catch {rio::http::get https://example.org/repo} e opts
+	list [rio::error::code_of $opts] [string match "not an http:// url*" $e]
+} -result {io_error 1}
+
+# --- repo.fetch parameter validation (no fetch is ever attempted) -------------
+test repo-fetch-requires-url {a missing url is bad_request} -body {
+	catch {rio::ops::repo_fetch {}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test repo-fetch-https-refused {https is refused up front — rio does no TLS (D39)} -body {
+	catch {rio::ops::repo_fetch {url https://example.org/repo}} e opts
+	list [rio::error::code_of $opts] [string match "*https is not supported yet*" $e]
+} -result {bad_request 1}
+
+test repo-fetch-scheme-refused {a non-http scheme is bad_request} -body {
+	catch {rio::ops::repo_fetch {url ftp://example.org/repo}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test repo-fetch-bad-timeout {a garbage timeout is bad_request, not internal} -body {
+	catch {rio::ops::repo_fetch {url http://example.org/repo timeout soon}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test repo-fetch-registered {repo.fetch is a registered op; a bad request comes
+		back as a clean error reply through dispatch} -body {
+	set resp [rio::dispatch::handle \
+		{id 1 op repo.fetch params {url ftp://example.org/x}} [list apply {{ev} {}}]]
+	list [dict get $resp ok] [dict get $resp error code]
+} -result {false bad_request}
+
+cleanupTests

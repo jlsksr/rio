@@ -144,6 +144,12 @@ proc rio::wire::_result_theme_get {result} {
 }
 rio::wire::result_encoder theme.get rio::wire::_result_theme_get
 
+# theme.list: `themes` is an array of name strings.
+proc rio::wire::_result_theme_list {result} {
+	return "{\"themes\":[strarr [dict get $result themes]]}"
+}
+rio::wire::result_encoder theme.list rio::wire::_result_theme_list
+
 # diff.lines: `ops` is an array of flat {tag, a, b} objects.
 proc rio::wire::_result_diff_lines {result} {
 	set items {}

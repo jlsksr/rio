@@ -63,8 +63,9 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   `~/.config/rio/agent/`, and add project-specific guidance in a `.rio/agent.md` at
   your project root.
 - **Theming** — live-switchable colour themes from the View menu: the plain
-  default, Solarized Dark/Light, and Plan 9 Acme. Themes are plain data files in
-  `themes/`, never executed.
+  default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
+  in yourself — the menu lists whatever the core can load. Themes are plain
+  data files, never executed.
 - **Editing modes** — the text area edits like **Windows** (Notepad/VSCode:
   Ctrl+A selects all, Ctrl+V pastes — the default), like **Emacs/readline**
   (Ctrl+A/E line motion, Ctrl+K kill, Ctrl+V really scrolls), or like **vi**
@@ -73,6 +74,12 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   mode is a small self-registering file in `modes/` — drop your own in
   `~/.config/rio/modes/` to replace or add one. App shortcuts (save, find, …)
   always win over the mode's keys.
+- **Extensions & repositories** — install syntax highlighters, editing modes,
+  and themes from **repositories you choose**: plain http-served directories,
+  apt-sources style, no marketplace and no central index (see below). Browse,
+  install, and remove in *View ▸ Extensions…*; every installed extension shows
+  which repository it came from, same-name extensions from different authors
+  coexist and you pick, and it all works over a remote core too.
 - **Custom keybindings** — every shortcut is one data table. Remap them in
   *Settings ▸ Keyboard Shortcuts…* (press-to-capture, applied live, no restart) or by
   hand in `~/.config/rio/keys.json`; the menus relabel themselves to match.
@@ -108,6 +115,28 @@ Frontends are thin views — the core owns your files and broadcasts changes bac
 **Still to come:** git write ops (stage/commit), an agent run-command tool (with
 guardrails), the terminal frontend (below), and a polished install/packaging path.
 The fuller list of candidate work lives in [ROADMAP.md](ROADMAP.md).
+
+## Extensions & repositories
+
+rio said no to the plugin bazaar — this is the yes it was saving up for. There
+is **no marketplace, no store, no central index**: extensions are distributed
+the way Debian distributes packages and OpenBSD serves its mirrors — you keep
+a short list of **repositories**, and a repository is nothing more than a
+**plain http-served directory** anyone can host with a couple of text files in
+it. Add a URL under *View ▸ Extensions… ▸ Repositories…* and everything it
+carries is yours to browse and install; publishing means copying files into
+your webdir, and it will still work when today's hosting fashions are gone.
+
+No central index means no central authority — so rio doesn't pretend
+otherwise. Every installed extension is marked with its **provenance** (which
+repository, which version); when two repositories offer an extension of the
+same name, both are listed with author and source and **you choose**; and
+installing code (a highlighter, a mode) says plainly that it is code, next to
+the URL you're trusting. Themes are data, parsed and never executed.
+
+*Installing:* View ▸ Extensions…. *Publishing your own repository:* the
+complete spec — three small text files — is in
+[CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).
 
 ## The two faces, one brain
 
