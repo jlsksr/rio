@@ -2653,7 +2653,24 @@ Both renderings come from the **same** region model (D13) and layout policy
   auto-hides (`gridscroll`, the grid sibling of the dock's pack `autoscroll`) when
   no line runs past the edge, and `apply_wrap` drops it entirely while wrapping,
   where horizontal scrolling is meaningless. Default is no wrap. Wrap state is
-  runtime-only (D21 later).
+  persisted with the other prefs (D31, `prefs.json`).
+
+  *(2026-07-23 — wrapped-line indent.)* By default Tk shows a logical line's
+  leading indentation on its **first** display line only; the wrapped continuation
+  rows fall back to the left margin. **View ▸ Indent Wrapped Lines** (`::wrap_indent`,
+  persisted) turns on VSCode's "wrappingIndent: same" — each continuation row is
+  indented to sit under its own line's first non-whitespace char. It is a pure
+  display layer, deliberately **decoupled from the highlighter** so it works on
+  plain files too: a per-line `-lmargin2` tag (`wrapind:<cols>`, one shared tag per
+  distinct indent depth) sized to the line's leading whitespace — columns computed
+  by expanding tabs to the widget's 8-stops, times the monospace column width
+  (`font measure RioEditorFont 0`; `restyle_group` re-sizes the tags on a font/theme
+  change). Tk tags ride with the text on insert/delete, so `apply_change` recomputes
+  only the lines an edit actually touched, never the whole buffer — and `load_buffer`
+  sizes a buffer on open/switch. No visible effect while wrap is off; the tags wait.
+  Tests: the wrap-indent group in `rio-gui/tests/smoke.tcl` (column math, per-line
+  tagging, incremental re-tag on edit, clear-on-toggle) and the prefs round-trip in
+  `session.tcl`.
 
   **GUI agent chat pane — implemented (D26 slice 2).** The right-hand `chat`
   column (D14): a dumb view (D3) over the `agent.*` event stream — a read-only

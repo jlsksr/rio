@@ -552,6 +552,37 @@ do_theme default
 ok "theme: switched back to default" [::rio_real_t cget -background]        white
 ok "theme: chat bg restored"         [.chat.log cget -background]           white
 
+# --- wrap indent: align wrapped continuation lines under their own indent ------
+ok "wrapind cols: spaces"  [wrapind_cols "    x"]  4
+ok "wrapind cols: tab"     [wrapind_cols "\tx"]    8
+ok "wrapind cols: tab+sp"  [wrapind_cols "\t  x"]  10
+ok "wrapind cols: none"    [wrapind_cols "x"]      0
+
+.ed.t delete 1.0 end
+.ed.t insert 1.0 "\tindented line\nplain line\n    spaced line"
+set cw [font measure RioEditorFont "0"]
+set ::wrap_indent 1
+apply_wrap_indent
+ok "wrapind: indented line tagged" [expr {"wrapind:8" in [::rio_real_t tag names 1.0]}] 1
+ok "wrapind: margin sized to font" [lindex [::rio_real_t tag configure wrapind:8 -lmargin2] 4] [expr {8*$cw}]
+ok "wrapind: plain line untagged"  [expr {[lsearch -glob [::rio_real_t tag names 2.0] wrapind:*] < 0}] 1
+ok "wrapind: spaced line tagged"   [expr {"wrapind:4" in [::rio_real_t tag names 3.0]}] 1
+# an edit that changes a line's indent re-sizes just that line's tag (incremental)
+.ed.t insert 2.0 "\t\t"
+ok "wrapind: edit re-tags a line"  [expr {"wrapind:16" in [::rio_real_t tag names 2.0]}] 1
+# toggling it off strips the indent from every line
+set ::wrap_indent 0
+apply_wrap_indent
+ok "wrapind: off clears line 1"    [expr {[lsearch -glob [::rio_real_t tag names 1.0] wrapind:*] < 0}] 1
+ok "wrapind: off empties ranges"   [::rio_real_t tag ranges wrapind:8] ""
+# the choice persists to prefs.json
+set ::wrap_indent 1
+apply_wrap_indent
+set pf [open [prefs_path] r] ; set prefs [::read $pf] ; close $pf
+ok "wrapind: persisted"            [dict get [json::json2dict $prefs] wrap_indent] 1
+set ::wrap_indent 0
+apply_wrap_indent
+
 # --- D27 glyphs on the live toolbar widgets ----------------------------------
 ok "glyph: find next ↓"   [.find.next cget -text] "↓"
 ok "glyph: find prev ↑"   [.find.prev cget -text] "↑"

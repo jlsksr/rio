@@ -73,16 +73,18 @@ ok "prefs: wrap recorded" [dict get [json::json2dict [slurp [prefs_path]]] wrap]
 # Full round-trip: set every field off its default, save, wipe the vars, reload.
 set ::theme_name solarized-dark
 set ::wrap_lines 1
+set ::wrap_indent 1
 set ::dock_side  right
 set ::dock_pane  git
 set ::chat_shown 0
 prefs_save
 # clobber the live vars, then load them back from disk
-set ::theme_name default ; set ::wrap_lines 0 ; set ::dock_side left
+set ::theme_name default ; set ::wrap_lines 0 ; set ::wrap_indent 0 ; set ::dock_side left
 set ::dock_pane files ; set ::chat_shown 1
 prefs_load
 ok "prefs: theme reloaded"      $::theme_name solarized-dark
 ok "prefs: wrap reloaded"       $::wrap_lines  1
+ok "prefs: wrap_indent reloaded" $::wrap_indent 1
 ok "prefs: dock_side reloaded"  $::dock_side   right
 ok "prefs: dock_pane reloaded"  $::dock_pane   git
 ok "prefs: chat_shown reloaded" $::chat_shown  0
