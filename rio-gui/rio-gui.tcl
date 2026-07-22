@@ -1971,15 +1971,23 @@ proc mark_modified {m} {
 }
 proc clear_modified {} { bufset $::cur modified 0 ; refresh_all }
 
+# The bare display name of a buffer — no modified marker. The unsaved-changes
+# dot (●, D27) is a rendering concern added by the tab strip and the title only;
+# keeping it out of here means the compare picker and the save prompt show a
+# clean filename.
 proc tab_name {id} {
 	set p [bufget $id path]
-	set n [expr {$p eq "" ? "untitled" : [file tail $p]}]
-	return "$n[expr {[bufget $id modified] ? { *} : {}}]"
+	return [expr {$p eq "" ? "untitled" : [file tail $p]}]
+}
+# The ● (U+25CF) unsaved marker, or "" — appended after the name in the tab and
+# the window title (D27).
+proc tab_dot {id} {
+	return [expr {[bufget $id modified] ? " ●" : ""}]
 }
 proc refresh_all   {} { refresh_tabs ; refresh_title ; refresh_status }
 proc refresh_title {} {
 	set suffix [expr {$::core_remote ? " — $::core_endpoint" : ""}]
-	wm title . "rio — [tab_name $::cur]$suffix"
+	wm title . "rio — [tab_name $::cur][tab_dot $::cur]$suffix"
 }
 proc refresh_status {} {
 	set p    [bufget $::cur path]
@@ -2132,7 +2140,7 @@ proc refresh_tabs {} {
 			set tfg [expr {$active && $focused ? [dict get $c accent] : $fg}]
 			set f [frame $strip.b$id -background $bg -borderwidth 1 \
 				-relief [expr {$active ? "raised" : "flat"}]]
-			label $f.l -text [tab_name $id] -background $bg -foreground $tfg \
+			label $f.l -text "[tab_name $id][tab_dot $id]" -background $bg -foreground $tfg \
 				-font RioUIFont -padx 6 -pady 1
 			label $f.x -text "×" -background $bg -foreground $fg \
 				-font RioUIFont -padx 3
@@ -3188,7 +3196,7 @@ proc extensions_window {} {
 	# Header: sources editor, refresh, filter.
 	frame $w.hdr -background [dict get $c ui.bg]
 	button $w.hdr.repos   -text "Repositories…" -font RioUIFont -command extw_sources_dialog
-	button $w.hdr.refresh -text "Refresh"       -font RioUIFont -command extw_refresh
+	button $w.hdr.refresh -text "⟳" -font RioUIFont -command extw_refresh  ;# ⟳ rescan (D27)
 	label $w.hdr.flbl -text "Filter:" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	entry $w.hdr.filter -font RioUIFont -width 18
@@ -4201,7 +4209,7 @@ bind .chat.hdr.clear <Button-1> chat_clear
 text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
 	-background white -foreground black -insertbackground black
-button .chat.send -text "Send" -font {monospace 9} -command chat_send
+button .chat.send -text "▶" -font {monospace 9} -command chat_send  ;# ▶ send (D27)
 # Status strip at the pane's very bottom: live agent + edit mode (filled by
 # chat_status_update; room for context-window usage later).
 label .chat.status -anchor w -font {monospace 9} -padx 4 -pady 2 \
@@ -4261,8 +4269,10 @@ label .find.fl -text "Find:"    -font {monospace 9} -anchor e -background "#dddd
 label .find.rl -text "Replace:" -font {monospace 9} -anchor e -background "#dddddd"
 entry .find.e  -font {monospace 11} -width 24
 entry .find.re -font {monospace 11} -width 24
-button .find.next -text "Next"     -font {monospace 9} -command find_next
-button .find.prev -text "Previous" -font {monospace 9} -command find_prev
+# ↓/↑ (U+2193/U+2191) step forward/backward through matches (top-to-bottom),
+# the find-widget idiom (D27); F3 / Shift+F3 are the keyboard path.
+button .find.next -text "↓" -width 2 -font {monospace 9} -command find_next
+button .find.prev -text "↑" -width 2 -font {monospace 9} -command find_prev
 checkbutton .find.case -text "Match case" -font {monospace 9} \
 	-variable ::find_case -command find_update -background "#dddddd"
 label .find.count -font {monospace 9} -anchor w -background "#dddddd"
