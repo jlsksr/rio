@@ -124,6 +124,11 @@ set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
+set ::col_on 0         ;# column/block editing (Ctrl+Shift+drag) enabled? (D40)
+set ::col_active 0     ;# a column selection is currently live
+set ::col_w ""         ;# the editor PROXY path the column selection lives on
+set ::col_anchor ""    ;# the fixed end, a Tk index "line.col"
+set ::col_caret ""     ;# the moving end, a Tk index "line.col"
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
 set ::edit_mode windows   ;# active editing mode (D38): windows | emacs | vi | a drop-in's name
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
@@ -2290,7 +2295,13 @@ proc restyle_group {g} {
 	set fm [expr {[dict exists $c editor.findmatch] \
 		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
 	$t tag configure findmatch -background $fm
+	# Column/block editing (D40): the block reuses the selection colour, the caret
+	# column the cursor colour. Raised above the syntax colours so both stay visible.
+	$t tag configure coltag   -background [dict get $c editor.selection]
+	$t tag configure colcaret -background [dict get $c editor.cursor]
 	$t tag raise sel
+	$t tag raise coltag
+	$t tag raise colcaret
 }
 
 proc apply_theme {theme} {
@@ -2549,6 +2560,7 @@ proc apply_editmode {} {
 	if {$::editmode_active ne ""} {
 		catch { rio::modes::detach $::editmode_active RioMode }
 	}
+	catch { col_clear }   ;# column editing (D40) is windows-only; drop any live selection
 	foreach seq [bind RioMode] { bind RioMode $seq "" }
 	set ::editmode_status ""
 	rio::modes::attach $::edit_mode RioMode
@@ -2731,6 +2743,7 @@ proc prefs_load {} {
 	if {[dict exists $d theme]}      { set ::theme_name [dict get $d theme] }
 	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
+	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d chat_shown]} { set ::chat_shown [expr {[dict get $d chat_shown] ? 1 : 0}] }
 	if {[dict exists $d dock_side] && [dict get $d dock_side] in {left right}} {
 		set ::dock_side [dict get $d dock_side]
@@ -2755,6 +2768,7 @@ proc prefs_save {} {
 			theme       $::theme_name \
 			wrap        $::wrap_lines \
 			wrap_indent $::wrap_indent \
+			column_edit $::col_on \
 			dock_side  $::dock_side \
 			dock_pane  $::dock_pane \
 			chat_shown $::chat_shown \
@@ -3866,6 +3880,157 @@ proc editor_dedent_one {ln} {
 }
 
 # ---------------------------------------------------------------------------
+# Column / block editing (AGENTS.md D40). Ctrl+Shift+drag makes a vertical,
+# multi-line cursor. Its zero-width form is a CARET COLUMN: typing / Backspace /
+# Delete / Tab act at one column on EVERY spanned line; drag a width and typing
+# overwrites that rectangular slice per line. Off by default (::col_on), a
+# Settings toggle. Notepad++'s real gesture is Alt+drag, but Linux/X11 window
+# managers grab Alt+drag to move the window, so rio uses Ctrl+Shift+drag.
+#
+# The whole feature is GUI-side. A column operation is emitted as ONE
+# buffer.replace over L1.0..L2.lineend with the transformed block, so it is a
+# single undo step — the same shape as replace_all and the D38 block-indent. All
+# these procs work on the group PROXY path `w` (edits route through editor_proxy
+# to the core; reads/tags/marks pass through). The windows mode binds them,
+# pref-gated; vi/emacs keep their own block notions. Columns are CHARACTER
+# columns (a tab inside the band may look misaligned — a documented v1 edge).
+# ---------------------------------------------------------------------------
+
+# Is a live column selection on THIS widget? (Guards every key/edit handler.)
+proc col_here {w} { return [expr {$::col_active && $w eq $::col_w}] }
+
+# Character length of line L in widget w.
+proc col_linelen {w L} { return [lindex [split [$w index "$L.0 lineend"] .] 1] }
+
+# Pad a line to at least n chars with spaces (column mode's virtual space).
+proc col_pad {line n} {
+	set d [expr {$n - [string length $line]}]
+	if {$d > 0} { append line [string repeat " " $d] }
+	return $line
+}
+
+# The line span (L1..L2) and column span (C1..C2) the selection currently covers.
+proc col_span {} {
+	lassign [split $::col_anchor .] al ac
+	lassign [split $::col_caret  .] cl cc
+	return [list [expr {min($al,$cl)}] [expr {max($al,$cl)}] \
+	             [expr {min($ac,$cc)}] [expr {max($ac,$cc)}]]
+}
+
+# Start a column selection at the widget pixel (x,y): anchor = caret = @x,y.
+proc col_begin {w x y} {
+	if {!$::col_on} return
+	set g [group_of_widget $w]
+	if {$g ne ""} { focus_group $g }
+	focus $w
+	$w tag remove sel 1.0 end
+	set idx [$w index @$x,$y]
+	set ::col_w $w ; set ::col_anchor $idx ; set ::col_caret $idx ; set ::col_active 1
+	col_paint
+}
+
+# Extend the moving end to @x,y as the mouse drags.
+proc col_motion {w x y} {
+	if {![col_here $w]} return
+	set ::col_caret [$w index @$x,$y]
+	col_paint
+}
+
+# Repaint the block highlight (coltag) or the caret column (colcaret). The caret
+# line carries Tk's own blinking insert bar; the other lines get a static block.
+proc col_paint {} {
+	if {!$::col_active} return
+	set w $::col_w
+	$w tag remove coltag 1.0 end ; $w tag remove colcaret 1.0 end
+	lassign [col_span] L1 L2 C1 C2
+	set cl [lindex [split $::col_caret .] 0]
+	for {set L $L1} {$L <= $L2} {incr L} {
+		set len [col_linelen $w $L]
+		if {$C2 > $C1} {
+			set a [expr {min($C1,$len)}] ; set b [expr {min($C2,$len)}]
+			if {$b > $a} { $w tag add coltag $L.$a $L.$b }
+		} elseif {$L != $cl && $C1 < $len} {
+			$w tag add colcaret $L.$C1 $L.[expr {$C1 + 1}]
+		}
+	}
+	catch { $w mark set insert $::col_caret ; $w see insert }
+}
+
+# Collapse the column selection and hand a single normal caret back.
+proc col_clear {} {
+	if {!$::col_active} return
+	set w $::col_w
+	catch { $w tag remove coltag 1.0 end ; $w tag remove colcaret 1.0 end }
+	catch { $w mark set insert $::col_caret ; $w see insert }
+	set ::col_active 0 ; set ::col_w ""
+}
+
+# Apply one column operation across every spanned line as a SINGLE span replace
+# (one undo). op: insert (a char/tab), delfwd (Delete), delback (BackSpace).
+proc col_edit {op {ch ""}} {
+	if {!$::col_active} return
+	set w $::col_w
+	lassign [col_span] L1 L2 C1 C2
+	set start $L1.0 ; set end [$w index "$L2.0 lineend"]
+	set block [$w get $start $end]
+	set out {} ; set newcol $C1
+	foreach line [split $block \n] {
+		switch -- $op {
+			insert {
+				set line [col_pad $line $C1]
+				lappend out [string range $line 0 [expr {$C1-1}]]$ch[string range $line $C2 end]
+				set newcol [expr {$C1 + [string length $ch]}]
+			}
+			delfwd {
+				if {$C2 > $C1} {
+					set line [col_pad $line $C1]
+					lappend out [string range $line 0 [expr {$C1-1}]][string range $line $C2 end]
+				} elseif {$C1 < [string length $line]} {
+					lappend out [string range $line 0 [expr {$C1-1}]][string range $line [expr {$C1+1}] end]
+				} else { lappend out $line }
+				set newcol $C1
+			}
+			delback {
+				if {$C2 > $C1} {
+					set line [col_pad $line $C1]
+					lappend out [string range $line 0 [expr {$C1-1}]][string range $line $C2 end]
+					set newcol $C1
+				} elseif {$C1 > 0} {
+					lappend out [string range $line 0 [expr {$C1-2}]][string range $line $C1 end]
+					set newcol [expr {$C1 - 1}]
+				} else { lappend out $line ; set newcol 0 }
+			}
+		}
+	}
+	set newblock [join $out \n]
+	if {$newblock eq $block} { return }   ;# no-op (e.g. BackSpace at column 0)
+	$w replace $start $end $newblock       ;# proxy -> one buffer.replace -> one undo
+	# Collapse to a caret column at the new column, same line span; keep it live so
+	# the next keystroke keeps typing down the column.
+	set ::col_anchor $L1.$newcol ; set ::col_caret $L2.$newcol
+	col_paint
+}
+
+# Key hooks the windows mode binds. Each returns 1 when it consumed the event
+# (the binding then breaks), 0 to let normal editing through.
+proc col_typed {w ch state} {
+	if {![col_here $w]} { return 0 }
+	if {$ch eq "" || ($state & 0x0C)} { return 0 }   ;# Control/Alt held, or no char
+	if {![string is print -strict $ch]} { return 0 } ;# Tab/Return/BackSpace handled elsewhere
+	col_edit insert $ch ; return 1
+}
+proc col_key {w op} {
+	if {![col_here $w]} { return 0 }
+	col_edit $op ; return 1
+}
+
+# Settings toggle: turning it off ends any live selection, then persist.
+proc apply_column_edit {} {
+	if {!$::col_on} { col_clear }
+	prefs_save
+}
+
+# ---------------------------------------------------------------------------
 # Keymap (AGENTS.md D23): ONE table maps a logical command -> {chord action}. It is
 # the single source of truth for the editor's keyboard shortcuts AND for the
 # accelerator labels shown in the menus, so a remap moves both together. Users remap
@@ -4550,6 +4715,8 @@ menu .m.settings -tearoff 0
 # the text area (D38), the shortcuts editor remaps the app chords (D23).
 menu .m.settings.editmode -tearoff 0
 .m.settings add cascade -label "Editing Mode" -menu .m.settings.editmode
+.m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
+	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by

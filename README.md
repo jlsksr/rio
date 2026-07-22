@@ -74,6 +74,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   mode is a small self-registering file in `modes/` — drop your own in
   `~/.config/rio/modes/` to replace or add one. App shortcuts (save, find, …)
   always win over the mode's keys.
+- **Column / block editing** — Notepad++-style. Turn it on in *Settings ▸ Column
+  Editing*, then **Ctrl+Shift+drag** a vertical cursor across many lines: typing,
+  Backspace, Delete and Tab all act at that column on every line (one undo);
+  drag a width and typing overwrites the rectangular block. Off by default.
 - **Extensions & repositories** — install syntax highlighters, editing modes,
   and themes from **repositories you choose**: plain http-served directories,
   apt-sources style, no marketplace and no central index (see below). Browse,
