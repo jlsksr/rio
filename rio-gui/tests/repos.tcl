@@ -292,6 +292,7 @@ hl_load
 extensions_window
 ok "window: exists, non-modal"     [list [winfo exists .extw] [grab current]] {1 {}}
 ok "window: scan done, not busy"   $::repo_busy 0
+ok "window: refresh is the ⟳ glyph" [.extw.hdr.refresh cget -text] "⟳"
 ok "window: status counts the scan" \
 	[string match "6 extension(s) from 2 repositories" [.extw.foot.status cget -text]] 1
 

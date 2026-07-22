@@ -1010,6 +1010,21 @@ themes for free. Implementation across the remaining spots (search, run/send,
 file-tree expand/collapse, modified-dot) is **deferred** — this entry only fixes
 the direction.
 
+*(Implemented 2026-07-22.)* The deferred sweep landed, converting the
+remaining text-labeled iconic controls to glyphs: the tab/title **unsaved-dot**
+`●` (U+25CF, a bare filename in `tab_name` + a `tab_dot` marker the tab strip
+and title append — kept out of the compare picker and the save prompt, which
+read cleaner bare), the find bar's **next/previous** `↓`/`↑` (U+2193/2191, the
+find-widget idiom; F3/Shift+F3 remain the keys), the chat **send** `▶`
+(U+25B6), and the Extensions window's **refresh** `⟳` (U+27F3, the glyph the
+git pane already uses). Every glyph is plain button/label text, so it recolours
+through `apply_theme` with no new role. Two things stayed by choice, not
+oversight: the file pane keeps the **POSIX `name/` trailing-slash** for
+directories (an idiom, not a missing icon), and the git list keeps git's own
+**porcelain XY codes** (`M`/`A`/`?`…). "search" has no on-screen home yet (find
+is keyboard/menu-driven, no toolbar button), so `⌕` waits for a spot to live
+in.
+
 ### D28 — Compare / diff view: a core line-diff op + a read-only two-pane GUI view
 
 D13/D14 always anticipated the editor center "splittable into two editor groups

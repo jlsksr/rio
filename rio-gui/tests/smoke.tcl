@@ -41,6 +41,8 @@ proc diskbytes {path} {
 	set f [open $path rb] ; set b [::read $f] ; close $f ; return $b
 }
 proc widget {} { ::rio_real_t get 1.0 end-1c }
+# The text painted on a buffer's tab handle (name + the ● unsaved dot, D27).
+proc tab_label_text {id} { [gget $::focus tabs].b$id.l cget -text }
 # The buffer ids currently backed by tab widgets in the focused group's strip
 # (frames are named .eg<g>.tabs.b$id).
 proc tab_ids {} {
@@ -64,10 +66,12 @@ ok "open: encoding detected"    [dict get [bufget $::cur meta] encoding] utf-8
 # --- edit through the dumb-view proxy, then save -----------------------------
 .ed.t insert 1.0 "X"
 ok "edit: marked modified"      [bufget $::cur modified] 1
+ok "edit: tab shows ● dot"      [string match "*●*" [tab_label_text $::cur]] 1
 ok "edit: core updated"         [rio::doc::text $::cur]  "Xalpha\nbeta\n"
 ok "edit: widget updated"       [widget]                 "Xalpha\nbeta\n"
 do_save
 ok "save: not modified"         [bufget $::cur modified] 0
+ok "save: tab dot cleared"      [string match "*●*" [tab_label_text $::cur]] 0
 ok "save: bytes on disk"        [diskbytes $p]           "Xalpha\nbeta\n"
 
 # --- tricky characters survive the proxy (no %A breakage) --------------------
@@ -547,6 +551,11 @@ ok "theme: acme selection applied"   [::rio_real_t cget -selectbackground]  "#ee
 do_theme default
 ok "theme: switched back to default" [::rio_real_t cget -background]        white
 ok "theme: chat bg restored"         [.chat.log cget -background]           white
+
+# --- D27 glyphs on the live toolbar widgets ----------------------------------
+ok "glyph: find next ↓"   [.find.next cget -text] "↓"
+ok "glyph: find prev ↑"   [.find.prev cget -text] "↑"
+ok "glyph: chat send ▶"   [.chat.send cget -text] "▶"
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

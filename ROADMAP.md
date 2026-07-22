@@ -17,9 +17,6 @@ Each entry notes its state:
 
 ## Editor & UI
 
-- **Monochrome-Unicode iconography** — *deferred.* Icons are to be plain monochrome
-  Unicode glyphs (not `.ico` files or colour emoji), themed like the rest of the UI.
-  Design settled; implementation not started.
 - **File-pane auto-refresh** — *gap.* The file tree doesn't update when the agent
   creates a file; it refreshes on the next manual reload. Fold into a proper
   file-pane pass.
