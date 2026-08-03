@@ -67,13 +67,13 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   in yourself — the menu lists whatever the core can load. Themes are plain
   data files, never executed.
 - **Editing modes** — the text area edits like **Windows** (Notepad/VSCode:
-  Ctrl+A selects all, Ctrl+V pastes — the default), like **Emacs/readline**
-  (Ctrl+A/E line motion, Ctrl+K kill, Ctrl+V really scrolls), or like **vi**
-  (modal: motions, counts, `d`/`c`/`y` operators, visual mode, a block cursor in
-  normal mode). One click in *Settings ▸ Editing Mode*, remembered across runs. A
-  mode is a small self-registering file in `modes/` — drop your own in
-  `~/.config/rio/modes/` to replace or add one. App shortcuts (save, find, …)
-  always win over the mode's keys.
+  Ctrl+A selects all, Ctrl+V pastes) — the mode the core ships with. Two more
+  install as **extensions** (below): **Emacs/readline** (Ctrl+A/E line motion,
+  Ctrl+K kill, Ctrl+V really scrolls) and **vi** (modal: motions, counts,
+  `d`/`c`/`y` operators, visual mode, a block cursor in normal mode). Pick one in
+  *Settings ▸ Editing Mode*, remembered across runs. A mode is a small
+  self-registering file in `modes/` — drop your own in `~/.config/rio/modes/` to
+  replace or add one. App shortcuts (save, find, …) always win over the mode's keys.
 - **Column / block editing** — Notepad++-style. Turn it on in *Settings ▸ Column
   Editing*, then **Ctrl+Shift+drag** a vertical cursor across many lines: typing,
   Backspace, Delete and Tab all act at that column on every line (one undo);

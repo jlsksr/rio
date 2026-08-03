@@ -2370,6 +2370,44 @@ modifier/inactive/pref-off guards).
 
 ---
 
+### D41 — The core ships one editing mode; emacs and vi become extensions
+
+D38 shipped three editing modes (windows/emacs/vi) as peer files in `modes/`.
+Getting each of the non-default modes *really* good — vi's ex commands, registers,
+`.` repeat, macros, marks; emacs's kill ring — is open-ended work (the D38/ROADMAP
+"editing-mode extensions" cluster). Rather than carry that weight in the core, the
+distribution now ships the **Windows mode only**; **emacs and vi move out into
+installable extensions** and can iterate on their own cadence, versioned and
+replaceable like any other extension.
+
+**This costs no new mechanism — it's the D39 extension system doing exactly what
+it was built for.** A mode already installs as a repository `kind = mode` payload
+into `~/.config/rio/modes/`, and `modes_load` already loads shipped modules then
+user drop-ins that shadow by re-registering (D38). So "unbundle a mode" is just:
+move `modes/{vi,emacs}.tcl` out of the shipped tree, and serve them from a
+repository. The repo carries them verbatim — a mode module is frontend code that
+binds keys on the RioMode tag; nothing about it changed.
+
+**Layout.** The repo tree lives at `extensions/` in the source tree, shaped as a
+real, complete rio repository (`rio-repository.conf` + `index` + one dir per
+extension with a `rio-extension.conf` manifest and the `.tcl` payload) — rsync it
+to a plain-HTTP webdir and it *is* the repository, no build step. It doubles as
+the worked reference example for CONTRIBUTING's "Extension repositories" spec.
+
+**A persisted mode that's no longer installed falls back cleanly.** `apply_editmode`
+already checks `rio::modes::exists` and drops to `windows` when the saved mode is
+absent (D38), so a user who had `vi` selected and hasn't installed the extension
+lands in Windows mode, not a broken state — the fallback that used to guard
+drop-ins now also guards the unbundled shipped modes.
+
+**Tests exercise the real install path.** `sandbox_install_mode` copies a packaged
+extension's payload into the sandbox drop-in dir before boot; `modes.tcl` installs
+emacs+vi and `vi.tcl` installs vi, so both suites test the modes *as extensions*,
+through the same `modes_load` drop-in mechanism a user hits — not a shipped-file
+shortcut. Full sweep stays green (311 core + every GUI suite).
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

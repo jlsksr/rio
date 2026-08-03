@@ -24,11 +24,12 @@ Each entry notes its state:
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
   noted refinement in the core document model. (Also felt in vi mode: one
   operator is one undo, but insert-state typing stays per-keystroke.)
-- **Editing-mode extensions** — *deferred* (AGENTS.md D38). The windows/emacs/vi
-  modes shipped; consciously left for later: vi ex commands (`:w` `:q`), named
-  registers, `.` repeat, macros, marks, visual-line — and a kill ring (`C-y`
-  yank) for the emacs mode. Each is an isolated addition to its `modes/*.tcl`
-  module.
+- **Editing-mode extensions** — *deferred* (AGENTS.md D38, D41). The core ships the
+  Windows mode; emacs and vi now ship as installable extensions (`extensions/`,
+  D41) so they can grow on their own cadence. Consciously left for later: vi ex
+  commands (`:w` `:q`), named registers, `.` repeat, macros, marks, visual-line —
+  and a kill ring (`C-y` yank) for the emacs mode. Each is an isolated addition to
+  its `modes/*.tcl` module (now the extension's payload).
 - **Column-editing extras** — *deferred* (AGENTS.md D40). Column/block editing
   shipped (Ctrl+Shift+drag a vertical cursor; type/Backspace/Delete/Tab down the
   column, one undo). Consciously left: rectangular clipboard (Ctrl+C/X/V carrying

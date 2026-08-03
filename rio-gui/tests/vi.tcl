@@ -12,6 +12,7 @@
 
 set ::env(RIO_GUI_HEADLESS) 1
 source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG (D31)
+sandbox_install_mode vi ;# D41: vi ships as an extension, not in the core
 source [file join [file dirname [info script]] .. .. rio-core server.tcl]
 set ::port [rio::server::listen 0]
 set ::connect_to "127.0.0.1:$::port"
