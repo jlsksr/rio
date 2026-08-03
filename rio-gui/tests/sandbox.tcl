@@ -19,6 +19,17 @@ set ::env(XDG_DATA_HOME)   [file join $::sandbox_dir data]
 rename exit _sandbox_real_exit
 proc exit {{code 0}} { catch {file delete -force $::sandbox_dir} ; _sandbox_real_exit $code }
 
+# Install a repository-distributed editing mode into the sandbox drop-in dir, the
+# way the Extensions window would (D41: the core ships windows-only; vi and emacs
+# live in the extensions/ repository). Call BEFORE sourcing rio-gui.tcl so the
+# boot-time modes_load picks it up as a user drop-in — exercising the real path.
+proc sandbox_install_mode {name} {
+	set src [file join [file dirname [info script]] .. .. extensions $name $name.tcl]
+	set dst [file join $::env(XDG_CONFIG_HOME) rio modes]
+	file mkdir $dst
+	file copy -force $src [file join $dst $name.tcl]
+}
+
 # Focused-group handles for the editor split (AGENTS.md D33). The pre-split editor was
 # a single widget: tests drove edits through the .ed.t proxy and introspected the real
 # widget as ::rio_real_t. Both now resolve to whichever editor group has focus — the

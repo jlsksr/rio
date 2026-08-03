@@ -130,7 +130,7 @@ set ::col_w ""         ;# the editor PROXY path the column selection lives on
 set ::col_anchor ""    ;# the fixed end, a Tk index "line.col"
 set ::col_caret ""     ;# the moving end, a Tk index "line.col"
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
-set ::edit_mode windows   ;# active editing mode (D38): windows | emacs | vi | a drop-in's name
+set ::edit_mode windows   ;# active editing mode (D38/D41): windows ships; emacs/vi & other drop-ins install as extensions
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
@@ -2509,7 +2509,8 @@ proc hl_user_dir {} {
 }
 
 # ---------------------------------------------------------------------------
-# Editing modes (AGENTS.md D38): windows / emacs / vi, loaded exactly like the
+# Editing modes (AGENTS.md D38, D41): the core ships the Windows mode only; emacs
+# and vi install as extensions into the user drop-in dir. Loaded exactly like the
 # syntax highlighters — registry first, shipped modules, then user drop-ins that
 # shadow by re-registering. The active mode lives on the shared RioMode bind tag,
 # which make_editor_group slots between each text widget and Tk's Text class:
