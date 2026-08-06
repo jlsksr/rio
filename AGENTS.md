@@ -2439,8 +2439,50 @@ choice, not drift.
 `blend_hex` tint toward the selection), and the `navicon` glyph colour (a muted
 `ui.fg`). `blend_hex` derives theme-relative shades so night-theme and custom themes
 get a sane hover for free. The git pane keeps its listbox for now (a candidate to
-adopt the same rich-list later). `smoke.tcl` drives the new widget (line text, band
-tag ranges, key/click nav); full sweep green (311 core + every GUI suite).
+adopt the same rich-list later — see D43). `smoke.tcl` drives the new widget (line
+text, band tag ranges, key/click nav); full sweep green (311 core + every GUI suite).
+
+---
+
+### D43 — The rich-list becomes a shared component; the git pane joins it; the file pane shows git flags
+
+D42 built the rich-list *for the files pane*. Two follow-ons: make the git pane look
+and feel the same, and surface git status in the file pane. Both fall out of the same
+move — **factor the rich-list into a reusable `rl_*` component** and make the two panes
+instances of it.
+
+**The `rl_*` component.** A rich-list is a read-only `text` widget drawn one row per
+line, with the D42 full-width hover/selection bands and mouse+keyboard navigation. All
+of that is now generic and keyed by the *body widget path*, so the file list and the
+git list keep separate state (`::rl_rows($b)`, `::rl_sel($b)`, `::rl_hover($b)`) over
+one implementation. Each row carries a `selectable` flag (placeholder rows like
+`(clean)` aren't) and an opaque `payload` the owning pane interprets; the caller
+renders its own row text (its glyphs/tags), the component only needs one inserted line
+per `rl_row`. Two callbacks wire behaviour: `onselect` (click or arrow) and
+`onactivate` (double-click / Return), either may be empty. The file pane passes
+`{}`/`nav_open` (selection is inert; activating opens); the git pane passes
+`git_pick`/`{}` (picking a change shows its diff — the old `<<ListboxSelect>>`
+behaviour). This kept the panes' *meaning* in small pane-specific procs while the
+chrome and feel are literally the same code.
+
+**The git pane is now a rich-list too.** Its `listbox` becomes the same sunken well +
+read-only body; a change row is the two porcelain status chars (each colour-tagged by
+kind — added green, deleted red, modified `accent`) then the path. The branch header,
+Refresh button, and the collapsible diff area (D13) are unchanged. This is the
+"adopt the same rich-list" candidate D42 flagged, done.
+
+**Git flags in the file pane.** `populate_nav` now fetches `git.status` once and
+annotates each row with a 2-char status gutter: a file gets its one-letter flag (the
+worktree char, else the staged one), a directory gets a `·` rollup dot when it
+contains — or *is*, since porcelain reports an untracked dir as itself — a change.
+Same kind→colour tags as the git pane. Porcelain paths are repo-root-relative and rio
+opens the repo root as the project, so they anchor at the project root; no repo (a
+plain folder) means no gutter. No new theme roles — the flags borrow `diff.added` /
+`diff.removed` / `accent`. It is still a *read* view (D7): flags are shown, not acted
+on; there is no file-watching, so like the git pane the flags refresh on the next
+repaint (the file-pane auto-refresh gap, ROADMAP, is unchanged). `smoke.tcl` covers
+the git rich-list (row text, pick→diff) and the file-pane flags (an `M` on a modified
+file, a `·` on a dir with an untracked child); full sweep green.
 
 ---
 

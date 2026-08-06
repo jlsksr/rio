@@ -562,8 +562,8 @@ proc do_open {path} {
 # repo. The core owns "which folder is open" (project.*); this pane is a dumb
 # view of it — opening a folder goes through project.open and the pane repaints
 # from the project.opened event (D3), the same event-driven path as buffer edits.
-# ::nav_dir is the directory currently shown (absolute); ::nav_rows is a parallel
-# list mapping each listbox row to {type abspath} so a click knows what it hit.
+# ::nav_dir is the directory currently shown (absolute); the pane is an rl_* rich-list
+# whose per-row payload is {type abspath}, so a click knows what it hit.
 # ---------------------------------------------------------------------------
 proc open_folder {path} {
 	set resp [rio_call project.open [dict create path $path]]
@@ -581,34 +581,148 @@ proc on_project_opened {p} {
 	if {$::dock_pane eq "git"} { refresh_git } else { populate_nav }
 }
 
-# Repaint the pane with the entries of ::nav_dir: a ".." row (unless at the root),
-# then directories, then files — each group dictionary-sorted by the core already.
-# Each row is one line: a mono glyph icon (▴ up · ▸ dir · ▪ file, all U+25xx so they
-# render monochrome, never emoji) then the name. The body is a read-only text widget;
-# we toggle -state to rewrite it (the git diff area uses the same dance). ::nav_rows
-# is the parallel {type abspath} list; row index N maps to text line N+1.
-proc populate_nav {} {
-	set b .dock.files.well.body
-	set ::nav_rows {}
-	set ::nav_sel  -1
-	set ::nav_hover -1
+# ---------------------------------------------------------------------------
+# rl_* — a reusable rich-list: a read-only text widget drawn one row per line,
+# with full-width hover and selection bands and mouse/keyboard navigation. Both
+# the files pane and the git pane (D42/D43) are instances of it — the well chrome,
+# the bands, and the nav feel are identical; only the row text and what a row
+# *means* differ. State is kept per body widget (arrays keyed by the widget path)
+# so the two lists don't share it. Each row carries a `selectable` flag (placeholder
+# rows like "(clean)" are not) and an opaque `payload` the owning pane interprets.
+#
+# The caller renders row text itself (its own glyphs/tags) — the component only
+# needs one inserted line per rl_row, in order, so line N maps to row N-1. Two
+# callbacks wire behaviour: onselect fires when the selection changes (click or
+# arrow), onactivate on double-click / Return; either may be empty. The bands use
+# the shared `selrow`/`hoverrow` tags, configured per body in apply_theme.
+# ---------------------------------------------------------------------------
+proc rl_init {b onselect onactivate} {
+	set ::rl_onselect($b)  $onselect
+	set ::rl_onactivate($b) $onactivate
+	rl_reset $b
+	bind $b <Button-1>        "focus %W ; rl_click %W %x %y ; break"
+	bind $b <Double-Button-1> "rl_click %W %x %y ; rl_activate %W ; break"
+	bind $b <Return>          "rl_activate %W ; break"
+	bind $b <Up>              "rl_move %W -1 ; break"
+	bind $b <Down>            "rl_move %W 1 ; break"
+	bind $b <Motion>          "rl_hover_at %W %x %y"
+	bind $b <Leave>           "rl_set_hover %W -1"
+}
+proc rl_reset {b} {
+	set ::rl_rows($b)  {}
+	set ::rl_sel($b)   -1
+	set ::rl_hover($b) -1
+}
+# Begin a repaint: enable, clear text and state. Caller then inserts rows and ends.
+proc rl_begin {b} {
 	$b configure -state normal
 	$b delete 1.0 end
+	rl_reset $b
+}
+# Record one row. The caller has already inserted exactly one line of text for it.
+proc rl_row {b selectable payload} {
+	lappend ::rl_rows($b) [list $selectable $payload]
+}
+proc rl_end {b} { $b configure -state disabled }
+
+proc rl_selectable {b i} {
+	if {$i < 0 || $i >= [llength $::rl_rows($b)]} { return 0 }
+	return [lindex [lindex $::rl_rows($b) $i] 0]
+}
+proc rl_payload {b i} { return [lindex [lindex $::rl_rows($b) $i] 1] }
+
+# Paint the hover and selection bands. Tagging through the trailing newline (+1c)
+# makes a band span the full pane width, not just the text. selrow sits above
+# hoverrow (see apply_theme) so the selection stays visible under the pointer.
+proc rl_paint {b} {
+	$b tag remove hoverrow 1.0 end
+	$b tag remove selrow   1.0 end
+	if {$::rl_hover($b) >= 0} {
+		set L [expr {$::rl_hover($b) + 1}]
+		$b tag add hoverrow $L.0 "$L.0 lineend +1c"
+	}
+	if {$::rl_sel($b) >= 0} {
+		set L [expr {$::rl_sel($b) + 1}]
+		$b tag add selrow $L.0 "$L.0 lineend +1c"
+	}
+}
+
+# Select a row by index (ignoring placeholder rows), repaint, scroll it into view,
+# and fire onselect. `fire` lets a headless test set a selection without the callback.
+proc rl_select {b row {fire 1}} {
+	if {![rl_selectable $b $row]} return
+	set ::rl_sel($b) $row
+	rl_paint $b
+	$b see [expr {$row + 1}].0
+	if {$fire && $::rl_onselect($b) ne ""} {
+		{*}$::rl_onselect($b) [rl_payload $b $row]
+	}
+}
+# Double-click / Return: run onactivate on the selected row.
+proc rl_activate {b} {
+	set row $::rl_sel($b)
+	if {![rl_selectable $b $row]} return
+	if {$::rl_onactivate($b) ne ""} {
+		{*}$::rl_onactivate($b) [rl_payload $b $row]
+	}
+}
+
+# Row index under a pixel: the text line at @x,y, minus one (line N -> row N-1).
+proc rl_row_at {b x y} {
+	return [expr {[lindex [split [$b index @$x,$y] .] 0] - 1}]
+}
+proc rl_click {b x y} {
+	if {![llength $::rl_rows($b)]} return
+	rl_select $b [rl_row_at $b $x $y]
+}
+# Keyboard move: step the selection by ±1, skipping placeholder rows, clamped.
+proc rl_move {b dir} {
+	set n [llength $::rl_rows($b)]
+	if {$n == 0} return
+	set cur $::rl_sel($b)
+	if {$cur < 0} { set cur [expr {$dir > 0 ? -1 : $n}] }
+	for {set i [expr {$cur + $dir}]} {$i >= 0 && $i < $n} {incr i $dir} {
+		if {[rl_selectable $b $i]} { rl_select $b $i ; return }
+	}
+}
+# Hover follows the pointer; -1 clears it. No-op when unchanged so we don't repaint
+# on every motion pixel.
+proc rl_hover_at {b x y} {
+	if {![llength $::rl_rows($b)]} return
+	rl_set_hover $b [rl_row_at $b $x $y]
+}
+proc rl_set_hover {b row} {
+	if {$row >= [llength $::rl_rows($b)]} { set row -1 }
+	if {$row >= 0 && ![rl_selectable $b $row]} { set row -1 }
+	if {$row == $::rl_hover($b)} return
+	set ::rl_hover($b) $row
+	rl_paint $b
+}
+
+# Repaint the files pane with the entries of ::nav_dir: a ".." row (unless at the
+# root), then directories, then files — each group dictionary-sorted by the core
+# already. Each row is one line: a 2-char git-status gutter (blank when clean, D43),
+# a mono glyph icon (▴ up · ▸ dir · ▪ file, all U+25xx so they render monochrome,
+# never emoji), then the name. The body is an rl_* rich-list.
+proc populate_nav {} {
+	set b .dock.files.well.body
+	rl_begin $b
 	if {$::nav_dir eq ""} {
 		.dock.files.head configure -text "(no folder)"
-		$b insert end "  Open a folder…\n"
-		lappend ::nav_rows [list none ""]
-		$b configure -state disabled
+		$b insert end "    Open a folder…\n"
+		rl_row $b 0 [list none ""]
+		rl_end $b
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
 	.dock.files.head configure -text [nav_header $::nav_dir $root]
+	set git [nav_git_map $root]
 	if {$::nav_dir ne $root} {
-		nav_render_row dir [file dirname $::nav_dir] ".." "▴"
+		nav_render_row dir [file dirname $::nav_dir] ".." "▴" ""
 	}
 	set resp [rio_call fs.list [dict create path $::nav_dir]]
 	if {![dict get $resp ok]} {
-		$b configure -state disabled
+		rl_end $b
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
@@ -617,85 +731,72 @@ proc populate_nav {} {
 		foreach e $entries {
 			if {[dict get $e type] ne $grp} continue
 			set name [dict get $e name]
+			set path [file join $::nav_dir $name]
 			if {$grp eq "dir"} {
-				nav_render_row dir [file join $::nav_dir $name] "$name/" "▸"
+				nav_render_row dir $path "$name/" "▸" [nav_dir_status $git $path]
 			} else {
-				nav_render_row file [file join $::nav_dir $name] $name "▪"
+				nav_render_row file $path $name "▪" [nav_file_status $git $path]
 			}
 		}
 	}
-	$b configure -state disabled
+	rl_end $b
 }
 
-# Append one navigator row: the glyph (tagged navicon for its own colour) then a
-# space and the label. Records {type abspath} in ::nav_rows; the line number follows
-# from the list length. Caller has the body in -state normal.
-proc nav_render_row {type path label glyph} {
-	.dock.files.well.body insert end $glyph navicon " $label\n"
-	lappend ::nav_rows [list $type $path]
+# The git status for the open project, as an abspath -> XY-status dict (the two
+# porcelain chars). Empty when there is no repo — a plain file pane, no gutter. The
+# porcelain paths are repo-root-relative and rio opens the repo root as the project,
+# so we anchor them at $root. (D43)
+proc nav_git_map {root} {
+	set map [dict create]
+	set r [rio_call git.status {}]
+	if {![dict get $r ok]} { return $map }
+	foreach c [dict get $r result changes] {
+		dict set map [file join $root [dict get $c path]] \
+			"[dict get $c x][dict get $c y]"
+	}
+	return $map
+}
+# A file's one-letter flag: the worktree char if any, else the staged one (so a bare
+# stage still shows). "" when the path is clean / untracked-parent.
+proc nav_file_status {git path} {
+	if {![dict exists $git $path]} { return "" }
+	set xy [dict get $git $path]
+	set y [string index $xy 1]
+	return [expr {$y ne " " ? $y : [string index $xy 0]}]
+}
+# A directory's rollup flag: "·" when it contains (or is) a change, else "". Lets the
+# flat one-dir navigator hint where changes hide without walking into them. An
+# untracked directory is reported by porcelain as the directory itself, so we match
+# both the dir's own path and anything beneath it.
+proc nav_dir_status {git path} {
+	if {[dict exists $git $path]} { return "·" }
+	foreach p [dict keys $git] {
+		if {[string match "$path/*" $p]} { return "·" }
+	}
+	return ""
 }
 
-# Paint the hover and selection bands. Tagging through the trailing newline (+1c)
-# makes the band span the full pane width, not just the text. selrow sits above
-# hoverrow (see apply_theme) so the selection stays visible under the pointer.
-proc nav_paint {} {
+# Append one navigator row: a 2-char status gutter (the flag glyph + a space, or two
+# spaces when clean), then the type glyph (tagged navicon) and the label. Records
+# {type abspath} as the row payload. Caller has the body in -state normal.
+proc nav_render_row {type path label glyph status} {
 	set b .dock.files.well.body
-	$b tag remove hoverrow 1.0 end
-	$b tag remove selrow   1.0 end
-	if {$::nav_hover >= 0} {
-		set L [expr {$::nav_hover + 1}]
-		$b tag add hoverrow $L.0 "$L.0 lineend +1c"
+	if {$status eq ""} {
+		$b insert end "  "
+	} else {
+		$b insert end $status [nav_status_tag $status] " "
 	}
-	if {$::nav_sel >= 0} {
-		set L [expr {$::nav_sel + 1}]
-		$b tag add selrow $L.0 "$L.0 lineend +1c"
+	$b insert end $glyph navicon " $label\n"
+	rl_row $b 1 [list $type $path]
+}
+# Colour tag for a files-pane status flag (see apply_theme for the colours).
+proc nav_status_tag {s} {
+	switch -- $s {
+		A - ? { return navadd }
+		D     { return navdel }
+		·     { return navdirty }
+		default { return navmod }
 	}
-}
-
-# Select a row by index (ignoring placeholder rows), repaint, and scroll it into view.
-proc nav_select {row} {
-	if {$row < 0 || $row >= [llength $::nav_rows]} return
-	if {[lindex [lindex $::nav_rows $row] 0] eq "none"} return
-	set ::nav_sel $row
-	nav_paint
-	.dock.files.well.body see [expr {$row + 1}].0
-}
-
-# Map a pixel to its row and select it (single click).
-proc nav_click_at {x y} {
-	if {![llength $::nav_rows]} return
-	nav_select [nav_row_at $x $y]
-}
-
-# Row index under a pixel: the text line at @x,y, minus one (line N -> row N-1).
-proc nav_row_at {x y} {
-	set line [lindex [split [.dock.files.well.body index @$x,$y] .] 0]
-	return [expr {$line - 1}]
-}
-
-# Keyboard move: step the selection by ±1, skipping placeholder rows, clamped.
-proc nav_move {dir} {
-	set n [llength $::nav_rows]
-	if {$n == 0} return
-	set cur $::nav_sel
-	if {$cur < 0} { set cur [expr {$dir > 0 ? -1 : $n}] }
-	for {set i [expr {$cur + $dir}]} {$i >= 0 && $i < $n} {incr i $dir} {
-		if {[lindex [lindex $::nav_rows $i] 0] ne "none"} { nav_select $i ; return }
-	}
-}
-
-# Hover follows the pointer; -1 clears it. No-op when the row is unchanged so we do
-# not repaint on every motion pixel.
-proc nav_hover_at {x y} {
-	if {![llength $::nav_rows]} return
-	nav_hover [nav_row_at $x $y]
-}
-proc nav_hover {row} {
-	if {$row >= [llength $::nav_rows]} { set row -1 }
-	if {$row >= 0 && [lindex [lindex $::nav_rows $row] 0] eq "none"} { set row -1 }
-	if {$row == $::nav_hover} return
-	set ::nav_hover $row
-	nav_paint
 }
 
 # Header: the project name, plus the path from the root when in a subdirectory.
@@ -704,10 +805,10 @@ proc nav_header {dir root} {
 	return "[file tail $root]/[string range $dir [expr {[string length $root] + 1}] end]"
 }
 
-# Double-click / Enter on a row: descend into a directory, or open a file in a tab.
-proc nav_activate {} {
-	if {$::nav_sel < 0 || $::nav_sel >= [llength $::nav_rows]} return
-	lassign [lindex $::nav_rows $::nav_sel] type path
+# Double-click / Enter on a row (onactivate): descend into a directory, or open a
+# file in a tab. The payload is the row's {type abspath}.
+proc nav_open {payload} {
+	lassign $payload type path
 	switch -- $type {
 		dir  { set ::nav_dir $path ; populate_nav }
 		file { do_open $path }
@@ -729,7 +830,9 @@ proc open_folder_dialog {} {
 # the open project (git.* now defaults its cwd to the project root): git.status
 # fills the branch + changed-file list, selecting a file fetches git.diff into a
 # read-only diff area. No file-watching, so a Refresh button re-reads on demand.
-# ::git_rows maps each list row to its change dict {path x y}.
+# The change list is an rl_* rich-list too (D43) — same well/bands/nav as the file
+# pane — each row's payload being its change dict {x y path ...} (or "" for a
+# placeholder like "(clean)").
 # ---------------------------------------------------------------------------
 # The diff area is collapsible (D13): hidden until a file is picked, so the
 # default git pane is just a full-height change list — consistent with the file
@@ -752,49 +855,70 @@ proc git_hide_diff {} {
 }
 
 proc refresh_git {} {
-	.dock.git.list delete 0 end
-	set ::git_rows {}
+	set b .dock.git.well.body
+	rl_begin $b
 	git_hide_diff
 	# With no folder open, git.* would fall back to rio's OWN process cwd and show
 	# the wrong repo — so the pane is honest about needing a project first.
 	if {[dict get [rio_call project.get {}] result root] eq ""} {
 		.dock.git.hdr.branch configure -text "git"
-		.dock.git.list insert end "  (open a folder)"
-		lappend ::git_rows ""
+		git_placeholder "(open a folder)"
+		rl_end $b
 		return
 	}
 	set resp [rio_call git.status {}]
 	if {![dict get $resp ok]} {
 		.dock.git.hdr.branch configure -text "git"
 		set code [dict get $resp error code]
-		.dock.git.list insert end \
-			[expr {$code eq "bad_request" ? "  (not a git repository)" \
-				: "  [dict get $resp error message]"}]
-		lappend ::git_rows ""
+		git_placeholder [expr {$code eq "bad_request" ? "(not a git repository)" \
+			: [dict get $resp error message]}]
+		rl_end $b
 		return
 	}
 	set r [dict get $resp result]
 	.dock.git.hdr.branch configure -text "⎇ [dict get $r branch]"
 	set changes [dict get $r changes]
 	if {![llength $changes]} {
-		.dock.git.list insert end "  (clean)"
-		lappend ::git_rows ""
+		git_placeholder "(clean)"
+		rl_end $b
 		return
 	}
-	foreach c $changes {
-		.dock.git.list insert end \
-			[format "%s%s %s" [dict get $c x] [dict get $c y] [dict get $c path]]
-		lappend ::git_rows $c
+	foreach c $changes { git_render_row $c }
+	rl_end $b
+}
+
+# A non-selectable message row (no folder / not a repo / clean). Two-space indent
+# keeps it clear of the status gutter column. Caller has the body in -state normal.
+proc git_placeholder {text} {
+	.dock.git.well.body insert end "  $text\n"
+	rl_row .dock.git.well.body 0 ""
+}
+# One change row: the two porcelain status chars (each colour-tagged by kind), a
+# space, then the path. Payload is the whole change dict.
+proc git_render_row {c} {
+	set b .dock.git.well.body
+	foreach ch [list [dict get $c x] [dict get $c y]] {
+		set tag [git_status_tag $ch]
+		if {$tag eq ""} { $b insert end $ch } else { $b insert end $ch $tag }
+	}
+	$b insert end " [dict get $c path]\n"
+	rl_row $b 1 $c
+}
+# Colour tag for a git porcelain status char (see apply_theme). "" for a blank.
+proc git_status_tag {ch} {
+	switch -- $ch {
+		A - ? { return gitadd }
+		D     { return gitdel }
+		" "   { return "" }
+		default { return gitmod }
 	}
 }
 
-# Selecting a changed file shows its diff. A path staged but not also modified in
-# the worktree (X set, Y blank) is shown via --cached; otherwise the worktree
-# diff. An untracked file has no textual diff — git returns empty, said plainly.
-proc git_select {} {
-	set sel [.dock.git.list curselection]
-	if {$sel eq ""} return
-	set row [lindex $::git_rows $sel]
+# Selecting a changed file (onselect) shows its diff. A path staged but not also
+# modified in the worktree (X set, Y blank) is shown via --cached; otherwise the
+# worktree diff. An untracked file has no textual diff — git returns empty, said
+# plainly. The payload is the change dict ("" for a placeholder row).
+proc git_pick {row} {
 	if {$row eq ""} { git_hide_diff ; return }
 	set x [dict get $row x] ; set y [dict get $row y]
 	set staged [expr {$y eq " " && $x ne " " && $x ne "?"}]
@@ -2125,10 +2249,8 @@ proc reset_session_state {} {
 	set ::cur ""
 	# Project/panes: the new core starts with no folder open unless it reports one.
 	set ::nav_dir ""
-	set ::nav_rows {}
-	set ::nav_sel  -1
-	set ::nav_hover -1
-	set ::git_rows {}
+	rl_reset .dock.files.well.body
+	rl_reset .dock.git.well.body
 	# A different core means a fresh conversation — clear the transcript.
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
@@ -2426,24 +2548,31 @@ proc apply_theme {theme} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
-	.dock.git.list configure -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-selectbackground [dict get $c editor.selection] \
-		-selectforeground [dict get $c ui.fg]
-	# The files rich-list (D42): a white content "well" (editor surface) with a
-	# full-width selection band (the editor selection colour jbm already likes) and
-	# a subtler hover band blended toward it. selrow raised above hoverrow so the
-	# selection wins under the pointer; navicon tints the glyph a muted foreground.
+	# The rich-list panes (D42/D43): a white content "well" (editor surface) with a
+	# full-width selection band (the editor selection colour jbm already likes) and a
+	# subtler hover band blended toward it. selrow raised above hoverrow so the
+	# selection wins under the pointer. The file and git lists share this chrome.
 	set fbg [dict get $c editor.bg]
-	.dock.files.well configure -background $fbg
-	.dock.files.well.body configure -font RioUIFont \
-		-background $fbg -foreground [dict get $c ui.fg]
-	.dock.files.well.body tag configure selrow   -background [dict get $c editor.selection]
-	.dock.files.well.body tag configure hoverrow -background \
-		[blend_hex $fbg [dict get $c editor.selection] 25]
-	.dock.files.well.body tag configure navicon  -foreground \
-		[blend_hex [dict get $c ui.fg] $fbg 35]
-	.dock.files.well.body tag raise selrow
+	foreach well {.dock.files.well .dock.git.well} {
+		$well configure -background $fbg
+		set body $well.body
+		$body configure -font RioUIFont -background $fbg -foreground [dict get $c ui.fg]
+		$body tag configure selrow   -background [dict get $c editor.selection]
+		$body tag configure hoverrow -background [blend_hex $fbg [dict get $c editor.selection] 25]
+		$body tag raise selrow
+	}
+	# The navigator's glyph + git-flag colours (D43): navicon tints the type glyph a
+	# muted foreground; the flag letters borrow the diff/accent roles by kind (added
+	# green, deleted red, modified accent) and the dir rollup dot a muted accent.
+	.dock.files.well.body tag configure navicon  -foreground [blend_hex [dict get $c ui.fg] $fbg 35]
+	.dock.files.well.body tag configure navadd   -foreground [dict get $c diff.added]
+	.dock.files.well.body tag configure navdel   -foreground [dict get $c diff.removed]
+	.dock.files.well.body tag configure navmod   -foreground [dict get $c accent]
+	.dock.files.well.body tag configure navdirty -foreground [blend_hex [dict get $c accent] $fbg 40]
+	# The git list's two status chars share the same kind->colour mapping.
+	.dock.git.well.body tag configure gitadd -foreground [dict get $c diff.added]
+	.dock.git.well.body tag configure gitdel -foreground [dict get $c diff.removed]
+	.dock.git.well.body tag configure gitmod -foreground [dict get $c accent]
 	# The diff area is code, so it takes the editor surface.
 	.dock.git.diff configure -font RioEditorFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
@@ -3785,16 +3914,12 @@ pack .dock.files.head -side top -fill x
 pack .dock.files.well -side top -fill both -expand 1
 pack .dock.files.well.body -side left -fill both -expand 1
 # .dock.files.well.sb is packed on demand by autoscroll (hidden when the list fits).
-bind .dock.files.well.body <Button-1>        {focus %W ; nav_click_at %x %y ; break}
-bind .dock.files.well.body <Double-Button-1> {nav_click_at %x %y ; nav_activate ; break}
-bind .dock.files.well.body <Return>          {nav_activate ; break}
-bind .dock.files.well.body <Up>              {nav_move -1 ; break}
-bind .dock.files.well.body <Down>            {nav_move 1 ; break}
-bind .dock.files.well.body <Motion>          {nav_hover_at %x %y}
-bind .dock.files.well.body <Leave>           {nav_hover -1}
+# The files pane doesn't act on mere selection (onselect empty); a double-click /
+# Return opens the row (nav_open).
+rl_init .dock.files.well.body {} nav_open
 
-# Git pane body: branch header + Refresh, the changed-file list, and a read-only
-# diff area below it.
+# Git pane body: branch header + Refresh, the changed-file list (a rich-list well,
+# D43 — same chrome as the file pane), and a read-only diff area below it.
 frame .dock.git -background "#dddddd"
 frame .dock.git.hdr -background "#dddddd"
 label .dock.git.hdr.branch -anchor w -font {monospace 9} -padx 4 -pady 2 \
@@ -3805,17 +3930,23 @@ pack .dock.git.hdr.refresh -side right
 pack .dock.git.hdr.branch  -side left -fill x -expand 1
 pack .dock.git.hdr -side top -fill x
 bind .dock.git.hdr.refresh <Button-1> refresh_git
-listbox .dock.git.list -width 26 -height 8 -activestyle none -exportselection 0 \
-	-borderwidth 0 -highlightthickness 0 \
-	-background "#dddddd" -foreground black
-# -width 26 matches the list so the git pane does not balloon the dock (and the
+frame .dock.git.well -borderwidth 2 -relief sunken -background white
+scrollbar .dock.git.well.sb -command {.dock.git.well.body yview}
+text .dock.git.well.body -width 26 -height 8 -wrap none -state disabled \
+	-cursor arrow -insertwidth 0 -takefocus 1 \
+	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
+	-background white -foreground black \
+	-yscrollcommand {autoscroll .dock.git.well.sb .dock.git.well.body}
+# -width 26 matches the file pane so the git pane does not balloon the dock (and the
 # whole window) to the text widget's default 80 columns when it is shown.
 text .dock.git.diff -wrap none -width 26 -height 8 -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black
-pack .dock.git.list -side top -fill both -expand 1
-# .dock.git.diff is packed on demand by git_show_diff (hidden until a file is picked).
-bind .dock.git.list <<ListboxSelect>> git_select
+pack .dock.git.well -side top -fill both -expand 1
+pack .dock.git.well.body -side left -fill both -expand 1
+# .dock.git.well.sb is packed on demand by autoscroll; .dock.git.diff by git_show_diff.
+# Picking a change (single click / arrow) shows its diff (git_pick); no separate activate.
+rl_init .dock.git.well.body git_pick {}
 
 # A thin draggable divider between the dock and the editor. place_dock parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which
@@ -4887,11 +5018,7 @@ themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (
 # directory argument opens as the project folder, a file opens in a tab. Remote: the
 # path lives on the SERVER, so we can't stat it from here — open each as a project
 # folder (project.open) and let the core judge; files are reached via the tree (D29).
-set ::nav_dir ""
-set ::nav_rows {}
-set ::nav_sel  -1
-set ::nav_hover -1
-set ::git_rows {}
+set ::nav_dir ""           ;# rl_* list state was initialised at widget construction
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
