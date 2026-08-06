@@ -928,6 +928,7 @@ proc refresh_git {} {
 	if {[dict get [rio_call project.get {}] result root] eq ""} {
 		.dock.git.hdr.branch configure -text "git"
 		git_placeholder "(open a folder)"
+		git_commit_bar 0
 		rl_end $b
 		return
 	}
@@ -937,6 +938,7 @@ proc refresh_git {} {
 		set code [dict get $resp error code]
 		git_placeholder [expr {$code eq "bad_request" ? "(not a git repository)" \
 			: [dict get $resp error message]}]
+		git_commit_bar 0
 		rl_end $b
 		return
 	}
@@ -945,10 +947,19 @@ proc refresh_git {} {
 	set changes [dict get $r changes]
 	if {![llength $changes]} {
 		git_placeholder "(clean)"
+		git_commit_bar 0
 		rl_end $b
 		return
 	}
-	foreach c $changes { git_render_row $c }
+	# The commit bar shows only when the index has something to commit: a change whose
+	# X (staged column) is a real status char — not clean " " and not untracked "?".
+	set staged 0
+	foreach c $changes {
+		git_render_row $c
+		set x [dict get $c x]
+		if {$x ne " " && $x ne "?"} { set staged 1 }
+	}
+	git_commit_bar $staged
 	rl_end $b
 }
 
@@ -1030,6 +1041,47 @@ proc do_git {op path} {
 		return
 	}
 	refresh_dock
+}
+
+# Show or hide the commit bar (D45). refresh_git calls this with 1 when the index has a
+# staged change to commit, 0 otherwise — so the bar is present exactly when committing is
+# meaningful. Packed at the very bottom of the git pane (below the change list and any
+# diff). Hiding clears the entry so a stale message never lingers into the next repo.
+proc git_commit_bar {show} {
+	if {$show} {
+		if {[lsearch -exact [pack slaves .dock.git] .dock.git.commit] < 0} {
+			pack .dock.git.commit -side bottom -fill x
+		}
+	} else {
+		pack forget .dock.git.commit
+		.dock.git.commit.msg delete 0 end
+	}
+}
+
+# Commit the staged index with the bar's summary line. Empty (or whitespace) message is
+# refused quietly — a flash, focus kept, no core call — rather than letting git abort.
+# On success the staged changes vanish, so refresh_dock auto-hides the bar; the header
+# then flashes the new short hash (git_flash outlives the refresh via `after`).
+proc git_commit {} {
+	set msg [string trim [.dock.git.commit.msg get]]
+	if {$msg eq ""} { git_flash "enter a commit message" ; focus .dock.git.commit.msg ; return }
+	set resp [rio_call git.commit [dict create message $msg]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	.dock.git.commit.msg delete 0 end
+	refresh_dock
+	git_flash "✓ committed [dict get $resp result hash]"
+}
+
+# Briefly show a message in the git header's branch label, then restore it. Reuses the
+# header rather than adding a status widget; the scheduled refresh_git repaints the real
+# branch line. Runs after refresh_dock, so the flash survives that repaint.
+proc git_flash {text} {
+	.dock.git.hdr.branch configure -text $text
+	after cancel refresh_git
+	after 2500 refresh_git
 }
 
 # An auto-hiding scrollbar: visible only when the view can't show everything.
@@ -2683,6 +2735,13 @@ proc apply_theme {theme} {
 	# The diff area is code, so it takes the editor surface.
 	.dock.git.diff configure -font RioEditorFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+	# The commit bar (D45): UI chrome like the header; the summary entry on the editor
+	# surface like the find entry so it reads as a place to type.
+	.dock.git.commit configure -background [dict get $c ui.bg]
+	.dock.git.commit.go configure -font RioUIFont
+	.dock.git.commit.msg configure -font RioUIFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor]
 	# The agent chat pane (D26): the chat.* roles + RioChatFont; accent on labels.
 	.chat configure -background [dict get $c chat.bg]
 	.chat.hdr configure -background [dict get $c chat.bg]
@@ -4055,6 +4114,17 @@ pack .dock.git.well.body -side left -fill both -expand 1
 # Picking a change (single click / arrow) shows its diff (git_pick); no separate
 # activate; right-click pops a context menu (git_context_menu).
 rl_init .dock.git.well.body git_pick {} git_context_menu
+
+# The commit bar (D45): rio's first inline text-input in a dock pane. A single-line
+# summary entry + a Commit button, packed at the bottom of the git pane by refresh_git
+# ONLY when something is staged (and hidden otherwise) — "appears only when needed", the
+# D36 find-bar quality bar. Enter in the entry commits too. Built here, not packed.
+frame  .dock.git.commit -background "#dddddd"
+entry  .dock.git.commit.msg -font {monospace 9}
+button .dock.git.commit.go  -text "✓ Commit" -font {monospace 9} -command git_commit
+pack .dock.git.commit.go  -side right -padx {2 4} -pady 2
+pack .dock.git.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
+bind .dock.git.commit.msg <Return> git_commit
 
 # A thin draggable divider between the dock and the editor. place_dock parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which

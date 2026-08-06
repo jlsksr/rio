@@ -2525,6 +2525,42 @@ logic (Track vs Stage vs Unstage vs Stage folder) and the action path (stage→u
 file, pane repaints). File-management actions (New / Rename / Delete) and commit/discard
 are recorded in ROADMAP, not built.
 
+### D45 — git commit from the GUI: the first inline pane input
+
+D44 let you stage but not commit — the loop dead-ended at the terminal. D45 adds
+**commit**, and with it rio's **first inline text-input inside a dock pane**: an
+*auto-showing commit bar* at the bottom of the git pane. It appears **only when the
+index has a staged change** and hides when nothing is staged — the D36 find-bar quality
+bar ("dynamic — appears only when needed") rather than VSCode's always-present box, so
+the narrow dock carries no dead space and there's no button to hunt for. A single-line
+summary entry + a *✓ Commit* button; Enter in the entry commits too.
+
+**Why staged-only visibility.** Commit acts on the index. Showing the bar exactly when
+something is staged makes the affordance self-explanatory (you staged → now you can
+commit) and structurally prevents the "nothing to commit" error — the bar simply isn't
+there when it would fail. `refresh_git` computes `staged` while drawing the change list
+(any change whose X column is a real status char, not `" "` or `"?"` — the same test
+`git_pick` uses) and calls `git_commit_bar`; every clean / no-repo early-return hides it.
+The toggle is deliberately *not* a blanket hide-at-top, so staging another file (which
+runs `refresh_dock`) doesn't wipe a half-typed message.
+
+**Single-line, v1.** One summary line (`git commit -m`), matching rio's own commit style
+and keeping the dock uncluttered; a multi-line body is deferred (ROADMAP). An empty
+message is refused quietly in the GUI (a header flash, focus kept — no core call) rather
+than letting git abort. Success feedback reuses the header: `git_flash` shows
+`✓ committed <short-hash>` in the branch label and schedules a `refresh_git` to restore
+it — no new status widget.
+
+**Core.** `git.commit` (`git commit -m <msg>`, returning the new HEAD short hash for the
+flash) joins `rio::git` and registers like the rest — the second git write family after
+D44, core-side so it works remote unchanged. We lean on git's own honest guards
+(surfaced as `bad_request` by `_run`): empty message and nothing-staged both fail with
+git's wording, no pre-checks. Tested: `git.test` covers commit-clears-index, the
+unborn-HEAD first commit, and nothing-staged → `bad_request` (core 322); `smoke.tcl`
+covers the bar's staged-only visibility and the commit action (empty no-ops, a real
+summary commits + clears the entry + auto-hides the bar). This commit bar is also the
+input primitive the deferred file-management verbs (Rename / New) will reuse.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

@@ -83,6 +83,16 @@ proc rio::git::unstage {cwd path} {
 	return ""
 }
 
+# git.commit: record the staged index as a commit — `git commit -m <msg>`. The second
+# git write family after D44's add/unstage. We lean on git's own guards, surfaced as
+# bad_request by _run: an empty message (`commit -m ""` aborts) and nothing staged
+# ("nothing to commit") both fail honestly with git's wording — no pre-checks here.
+# Returns the new HEAD's short hash, for the frontend to confirm the commit.
+proc rio::git::commit {cwd msg} {
+	_run $cwd commit -m $msg
+	return [string trim [_run $cwd rev-parse --short HEAD]]
+}
+
 # git.diff: the unified diff text. `staged` selects the index (--cached); `path`
 # limits it to one file. Returned raw for the caller to render.
 proc rio::git::diff {cwd path staged} {

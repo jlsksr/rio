@@ -33,6 +33,13 @@ proc rio::ops::git_unstage {params} {
 }
 rio::dispatch::register git.unstage rio::ops::git_unstage
 
+# git.commit {message, ?cwd?} -> {hash <short>} ; commit the staged index.
+proc rio::ops::git_commit {params} {
+	set hash [rio::git::commit [_git_cwd $params] [dict get $params message]]
+	return [dict create result [dict create hash $hash]]
+}
+rio::dispatch::register git.commit rio::ops::git_commit
+
 # git.diff {?cwd?, ?path?, ?staged?} -> {diff <unified-diff text>}
 proc rio::ops::git_diff {params} {
 	set path   [expr {[dict exists $params path]   ? [dict get $params path]   : ""}]

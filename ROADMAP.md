@@ -25,7 +25,8 @@ Each entry notes its state:
   Folder / Rename / Delete** — are the natural next set. Each needs a new `fs.*` write
   op (create / rename / delete, core-side so it works remote like `git.add`) and a
   confirmation for the destructive ones, plus refreshing the pane after. Kept out of
-  D44 to keep that pass git-focused.
+  D44 to keep that pass git-focused. The **inline text-input** New/Rename need now
+  exists — the D45 commit bar is the reusable primitive (an auto-showing pane entry).
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:
@@ -122,12 +123,12 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44). Stage / unstage / track
-  landed as `git.add` / `git.unstage`, driven from the pane context menus. Still
-  wanted: **commit** (needs a message-input UI — the first git write that isn't a
-  one-shot op) and **discard changes** (`git restore` / removing an untracked file —
-  destructive, so behind a confirm). These were consciously left out of D44's first
-  pass.
+- **Write operations** — *in progress* (AGENTS.md D44, D45). Stage / unstage / track
+  landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
+  driven from an auto-showing single-line commit bar in the git pane — rio's first
+  inline pane text-input. Still wanted: **discard changes** (`git restore` / removing an
+  untracked file — destructive, so behind a confirm), and a **multi-line commit
+  message** body (v1 is a single summary line).
 
 ## Agent
 
