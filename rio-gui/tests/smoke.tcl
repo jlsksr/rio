@@ -177,18 +177,21 @@ set ::captured {}
 # --- file pane (project root + lazy fs.list navigator) -----------------------
 # Build a throwaway tree, open it as the project folder, and drive the pane the
 # way a double-click would (select a row, call nav_activate).
-# The pane is a read-only text widget now (D42): each row is "<glyph> <name>", so a
-# label is the line text past the glyph and its space. ::nav_rows is the row count.
+# The pane is a read-only rl_* text widget (D42/D43): each row is
+# "<flag-gutter:2><glyph> <name>", so a label is the line text past a 4-char prefix
+# (the 2-char git-flag gutter, the type glyph, and its space).
 proc nav_labels {} {
 	set b .dock.files.well.body
 	set out {}
-	for {set i 0} {$i < [llength $::nav_rows]} {incr i} {
+	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
 		set L [expr {$i + 1}]
-		lappend out [string range [$b get "$L.0" "$L.0 lineend"] 2 end]
+		lappend out [string range [$b get "$L.0" "$L.0 lineend"] 4 end]
 	}
 	return $out
 }
-proc nav_click {row} { nav_select $row ; nav_activate }
+proc nav_click {row} {
+	rl_select .dock.files.well.body $row ; rl_activate .dock.files.well.body
+}
 
 set tf [file tempfile tpath] ; close $tf
 set proj [file join [file dirname $tpath] riogui-nav-[clock clicks]]
@@ -202,9 +205,9 @@ ok "pane: header is project name" [.dock.files.head cget -text] [file tail $proj
 ok "pane: dirs then files"        [nav_labels]           {sub/ zeta.txt}
 # Bands: a selection covers exactly its row (through the newline, so it spans full
 # width); a hover tags the hovered row. (D42 rich-list.)
-nav_select 0
+rl_select .dock.files.well.body 0
 ok "pane: selection band on row 0" [.dock.files.well.body tag ranges selrow]   {1.0 2.0}
-nav_hover 1
+rl_set_hover .dock.files.well.body 1
 ok "pane: hover band on row 1"     [.dock.files.well.body tag ranges hoverrow] {2.0 3.0}
 update idletasks
 ok "pane: scrollbar hidden when list fits" \
@@ -281,20 +284,45 @@ if {![catch {exec git --version}]} {
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\n" ; close $gf
 	gitc $gdir add a.txt ; gitc $gdir commit -q -m first
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\ntwo\n" ; close $gf
+	file mkdir [file join $gdir sub]
+	set nf [open [file join $gdir sub n.txt] w] ; puts -nonewline $nf "new\n" ; close $nf
 
-	open_folder $gdir          ;# active pane is files; git refreshes when shown
-	show_pane git
+	# The file pane annotates its rows with git flags (D43): with a.txt modified in the
+	# worktree and an untracked file under sub/, the file pane (still the active pane
+	# after open_folder) shows an "M" flag on the file and a "·" rollup dot on the dir.
+	# (Look up by name — the pane also lists .git/, so row order isn't fixed.)
+	proc fpane_flag {name} {
+		set b .dock.files.well.body
+		for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
+			if {[file tail [lindex [rl_payload $b $i] 1]] eq $name} {
+				set L [expr {$i + 1}]
+				return [string index [$b get "$L.0" "$L.0 lineend"] 0]
+			}
+		}
+		return ""
+	}
+	open_folder $gdir
+	ok "pane: dir rollup dot on sub"     [fpane_flag sub]   "·"
+	ok "pane: git flag on modified file" [fpane_flag a.txt] M
+
+	# The git list is an rl_* rich-list too now (D43): a row is "<XY> <path>" in the
+	# body text widget, picked via rl_select (which fires git_pick).
+	proc git_line {row} {
+		set b .dock.git.well.body ; set L [expr {$row + 1}]
+		return [$b get "$L.0" "$L.0 lineend"]
+	}
+	show_pane git              ;# the file pane was active above; git refreshes on show
 	proc git_shows_diff {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.diff] >= 0} }
 	ok "git: branch shown"        [.dock.git.hdr.branch cget -text] "⎇ main"
-	ok "git: change listed"       [string match "* M a.txt" [.dock.git.list get 0]] 1
+	ok "git: change listed"       [string match "* M a.txt" [git_line 0]] 1
 	ok "git: diff hidden until pick" [git_shows_diff] 0
-	.dock.git.list selection set 0 ; git_select
+	rl_select .dock.git.well.body 0
 	ok "git: diff shows on pick"   [git_shows_diff] 1
 	ok "git: diff shows the edit"  [string match "*+two*" [.dock.git.diff get 1.0 end-1c]] 1
 
 	# Refresh after staging clears the worktree change for that path and re-collapses.
 	gitc $gdir add a.txt ; refresh_git
-	ok "git: refresh sees staged"   [string match "M *a.txt" [.dock.git.list get 0]] 1
+	ok "git: refresh sees staged"   [string match "M *a.txt" [git_line 0]] 1
 	ok "git: diff re-collapses"     [git_shows_diff] 0
 	file delete -force $gdir
 } else {
