@@ -577,7 +577,13 @@ proc open_folder {path} {
 
 proc on_project_opened {p} {
 	set ::nav_dir [dict get $p root]
-	# Refresh the visible pane now; the other refreshes when next shown.
+	refresh_dock
+}
+
+# Repaint whichever dock pane is showing (the other repaints when next shown). rio
+# does no file-watching, so the panes' git state is refreshed at the moments rio
+# knows something changed — opening a folder, saving a file — rather than live.
+proc refresh_dock {} {
 	if {$::dock_pane eq "git"} { refresh_git } else { populate_nav }
 }
 
@@ -1573,6 +1579,7 @@ proc do_save_as {path} {
 	}
 	bufset $::cur path $path
 	clear_modified
+	refresh_dock   ;# the new/renamed file (and its git flag) now shows in the pane
 	return 1
 }
 
@@ -1585,6 +1592,7 @@ proc do_save {} {
 		return 0
 	}
 	clear_modified
+	refresh_dock   ;# saved edits are now on disk — repaint so the git flag appears
 	return 1
 }
 

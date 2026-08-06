@@ -282,7 +282,8 @@ if {![catch {exec git --version}]} {
 	proc gitc {dir args} { exec git -C $dir -c user.email=t@e -c user.name=t {*}$args }
 	gitc $gdir init -q ; gitc $gdir branch -M main
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\n" ; close $gf
-	gitc $gdir add a.txt ; gitc $gdir commit -q -m first
+	set gf [open [file join $gdir b.txt] w] ; puts -nonewline $gf "bee\n" ; close $gf
+	gitc $gdir add a.txt b.txt ; gitc $gdir commit -q -m first
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\ntwo\n" ; close $gf
 	file mkdir [file join $gdir sub]
 	set nf [open [file join $gdir sub n.txt] w] ; puts -nonewline $nf "new\n" ; close $nf
@@ -304,6 +305,14 @@ if {![catch {exec git --version}]} {
 	open_folder $gdir
 	ok "pane: dir rollup dot on sub"     [fpane_flag sub]   "·"
 	ok "pane: git flag on modified file" [fpane_flag a.txt] M
+
+	# Saving from the editor repaints the pane so a fresh flag appears (D43): b.txt is
+	# committed-clean, so it has no flag until we edit it and save (do_save -> refresh).
+	ok "pane: clean file has no flag"    [fpane_flag b.txt] " "
+	do_open [file join $gdir b.txt]
+	.ed.t insert 1.0 "z"
+	do_save
+	ok "pane: flag appears after save"   [fpane_flag b.txt] M
 
 	# The git list is an rl_* rich-list too now (D43): a row is "<XY> <path>" in the
 	# body text widget, picked via rl_select (which fires git_pick).

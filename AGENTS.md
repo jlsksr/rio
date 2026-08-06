@@ -2479,10 +2479,16 @@ Same kind→colour tags as the git pane. Porcelain paths are repo-root-relative 
 opens the repo root as the project, so they anchor at the project root; no repo (a
 plain folder) means no gutter. No new theme roles — the flags borrow `diff.added` /
 `diff.removed` / `accent`. It is still a *read* view (D7): flags are shown, not acted
-on; there is no file-watching, so like the git pane the flags refresh on the next
-repaint (the file-pane auto-refresh gap, ROADMAP, is unchanged). `smoke.tcl` covers
-the git rich-list (row text, pick→diff) and the file-pane flags (an `M` on a modified
-file, a `·` on a dir with an untracked child); full sweep green.
+on. rio does no file-watching, so rather than live, the panes refresh at the moments
+rio *knows* the tree changed: opening a folder and **saving a file** both now call
+`refresh_dock` (repaint the shown pane). That closes the obvious feedback loop — edit
+in rio, save, see the `M` — without a watcher. What still needs a manual nudge
+(navigate, or the git Refresh button) is a change rio didn't make: an *unsaved* editor
+buffer (git reads the working tree on disk, so there's nothing to see yet) and edits
+made *outside* rio. The general file-pane auto-refresh gap (ROADMAP) stays open.
+`smoke.tcl` covers the git rich-list (row text, pick→diff) and the file-pane flags (an
+`M` on a modified file, a `·` on a dir with an untracked child, and a flag appearing
+after `do_save`); full sweep green.
 
 ---
 
