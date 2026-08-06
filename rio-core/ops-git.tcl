@@ -19,6 +19,20 @@ proc rio::ops::git_status {params} {
 }
 rio::dispatch::register git.status rio::ops::git_status
 
+# git.add {path, ?cwd?} -> {} ; track/stage the path (the first git write op).
+proc rio::ops::git_add {params} {
+	rio::git::add [_git_cwd $params] [dict get $params path]
+	return [dict create result {}]
+}
+rio::dispatch::register git.add rio::ops::git_add
+
+# git.unstage {path, ?cwd?} -> {} ; drop the path from the index (inverse of add).
+proc rio::ops::git_unstage {params} {
+	rio::git::unstage [_git_cwd $params] [dict get $params path]
+	return [dict create result {}]
+}
+rio::dispatch::register git.unstage rio::ops::git_unstage
+
 # git.diff {?cwd?, ?path?, ?staged?} -> {diff <unified-diff text>}
 proc rio::ops::git_diff {params} {
 	set path   [expr {[dict exists $params path]   ? [dict get $params path]   : ""}]

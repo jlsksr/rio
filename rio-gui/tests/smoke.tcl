@@ -287,6 +287,7 @@ if {![catch {exec git --version}]} {
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\ntwo\n" ; close $gf
 	file mkdir [file join $gdir sub]
 	set nf [open [file join $gdir sub n.txt] w] ; puts -nonewline $nf "new\n" ; close $nf
+	set uf [open [file join $gdir u.txt] w] ; puts -nonewline $uf "untracked\n" ; close $uf
 
 	# The file pane annotates its rows with git flags (D43): with a.txt modified in the
 	# worktree and an untracked file under sub/, the file pane (still the active pane
@@ -305,6 +306,7 @@ if {![catch {exec git --version}]} {
 	open_folder $gdir
 	ok "pane: dir rollup dot on sub"     [fpane_flag sub]   "·"
 	ok "pane: git flag on modified file" [fpane_flag a.txt] M
+	ok "pane: untracked file flagged ?"  [fpane_flag u.txt] ?
 
 	# Saving from the editor repaints the pane so a fresh flag appears (D43): b.txt is
 	# committed-clean, so it has no flag until we edit it and save (do_save -> refresh).
@@ -328,6 +330,47 @@ if {![catch {exec git --version}]} {
 	rl_select .dock.git.well.body 0
 	ok "git: diff shows on pick"   [git_shows_diff] 1
 	ok "git: diff shows the edit"  [string match "*+two*" [.dock.git.diff get 1.0 end-1c]] 1
+
+	# Context menus (D44). Build the menus without posting (tk_popup would grab) and
+	# read back their entry labels; ::nav_git still reflects the last file-pane paint
+	# (a.txt " M", u.txt "??", sub "??").
+	proc menu_labels {m} {
+		set out {}
+		for {set i 0} {$i <= [$m index end]} {incr i} {
+			lappend out [expr {[$m type $i] eq "separator" ? "---" : [$m entrycget $i -label]}]
+		}
+		return $out
+	}
+	menu .tm -tearoff 0
+	nav_menu_build .tm [list file [file join $gdir a.txt]]
+	ok "menu: modified file offers Stage" [menu_labels .tm] {Open {Copy Path} --- Stage}
+	.tm delete 0 end ; nav_menu_build .tm [list file [file join $gdir u.txt]]
+	ok "menu: untracked file offers Track" [menu_labels .tm] {Open {Copy Path} --- {Track (git add)}}
+	.tm delete 0 end ; nav_menu_build .tm [list dir [file join $gdir sub]]
+	ok "menu: dir with changes offers Stage folder" [menu_labels .tm] {Open --- {Stage folder}}
+	.tm delete 0 end ; git_menu_build .tm [dict create x { } y M path a.txt]
+	ok "menu: git unstaged offers Stage" [menu_labels .tm] {Open {Copy Path} --- Stage}
+	.tm delete 0 end ; git_menu_build .tm [dict create x A y { } path c.txt]
+	ok "menu: git staged offers Unstage" [menu_labels .tm] {Open {Copy Path} --- Unstage}
+	destroy .tm
+
+	# The action proc: stage/unstage a path through the core, then the pane repaints.
+	# git_xy_for reads a path's two status chars back out of the git list.
+	proc git_xy_for {name} {
+		set b .dock.git.well.body
+		for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
+			set p [rl_payload $b $i]
+			if {$p ne "" && [dict get $p path] eq $name} {
+				set L [expr {$i + 1}]
+				return [string range [$b get "$L.0" "$L.0 lineend"] 0 1]
+			}
+		}
+		return ""
+	}
+	do_git add [file join $gdir b.txt]
+	ok "action: stage flips b.txt to staged"   [git_xy_for b.txt] "M "
+	do_git unstage [file join $gdir b.txt]
+	ok "action: unstage returns b.txt"          [git_xy_for b.txt] " M"
 
 	# Refresh after staging clears the worktree change for that path and re-collapses.
 	gitc $gdir add a.txt ; refresh_git

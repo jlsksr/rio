@@ -142,6 +142,61 @@ test git-status-wire {git.status encodes to JSON with branch + a changes array} 
 	rio::wire::response [dict create id 1 ok true op git.status result $result]
 } -result {{"id":"1","ok":true,"result":{"branch":"main","changes":[{"x":"A","y":" ","path":"c.txt"}]}}}
 
+# --- write layer: add (track/stage) and unstage (D44) ------------------------
+# These mutate the index, so each gets its OWN repo (makerepo: a.txt " M", c.txt
+# "A ", b.txt "??") rather than the shared read-only $::repo. xy_of reads one path's
+# two status chars back out.
+proc xy_of {repo path} {
+	set c [by_path [dict get [rio::git::status $repo] changes]]
+	if {![dict exists $c $path]} { return "" }
+	return "[dict get $c $path x][dict get $c $path y]"
+}
+
+test git-add-tracks-untracked {add stages an untracked file (?? -> A )} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	rio::git::add $d b.txt
+	xy_of $d b.txt
+} -cleanup {file delete -force $d} -result {A }
+
+test git-add-stages-modified {add stages a modified tracked file ( M -> M )} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	rio::git::add $d a.txt
+	xy_of $d a.txt
+} -cleanup {file delete -force $d} -result {M }
+
+test git-unstage-staged-add {unstage drops a staged add back to untracked (A  -> ??)} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	rio::git::unstage $d c.txt
+	xy_of $d c.txt
+} -cleanup {file delete -force $d} -result {??}
+
+test git-unstage-unborn-head {unstage works on an unborn HEAD (no commits yet)} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-unborn-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	writefile [file join $d f.txt] "hi\n" ; git_in $d add f.txt   ;# staged add, no HEAD
+} -body {
+	rio::git::unstage $d f.txt
+	xy_of $d f.txt
+} -cleanup {file delete -force $d} -result {??}
+
+test git-op-add {git.add op stages through the core and returns ok} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set resp [dict get [rio::core::call git.add [dict create cwd $d path b.txt]] response]
+	list [dict get $resp ok] [xy_of $d b.txt]
+} -cleanup {file delete -force $d} -result {true {A }}
+
+test git-op-unstage {git.unstage op unstages through the core and returns ok} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set resp [dict get [rio::core::call git.unstage [dict create cwd $d path c.txt]] response]
+	list [dict get $resp ok] [xy_of $d c.txt]
+} -cleanup {file delete -force $d} -result {true ??}
+
+test git-write-ops-registered {git.add and git.unstage are in the live registry} -body {
+	expr {"git.add" in [rio::dispatch::opnames] \
+		&& "git.unstage" in [rio::dispatch::opnames]}
+} -result 1
+
 if {[testConstraint hasgit] && [info exists ::repo]} {
 	file delete -force $::repo
 }

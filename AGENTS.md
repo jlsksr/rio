@@ -2492,6 +2492,41 @@ after `do_save`); full sweep green.
 
 ---
 
+### D44 — Right-click context menus on the panes; the first git write ops
+
+The rich-list panes could show git state (D43) but not *act* on it — no way to track an
+untracked file. So: **right-click context menus** on both panes, and the git actions
+they need. "Track a file" is `git add`, which is the **first git write op in rio** —
+git had been read-only since D7 (status/diffs). This deliberately extends that line to
+**stage / unstage / track**; commit (needs a message UI) and discard (destructive)
+stay out.
+
+**Menus ride the `rl_*` component.** `rl_init` gains a third callback, `oncontext`; a
+`<Button-3>` binding runs `rl_context`, which selects the row under the pointer
+(band only — `fire=0`, so a git-pane right-click doesn't also load the diff) and hands
+its payload + root coords to the pane's builder. Each pane keeps a tiny builder
+(`nav_menu_build` / `git_menu_build`, split from the `tk_popup` wrapper so a headless
+test can read the entry labels) that follows the existing `tab_context_menu` idiom —
+a fresh menu per popup, scoped to the clicked row (the UI-design bar). The file menu
+offers Open + Copy Path always, and git items from the row's status (read from the
+`::nav_git` stash `populate_nav` already computes): untracked → *Track (git add)*,
+worktree-dirty → *Stage*, staged → *Unstage*, a dir with changes → *Stage folder*. The
+git-pane menu offers Open + Copy Path + Stage/Unstage from the change's X/Y.
+
+**Core.** `git.add` (`git add -- <path>`) and `git.unstage` (`git reset -q -- <path>` —
+`reset`, not `restore --staged`, so it also works on an unborn HEAD) join `rio::git`
+and register like the read ops (D7/D11). They run core-side, so the menus work in
+remote mode unchanged; the GUI's `do_git` calls the op then `refresh_dock` so the flag
+/ change list updates immediately. Paths are the one wrinkle: the file pane holds
+abspaths, the git pane holds repo-relative paths — both resolve against the project-root
+cwd, so `do_git` passes either through untouched. Tested end to end: `git.test` covers
+add/unstage incl. the unborn-HEAD case (core 318); `smoke.tcl` covers the menu-label
+logic (Track vs Stage vs Unstage vs Stage folder) and the action path (stage→unstage a
+file, pane repaints). File-management actions (New / Rename / Delete) and commit/discard
+are recorded in ROADMAP, not built.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
