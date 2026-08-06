@@ -66,6 +66,23 @@ proc rio::git::status {cwd} {
 	return [dict create branch $branch changes $changes]
 }
 
+# git.add: track/stage a path — `git add -- <path>`. An untracked file becomes
+# tracked+staged; a modified tracked file has its worktree changes staged. This is
+# the first git WRITE op (D7 was read-only status/diffs); it carries no result.
+proc rio::git::add {cwd path} {
+	_run $cwd add -- $path
+	return ""
+}
+
+# git.unstage: the inverse of add — `git reset -q -- <path>` drops the path from the
+# index (a staged-add returns to untracked; a staged modification returns to modified-
+# unstaged). `reset` rather than `restore --staged` so it also works on an unborn HEAD
+# (a repo with no commits yet), where `restore --staged` cannot resolve HEAD.
+proc rio::git::unstage {cwd path} {
+	_run $cwd reset -q -- $path
+	return ""
+}
+
 # git.diff: the unified diff text. `staged` selects the index (--cached); `path`
 # limits it to one file. Returned raw for the caller to render.
 proc rio::git::diff {cwd path staged} {

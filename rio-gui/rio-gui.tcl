@@ -602,9 +602,10 @@ proc refresh_dock {} {
 # arrow), onactivate on double-click / Return; either may be empty. The bands use
 # the shared `selrow`/`hoverrow` tags, configured per body in apply_theme.
 # ---------------------------------------------------------------------------
-proc rl_init {b onselect onactivate} {
-	set ::rl_onselect($b)  $onselect
+proc rl_init {b onselect onactivate oncontext} {
+	set ::rl_onselect($b)   $onselect
 	set ::rl_onactivate($b) $onactivate
+	set ::rl_oncontext($b)  $oncontext
 	rl_reset $b
 	bind $b <Button-1>        "focus %W ; rl_click %W %x %y ; break"
 	bind $b <Double-Button-1> "rl_click %W %x %y ; rl_activate %W ; break"
@@ -613,6 +614,7 @@ proc rl_init {b onselect onactivate} {
 	bind $b <Down>            "rl_move %W 1 ; break"
 	bind $b <Motion>          "rl_hover_at %W %x %y"
 	bind $b <Leave>           "rl_set_hover %W -1"
+	bind $b <Button-3>        "rl_context %W %x %y %X %Y ; break"
 }
 proc rl_reset {b} {
 	set ::rl_rows($b)  {}
@@ -672,6 +674,17 @@ proc rl_activate {b} {
 		{*}$::rl_onactivate($b) [rl_payload $b $row]
 	}
 }
+# Right-click: select the row under the pointer (band only — fire=0, so a git-pane
+# right-click doesn't also load its diff) and hand its payload + root coords to the
+# owning pane's oncontext, which pops a menu. A right-click off any row does nothing.
+proc rl_context {b x y X Y} {
+	set row [rl_row_at $b $x $y]
+	if {![rl_selectable $b $row]} return
+	rl_select $b $row 0
+	if {$::rl_oncontext($b) ne ""} {
+		{*}$::rl_oncontext($b) [rl_payload $b $row] $X $Y
+	}
+}
 
 # Row index under a pixel: the text line at @x,y, minus one (line N -> row N-1).
 proc rl_row_at {b x y} {
@@ -717,12 +730,14 @@ proc populate_nav {} {
 		.dock.files.head configure -text "(no folder)"
 		$b insert end "    Open a folder…\n"
 		rl_row $b 0 [list none ""]
+		set ::nav_git {}
 		rl_end $b
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
 	.dock.files.head configure -text [nav_header $::nav_dir $root]
 	set git [nav_git_map $root]
+	set ::nav_git $git   ;# stashed so the row context menu can read status (D44)
 	if {$::nav_dir ne $root} {
 		nav_render_row dir [file dirname $::nav_dir] ".." "▴" ""
 	}
@@ -819,6 +834,50 @@ proc nav_open {payload} {
 		dir  { set ::nav_dir $path ; populate_nav }
 		file { do_open $path }
 	}
+}
+
+# Right-click a file/dir row (oncontext): a menu of actions ABOUT THIS ROW (the
+# UI-design bar — scoped to what was clicked, like the tab menu). Rebuilt each popup
+# so the git items reflect the row's current status (read from the ::nav_git stash).
+# Open + Copy Path always; git stage/unstage/track appear only when they apply (D44).
+# nav_menu_build fills a menu (separated so a headless test can inspect entries
+# without posting); nav_context_menu wraps it in the popup.
+proc nav_context_menu {payload X Y} {
+	catch {destroy .navmenu}
+	menu .navmenu -tearoff 0
+	nav_menu_build .navmenu $payload
+	tk_popup .navmenu $X $Y
+}
+proc nav_menu_build {m payload} {
+	lassign $payload type path
+	$m add command -label "Open" -command [list nav_open $payload]
+	if {$type eq "file"} {
+		$m add command -label "Copy Path" -command [list rio_copy_clip $path]
+	}
+	nav_menu_git $m $type $path
+}
+# Append the git items for a row, given its type and abspath. A file uses its XY from
+# the stash (untracked -> Track; worktree-dirty -> Stage; staged -> Unstage); a dir
+# that contains changes offers "Stage folder" (git add on the directory).
+proc nav_menu_git {m type path} {
+	if {![info exists ::nav_git]} return
+	if {$type eq "dir"} {
+		if {[nav_dir_status $::nav_git $path] ne ""} {
+			$m add separator
+			$m add command -label "Stage folder" -command [list do_git add $path]
+		}
+		return
+	}
+	if {![dict exists $::nav_git $path]} return   ;# clean / no repo — no git items
+	set xy [dict get $::nav_git $path]
+	set x [string index $xy 0] ; set y [string index $xy 1]
+	$m add separator
+	if {$x eq "?"} {
+		$m add command -label "Track (git add)" -command [list do_git add $path]
+		return
+	}
+	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
+	if {$x ne " "} { $m add command -label "Unstage" -command [list do_git unstage $path] }
 }
 
 proc open_folder_dialog {} {
@@ -935,6 +994,42 @@ proc git_pick {row} {
 	}
 	set d [dict get $resp result diff]
 	git_show_diff [expr {$d eq "" ? "(no textual diff)" : $d}]
+}
+
+# Right-click a change row (oncontext): Open the file, Copy Path, and Stage/Unstage
+# from its X/Y (D44). The porcelain path is repo-root-relative and the project root is
+# the repo root, so it doubles as git's cwd-relative path; Open needs the abspath.
+# git_menu_build fills the menu (separated for headless inspection); the wrapper posts.
+proc git_context_menu {payload X Y} {
+	catch {destroy .gitmenu}
+	menu .gitmenu -tearoff 0
+	git_menu_build .gitmenu $payload
+	tk_popup .gitmenu $X $Y
+}
+proc git_menu_build {m payload} {
+	set path [dict get $payload path]
+	set root [dict get [rio_call project.get {}] result root]
+	set abs  [file join $root $path]
+	$m add command -label "Open"      -command [list do_open $abs]
+	$m add command -label "Copy Path" -command [list rio_copy_clip $abs]
+	set x [dict get $payload x] ; set y [dict get $payload y]
+	$m add separator
+	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
+	if {$x ne " " && $x ne "?"} {
+		$m add command -label "Unstage" -command [list do_git unstage $path]
+	}
+}
+
+# Run a git write op (add | unstage) on a path, then repaint the shown pane so the
+# new flag / change list appears. The path may be a file-pane abspath or a git-pane
+# repo-relative path — git resolves both against the project-root cwd.
+proc do_git {op path} {
+	set resp [rio_call git.$op [dict create path $path]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	refresh_dock
 }
 
 # An auto-hiding scrollbar: visible only when the view can't show everything.
@@ -2317,13 +2412,17 @@ proc refresh_status {} {
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [dict size $::buffers] $mode]
 }
+# Put text on the clipboard (a no-op for empty text). The one clipboard idiom the
+# context menus share.
+proc rio_copy_clip {text} {
+	if {$text eq ""} return
+	clipboard clear
+	clipboard append $text
+}
 # Copy a tab's file path to the clipboard (context menu). A no-op for an untitled
 # buffer, which has no path — the menu disables the item in that case.
 proc tab_copy_path {id} {
-	set path [bufget $id path]
-	if {$path eq ""} return
-	clipboard clear
-	clipboard append $path
+	rio_copy_clip [bufget $id path]
 }
 
 # Right-click a tab handle: a context menu of actions ABOUT THIS TAB (id, g) — nothing
@@ -3923,8 +4022,8 @@ pack .dock.files.well -side top -fill both -expand 1
 pack .dock.files.well.body -side left -fill both -expand 1
 # .dock.files.well.sb is packed on demand by autoscroll (hidden when the list fits).
 # The files pane doesn't act on mere selection (onselect empty); a double-click /
-# Return opens the row (nav_open).
-rl_init .dock.files.well.body {} nav_open
+# Return opens the row (nav_open); right-click pops a context menu (nav_context_menu).
+rl_init .dock.files.well.body {} nav_open nav_context_menu
 
 # Git pane body: branch header + Refresh, the changed-file list (a rich-list well,
 # D43 — same chrome as the file pane), and a read-only diff area below it.
@@ -3953,8 +4052,9 @@ text .dock.git.diff -wrap none -width 26 -height 8 -state disabled \
 pack .dock.git.well -side top -fill both -expand 1
 pack .dock.git.well.body -side left -fill both -expand 1
 # .dock.git.well.sb is packed on demand by autoscroll; .dock.git.diff by git_show_diff.
-# Picking a change (single click / arrow) shows its diff (git_pick); no separate activate.
-rl_init .dock.git.well.body git_pick {}
+# Picking a change (single click / arrow) shows its diff (git_pick); no separate
+# activate; right-click pops a context menu (git_context_menu).
+rl_init .dock.git.well.body git_pick {} git_context_menu
 
 # A thin draggable divider between the dock and the editor. place_dock parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which
