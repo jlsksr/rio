@@ -67,7 +67,14 @@ Each entry notes its state:
   a dedicated pane (D14) until it lands. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a
-  non-modal tool window and re-hosts into a dock site when this lands.
+  non-modal tool window and re-hosts into a dock site when this lands. The **git
+  pane is the natural first *extension* tenant** once this and a stable plugin
+  UI-contribution seam exist — an extension can't contribute a GUI panel today (real
+  kinds are only syntax/mode/theme), so extracting git is premature and its cost is
+  these two missing seams, not the git code. When it comes, D43's files-pane git flags
+  make the boundary a shared **git-status service** (git publishes status; the
+  navigator subscribes if the extension is present, degrading to no-flags exactly like
+  the current no-repo case) rather than a clean lift-out of "the git pane".
 
 ## Syntax highlighting
 
