@@ -27,6 +27,10 @@ proc makerepo {} {
 	file mkdir $dir
 	git_in $dir init -q
 	git_in $dir branch -M main
+	# Persist a local identity so rio::git::commit (which shells a plain `git commit`,
+	# no -c identity) works without depending on the machine's global git config.
+	git_in $dir config user.email t@example.com
+	git_in $dir config user.name tester
 	writefile [file join $dir a.txt] "one\n"
 	git_in $dir add a.txt
 	git_in $dir commit -q -m first
@@ -192,9 +196,46 @@ test git-op-unstage {git.unstage op unstages through the core and returns ok} \
 	list [dict get $resp ok] [xy_of $d c.txt]
 } -cleanup {file delete -force $d} -result {true ??}
 
-test git-write-ops-registered {git.add and git.unstage are in the live registry} -body {
+test git-commit-records-staged {commit records the staged index and clears it} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set hash [rio::git::commit $d "add c.txt"]
+	# c.txt was staged (A ) -> now committed, so no longer a change; hash is the short SHA.
+	list [regexp {^[0-9a-f]{4,}$} $hash] [xy_of $d c.txt]
+} -cleanup {file delete -force $d} -result {1 {}}
+
+test git-commit-unborn-head {commit works on an unborn HEAD (first commit)} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-commit0-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	git_in $d config user.email t@example.com ; git_in $d config user.name tester
+	writefile [file join $d f.txt] "hi\n" ; git_in $d add f.txt   ;# staged add, no HEAD
+} -body {
+	set hash [rio::git::commit $d "first"]
+	list [regexp {^[0-9a-f]{4,}$} $hash] [dict get [rio::git::status $d] branch]
+} -cleanup {file delete -force $d} -result {1 main}
+
+test git-commit-nothing-staged {commit with nothing staged is a bad_request} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-clean-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	writefile [file join $d f.txt] "hi\n" ; git_in $d add f.txt ; git_in $d commit -q -m first
+} -body {
+	catch {rio::git::commit $d "nope"} err opts
+	rio::error::code_of $opts
+} -cleanup {file delete -force $d} -result bad_request
+
+test git-op-commit {git.commit op commits through the core and returns the hash} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set resp [dict get [rio::core::call git.commit \
+		[dict create cwd $d message "via op"]] response]
+	list [dict get $resp ok] [regexp {^[0-9a-f]{4,}$} [dict get $resp result hash]] \
+		[xy_of $d c.txt]
+} -cleanup {file delete -force $d} -result {true 1 {}}
+
+test git-write-ops-registered {git.add, git.unstage, git.commit are in the live registry} -body {
 	expr {"git.add" in [rio::dispatch::opnames] \
-		&& "git.unstage" in [rio::dispatch::opnames]}
+		&& "git.unstage" in [rio::dispatch::opnames] \
+		&& "git.commit" in [rio::dispatch::opnames]}
 } -result 1
 
 if {[testConstraint hasgit] && [info exists ::repo]} {

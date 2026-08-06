@@ -281,6 +281,9 @@ if {![catch {exec git --version}]} {
 	file mkdir $gdir
 	proc gitc {dir args} { exec git -C $dir -c user.email=t@e -c user.name=t {*}$args }
 	gitc $gdir init -q ; gitc $gdir branch -M main
+	# Persist a local identity so git.commit (a plain `git commit`) works headless
+	# regardless of the machine's global git config.
+	gitc $gdir config user.email t@e ; gitc $gdir config user.name t
 	set gf [open [file join $gdir a.txt] w] ; puts -nonewline $gf "one\n" ; close $gf
 	set gf [open [file join $gdir b.txt] w] ; puts -nonewline $gf "bee\n" ; close $gf
 	gitc $gdir add a.txt b.txt ; gitc $gdir commit -q -m first
@@ -376,6 +379,21 @@ if {![catch {exec git --version}]} {
 	gitc $gdir add a.txt ; refresh_git
 	ok "git: refresh sees staged"   [string match "M *a.txt" [git_line 0]] 1
 	ok "git: diff re-collapses"     [git_shows_diff] 0
+
+	# The commit bar (D45) auto-shows only when the index has a staged change. a.txt is
+	# now staged (M ) from the refresh above, so the bar is packed into the git pane.
+	proc git_bar_shown {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.commit] >= 0} }
+	ok "commit: bar shown when staged" [git_bar_shown] 1
+	# An empty (whitespace) summary is refused without touching the repo: still staged.
+	.dock.git.commit.msg delete 0 end ; .dock.git.commit.msg insert 0 "   " ; git_commit
+	ok "commit: empty message no-ops"  [git_xy_for a.txt] "M "
+	# A real summary commits the index: a.txt leaves the change list, the entry clears,
+	# and with nothing staged left the bar auto-hides (b.txt/u.txt stay unstaged).
+	.dock.git.commit.msg delete 0 end ; .dock.git.commit.msg insert 0 "smoke commit" ; git_commit
+	ok "commit: staged change committed" [git_xy_for a.txt] ""
+	ok "commit: entry cleared"           [.dock.git.commit.msg get] ""
+	ok "commit: bar hidden after commit" [git_bar_shown] 0
+	after cancel refresh_git   ;# drop the pending git_flash restore before teardown
 	file delete -force $gdir
 } else {
 	puts "SKIP  git pane checks (git not installed)"
