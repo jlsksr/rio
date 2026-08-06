@@ -177,33 +177,43 @@ set ::captured {}
 # --- file pane (project root + lazy fs.list navigator) -----------------------
 # Build a throwaway tree, open it as the project folder, and drive the pane the
 # way a double-click would (select a row, call nav_activate).
+# The pane is a read-only text widget now (D42): each row is "<glyph> <name>", so a
+# label is the line text past the glyph and its space. ::nav_rows is the row count.
 proc nav_labels {} {
+	set b .dock.files.well.body
 	set out {}
-	for {set i 0} {$i < [.dock.files.list size]} {incr i} { lappend out [.dock.files.list get $i] }
+	for {set i 0} {$i < [llength $::nav_rows]} {incr i} {
+		set L [expr {$i + 1}]
+		lappend out [string range [$b get "$L.0" "$L.0 lineend"] 2 end]
+	}
 	return $out
 }
-proc nav_click {row} {
-	.dock.files.list selection clear 0 end ; .dock.files.list selection set $row ; nav_activate
-}
+proc nav_click {row} { nav_select $row ; nav_activate }
 
 set tf [file tempfile tpath] ; close $tf
 set proj [file join [file dirname $tpath] riogui-nav-[clock clicks]]
 file mkdir [file join $proj sub]
 set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; close $zf
 
-ok "pane: empty before folder open" [nav_labels] {{  Open a folder…}}
+ok "pane: empty before folder open" [nav_labels] {{Open a folder…}}
 open_folder $proj
 ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
 ok "pane: header is project name" [.dock.files.head cget -text] [file tail $proj]
-ok "pane: dirs then files"        [nav_labels]           {sub/ {  zeta.txt}}
+ok "pane: dirs then files"        [nav_labels]           {sub/ zeta.txt}
+# Bands: a selection covers exactly its row (through the newline, so it spans full
+# width); a hover tags the hovered row. (D42 rich-list.)
+nav_select 0
+ok "pane: selection band on row 0" [.dock.files.well.body tag ranges selrow]   {1.0 2.0}
+nav_hover 1
+ok "pane: hover band on row 1"     [.dock.files.well.body tag ranges hoverrow] {2.0 3.0}
 update idletasks
 ok "pane: scrollbar hidden when list fits" \
-	[expr {[lsearch -exact [pack slaves .dock.files] .dock.files.sb] < 0}] 1
+	[expr {[lsearch -exact [pack slaves .dock.files.well] .dock.files.well.sb] < 0}] 1
 
-# Descend into the subdir (row 0 = sub/), then back up via "../".
+# Descend into the subdir (row 0 = sub/), then back up via "..".
 nav_click 0
 ok "pane: descended into sub"     $::nav_dir             [file normalize [file join $proj sub]]
-ok "pane: subdir shows .. first"  [lindex [nav_labels] 0] "../"
+ok "pane: subdir shows .. first"  [lindex [nav_labels] 0] ".."
 nav_click 0
 ok "pane: ascended to root"       $::nav_dir             [file normalize $proj]
 

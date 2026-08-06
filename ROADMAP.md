@@ -20,6 +20,13 @@ Each entry notes its state:
 - **File-pane auto-refresh** — *gap.* The file tree doesn't update when the agent
   creates a file; it refreshes on the next manual reload. Fold into a proper
   file-pane pass.
+- **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42, which
+  made the pane a rich-list drawn with a read-only text widget). Candidates: an
+  expandable Explorer-style tree (structural change to the flat navigator); the git
+  pane adopting the same rich-list; drawn-bitmap icons if glyphs prove too plain.
+  The larger fork — **core-backed read-only "view buffers"** (emacs-like modes for
+  dired/git/log, re-backing the D42 widget with the core) — is noted but *not taken*;
+  today the pane is deliberately GUI-local chrome, not a buffer.
 - **Undo-coalescing in the doc model** — *deferred.* Typing currently records
   fine-grained undo steps; batching a run of keystrokes into one undo unit is a
   noted refinement in the core document model. (Also felt in vi mode: one

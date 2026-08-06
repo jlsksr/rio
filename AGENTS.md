@@ -2408,6 +2408,42 @@ shortcut. Full sweep stays green (311 core + every GUI suite).
 
 ---
 
+### D42 — The files pane is a rich-list drawn with a text widget (not a listbox)
+
+The files pane was a classic Tk `listbox` — text-only, one whole-widget colour, one
+selection bar: "essentially the output of `ls`." To make it feel like Win98/2000-era
+productivity software (per the UI principle) it needs per-row icons, a hover band,
+and a proper selection band — none of which a listbox can do. So the pane body
+becomes a **read-only `text` widget used purely as a rich-list canvas**: a Win2000
+sunken white "well" holding one line per entry — a mono glyph icon (`▴`/`▸`/`▪`, all
+U+25xx so they render monochrome, never emoji — honouring the icons-are-glyphs
+principle) then the name; a full-width hover band and selection band (the tag spans
+through the trailing newline so it fills the pane width). Navigation is **unchanged**
+— still the flat, lazy one-directory `fs.list` navigator (`..`, descend, open); this
+is purely how it looks and feels.
+
+**The boundary that matters: this text widget is GUI-local chrome, NOT a core
+buffer.** rio has exactly one "view of a core buffer" — the editor widget, renamed
+to `::real<g>` and proxied so every keystroke is a `buffer.replace` over the protocol
+(D3/D33). The files body is the opposite: `-state disabled`, never renamed, never
+proxied, never editable, absent from the document model. It uses a text widget only
+because it is the best stock classic-Tk surface for icons + full-width bands +
+scrolling + keyboard nav (a canvas would mean hand-computing all of it). So this does
+**not** put rio on the emacs "everything is a buffer" road; that stays a conscious,
+not-yet-taken fork (ROADMAP). If rio ever *does* want core-backed read-only "view
+buffers" (dired/git/log with modes), this widget could be re-backed then — but by
+choice, not drift.
+
+**Themed through the existing pipeline, no new roles.** `apply_theme` styles the well
+(editor surface), the `selrow` band (`editor.selection`), a `hoverrow` band (a
+`blend_hex` tint toward the selection), and the `navicon` glyph colour (a muted
+`ui.fg`). `blend_hex` derives theme-relative shades so night-theme and custom themes
+get a sane hover for free. The git pane keeps its listbox for now (a candidate to
+adopt the same rich-list later). `smoke.tcl` drives the new widget (line text, band
+tag ranges, key/click nav); full sweep green (311 core + every GUI suite).
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
