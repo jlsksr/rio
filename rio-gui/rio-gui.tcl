@@ -583,23 +583,32 @@ proc on_project_opened {p} {
 
 # Repaint the pane with the entries of ::nav_dir: a ".." row (unless at the root),
 # then directories, then files — each group dictionary-sorted by the core already.
+# Each row is one line: a mono glyph icon (▴ up · ▸ dir · ▪ file, all U+25xx so they
+# render monochrome, never emoji) then the name. The body is a read-only text widget;
+# we toggle -state to rewrite it (the git diff area uses the same dance). ::nav_rows
+# is the parallel {type abspath} list; row index N maps to text line N+1.
 proc populate_nav {} {
-	.dock.files.list delete 0 end
+	set b .dock.files.well.body
 	set ::nav_rows {}
+	set ::nav_sel  -1
+	set ::nav_hover -1
+	$b configure -state normal
+	$b delete 1.0 end
 	if {$::nav_dir eq ""} {
 		.dock.files.head configure -text "(no folder)"
-		.dock.files.list insert end "  Open a folder…"
+		$b insert end "  Open a folder…\n"
 		lappend ::nav_rows [list none ""]
+		$b configure -state disabled
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
 	.dock.files.head configure -text [nav_header $::nav_dir $root]
 	if {$::nav_dir ne $root} {
-		.dock.files.list insert end "../"
-		lappend ::nav_rows [list dir [file dirname $::nav_dir]]
+		nav_render_row dir [file dirname $::nav_dir] ".." "▴"
 	}
 	set resp [rio_call fs.list [dict create path $::nav_dir]]
 	if {![dict get $resp ok]} {
+		$b configure -state disabled
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
@@ -608,10 +617,85 @@ proc populate_nav {} {
 		foreach e $entries {
 			if {[dict get $e type] ne $grp} continue
 			set name [dict get $e name]
-			.dock.files.list insert end [expr {$grp eq "dir" ? "$name/" : "  $name"}]
-			lappend ::nav_rows [list $grp [file join $::nav_dir $name]]
+			if {$grp eq "dir"} {
+				nav_render_row dir [file join $::nav_dir $name] "$name/" "▸"
+			} else {
+				nav_render_row file [file join $::nav_dir $name] $name "▪"
+			}
 		}
 	}
+	$b configure -state disabled
+}
+
+# Append one navigator row: the glyph (tagged navicon for its own colour) then a
+# space and the label. Records {type abspath} in ::nav_rows; the line number follows
+# from the list length. Caller has the body in -state normal.
+proc nav_render_row {type path label glyph} {
+	.dock.files.well.body insert end $glyph navicon " $label\n"
+	lappend ::nav_rows [list $type $path]
+}
+
+# Paint the hover and selection bands. Tagging through the trailing newline (+1c)
+# makes the band span the full pane width, not just the text. selrow sits above
+# hoverrow (see apply_theme) so the selection stays visible under the pointer.
+proc nav_paint {} {
+	set b .dock.files.well.body
+	$b tag remove hoverrow 1.0 end
+	$b tag remove selrow   1.0 end
+	if {$::nav_hover >= 0} {
+		set L [expr {$::nav_hover + 1}]
+		$b tag add hoverrow $L.0 "$L.0 lineend +1c"
+	}
+	if {$::nav_sel >= 0} {
+		set L [expr {$::nav_sel + 1}]
+		$b tag add selrow $L.0 "$L.0 lineend +1c"
+	}
+}
+
+# Select a row by index (ignoring placeholder rows), repaint, and scroll it into view.
+proc nav_select {row} {
+	if {$row < 0 || $row >= [llength $::nav_rows]} return
+	if {[lindex [lindex $::nav_rows $row] 0] eq "none"} return
+	set ::nav_sel $row
+	nav_paint
+	.dock.files.well.body see [expr {$row + 1}].0
+}
+
+# Map a pixel to its row and select it (single click).
+proc nav_click_at {x y} {
+	if {![llength $::nav_rows]} return
+	nav_select [nav_row_at $x $y]
+}
+
+# Row index under a pixel: the text line at @x,y, minus one (line N -> row N-1).
+proc nav_row_at {x y} {
+	set line [lindex [split [.dock.files.well.body index @$x,$y] .] 0]
+	return [expr {$line - 1}]
+}
+
+# Keyboard move: step the selection by ±1, skipping placeholder rows, clamped.
+proc nav_move {dir} {
+	set n [llength $::nav_rows]
+	if {$n == 0} return
+	set cur $::nav_sel
+	if {$cur < 0} { set cur [expr {$dir > 0 ? -1 : $n}] }
+	for {set i [expr {$cur + $dir}]} {$i >= 0 && $i < $n} {incr i $dir} {
+		if {[lindex [lindex $::nav_rows $i] 0] ne "none"} { nav_select $i ; return }
+	}
+}
+
+# Hover follows the pointer; -1 clears it. No-op when the row is unchanged so we do
+# not repaint on every motion pixel.
+proc nav_hover_at {x y} {
+	if {![llength $::nav_rows]} return
+	nav_hover [nav_row_at $x $y]
+}
+proc nav_hover {row} {
+	if {$row >= [llength $::nav_rows]} { set row -1 }
+	if {$row >= 0 && [lindex [lindex $::nav_rows $row] 0] eq "none"} { set row -1 }
+	if {$row == $::nav_hover} return
+	set ::nav_hover $row
+	nav_paint
 }
 
 # Header: the project name, plus the path from the root when in a subdirectory.
@@ -622,9 +706,8 @@ proc nav_header {dir root} {
 
 # Double-click / Enter on a row: descend into a directory, or open a file in a tab.
 proc nav_activate {} {
-	set sel [.dock.files.list curselection]
-	if {$sel eq ""} return
-	lassign [lindex $::nav_rows $sel] type path
+	if {$::nav_sel < 0 || $::nav_sel >= [llength $::nav_rows]} return
+	lassign [lindex $::nav_rows $::nav_sel] type path
 	switch -- $type {
 		dir  { set ::nav_dir $path ; populate_nav }
 		file { do_open $path }
@@ -744,6 +827,20 @@ proc autoscroll {sb widget lo hi} {
 proc gridscroll {sb lo hi} {
 	if {$lo <= 0.0 && $hi >= 1.0} { grid remove $sb } else { grid $sb }
 	$sb set $lo $hi
+}
+
+# Blend two "#rrggbb" colours: pct% of b mixed into a, returned as "#rrggbb". Used
+# to derive theme-relative tints (e.g. the files pane's hover band) without needing
+# a dedicated theme role for every shade. winfo rgb resolves names/hex to 16-bit
+# channels; we scale back to 8-bit.
+proc blend_hex {a b pct} {
+	lassign [winfo rgb . $a] ar ag ab
+	lassign [winfo rgb . $b] br bg bb
+	set mix [list]
+	foreach x [list $ar $ag $ab] y [list $br $bg $bb] {
+		lappend mix [expr {(($x * (100 - $pct) + $y * $pct) / 100) >> 8}]
+	}
+	return [format "#%02x%02x%02x" {*}$mix]
 }
 
 # ---------------------------------------------------------------------------
@@ -2029,6 +2126,8 @@ proc reset_session_state {} {
 	# Project/panes: the new core starts with no folder open unless it reports one.
 	set ::nav_dir ""
 	set ::nav_rows {}
+	set ::nav_sel  -1
+	set ::nav_hover -1
 	set ::git_rows {}
 	# A different core means a fresh conversation — clear the transcript.
 	.chat.log configure -state normal
@@ -2327,12 +2426,24 @@ proc apply_theme {theme} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
-	foreach w {.dock.files.list .dock.git.list} {
-		$w configure -font RioUIFont \
-			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-			-selectbackground [dict get $c editor.selection] \
-			-selectforeground [dict get $c ui.fg]
-	}
+	.dock.git.list configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c editor.selection] \
+		-selectforeground [dict get $c ui.fg]
+	# The files rich-list (D42): a white content "well" (editor surface) with a
+	# full-width selection band (the editor selection colour jbm already likes) and
+	# a subtler hover band blended toward it. selrow raised above hoverrow so the
+	# selection wins under the pointer; navicon tints the glyph a muted foreground.
+	set fbg [dict get $c editor.bg]
+	.dock.files.well configure -background $fbg
+	.dock.files.well.body configure -font RioUIFont \
+		-background $fbg -foreground [dict get $c ui.fg]
+	.dock.files.well.body tag configure selrow   -background [dict get $c editor.selection]
+	.dock.files.well.body tag configure hoverrow -background \
+		[blend_hex $fbg [dict get $c editor.selection] 25]
+	.dock.files.well.body tag configure navicon  -foreground \
+		[blend_hex [dict get $c ui.fg] $fbg 35]
+	.dock.files.well.body tag raise selrow
 	# The diff area is code, so it takes the editor surface.
 	.dock.git.diff configure -font RioEditorFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
@@ -3654,20 +3765,33 @@ pack .dock.sel -side top -fill x
 bind .dock.sel.files <Button-1> {show_pane files}
 bind .dock.sel.git   <Button-1> {show_pane git}
 
-# File pane body: a header + a scrollable listbox the navigator fills.
+# File pane body (D42): a header above a sunken "well" holding the rich-list view —
+# a read-only text widget the navigator fills. It is GUI-local CHROME, not a core
+# buffer: -state disabled, never renamed/proxied like the editor, never editable.
+# The text widget is simply the best stock classic-Tk canvas for per-row glyph icons
+# and full-width hover/selection bands (a listbox is text-only, one colour). -width 26
+# (cols) keeps the dock's width stable when switching to the git pane (see below).
 frame .dock.files -background "#dddddd"
 label .dock.files.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-scrollbar .dock.files.sb -command {.dock.files.list yview}
-listbox .dock.files.list -width 26 -activestyle none -exportselection 0 \
-	-borderwidth 0 -highlightthickness 0 \
-	-background "#dddddd" -foreground black \
-	-yscrollcommand {autoscroll .dock.files.sb .dock.files.list}
+frame .dock.files.well -borderwidth 2 -relief sunken -background white
+scrollbar .dock.files.well.sb -command {.dock.files.well.body yview}
+text .dock.files.well.body -width 26 -height 10 -wrap none -state disabled \
+	-cursor arrow -insertwidth 0 -takefocus 1 \
+	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
+	-background white -foreground black \
+	-yscrollcommand {autoscroll .dock.files.well.sb .dock.files.well.body}
 pack .dock.files.head -side top -fill x
-pack .dock.files.list -side left -fill both -expand 1
-# .dock.files.sb is packed on demand by autoscroll (hidden when the list fits).
-bind .dock.files.list <Double-Button-1> nav_activate
-bind .dock.files.list <Return>          nav_activate
+pack .dock.files.well -side top -fill both -expand 1
+pack .dock.files.well.body -side left -fill both -expand 1
+# .dock.files.well.sb is packed on demand by autoscroll (hidden when the list fits).
+bind .dock.files.well.body <Button-1>        {focus %W ; nav_click_at %x %y ; break}
+bind .dock.files.well.body <Double-Button-1> {nav_click_at %x %y ; nav_activate ; break}
+bind .dock.files.well.body <Return>          {nav_activate ; break}
+bind .dock.files.well.body <Up>              {nav_move -1 ; break}
+bind .dock.files.well.body <Down>            {nav_move 1 ; break}
+bind .dock.files.well.body <Motion>          {nav_hover_at %x %y}
+bind .dock.files.well.body <Leave>           {nav_hover -1}
 
 # Git pane body: branch header + Refresh, the changed-file list, and a read-only
 # diff area below it.
@@ -4765,6 +4889,8 @@ themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (
 # folder (project.open) and let the core judge; files are reached via the tree (D29).
 set ::nav_dir ""
 set ::nav_rows {}
+set ::nav_sel  -1
+set ::nav_hover -1
 set ::git_rows {}
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
 place_dock                 ;# pack the dock (default left) and the editor
