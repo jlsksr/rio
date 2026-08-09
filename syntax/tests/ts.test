@@ -1,0 +1,81 @@
+# Tests for the TypeScript highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free,
+# so this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. ts.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::ts::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-ts {.ts and .tsx resolve to the ts scanner} -body {
+	list [rio::syntax::for_path app.ts] [rio::syntax::for_path app.tsx]
+} -result {rio::syntax::ts::scan rio::syntax::ts::scan}
+
+test lang_for_path-ts {.ts resolves to the TypeScript language name} -body {
+	rio::syntax::lang_for_path /s/main.ts
+} -result TypeScript
+
+# --- type-system keywords and types --------------------------------------------
+
+test interface-and-name {interface is a keyword and the name a type} -body {
+	set s [hl "interface Foo \{"]
+	list [has $s 1.0 1.9 keyword] [has $s 1.10 1.13 type]
+} -result {1 1}
+
+test builtin-type {a built-in type name in an annotation is a type} -body {
+	set s [hl {let x: string}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.7 1.13 type]
+} -result {1 1}
+
+test capitalised-type {a Capitalised type name is a type} -body {
+	has [hl {let x: Foo}] 1.7 1.10 type
+} -result 1
+
+test type-alias {type is a keyword; both the alias and the built-in are types} -body {
+	set s [hl {type ID = string}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.5 1.7 type] [has $s 1.10 1.16 type]
+} -result {1 1 1}
+
+test constant-null {null is a constant} -body {
+	has [hl {x = null}] 1.4 1.8 constant
+} -result 1
+
+# --- decorators, numbers, calls, strings ---------------------------------------
+
+test decorator {a @Component decorator is meta} -body {
+	has [hl {@Component}] 1.0 1.10 meta
+} -result 1
+
+test bigint {a bigint literal keeps its n suffix} -body {
+	has [hl {100n}] 1.0 1.4 number
+} -result 1
+
+test call {a name directly before "(" is a function} -body {
+	has [hl {foo(x)}] 1.0 1.3 function
+} -result 1
+
+test template {a `…` template literal is a string} -body {
+	has [hl {`hi`}] 1.0 1.4 string
+} -result 1
+
+test line-comment {a // comment runs to end of line} -body {
+	has [hl {// hi}] 1.0 1.5 comment
+} -result 1
+
+test block-comment {a /* … */ comment on one line} -body {
+	has [hl {/* x */}] 1.0 1.7 comment
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

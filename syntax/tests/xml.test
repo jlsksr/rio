@@ -1,0 +1,55 @@
+# Tests for XML highlighting (AGENTS.md D32). XML reuses the (X)HTML scanner
+# (rio::syntax::html::scan); this checks the XML registration resolves and that the shared
+# scanner colours the XML constructs. Pure Tcl — Tk-free, runs under a bare tclsh.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. html.tcl]
+source [file join $here .. xml.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::html::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-xml {.xml resolves to the (reused) html scanner} -body {
+	rio::syntax::for_path doc.xml
+} -result rio::syntax::html::scan
+
+test lang_for_path-xml {.xml and .svg resolve to the XML language name} -body {
+	list [rio::syntax::lang_for_path a.xml] [rio::syntax::lang_for_path icon.svg]
+} -result {XML XML}
+
+# --- the shared scanner on XML constructs --------------------------------------
+
+test tag {an element name is a tag} -body {
+	has [hl {<root>}] 1.0 1.5 tag
+} -result 1
+
+test attribute-and-value {an attribute name and its quoted value} -body {
+	set s [hl {<a href="x">}]
+	list [has $s 1.0 1.2 tag] [has $s 1.3 1.7 attribute] [has $s 1.8 1.11 string]
+} -result {1 1 1}
+
+test comment {an <!-- … --> comment is a comment} -body {
+	has [hl {<!-- c -->}] 1.0 1.10 comment
+} -result 1
+
+test declaration {an <?xml …?> processing instruction is meta} -body {
+	has [hl {<?xml version="1.0"?>}] 1.0 1.21 meta
+} -result 1
+
+test entity {an &amp; entity is an entity} -body {
+	has [hl {&amp;}] 1.0 1.5 entity
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

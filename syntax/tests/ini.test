@@ -1,0 +1,75 @@
+# Tests for the INI / properties highlighter (AGENTS.md D32). Pure Tcl — the module is
+# Tk-free, so this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. ini.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::ini::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-ini {.ini resolves to the ini scanner} -body {
+	rio::syntax::for_path app.ini
+} -result rio::syntax::ini::scan
+
+test lang_for_path-ini {.properties resolves to the INI language name} -body {
+	rio::syntax::lang_for_path /e/app.properties
+} -result INI
+
+# --- sections and keys ---------------------------------------------------------
+
+test section {a [section] header is a type} -body {
+	has [hl {[server]}] 1.0 1.8 type
+} -result 1
+
+test key-equals {the key of a key = value pair is an attribute} -body {
+	has [hl {host = localhost}] 1.0 1.4 attribute
+} -result 1
+
+test key-colon-number {a key : value pair — key attribute, numeric value a number} -body {
+	set s [hl {port: 8080}]
+	list [has $s 1.0 1.4 attribute] [has $s 1.6 1.10 number]
+} -result {1 1}
+
+test boolean-value {a boolean value is a constant} -body {
+	set s [hl {debug = true}]
+	list [has $s 1.0 1.5 attribute] [has $s 1.8 1.12 constant]
+} -result {1 1}
+
+test quoted-value {a quoted value is a string} -body {
+	set s [hl {name = "rio"}]
+	list [has $s 1.0 1.4 attribute] [has $s 1.7 1.12 string]
+} -result {1 1}
+
+# --- comments ------------------------------------------------------------------
+
+test comment-semicolon {a ; line comment is a comment} -body {
+	has [hl {; a note}] 1.0 1.8 comment
+} -result 1
+
+test comment-hash {a # line comment is a comment} -body {
+	has [hl {# hi}] 1.0 1.4 comment
+} -result 1
+
+test inline-comment {a trailing ; after whitespace is a comment} -body {
+	set s [hl {key = val ; note}]
+	list [has $s 1.0 1.3 attribute] [has $s 1.10 1.16 comment]
+} -result {1 1}
+
+test hash-in-value-not-comment {a # inside a value (no leading space) stays literal} -body {
+	set s [hl {url = http://x#y}]
+	list [has $s 1.0 1.3 attribute] [has $s 1.14 1.16 comment]
+} -result {1 0}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
