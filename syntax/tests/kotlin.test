@@ -1,0 +1,109 @@
+# Tests for the Kotlin highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. kotlin.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::kotlin::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-kotlin {.kt resolves to the kotlin scanner} -body {
+	rio::syntax::for_path App.kt
+} -result rio::syntax::kotlin::scan
+
+test lang_for_path-kotlin {.kts resolves to the Kotlin language name} -body {
+	rio::syntax::lang_for_path /s/build.kts
+} -result Kotlin
+
+# --- keywords, types, constants ------------------------------------------------
+
+test fun-and-name {fun is a keyword and the method name a function} -body {
+	set s [hl {fun main()}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.4 1.8 function]
+} -result {1 1}
+
+test val-and-type {val is a keyword; a Capitalised type name is a type} -body {
+	set s [hl {val x: Int}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.7 1.10 type]
+} -result {1 1}
+
+test class-and-name {class is a keyword and the class name a type} -body {
+	set s [hl {class Foo}]
+	list [has $s 1.0 1.5 keyword] [has $s 1.6 1.9 type]
+} -result {1 1}
+
+test constant-null {null is a constant} -body {
+	has [hl {val x = null}] 1.8 1.12 constant
+} -result 1
+
+# --- annotations, numbers, calls -----------------------------------------------
+
+test annotation {an @JvmStatic annotation is meta} -body {
+	has [hl {@JvmStatic}] 1.0 1.10 meta
+} -result 1
+
+test number {a numeric literal is a number} -body {
+	has [hl {x = 42}] 1.4 1.6 number
+} -result 1
+
+test call {a name directly before "(" is a function} -body {
+	has [hl {foo(x)}] 1.0 1.3 function
+} -result 1
+
+# --- strings -------------------------------------------------------------------
+
+test string {a "…" string is a string} -body {
+	has [hl {val s = "hi"}] 1.8 1.12 string
+} -result 1
+
+test char-literal {a 'c' char literal is a string} -body {
+	has [hl {'a'}] 1.0 1.3 string
+} -result 1
+
+test raw-string {a """…""" raw string on one line is a string} -body {
+	has [hl {"""hi"""}] 1.0 1.8 string
+} -result 1
+
+test raw-string-multiline {a """…""" raw string carries across lines} -body {
+	set s [hl "\"\"\"\nline\n\"\"\""]
+	list [has $s 1.0 1.3 string] [has $s 2.0 2.4 string] [has $s 3.0 3.3 string]
+} -result {1 1 1}
+
+test slashes-in-string-not-comment {a // inside a string is not a comment} -body {
+	set s [hl {val s = "a//b"}]
+	list [has $s 1.8 1.14 string] [has $s 1.10 1.14 comment]
+} -result {1 0}
+
+# --- comments (with nesting) ---------------------------------------------------
+
+test line-comment {a // comment runs to end of line} -body {
+	has [hl {// hi}] 1.0 1.5 comment
+} -result 1
+
+test block-comment {a /* … */ comment on one line} -body {
+	has [hl {/* x */ val}] 1.0 1.7 comment
+} -result 1
+
+test nested-block-comment {a nested /* /* */ */ closes only at the outer */} -body {
+	set s [hl {/* a /* b */ c */ x}]
+	has $s 1.0 1.17 comment
+} -result 1
+
+test nested-block-multiline {a nested block comment carries its depth across lines} -body {
+	set s [hl "/* a /* b\n */ still */ end"]
+	list [has $s 1.0 1.9 comment] [has $s 2.0 2.12 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
