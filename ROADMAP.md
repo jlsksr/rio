@@ -83,9 +83,9 @@ Each entry notes its state:
   `syntax/<lang>.tcl` file (per-line `scan` contract, AGENTS.md D32), so adding a
   language is isolated work — good first contributions. Shipped: (X)HTML, CSS,
   JavaScript, Perl, Tcl, shell, Markdown, PHP, Python, Lua, C, C#, C++, Go, Rust, JSON,
-  YAML, TOML, SQL, Ruby, Java, Kotlin. The languages we set out to cover are
-  now in; further ones are whatever a contributor reaches for next (Swift,
-  Scala, R, Zig, …) — an isolated drop-in each.
+  YAML, TOML, SQL, Ruby, Java, Kotlin, Swift, Scala. The languages we set out
+  to cover are now in; further ones are whatever a contributor reaches for
+  next (R, Haskell, Zig, …) — an isolated drop-in each.
 - **Viewport scoping** — *deferred* (AGENTS.md D32 amendment). Re-highlighting is
   now incremental, so per-edit cost is already small; viewport would only cap the
   one-time whole-file scan on very large files and needs scroll-event machinery not
