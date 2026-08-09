@@ -1,0 +1,121 @@
+# Tests for the SQL highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. sql.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::sql::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-sql {.sql resolves to the sql scanner} -body {
+	rio::syntax::for_path schema.sql
+} -result rio::syntax::sql::scan
+
+test lang_for_path-sql {.sql resolves to the SQL language name} -body {
+	rio::syntax::lang_for_path /db/init.sql
+} -result SQL
+
+# --- keywords, types, constants ------------------------------------------------
+
+test keywords {reserved words are keywords} -body {
+	set s [hl {SELECT * FROM t}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.9 1.13 keyword]
+} -result {1 1}
+
+test keyword-case-insensitive {lower-case keywords still light} -body {
+	has [hl {select 1}] 1.0 1.6 keyword
+} -result 1
+
+test type {a built-in data type is a type} -body {
+	has [hl {id INT}] 1.3 1.6 type
+} -result 1
+
+test type-over-function {a type name before "(" stays a type, its length a number} -body {
+	set s [hl {name VARCHAR(255)}]
+	list [has $s 1.5 1.12 type] [has $s 1.13 1.16 number]
+} -result {1 1}
+
+test constant-and-keyword {IS NULL — a keyword then a constant} -body {
+	set s [hl {WHERE x IS NULL}]
+	list [has $s 1.8 1.10 keyword] [has $s 1.11 1.15 constant]
+} -result {1 1}
+
+test number {a numeric literal is a number} -body {
+	has [hl {LIMIT 100}] 1.6 1.9 number
+} -result 1
+
+test function {a name directly before "(" is a function} -body {
+	has [hl {COUNT(x)}] 1.0 1.5 function
+} -result 1
+
+# --- strings and delimited identifiers -----------------------------------------
+
+test string {a '…' literal is a string} -body {
+	has [hl {WHERE x = 'rio'}] 1.10 1.15 string
+} -result 1
+
+test string-doubled-quote {a doubled '' is an escape, so it stays one string} -body {
+	has [hl {x = 'it''s'}] 1.4 1.11 string
+} -result 1
+
+test string-spans-lines {an unterminated '…' carries to the next line} -body {
+	set s [hl "'a\nb'"]
+	list [has $s 1.0 1.2 string] [has $s 2.0 2.2 string]
+} -result {1 1}
+
+test double-quote-identifier {a "…" delimited identifier is a variable} -body {
+	has [hl {SELECT "col" FROM t}] 1.7 1.12 variable
+} -result 1
+
+test backtick-identifier {a `…` delimited identifier is a variable} -body {
+	has [hl {`tbl`}] 1.0 1.5 variable
+} -result 1
+
+# --- bind parameters -----------------------------------------------------------
+
+test bind-named {a :name bind parameter is a variable} -body {
+	has [hl {id = :name}] 1.5 1.10 variable
+} -result 1
+
+test bind-positional {a $1 positional parameter is a variable} -body {
+	has [hl {id = $1}] 1.5 1.7 variable
+} -result 1
+
+# --- comments ------------------------------------------------------------------
+
+test line-comment {a -- comment runs to end of line} -body {
+	has [hl {-- hi}] 1.0 1.5 comment
+} -result 1
+
+test trailing-comment {a -- after a value colours from the dashes} -body {
+	set s [hl {SELECT 1 -- tail}]
+	list [has $s 1.7 1.8 number] [has $s 1.9 1.16 comment]
+} -result {1 1}
+
+test block-comment {a /* … */ comment on one line} -body {
+	has [hl {/* x */ SELECT}] 1.0 1.7 comment
+} -result 1
+
+test block-comment-multiline {a /* … */ comment carries across lines} -body {
+	set s [hl "/*\nmid\n*/"]
+	list [has $s 1.0 1.2 comment] [has $s 2.0 2.3 comment] [has $s 3.0 3.2 comment]
+} -result {1 1 1}
+
+test dashes-in-string-not-comment {-- inside a string is not a comment} -body {
+	set s [hl {x = '-- no'}]
+	list [has $s 1.4 1.11 string] [has $s 1.5 1.11 comment]
+} -result {1 0}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

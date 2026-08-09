@@ -1,0 +1,142 @@
+# Tests for the Ruby highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. ruby.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::ruby::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-ruby {.rb resolves to the ruby scanner} -body {
+	rio::syntax::for_path app.rb
+} -result rio::syntax::ruby::scan
+
+test lang_for_path-ruby {.rb resolves to the Ruby language name} -body {
+	rio::syntax::lang_for_path /x/Rakefile.rake
+} -result Ruby
+
+# --- keywords, definitions -----------------------------------------------------
+
+test def-and-name {def is a keyword and the method name a function} -body {
+	set s [hl {def foo}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.4 1.7 function]
+} -result {1 1}
+
+test class-and-name {class is a keyword and the class name a type} -body {
+	set s [hl {class Foo}]
+	list [has $s 1.0 1.5 keyword] [has $s 1.6 1.9 type]
+} -result {1 1}
+
+test def-self-method {def self.run — self stays a keyword, run the method name} -body {
+	set s [hl {def self.run}]
+	list [has $s 1.4 1.8 keyword] [has $s 1.9 1.12 function]
+} -result {1 1}
+
+test predicate-method-name {a def name ending in ? is a function} -body {
+	has [hl {def valid?}] 1.4 1.10 function
+} -result 1
+
+test defined-keyword {defined? is a keyword} -body {
+	has [hl {defined?(x)}] 1.0 1.8 keyword
+} -result 1
+
+test constant-nil {nil is a constant} -body {
+	has [hl {x = nil}] 1.4 1.7 constant
+} -result 1
+
+# --- variables and symbols -----------------------------------------------------
+
+test ivar {an @ivar is a variable} -body {
+	has [hl {@name = 1}] 1.0 1.5 variable
+} -result 1
+
+test cvar {an @@cvar is a variable} -body {
+	has [hl {@@count}] 1.0 1.7 variable
+} -result 1
+
+test global {a $global is a variable} -body {
+	has [hl {$stdout}] 1.0 1.7 variable
+} -result 1
+
+test symbol {a :sym symbol is a constant} -body {
+	has [hl {x = :sym}] 1.4 1.8 constant
+} -result 1
+
+test symbols-in-array {each :sym in a list is a constant} -body {
+	set s [hl {[:a, :b]}]
+	list [has $s 1.1 1.3 constant] [has $s 1.5 1.7 constant]
+} -result {1 1}
+
+test scope-not-symbol {Foo::Bar are types; the :: is not a symbol} -body {
+	set s [hl {Foo::Bar}]
+	list [has $s 1.0 1.3 type] [has $s 1.5 1.8 type] [has $s 1.3 1.5 constant]
+} -result {1 1 0}
+
+# --- numbers, calls, builtins --------------------------------------------------
+
+test number {a numeric literal is a number} -body {
+	has [hl {count = 42}] 1.8 1.10 number
+} -result 1
+
+test builtin {a core method like puts is a function} -body {
+	has [hl {puts x}] 1.0 1.4 function
+} -result 1
+
+test call {a name directly before "(" is a function} -body {
+	has [hl {foo(1)}] 1.0 1.3 function
+} -result 1
+
+test type-then-method {String is a type and .new a function} -body {
+	set s [hl {String.new}]
+	list [has $s 1.0 1.6 type] [has $s 1.7 1.10 function]
+} -result {1 1}
+
+# --- strings -------------------------------------------------------------------
+
+test string-double {a "…" string is a string} -body {
+	has [hl {x = "hi"}] 1.4 1.8 string
+} -result 1
+
+test string-single-hash-literal {a # inside a '…' string is not a comment} -body {
+	set s [hl {'a#{b}'}]
+	list [has $s 1.0 1.7 string] [has $s 1.2 1.7 comment]
+} -result {1 0}
+
+test interpolation-stays-string {a "#{x}" interpolation stays inside the string} -body {
+	has [hl {"#{x}"}] 1.0 1.6 string
+} -result 1
+
+test string-spans-lines {an unterminated "…" carries to the next line} -body {
+	set s [hl "\"a\nb\""]
+	list [has $s 1.0 1.2 string] [has $s 2.0 2.2 string]
+} -result {1 1}
+
+# --- comments ------------------------------------------------------------------
+
+test line-comment {a # comment runs to end of line} -body {
+	has [hl {# note}] 1.0 1.6 comment
+} -result 1
+
+test trailing-comment {a # after a value colours from the hash} -body {
+	set s [hl {x = 1 # c}]
+	list [has $s 1.4 1.5 number] [has $s 1.6 1.9 comment]
+} -result {1 1}
+
+test block-comment {a =begin … =end block colours every line as comment} -body {
+	set s [hl "=begin\ndoc\n=end"]
+	list [has $s 1.0 1.6 comment] [has $s 2.0 2.3 comment] [has $s 3.0 3.4 comment]
+} -result {1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
