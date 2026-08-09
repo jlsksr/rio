@@ -1,0 +1,105 @@
+# Tests for the Java highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. java.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::java::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-java {.java resolves to the java scanner} -body {
+	rio::syntax::for_path Main.java
+} -result rio::syntax::java::scan
+
+test lang_for_path-java {.java resolves to the Java language name} -body {
+	rio::syntax::lang_for_path /src/Main.java
+} -result Java
+
+# --- keywords, types, constants ------------------------------------------------
+
+test class-decl {public and class are keywords; the class name a type} -body {
+	set s [hl {public class Main}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.7 1.12 keyword] [has $s 1.13 1.17 type]
+} -result {1 1 1}
+
+test primitive-type {a primitive type name is a type} -body {
+	has [hl {int x}] 1.0 1.3 type
+} -result 1
+
+test capitalised-type {a Capitalised identifier is a type} -body {
+	has [hl {String s}] 1.0 1.6 type
+} -result 1
+
+test constant-null {null is a constant} -body {
+	has [hl {x = null}] 1.4 1.8 constant
+} -result 1
+
+test new-type {new is a keyword and the following name a type} -body {
+	set s [hl {new Foo()}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.4 1.7 type]
+} -result {1 1}
+
+test import-path {import is a keyword; a lower-case package path stays plain, the class a type} -body {
+	set s [hl {import java.util.List;}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.17 1.21 type]
+} -result {1 1}
+
+# --- annotations, numbers, calls -----------------------------------------------
+
+test annotation {an @Override annotation is meta} -body {
+	has [hl {@Override}] 1.0 1.9 meta
+} -result 1
+
+test number {a numeric literal is a number} -body {
+	has [hl {x = 42}] 1.4 1.6 number
+} -result 1
+
+test number-hex-suffix {a 0x… hex with an L suffix is one number} -body {
+	has [hl {0xFFL}] 1.0 1.5 number
+} -result 1
+
+test call {a name directly before "(" is a function} -body {
+	has [hl {foo(x)}] 1.0 1.3 function
+} -result 1
+
+# --- strings and comments ------------------------------------------------------
+
+test string {a "…" string is a string} -body {
+	has [hl {s = "hi"}] 1.4 1.8 string
+} -result 1
+
+test char-literal {a 'c' char literal is a string} -body {
+	has [hl {c = 'a'}] 1.4 1.7 string
+} -result 1
+
+test line-comment {a // comment runs to end of line} -body {
+	has [hl {// hi}] 1.0 1.5 comment
+} -result 1
+
+test block-comment {a /* … */ comment on one line} -body {
+	has [hl {/* x */ int}] 1.0 1.7 comment
+} -result 1
+
+test javadoc-multiline {a /** … */ Javadoc block colours every line as comment} -body {
+	set s [hl "/**\n * doc\n */"]
+	list [has $s 1.0 1.3 comment] [has $s 2.0 2.6 comment] [has $s 3.0 3.3 comment]
+} -result {1 1 1}
+
+test slashes-in-string-not-comment {a // inside a string is not a comment} -body {
+	set s [hl {s = "a//b"}]
+	list [has $s 1.4 1.10 string] [has $s 1.6 1.10 comment]
+} -result {1 0}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
