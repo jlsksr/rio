@@ -1,0 +1,104 @@
+# Tests for the YAML highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. yaml.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::yaml::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-yaml {.yaml/.yml resolve to the yaml scanner} -body {
+	list [rio::syntax::for_path a.yaml] [rio::syntax::for_path a.yml]
+} -result {rio::syntax::yaml::scan rio::syntax::yaml::scan}
+
+test lang_for_path-yaml {.yml resolves to the YAML language name} -body {
+	rio::syntax::lang_for_path /x/ci.yml
+} -result YAML
+
+# --- keys and scalars ----------------------------------------------------------
+
+test key {a mapping key is attribute} -body {
+	has [hl {name: rio}] 1.0 1.4 attribute
+} -result 1
+
+test quoted-key {a quoted key (with a colon inside) is one attribute} -body {
+	has [hl {"a:b": 1}] 1.0 1.5 attribute
+} -result 1
+
+test key-and-string {a key plus a quoted string value} -body {
+	set s [hl {title: "rio ide"}]
+	list [has $s 1.0 1.5 attribute] [has $s 1.7 1.16 string]
+} -result {1 1}
+
+test bool {a whole-value boolean is a constant} -body {
+	has [hl {debug: true}] 1.7 1.11 constant
+} -result 1
+
+test number {a numeric value is a number} -body {
+	has [hl {port: 8080}] 1.6 1.10 number
+} -result 1
+
+test list-item-constant {a "- yes" sequence item colours the constant} -body {
+	has [hl {- yes}] 1.2 1.5 constant
+} -result 1
+
+test flow-array {numbers inside a flow array colour} -body {
+	set s [hl {ports: [1, 2]}]
+	list [has $s 1.8 1.9 number] [has $s 1.11 1.12 number]
+} -result {1 1}
+
+# --- anchors, aliases, tags ----------------------------------------------------
+
+test anchor {an &anchor is a variable} -body {
+	has [hl {base: &a 1}] 1.6 1.8 variable
+} -result 1
+
+test alias {a *alias is a variable} -body {
+	has [hl {ref: *a}] 1.5 1.7 variable
+} -result 1
+
+test tag {a !!type tag is a type} -body {
+	has [hl {x: !!str foo}] 1.3 1.8 type
+} -result 1
+
+# --- comments and markers ------------------------------------------------------
+
+test comment {a # comment runs to end of line} -body {
+	has [hl {# note}] 1.0 1.6 comment
+} -result 1
+
+test inline-comment {a trailing comment colours from the # after whitespace} -body {
+	set s [hl {key: 1 # c}]
+	list [has $s 1.5 1.6 number] [has $s 1.7 1.10 comment]
+} -result {1 1}
+
+test hash-in-string-not-comment {a # inside a quoted string is not a comment} -body {
+	set s [hl {pw: "a#b"}]
+	list [has $s 1.4 1.9 string] [has $s 1.6 1.9 comment]
+} -result {1 0}
+
+test doc-marker {a --- document marker is meta} -body {
+	has [hl {---}] 1.0 1.3 meta
+} -result 1
+
+# --- block scalars -------------------------------------------------------------
+
+test block-scalar {a | block scalar colours its indented body as string} -body {
+	set s [hl "body: |\n  line one\n  line two\nafter: x"]
+	list [has $s 1.0 1.4 attribute] [has $s 2.0 2.10 string] \
+		[has $s 3.0 3.10 string] [has $s 4.0 4.5 attribute]
+} -result {1 1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

@@ -1,0 +1,91 @@
+# Tests for the TOML highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. toml.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::toml::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-toml {.toml resolves to the toml scanner} -body {
+	rio::syntax::for_path Cargo.toml
+} -result rio::syntax::toml::scan
+
+test lang_for_path-toml {.toml resolves to the TOML language name} -body {
+	rio::syntax::lang_for_path /x/pyproject.toml
+} -result TOML
+
+# --- headers, keys, values -----------------------------------------------------
+
+test table-header {a [table] header is a type} -body {
+	has [hl {[server]}] 1.0 1.8 type
+} -result 1
+
+test array-of-tables {a [[table]] header is a type} -body {
+	has [hl {[[x]]}] 1.0 1.5 type
+} -result 1
+
+test key-and-string {a key is attribute; a basic string value is string} -body {
+	set s [hl {name = "rio"}]
+	list [has $s 1.0 1.4 attribute] [has $s 1.7 1.12 string]
+} -result {1 1}
+
+test dotted-key {a dotted key spans the whole path as attribute} -body {
+	has [hl {a.b.c = 1}] 1.0 1.5 attribute
+} -result 1
+
+test number-int {an integer value is a number} -body {
+	has [hl {port = 8080}] 1.7 1.11 number
+} -result 1
+
+test number-hex {a 0x base integer is a number} -body {
+	has [hl {mask = 0xFF}] 1.7 1.11 number
+} -result 1
+
+test bool-constant {true/false are constants} -body {
+	has [hl {on = true}] 1.5 1.9 constant
+} -result 1
+
+test datetime-constant {an RFC-3339 date-time is a constant} -body {
+	has [hl {d = 2024-01-02T03:04:05Z}] 1.4 1.24 constant
+} -result 1
+
+test literal-string {a '…' literal string keeps backslashes (no escape)} -body {
+	has [hl {p = 'C:\path'}] 1.4 1.13 string
+} -result 1
+
+# --- comments and strings interplay --------------------------------------------
+
+test comment {a # comment runs to end of line} -body {
+	has [hl {# a note}] 1.0 1.8 comment
+} -result 1
+
+test hash-in-string-not-comment {a # inside a string is not a comment} -body {
+	set s [hl {t = "a#b"}]
+	list [has $s 1.4 1.9 string] [has $s 1.6 1.9 comment]
+} -result {1 0}
+
+test trailing-comment {a comment after a value colours from the #} -body {
+	has [hl {x = 1  # tail}] 1.7 1.13 comment
+} -result 1
+
+# --- multi-line strings --------------------------------------------------------
+
+test multiline-basic {a """ … """ string carries across lines} -body {
+	set s [hl "s = \"\"\"\nline\n\"\"\""]
+	list [has $s 1.4 1.7 string] [has $s 2.0 2.4 string] [has $s 3.0 3.3 string]
+} -result {1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
