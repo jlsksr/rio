@@ -1,0 +1,102 @@
+# Tests for the Swift highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
+# this runs under a bare tclsh with no display.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. swift.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::swift::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring -----------------------------------------------------------
+
+test for_path-swift {.swift resolves to the swift scanner} -body {
+	rio::syntax::for_path App.swift
+} -result rio::syntax::swift::scan
+
+test lang_for_path-swift {.swift resolves to the Swift language name} -body {
+	rio::syntax::lang_for_path /s/main.swift
+} -result Swift
+
+# --- keywords, types, constants ------------------------------------------------
+
+test func-and-name {func is a keyword and the method name a function} -body {
+	set s [hl {func greet()}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.5 1.10 function]
+} -result {1 1}
+
+test let-and-type {let is a keyword; a Capitalised type name is a type} -body {
+	set s [hl {let x: Int}]
+	list [has $s 1.0 1.3 keyword] [has $s 1.7 1.10 type]
+} -result {1 1}
+
+test struct-and-name {struct is a keyword and the type name a type} -body {
+	set s [hl {struct Point}]
+	list [has $s 1.0 1.6 keyword] [has $s 1.7 1.12 type]
+} -result {1 1}
+
+test constant-nil {nil is a constant} -body {
+	has [hl {var x = nil}] 1.8 1.11 constant
+} -result 1
+
+# --- attributes, directives, numbers, calls ------------------------------------
+
+test attribute {an @escaping attribute is meta} -body {
+	has [hl {@escaping}] 1.0 1.9 meta
+} -result 1
+
+test directive {a #available compiler directive is meta} -body {
+	has [hl {#available}] 1.0 1.10 meta
+} -result 1
+
+test number {a numeric literal is a number} -body {
+	has [hl {x = 42}] 1.4 1.6 number
+} -result 1
+
+test number-hex-float {a 0x… hex float is one number} -body {
+	has [hl {0xFp2}] 1.0 1.5 number
+} -result 1
+
+test call {a name directly before "(" is a function} -body {
+	has [hl {foo(x)}] 1.0 1.3 function
+} -result 1
+
+# --- strings -------------------------------------------------------------------
+
+test string {a "…" string is a string} -body {
+	has [hl {let s = "hi"}] 1.8 1.12 string
+} -result 1
+
+test interpolation-stays-string {a \(…) interpolation stays inside the string} -body {
+	has [hl {"a\(b)c"}] 1.0 1.8 string
+} -result 1
+
+test multiline-string {a """…""" string carries across lines} -body {
+	set s [hl "\"\"\"\ntext\n\"\"\""]
+	list [has $s 1.0 1.3 string] [has $s 2.0 2.4 string] [has $s 3.0 3.3 string]
+} -result {1 1 1}
+
+test no-char-literal {Swift has no 'c' char literal — a single quote is not a string} -body {
+	has [hl {'a'}] 1.0 1.3 string
+} -result 0
+
+# --- comments (with nesting) ---------------------------------------------------
+
+test line-comment {a // comment runs to end of line} -body {
+	has [hl {// hi}] 1.0 1.5 comment
+} -result 1
+
+test nested-block-comment {a nested /* /* */ */ closes only at the outer */} -body {
+	has [hl {/* a /* b */ c */ x}] 1.0 1.17 comment
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
