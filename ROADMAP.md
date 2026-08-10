@@ -82,11 +82,13 @@ Each entry notes its state:
 - **More languages** — *ongoing.* Each highlighter is one self-contained
   `syntax/<lang>.tcl` file (per-line `scan` contract, AGENTS.md D32), so adding a
   language is isolated work — good first contributions. Shipped: (X)HTML, XML, CSS,
-  JavaScript, TypeScript, Perl, Tcl, shell, Markdown, PHP, Python, Lua, C, C#, C++, Go,
-  Rust, JSON, YAML, TOML, INI, SQL, Ruby, Java, Kotlin, Swift, Scala (XML reuses the
-  (X)HTML scanner). That covers the common set — further ones are whatever a
-  contributor reaches for next (PowerShell, Dockerfile, Makefile, R, Haskell, …), an
-  isolated drop-in each.
+  JavaScript, TypeScript, Perl, Tcl, shell, Batch/cmd, PowerShell, awk, sed, Makefile,
+  Dockerfile, Markdown, PHP, Python, Lua, C, C#, C++, Go, Rust, JSON, YAML, TOML, INI,
+  SQL, Ruby, Java, Kotlin, Swift, Scala (XML reuses the (X)HTML scanner; Makefile and
+  Dockerfile match by whole file name, D46). That covers the common set and Notepad++'s
+  built-ins — further ones are whatever a contributor reaches for next (R, Haskell,
+  CMake, Diff, …), an isolated drop-in each. Diff would want added/removed roles the
+  fixed token vocabulary doesn't have yet — a small vocabulary question, not a drop-in.
 - **Viewport scoping** — *deferred* (AGENTS.md D32 amendment). Re-highlighting is
   now incremental, so per-edit cost is already small; viewport would only cap the
   one-time whole-file scan on very large files and needs scroll-event machinery not

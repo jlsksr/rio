@@ -2563,6 +2563,31 @@ input primitive the deferred file-management verbs (Rename / New) will reuse.
 
 ---
 
+### D46 — Highlighters can register by whole file NAME, not only extension
+
+The syntax registry (D32) resolved a highlighter by file **extension** only. That is
+fine for `.sql` / `.rb` / `.ts`, but the two most-reached-for build files carry **no
+extension at all** — `Makefile`, `Dockerfile` — so they could never be highlighted. D46
+adds a second, parallel key: `register_filename <lang> {basenames} <scan>` maps whole
+basenames (`Makefile`, `GNUmakefile`, `Dockerfile`, `Containerfile`) to a scanner, beside
+the existing extension map.
+
+**Resolution precedence** (`rio::syntax::_resolve`, shared by `for_path` and
+`lang_for_path`): exact basename → extension → **rootname-of-basename**. The rootname
+fallback (last suffix stripped) means `Dockerfile.prod` and `Makefile.inc` still resolve,
+while an *explicit* extension always wins first, so `Makefile.tcl` is Tcl — a rootname
+guess never overrides a real extension. Case-insensitive throughout, "later registration
+wins" unchanged (so a user file still shadows a shipped one). A language can register
+under both keys: the Makefile highlighter claims `Makefile`/`GNUmakefile` by name *and*
+`.mk`/`.make` by extension.
+
+This is the enabling seam for the D32 "more languages" batch that shipped Makefile,
+Dockerfile, Batch/cmd, PowerShell, awk, and sed — the build-file highlighters would be
+dead code without a basename key. Kept deliberately small: no glob/shebang matching (a
+`#!/usr/bin/awk` first-line detector is the obvious next step, noted but not built).
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

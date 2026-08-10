@@ -1,0 +1,93 @@
+# Tests for the PowerShell highlighter (AGENTS.md D32). Pure Tcl — Tk-free, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. powershell.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::powershell::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring ------------------------------------------------------------
+
+test for_path-ps1 {.ps1 resolves to the powershell scanner} -body {
+	rio::syntax::for_path deploy.ps1
+} -result rio::syntax::powershell::scan
+
+test lang_for_path-psm1 {.psm1 resolves to the PowerShell language name} -body {
+	rio::syntax::lang_for_path mod.psm1
+} -result PowerShell
+
+# --- keywords, cmdlets, operators -----------------------------------------------
+
+test keyword {a language keyword lights} -body {
+	has [hl {foreach ($x in $xs) {}}] 1.0 1.7 keyword
+} -result 1
+
+test keyword-case-insensitive {keywords match case-insensitively} -body {
+	has [hl {Function Foo {}}] 1.0 1.8 keyword
+} -result 1
+
+test cmdlet {a Verb-Noun cmdlet is a function} -body {
+	has [hl {Get-ChildItem -Path .}] 1.0 1.13 function
+} -result 1
+
+test word-operator {a -eq word-operator is an operator} -body {
+	has [hl {if ($a -eq 1) {}}] 1.7 1.10 operator
+} -result 1
+
+# --- variables and types --------------------------------------------------------
+
+test variable {a $var is a variable} -body {
+	has [hl {$name = 5}] 1.0 1.5 variable
+} -result 1
+
+test variable-scope {a $env:PATH scoped variable is a variable} -body {
+	has [hl {$env:PATH}] 1.0 1.9 variable
+} -result 1
+
+test variable-automatic {the automatic $_ is a variable} -body {
+	has [hl {$_ .Name}] 1.0 1.2 variable
+} -result 1
+
+test type-accelerator {a [string] type accelerator is a type} -body {
+	has [hl {[string]$x = 'a'}] 1.0 1.8 type
+} -result 1
+
+test number {a numeric literal is a number} -body {
+	has [hl {$n = 42}] 1.5 1.7 number
+} -result 1
+
+# --- strings and comments -------------------------------------------------------
+
+test string-double {a "…" expandable string is a string} -body {
+	has [hl {Write-Output "hi"}] 1.13 1.17 string
+} -result 1
+
+test string-single {a '…' literal string is a string} -body {
+	has [hl {$s = 'abc'}] 1.5 1.10 string
+} -result 1
+
+test string-spans-lines {an unterminated "…" carries to the next line} -body {
+	set s [hl "\"a\nb\""]
+	list [has $s 1.0 1.2 string] [has $s 2.0 2.2 string]
+} -result {1 1}
+
+test line-comment {a # comment runs to end of line} -body {
+	has [hl {$x = 1 # set x}] 1.7 1.14 comment
+} -result 1
+
+test block-comment {a <# … #> block comment carries across lines} -body {
+	set s [hl "<#\ndoc\n#>"]
+	list [has $s 1.0 1.2 comment] [has $s 2.0 2.3 comment] [has $s 3.0 3.2 comment]
+} -result {1 1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

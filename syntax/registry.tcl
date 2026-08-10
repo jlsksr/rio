@@ -36,7 +36,9 @@
 namespace eval rio::syntax {
 	variable scanners {}     ;# ext (lowercased, no dot) -> scanner proc
 	variable extlang  {}     ;# ext (lowercased, no dot) -> language display name
-	variable langs {}        ;# lang name -> {exts <list> scanner <proc>} (introspection)
+	variable filenames {}    ;# whole basename (lowercased) -> scanner proc (for extension-less files)
+	variable filelang  {}    ;# whole basename (lowercased) -> language display name
+	variable langs {}        ;# lang name -> {exts/files <list> scanner <proc>} (introspection)
 }
 
 # The canonical TOKEN VOCABULARY. Highlighters emit only these type names; a theme
@@ -72,27 +74,53 @@ proc rio::syntax::register {lang exts scan} {
 	}
 }
 
-# The scanner proc registered for a file path (by its extension), or "" when the
-# file type has no highlighter (the caller then leaves the text un-highlighted).
-proc rio::syntax::for_path {path} {
-	variable scanners
-	set ext [string tolower [string trimleft [file extension $path] .]]
-	if {$ext ne "" && [dict exists $scanners $ext]} {
-		return [dict get $scanners $ext]
+# Register a highlighter by whole FILE NAME rather than extension — for the build files
+# that carry no extension (`Makefile`, `Dockerfile`, `GNUmakefile`). Same "later
+# registration wins" and case-insensitive matching; the names are bare basenames. A file
+# resolves by exact basename first, then by extension, then by rootname (so `Makefile.inc`
+# and `Dockerfile.prod` also match) — see `_resolve`.
+proc rio::syntax::register_filename {lang names scan} {
+	variable filenames
+	variable filelang
+	variable langs
+	set entry [expr {[dict exists $langs $lang] ? [dict get $langs $lang] : {}}]
+	dict set langs $lang [dict merge $entry [dict create files $names scanner $scan]]
+	foreach nm $names {
+		set nm [string tolower $nm]
+		dict set filenames $nm $scan
+		dict set filelang  $nm $lang
 	}
+}
+
+# Resolve a path against the two maps `files` (whole-basename) and `exts` (extension),
+# returning the matched value or "". Precedence: exact basename, then extension, then the
+# rootname-of-basename (the last-suffix-stripped name) against the filename map — so an
+# explicit extension always beats a rootname guess (`Makefile.tcl` is Tcl, not make) while
+# `Dockerfile.prod` / `Makefile.inc` still resolve to their build-file highlighter.
+proc rio::syntax::_resolve {path files exts} {
+	set tail [string tolower [file tail $path]]
+	if {[dict exists $files $tail]} { return [dict get $files $tail] }
+	set ext [string tolower [string trimleft [file extension $path] .]]
+	if {$ext ne "" && [dict exists $exts $ext]} { return [dict get $exts $ext] }
+	set root [string tolower [file rootname [file tail $path]]]
+	if {$root ne $tail && [dict exists $files $root]} { return [dict get $files $root] }
 	return ""
 }
 
-# The language display NAME registered for a file path (by its extension), or ""
-# when the file type has no highlighter — the frontend then shows a plain-text label.
-# Parallels for_path: same "later registration wins" and case-insensitive matching.
+# The scanner proc registered for a file path (by basename or extension), or "" when the
+# file type has no highlighter (the caller then leaves the text un-highlighted).
+proc rio::syntax::for_path {path} {
+	variable scanners
+	variable filenames
+	return [_resolve $path $filenames $scanners]
+}
+
+# The language display NAME registered for a file path, or "" when the file type has no
+# highlighter — the frontend then shows a plain-text label. Parallels for_path exactly.
 proc rio::syntax::lang_for_path {path} {
 	variable extlang
-	set ext [string tolower [string trimleft [file extension $path] .]]
-	if {$ext ne "" && [dict exists $extlang $ext]} {
-		return [dict get $extlang $ext]
-	}
-	return ""
+	variable filelang
+	return [_resolve $path $filelang $extlang]
 }
 
 # Scan one line with a scanner. A one-line indirection so callers never invoke the

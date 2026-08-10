@@ -1,0 +1,73 @@
+# Tests for the awk highlighter (AGENTS.md D32). Pure Tcl — Tk-free, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. awk.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::awk::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring ------------------------------------------------------------
+
+test for_path-awk {.awk resolves to the awk scanner} -body {
+	rio::syntax::for_path report.awk
+} -result rio::syntax::awk::scan
+
+test lang_for_path-awk {.awk resolves to the Awk language name} -body {
+	rio::syntax::lang_for_path report.awk
+} -result Awk
+
+# --- keywords, functions, variables ---------------------------------------------
+
+test begin-pattern {BEGIN is a keyword} -body {
+	has [hl {BEGIN { FS = "," }}] 1.0 1.5 keyword
+} -result 1
+
+test control-keyword {a control keyword lights} -body {
+	has [hl {if (x > 1) print}] 1.0 1.2 keyword
+} -result 1
+
+test builtin-function {a built-in function is a function} -body {
+	has [hl {n = length(s)}] 1.4 1.10 function
+} -result 1
+
+test user-function-call {a name before "(" is a function} -body {
+	has [hl {total(a, b)}] 1.0 1.5 function
+} -result 1
+
+test builtin-variable {a built-in variable NF is a variable} -body {
+	has [hl {print NF}] 1.6 1.8 variable
+} -result 1
+
+test field {a $1 field reference is a variable} -body {
+	has [hl {print $1}] 1.6 1.8 variable
+} -result 1
+
+test field-named {a $NF field reference is a variable} -body {
+	has [hl {print $NF}] 1.6 1.9 variable
+} -result 1
+
+# --- literals -------------------------------------------------------------------
+
+test string {a "…" string is a string} -body {
+	has [hl {print "hello"}] 1.6 1.13 string
+} -result 1
+
+test number {a numeric literal is a number} -body {
+	has [hl {x = 3.14}] 1.4 1.8 number
+} -result 1
+
+test comment {a # comment runs to end of line} -body {
+	has [hl {x = 1  # tally}] 1.7 1.14 comment
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
