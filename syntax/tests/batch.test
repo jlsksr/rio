@@ -1,0 +1,91 @@
+# Tests for the Windows Batch / cmd highlighter (AGENTS.md D32). Pure Tcl — Tk-free.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. batch.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::batch::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring ------------------------------------------------------------
+
+test for_path-bat {.bat resolves to the batch scanner} -body {
+	rio::syntax::for_path build.bat
+} -result rio::syntax::batch::scan
+
+test lang_for_path-cmd {.cmd resolves to the Batch language name} -body {
+	rio::syntax::lang_for_path run.cmd
+} -result Batch
+
+# --- keywords -------------------------------------------------------------------
+
+test keyword {a command word is a keyword} -body {
+	has [hl {echo hello}] 1.0 1.4 keyword
+} -result 1
+
+test keyword-case-insensitive {commands match case-insensitively} -body {
+	has [hl {SET x=1}] 1.0 1.3 keyword
+} -result 1
+
+test operator-word {a comparison operator word is an operator} -body {
+	set s [hl {if %n% GEQ 3 goto done}]
+	list [has $s 1.0 1.2 keyword] [has $s 1.7 1.10 operator]
+} -result {1 1}
+
+test at-echo {a leading @ is an operator, echo a keyword} -body {
+	set s [hl {@echo off}]
+	list [has $s 1.0 1.1 operator] [has $s 1.1 1.5 keyword]
+} -result {1 1}
+
+# --- variables ------------------------------------------------------------------
+
+test var-percent {a %VAR% expansion is a variable} -body {
+	has [hl {echo %PATH%}] 1.5 1.11 variable
+} -result 1
+
+test var-arg {a %1 positional argument is a variable} -body {
+	has [hl {echo %1}] 1.5 1.7 variable
+} -result 1
+
+test var-loop {a %%i for-loop variable is a variable} -body {
+	has [hl {echo %%i}] 1.5 1.8 variable
+} -result 1
+
+test var-delayed {a !VAR! delayed expansion is a variable} -body {
+	has [hl {echo !count!}] 1.5 1.12 variable
+} -result 1
+
+# --- comments -------------------------------------------------------------------
+
+test rem-comment {a REM line is a comment} -body {
+	has [hl {rem a note}] 1.0 1.10 comment
+} -result 1
+
+test colon-colon-comment {a :: line comment is a comment} -body {
+	has [hl {:: disabled}] 1.0 1.11 comment
+} -result 1
+
+test label {a :label is a function target} -body {
+	has [hl {:done}] 1.0 1.5 function
+} -result 1
+
+# --- strings and numbers --------------------------------------------------------
+
+test string {a "…" string is a string} -body {
+	has [hl {copy "a b.txt" dest}] 1.5 1.14 string
+} -result 1
+
+test number {a bare number is a number} -body {
+	has [hl {timeout 5}] 1.8 1.9 number
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

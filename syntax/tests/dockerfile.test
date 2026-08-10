@@ -1,0 +1,85 @@
+# Tests for the Dockerfile highlighter (AGENTS.md D32). Pure Tcl — Tk-free, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. dockerfile.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::dockerfile::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring (whole-basename + rootname, D46) ---------------------------
+
+test for_path-basename {a plain Dockerfile resolves by basename} -body {
+	rio::syntax::for_path /app/Dockerfile
+} -result rio::syntax::dockerfile::scan
+
+test lang_for_path-rootname {Dockerfile.prod resolves via the rootname fallback} -body {
+	rio::syntax::lang_for_path Dockerfile.prod
+} -result Dockerfile
+
+test for_path-ext {a .dockerfile extension resolves too} -body {
+	rio::syntax::for_path web.dockerfile
+} -result rio::syntax::dockerfile::scan
+
+# --- instructions ---------------------------------------------------------------
+
+test instruction {a leading instruction is a keyword} -body {
+	has [hl {RUN apt-get update}] 1.0 1.3 keyword
+} -result 1
+
+test instruction-lowercase {instructions match case-insensitively} -body {
+	has [hl {from alpine}] 1.0 1.4 keyword
+} -result 1
+
+test as-keyword {the AS of a FROM … AS name is a keyword} -body {
+	set s [hl {FROM golang AS build}]
+	list [has $s 1.0 1.4 keyword] [has $s 1.12 1.14 keyword]
+} -result {1 1}
+
+test onbuild-wraps-instruction {ONBUILD then a wrapped instruction — both keywords} -body {
+	set s [hl {ONBUILD COPY . /app}]
+	list [has $s 1.0 1.7 keyword] [has $s 1.8 1.12 keyword]
+} -result {1 1}
+
+test not-an-instruction {a bareword that is not an instruction stays plain} -body {
+	hl {hello world}
+} -result {}
+
+# --- values ---------------------------------------------------------------------
+
+test string {a quoted argument is a string} -body {
+	has [hl {LABEL desc="a b"}] 1.11 1.16 string
+} -result 1
+
+test expansion {a ${VAR} expansion is a variable} -body {
+	has [hl {ENV PATH=${HOME}/bin}] 1.9 1.16 variable
+} -result 1
+
+test expansion-bare {a $VAR expansion is a variable} -body {
+	has [hl {RUN echo $HOME}] 1.9 1.14 variable
+} -result 1
+
+test number {EXPOSE 8080 — the port is a number} -body {
+	has [hl {EXPOSE 8080}] 1.7 1.11 number
+} -result 1
+
+# --- comments -------------------------------------------------------------------
+
+test comment {a # comment is a comment} -body {
+	has [hl {# base image}] 1.0 1.12 comment
+} -result 1
+
+test directive-meta {a # syntax= parser directive is meta} -body {
+	has [hl {# syntax=docker/dockerfile:1}] 1.0 1.28 meta
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

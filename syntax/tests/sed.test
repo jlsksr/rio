@@ -1,0 +1,87 @@
+# Tests for the sed highlighter (AGENTS.md D32). Pure Tcl — Tk-free, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. sed.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::sed::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring ------------------------------------------------------------
+
+test for_path-sed {.sed resolves to the sed scanner} -body {
+	rio::syntax::for_path fix.sed
+} -result rio::syntax::sed::scan
+
+test lang_for_path-sed {.sed resolves to the Sed language name} -body {
+	rio::syntax::lang_for_path fix.sed
+} -result Sed
+
+# --- substitute command ---------------------------------------------------------
+
+test substitute {s/a/b/ — command, delimiters, patterns} -body {
+	set s [hl {s/foo/bar/}]
+	list [has $s 1.0 1.1 keyword] [has $s 1.1 1.2 operator] \
+	     [has $s 1.2 1.5 string] [has $s 1.6 1.9 string]
+} -result {1 1 1 1}
+
+test substitute-flags {the trailing flags of an s/// are attributes} -body {
+	has [hl {s/x/y/gi}] 1.6 1.7 attribute
+} -result 1
+
+test transliterate {y/abc/xyz/ colours like a substitute} -body {
+	set s [hl {y/abc/xyz/}]
+	list [has $s 1.0 1.1 keyword] [has $s 1.2 1.5 string] [has $s 1.6 1.9 string]
+} -result {1 1 1}
+
+# --- addresses ------------------------------------------------------------------
+
+test address-number {a numeric address is a number} -body {
+	has [hl {5d}] 1.0 1.1 number
+} -result 1
+
+test address-range {a first,second range — numbers and the comma operator} -body {
+	set s [hl {1,5d}]
+	list [has $s 1.0 1.1 number] [has $s 1.1 1.2 operator] [has $s 1.2 1.3 number]
+} -result {1 1 1}
+
+test address-last {the $ last-line address is an operator} -body {
+	has [hl {$d}] 1.0 1.1 operator
+} -result 1
+
+test address-regex {a /regex/ address is a string} -body {
+	set s [hl {/^#/d}]
+	list [has $s 1.0 1.4 string] [has $s 1.4 1.5 keyword]
+} -result {1 1}
+
+# --- branches, labels, plain commands -------------------------------------------
+
+test label {a : label definition names a function target} -body {
+	has [hl {:top}] 1.1 1.4 function
+} -result 1
+
+test branch {a b command with a label — keyword then function} -body {
+	set s [hl {b end}]
+	list [has $s 1.0 1.1 keyword] [has $s 1.2 1.5 function]
+} -result {1 1}
+
+test plain-command {a bare p command is a keyword} -body {
+	has [hl {p}] 1.0 1.1 keyword
+} -result 1
+
+# --- comments -------------------------------------------------------------------
+
+test comment {a # comment is a comment} -body {
+	has [hl {# a note}] 1.0 1.8 comment
+} -result 1
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests

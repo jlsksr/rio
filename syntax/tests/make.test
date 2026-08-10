@@ -1,0 +1,97 @@
+# Tests for the Makefile highlighter (AGENTS.md D32). Pure Tcl — Tk-free, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. make.tcl]
+
+proc hl {text} { rio::syntax::tokenize rio::syntax::make::scan $text }
+proc has {spans i0 i1 type} {
+	foreach {a b t} $spans { if {$a eq $i0 && $b eq $i1 && $t eq $type} { return 1 } }
+	return 0
+}
+
+# --- registry wiring (whole-basename matching, D46) -----------------------------
+
+test for_path-basename {a plain Makefile resolves by basename} -body {
+	rio::syntax::for_path /src/Makefile
+} -result rio::syntax::make::scan
+
+test lang_for_path-basename {GNUmakefile resolves to the Makefile language} -body {
+	rio::syntax::lang_for_path GNUmakefile
+} -result Makefile
+
+test for_path-ext {a .mk file resolves by extension} -body {
+	rio::syntax::for_path rules.mk
+} -result rio::syntax::make::scan
+
+test for_path-rootname {Makefile.inc resolves via the rootname fallback} -body {
+	rio::syntax::lang_for_path Makefile.inc
+} -result Makefile
+
+test resolve-ext-beats-rootname {an explicit extension wins over the rootname guess} -body {
+	# Makefile.tcl is Tcl, not make — the .tcl extension must take precedence.
+	source [file join $here .. tcl.tcl]
+	rio::syntax::lang_for_path Makefile.tcl
+} -result Tcl
+
+# --- constructs -----------------------------------------------------------------
+
+test target {the target of a rule is a function} -body {
+	has [hl {all: build test}] 1.0 1.3 function
+} -result 1
+
+test multiple-targets {each target name before ':' is a function} -body {
+	set s [hl {foo bar: dep}]
+	list [has $s 1.0 1.3 function] [has $s 1.4 1.7 function]
+} -result {1 1}
+
+test assignment {the name of a VAR = value assignment is a variable} -body {
+	has [hl {CC = gcc}] 1.0 1.2 variable
+} -result 1
+
+test assignment-colon-equals {a := immediate assignment names a variable} -body {
+	has [hl {OBJ := a.o b.o}] 1.0 1.3 variable
+} -result 1
+
+test directive {an ifeq directive is a keyword} -body {
+	has [hl {ifeq ($(A),1)}] 1.0 1.4 keyword
+} -result 1
+
+test include {an include directive is a keyword} -body {
+	has [hl {include config.mk}] 1.0 1.7 keyword
+} -result 1
+
+test ref-variable {a $(CC) reference is a variable} -body {
+	has [hl {	$(CC) -c $<}] 1.1 1.6 variable
+} -result 1
+
+test ref-function {a $(wildcard …) reference leads with a function} -body {
+	has [hl {SRC = $(wildcard *.c)}] 1.6 1.21 function
+} -result 1
+
+test automatic-var {an automatic variable $@ is a variable} -body {
+	has [hl {	cc -o $@ $^}] 1.7 1.9 variable
+} -result 1
+
+test escaped-dollar {a $$ escaped dollar is left plain} -body {
+	# $$ is literal; only the real reference $(HOME) should colour.
+	set s [hl {	echo $$PATH $(HOME)}]
+	has $s 1.13 1.20 variable
+} -result 1
+
+test comment {a # comment runs to end of line} -body {
+	has [hl {# a note}] 1.0 1.8 comment
+} -result 1
+
+test trailing-comment {a # after a rule colours from the hash} -body {
+	set s [hl {all: dep # build it}]
+	list [has $s 1.0 1.3 function] [has $s 1.9 1.19 comment]
+} -result {1 1}
+
+test empty {empty input yields no spans} -body {
+	hl ""
+} -result {}
+
+cleanupTests
