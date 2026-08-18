@@ -2614,6 +2614,13 @@ another subtree wouldn't be visible there anyway). Same seam is ready for the fu
 `fs.*` delete/rename ops (D-file-management): each should emit `fs.changed` on the
 affected path and this handler already does the right thing.
 
+Complementing the auto path, the files-pane header gained a **manual `⟳` Refresh**
+(`.dock.files.hdr.refresh` → `populate_nav`), mirroring the git pane's header exactly
+(the header became a name-left / glyph-right frame like `.dock.git.hdr`). Auto-refresh
+only fires for writes rio's own core makes; `⟳` is the escape hatch for changes it
+didn't — an external editor, a `git pull`, a build artifact — re-listing the directory
+and re-reading git flags on demand.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

@@ -201,7 +201,7 @@ set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; clos
 ok "pane: empty before folder open" [nav_labels] {{Open a folder…}}
 open_folder $proj
 ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
-ok "pane: header is project name" [.dock.files.head cget -text] [file tail $proj]
+ok "pane: header is project name" [.dock.files.hdr.head cget -text] [file tail $proj]
 ok "pane: dirs then files"        [nav_labels]           {sub/ zeta.txt}
 # Bands: a selection covers exactly its row (through the newline, so it spans full
 # width); a hover tags the hovered row. (D42 rich-list.)
@@ -233,6 +233,12 @@ ok "pane: fs.changed reveals new file" [expr {[lsearch -exact [nav_labels] gamma
 set df [open [file join $proj delta.txt] w] ; puts -nonewline $df "D\n" ; close $df
 dispatch_event [dict create event fs.changed params [dict create path [file join $proj sub deep.txt]]]
 ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 0
+# The ⟳ refresh control reloads the shown directory on demand — the manual path for
+# changes rio didn't make. delta.txt is on disk in the root but not yet shown (the
+# out-of-dir event above skipped its repaint); running the control's action reveals it.
+ok "pane: refresh control wired"   [bind .dock.files.hdr.refresh <Button-1>] populate_nav
+uplevel #0 [bind .dock.files.hdr.refresh <Button-1>]
+ok "pane: refresh reloads the dir" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 1
 # Restore the original tree ({sub/ zeta.txt}) for the row-index tests that follow.
 file delete [file join $proj gamma.txt] [file join $proj delta.txt] ; populate_nav
 

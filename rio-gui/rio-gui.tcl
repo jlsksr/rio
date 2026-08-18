@@ -745,7 +745,7 @@ proc populate_nav {} {
 	set b .dock.files.well.body
 	rl_begin $b
 	if {$::nav_dir eq ""} {
-		.dock.files.head configure -text "(no folder)"
+		.dock.files.hdr.head configure -text "(no folder)"
 		$b insert end "    Open a folder…\n"
 		rl_row $b 0 [list none ""]
 		set ::nav_git {}
@@ -753,7 +753,7 @@ proc populate_nav {} {
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
-	.dock.files.head configure -text [nav_header $::nav_dir $root]
+	.dock.files.hdr.head configure -text [nav_header $::nav_dir $root]
 	set git [nav_git_map $root]
 	set ::nav_git $git   ;# stashed so the row context menu can read status (D44)
 	if {$::nav_dir ne $root} {
@@ -2730,10 +2730,10 @@ proc apply_theme {theme} {
 	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
 	# yet); list selections borrow the editor's selection colour so the panes
 	# match the surface. The selector labels are coloured by style_selector.
-	foreach w {.dock .dock.sel .dock.files .dock.git .dock.git.hdr} {
+	foreach w {.dock .dock.sel .dock.files .dock.files.hdr .dock.git .dock.git.hdr} {
 		$w configure -background [dict get $c ui.bg]
 	}
-	foreach w {.dock.files.head .dock.git.hdr.branch .dock.git.hdr.refresh} {
+	foreach w {.dock.files.hdr.head .dock.files.hdr.refresh .dock.git.hdr.branch .dock.git.hdr.refresh} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
@@ -4101,8 +4101,19 @@ bind .dock.sel.git   <Button-1> {show_pane git}
 # and full-width hover/selection bands (a listbox is text-only, one colour). -width 26
 # (cols) keeps the dock's width stable when switching to the git pane (see below).
 frame .dock.files -background "#dddddd"
-label .dock.files.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
+# Files pane header: the project/subdir name (left) + a Refresh glyph (right), the same
+# layout as the git pane header so the two panes reload the same way. ⟳ re-lists the
+# shown directory and re-reads git flags via populate_nav — the manual counterpart to the
+# fs.changed auto-refresh (D47), for changes rio didn't make (an external tool, git pull).
+frame .dock.files.hdr -background "#dddddd"
+label .dock.files.hdr.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
+label .dock.files.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
+	-background "#dddddd" -foreground black
+pack .dock.files.hdr.refresh -side right
+pack .dock.files.hdr.head    -side left -fill x -expand 1
+pack .dock.files.hdr -side top -fill x
+bind .dock.files.hdr.refresh <Button-1> populate_nav
 frame .dock.files.well -borderwidth 2 -relief sunken -background white
 scrollbar .dock.files.well.sb -command {.dock.files.well.body yview}
 text .dock.files.well.body -width 26 -height 10 -wrap none -state disabled \
@@ -4110,7 +4121,6 @@ text .dock.files.well.body -width 26 -height 10 -wrap none -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
 	-background white -foreground black \
 	-yscrollcommand {autoscroll .dock.files.well.sb .dock.files.well.body}
-pack .dock.files.head -side top -fill x
 pack .dock.files.well -side top -fill both -expand 1
 pack .dock.files.well.body -side left -fill both -expand 1
 # .dock.files.well.sb is packed on demand by autoscroll (hidden when the list fits).
