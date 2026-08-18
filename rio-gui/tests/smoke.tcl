@@ -261,6 +261,53 @@ file delete [file join $proj gamma.txt] ; populate_nav
 nav_click 1
 ok "pane: file opened in a tab"   [bufget $::cur path]   [file join $proj zeta.txt]
 ok "pane: opened file's text"     [rio::doc::text $::cur] "ZETA\n"
+
+# --- file-management context actions (D48) -----------------------------------
+# The verbs sit between Copy Path and any git items; with no repo here the row menu is
+# just Open/Copy Path + the four fs verbs. On the shown dir's own entry all four appear;
+# on a ".." row (a dir whose parent is NOT the shown dir) only New File/New Folder do,
+# never Rename/Delete of the parent.
+proc menu_labels2 {m} {
+	set out {}
+	for {set i 0} {$i <= [$m index end]} {incr i} {
+		lappend out [expr {[$m type $i] eq "separator" ? "---" : [$m entrycget $i -label]}]
+	}
+	return $out
+}
+menu .fsm -tearoff 0
+nav_menu_build .fsm [list file [file join $proj zeta.txt]]
+ok "fs-menu: file row has all four verbs" [menu_labels2 .fsm] \
+	[list Open {Copy Path} --- {New File…} {New Folder…} Rename… Delete…]
+.fsm delete 0 end ; nav_menu_build .fsm [list dir [file dirname $proj]]
+ok "fs-menu: .. row omits Rename/Delete" [menu_labels2 .fsm] [list Open --- {New File…} {New Folder…}]
+destroy .fsm
+
+# fs_apply_create writes through the core and the pane shows it after a repaint.
+fs_apply_create file kappa.txt
+ok "fs: created file on disk"   [file isfile [file join $proj kappa.txt]] 1
+ok "fs: created file in pane"   [expr {[lsearch -exact [nav_labels] kappa.txt] >= 0}] 1
+fs_apply_create dir newdir
+ok "fs: created folder on disk" [file isdirectory [file join $proj newdir]] 1
+ok "fs: created folder in pane" [expr {[lsearch -exact [nav_labels] newdir/] >= 0}] 1
+# An invalid (non-single-component) name is refused: nothing created, no crash.
+fs_apply_create file "a/b.txt"
+ok "fs: nested name refused"    [file exists [file join $proj a]] 0
+
+# Rename a file that is open in a tab: disk renamed AND the tab retargets (path + title).
+do_open [file join $proj kappa.txt]
+fs_apply_rename [file join $proj kappa.txt] lambda.txt
+ok "fs: rename moved on disk"   [list [file exists [file join $proj kappa.txt]] \
+	[file isfile [file join $proj lambda.txt]]] {0 1}
+ok "fs: open tab retargeted"    [bufget $::cur path]   [file join $proj lambda.txt]
+ok "fs: tab title follows"      [tab_name $::cur]      lambda.txt
+
+# Delete a file open in a tab: disk gone and the buffer closes (no save prompt — the
+# modified flag is cleared first). Buffer count drops by one.
+set before [dict size $::buffers]
+fs_apply_delete [file join $proj lambda.txt]
+ok "fs: deleted file on disk"   [file exists [file join $proj lambda.txt]] 0
+ok "fs: open tab closed"        [dict size $::buffers] [expr {$before - 1}]
+
 file delete -force $proj
 
 # --- dock layout: switch panes and switch sides ------------------------------
@@ -381,13 +428,17 @@ if {![catch {exec git --version}]} {
 		}
 		return $out
 	}
+	# The file-management verbs (D48) sit between Copy Path and the git items; with the
+	# folder open, a real entry OF the shown dir carries all four (New File/Folder,
+	# Rename, Delete), so they precede the git tail here.
+	set fsv {{New File…} {New Folder…} {Rename…} {Delete…}}
 	menu .tm -tearoff 0
 	nav_menu_build .tm [list file [file join $gdir a.txt]]
-	ok "menu: modified file offers Stage" [menu_labels .tm] {Open {Copy Path} --- Stage}
+	ok "menu: modified file offers Stage" [menu_labels .tm] [list Open {Copy Path} --- {*}$fsv --- Stage]
 	.tm delete 0 end ; nav_menu_build .tm [list file [file join $gdir u.txt]]
-	ok "menu: untracked file offers Track" [menu_labels .tm] {Open {Copy Path} --- {Track (git add)}}
+	ok "menu: untracked file offers Track" [menu_labels .tm] [list Open {Copy Path} --- {*}$fsv --- {Track (git add)}]
 	.tm delete 0 end ; nav_menu_build .tm [list dir [file join $gdir sub]]
-	ok "menu: dir with changes offers Stage folder" [menu_labels .tm] {Open --- {Stage folder}}
+	ok "menu: dir with changes offers Stage folder" [menu_labels .tm] [list Open --- {*}$fsv --- {Stage folder}]
 	.tm delete 0 end ; git_menu_build .tm [dict create x { } y M path a.txt]
 	ok "menu: git unstaged offers Stage" [menu_labels .tm] {Open {Copy Path} --- Stage}
 	.tm delete 0 end ; git_menu_build .tm [dict create x A y { } path c.txt]

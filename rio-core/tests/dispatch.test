@@ -100,6 +100,26 @@ test buffer-close-unknown {closing a missing buffer errors cleanly} -body {
 	list [dict get $r ok] [dict get $r error code] [dict get $r error message]
 } -result {false no_buffer {no such buffer: 99999}}
 
+# --- buffer.setpath (repoint a buffer without writing; D48 rename support) ----
+
+test buffer-setpath-updates {buffer.setpath changes the stored path, no write} -body {
+	set b [rio::doc::new "hi" old.txt [dict create path /tmp/old.txt]]
+	set out [rio::core::call buffer.setpath [dict create buffer $b path /tmp/new.txt]]
+	list [dict get $out response ok] [dict get [rio::doc::meta $b] path]
+} -result {true /tmp/new.txt}
+
+test buffer-setpath-unknown {setpath on a missing buffer errors cleanly} -body {
+	set out [rio::core::call buffer.setpath [dict create buffer 99999 path /tmp/x]]
+	set r [dict get $out response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false no_buffer}
+
+test buffer-setpath-no-path {setpath without a path is a bad_request} -body {
+	set b [rio::doc::new "hi" p.txt]
+	set r [dict get [rio::core::call buffer.setpath [dict create buffer $b]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
 # --- buffer.list (inventory; the first non-flat result) ----------------------
 # The registry is shared across tests, so don't assert the whole list — locate
 # the buffer under test within it.
@@ -145,8 +165,10 @@ test session-hello-identity {session.hello reports protocol version and name} -b
 test session-hello-ops {session.hello lists registered ops, sorted, including itself} -body {
 	set ops [dict get [rio::core::call session.hello {}] response result ops]
 	list [expr {"session.hello" in $ops}] [expr {"buffer.replace" in $ops}] \
-		[expr {"file.open" in $ops}] [expr {$ops eq [lsort $ops]}]
-} -result {1 1 1 1}
+		[expr {"file.open" in $ops}] [expr {$ops eq [lsort $ops]}] \
+		[expr {"fs.create" in $ops}] [expr {"fs.rename" in $ops}] \
+		[expr {"fs.delete" in $ops}] [expr {"buffer.setpath" in $ops}]
+} -result {1 1 1 1 1 1 1 1}
 
 test session-hello-no-event {session.hello is a pure query — no events} -body {
 	llength [dict get [rio::core::call session.hello {}] events]

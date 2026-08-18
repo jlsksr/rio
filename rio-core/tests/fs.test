@@ -213,4 +213,88 @@ test fs-op-write-event {fs.write emits fs.changed naming the written path} -body
 	list [dict get $ev event] [expr {[dict get $ev params path] eq [file normalize $p]}]
 } -result {fs.changed 1}
 
+# --- fs.create / fs.rename / fs.delete: file-management write ops (D48) --------
+# Absolute paths resolve as-is (no project needed); the events name the changed path.
+
+test fs-op-create-file {fs.create makes an empty file and emits fs.changed} -body {
+	set p [file join [makeDirectory fsc] new.txt]
+	set r [rio::core::call fs.create [dict create path $p]]
+	set ev [lindex [dict get $r events] 0]
+	list [file isfile $p] \
+		[expr {[dict get $r response result path] eq [file normalize $p]}] \
+		[dict get $ev event] \
+		[expr {[dict get $ev params path] eq [file normalize $p]}]
+} -result {1 1 fs.changed 1}
+
+test fs-op-create-dir {fs.create with type dir makes a directory} -body {
+	set p [file join [makeDirectory fscd] sub]
+	rio::core::call fs.create [dict create path $p type dir]
+	list [file isdirectory $p]
+} -result 1
+
+test fs-op-create-clobber {fs.create refuses to overwrite an existing path} -body {
+	set p [file join [makeDirectory fscc] there.txt]
+	rio::core::call fs.create [dict create path $p]
+	set r [dict get [rio::core::call fs.create [dict create path $p]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
+test fs-op-create-bad-type {fs.create rejects a type that is not file or dir} -body {
+	set p [file join [makeDirectory fsct] x]
+	set r [dict get [rio::core::call fs.create [dict create path $p type link]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test fs-op-create-no-path {fs.create without a path is a bad_request} -body {
+	set r [dict get [rio::core::call fs.create {}] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test fs-op-rename {fs.rename moves a file and emits fs.changed for both ends} -body {
+	set d [makeDirectory fsr]
+	set a [file join $d a.txt] ; set b [file join $d b.txt]
+	rio::core::call fs.create [dict create path $a]
+	set r [rio::core::call fs.rename [dict create path $a to $b]]
+	set evs [dict get $r events]
+	list [file exists $a] [file exists $b] [llength $evs] \
+		[expr {[dict get [lindex $evs 0] params path] eq [file normalize $a]}] \
+		[expr {[dict get [lindex $evs 1] params path] eq [file normalize $b]}]
+} -result {0 1 2 1 1}
+
+test fs-op-rename-clobber {fs.rename refuses to overwrite an existing destination} -body {
+	set d [makeDirectory fsrc]
+	set a [file join $d a.txt] ; set b [file join $d b.txt]
+	rio::core::call fs.create [dict create path $a]
+	rio::core::call fs.create [dict create path $b]
+	set r [dict get [rio::core::call fs.rename [dict create path $a to $b]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
+test fs-op-rename-missing-arg {fs.rename without `to` is a bad_request} -body {
+	set r [dict get [rio::core::call fs.rename [dict create path /tmp/x]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test fs-op-delete-file {fs.delete removes a file and emits fs.changed} -body {
+	set p [file join [makeDirectory fsd] gone.txt]
+	rio::core::call fs.create [dict create path $p]
+	set ev [lindex [dict get [rio::core::call fs.delete [dict create path $p]] events] 0]
+	list [file exists $p] [dict get $ev event]
+} -result {0 fs.changed}
+
+test fs-op-delete-tree {fs.delete removes a non-empty directory recursively} -body {
+	set d [makeDirectory fsdt]
+	set sub [file join $d sub]
+	rio::core::call fs.create [dict create path $sub type dir]
+	rio::core::call fs.create [dict create path [file join $sub inner.txt]]
+	rio::core::call fs.delete [dict create path $sub]
+	list [file exists $sub]
+} -result 0
+
+test fs-op-delete-missing {fs.delete of a nonexistent path is an io_error} -body {
+	set p [file join [temporaryDirectory] no-such-[pid].txt]
+	set r [dict get [rio::core::call fs.delete [dict create path $p]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
 cleanupTests

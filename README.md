@@ -41,9 +41,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a
   tab's right-click menu). Drag the divider to resize; closing a group's last tab
   unsplits.
-- **Files & git** — open a project folder and browse it in a side pane; view
-  **git status and diffs** for the open repo, and **stage, unstage, and commit**
-  right from the pane. The file pane keeps itself current — it updates on the
+- **Files & git** — open a project folder and browse it in a side pane; **create,
+  rename, and delete** files and folders from the row menu (deletes confirm first);
+  and view **git status and diffs** for the open repo with **stage, unstage, and
+  commit** right from the pane. The file pane keeps itself current — it updates on the
   agent's own writes, when rio regains focus, and on a manual refresh (⟳). Files
   and git share one dockable, resizable side panel.
 - **Compare view** — a **side-by-side diff** of two documents, original beside

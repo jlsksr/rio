@@ -31,6 +31,21 @@ proc rio::ops::buffer_close {params} {
 }
 rio::dispatch::register buffer.close rio::ops::buffer_close
 
+# buffer.setpath {buffer, path} -> {} ; repoint a buffer at a new file WITHOUT writing.
+# Only the stored path changes — the same doc meta `file.save`'s save-as updates. This
+# is what makes a file-pane Rename (D48) durable for an open buffer: without it the
+# retargeted tab's next Save would recreate the OLD name from the core's stale path.
+proc rio::ops::buffer_setpath {params} {
+	set id [_bufid $params]
+	if {![rio::doc::exists $id]} { rio::error::raise no_buffer "no such buffer: $id" }
+	if {![dict exists $params path]} {
+		rio::error::raise bad_request "buffer.setpath requires a path"
+	}
+	rio::doc::setmeta $id path [dict get $params path]
+	return [dict create result {}]
+}
+rio::dispatch::register buffer.setpath rio::ops::buffer_setpath
+
 # buffer.list -> {buffers <array of {buffer,name,path,linecount}>}
 # The core's inventory of open buffers, in creation order. This is the first op
 # whose result is non-flat — `buffers` is an array — so the wire encoder is told
