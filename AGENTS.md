@@ -2551,6 +2551,13 @@ than letting git abort. Success feedback reuses the header: `git_flash` shows
 `✓ committed <short-hash>` in the branch label and schedules a `refresh_git` to restore
 it — no new status widget.
 
+**Placeholder hint (later refinement).** The empty entry shows a greyed `message` hint —
+Tk entries have no native placeholder, so it is a child label *placed inside* the entry
+and toggled by the entry's textvariable trace (shown while empty, hidden the moment you
+type). Kept out of `.msg get`, so the hint text can never be mistaken for a real summary
+or committed; themed on the entry surface with a `blend_hex` grey. `smoke.tcl` covers the
+empty→typed→cleared cycle.
+
 **Core.** `git.commit` (`git commit -m <msg>`, returning the new HEAD short hash for the
 flash) joins `rio::git` and registers like the rest — the second git write family after
 D44, core-side so it works remote unchanged. We lean on git's own honest guards

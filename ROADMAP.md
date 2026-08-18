@@ -26,6 +26,15 @@ Each entry notes its state:
   rename's old→new pair). Kept out of D44 to keep that pass git-focused. The **inline
   text-input** New/Rename need now exists — the D45 commit bar is the reusable primitive
   (an auto-showing pane entry).
+- **Live file-watching in the core** — *deferred* (AGENTS.md D47). The file pane now
+  refreshes on rio's own core writes (`fs.changed`), on regaining OS focus, and on a
+  manual ⟳ — which covers external changes at the "alt-tab back" moment without a poll.
+  The *proper* answer for truly live updates (a file appearing while rio is focused, from
+  a build or another tool) is OS notifications in the core — inotify / kqueue / FSEvents —
+  emitting `fs.changed`, reusing the D47 event and working remote for free. Deferred for
+  its cost: Tcl has no built-in inotify, so it means a C extension or shelling to
+  per-platform watchers — a dependency plus a platform matrix — against the no-heavy-deps
+  grain. The focus-return refresh is the cheap 90% stand-in until then.
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:

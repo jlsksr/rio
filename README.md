@@ -42,8 +42,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   tab's right-click menu). Drag the divider to resize; closing a group's last tab
   unsplits.
 - **Files & git** — open a project folder and browse it in a side pane; view
-  **git status and diffs** for the open repo (read-only for now). Files and git
-  share one dockable, resizable side panel.
+  **git status and diffs** for the open repo, and **stage, unstage, and commit**
+  right from the pane. The file pane keeps itself current — it updates on the
+  agent's own writes, when rio regains focus, and on a manual refresh (⟳). Files
+  and git share one dockable, resizable side panel.
 - **Compare view** — a **side-by-side diff** of two documents, original beside
   proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
   the active buffer against any file from the View menu.
@@ -116,7 +118,7 @@ locally, or a socket to a core running elsewhere (**server mode**, like
 `emacs-server`). Same op calls either way; there is no separate in-process path.
 Frontends are thin views — the core owns your files and broadcasts changes back.
 
-**Still to come:** git write ops (stage/commit), an agent run-command tool (with
+**Still to come:** git discard/restore, an agent run-command tool (with
 guardrails), the terminal frontend (below), and a polished install/packaging path.
 The fuller list of candidate work lives in [ROADMAP.md](ROADMAP.md).
 
