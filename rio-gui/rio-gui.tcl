@@ -206,6 +206,24 @@ proc dispatch_event {ev} {
 			if {$g ne ""} { apply_change $g $p }
 		}
 		project.opened { on_project_opened [dict get $ev params] }
+		fs.changed     { on_fs_changed [dict get $ev params] }
+	}
+}
+
+# A file appeared or changed on disk outside the editor's own save — an agent fs.write
+# (D26), which is not backed by an open buffer so no buffer.changed fires (D47). Repaint
+# the dock so the new file, and any git-status shift, shows without a manual reload. The
+# files pane lists a single directory, so it repaints only when the change lands in the
+# directory currently shown; the git pane's status is project-wide, so it always repaints.
+# The user's own Save needs nothing here: it refreshes locally via do_save and goes
+# through file.save, which emits no fs.changed — so there is no double repaint.
+proc on_fs_changed {p} {
+	if {![dict exists $p path]} return
+	if {$::dock_pane eq "git"} {
+		refresh_git
+	} elseif {$::nav_dir ne "" &&
+			[file normalize [file dirname [dict get $p path]]] eq [file normalize $::nav_dir]} {
+		populate_nav
 	}
 }
 

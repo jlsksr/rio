@@ -220,6 +220,22 @@ ok "pane: subdir shows .. first"  [lindex [nav_labels] 0] ".."
 nav_click 0
 ok "pane: ascended to root"       $::nav_dir             [file normalize $proj]
 
+# fs.changed repaints the files pane when the write lands in the shown directory, so an
+# agent-created file appears without a manual reload (D47). Create a file on disk behind
+# the pane's back, then feed it the event the core would broadcast.
+set nf [open [file join $proj gamma.txt] w] ; puts -nonewline $nf "G\n" ; close $nf
+ok "pane: new file absent pre-event"   [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 0
+dispatch_event [dict create event fs.changed params [dict create path [file join $proj gamma.txt]]]
+ok "pane: fs.changed reveals new file" [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 1
+# A write OUTSIDE the shown directory does not repaint it (single-dir navigator): create
+# delta.txt in the root but signal a change under sub/ — the guard skips the repaint, so
+# delta.txt must stay hidden until something legitimately refreshes.
+set df [open [file join $proj delta.txt] w] ; puts -nonewline $df "D\n" ; close $df
+dispatch_event [dict create event fs.changed params [dict create path [file join $proj sub deep.txt]]]
+ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 0
+# Restore the original tree ({sub/ zeta.txt}) for the row-index tests that follow.
+file delete [file join $proj gamma.txt] [file join $proj delta.txt] ; populate_nav
+
 # Activating a file row opens it in a tab (row 1 = zeta.txt, after sub/).
 nav_click 1
 ok "pane: file opened in a tab"   [bufget $::cur path]   [file join $proj zeta.txt]

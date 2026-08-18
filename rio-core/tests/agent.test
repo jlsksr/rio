@@ -384,6 +384,18 @@ test agent-create-appeared-refused {approving a create after the file appeared o
 		[string trim [dict get [rio::fs::read [file join $::pdir fresh.txt]] text]]
 } -cleanup { rio::project::close } -result {propose done 1 {user got there first}}
 
+test agent-create-emits-fs-changed {applying a create forwards fs.write's fs.changed event (D47)} -setup {
+	set ::pdir [makeDirectory agce]
+	rio::project::open $::pdir
+} -body {
+	set prep [rio::agent::tools::prepare_write propose_create \
+		[dict create path birth.txt content "hi\n"]]
+	set r [rio::agent::tools::apply_write [dict get $prep plan]]
+	set ev [lindex [dict get $r events] 0]
+	list [dict get $r ok] [dict get $ev event] \
+		[expr {[dict get $ev params path] eq [file normalize [file join $::pdir birth.txt]]}]
+} -cleanup { rio::project::close } -result {1 fs.changed 1}
+
 test agent-edit-not-unique {propose_edit with a non-unique old_string is refused} -setup {
 	set ::pdir [makeDirectory agnu] ; makeFile "x\nx\n" f.txt $::pdir
 	rio::project::open $::pdir

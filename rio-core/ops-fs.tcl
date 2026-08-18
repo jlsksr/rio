@@ -122,7 +122,12 @@ proc rio::ops::fs_write {params} {
 	} err]} {
 		rio::error::raise io_error $err
 	}
+	# Announce the disk write so frontends can refresh a file tree that isn't backed
+	# by an open buffer (buffer.changed covers the open-buffer case). This is what
+	# lets the GUI's file pane show an agent-created file without a manual reload.
+	set ev [dict create event fs.changed params [dict create path $abs]]
 	return [dict create result [dict create \
-		path $abs chars [string length [dict get $params text]]]]
+		path $abs chars [string length [dict get $params text]]] \
+		events [list $ev]]
 }
 rio::dispatch::register fs.write rio::ops::fs_write

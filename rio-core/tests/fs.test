@@ -206,4 +206,11 @@ test fs-op-write-no-text {fs.write without text is a bad_request} -body {
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
 
+test fs-op-write-event {fs.write emits fs.changed naming the written path} -body {
+	set p [file join [makeDirectory fswe] made.txt]
+	set evs [dict get [rio::core::call fs.write [dict create path $p text "x\n"]] events]
+	set ev [lindex $evs 0]
+	list [dict get $ev event] [expr {[dict get $ev params path] eq [file normalize $p]}]
+} -result {fs.changed 1}
+
 cleanupTests

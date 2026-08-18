@@ -2588,6 +2588,34 @@ dead code without a basename key. Kept deliberately small: no glob/shebang match
 
 ---
 
+### D47 — The file pane auto-refreshes on out-of-buffer disk writes (`fs.changed`)
+
+The files pane repainted only on an explicit reload (navigate away and back, or the
+user's own Save). So an **agent-created file never appeared** until a manual refresh: the
+core does no broadcast for a disk write that isn't backed by an open buffer, and
+`buffer.changed` — the event the editor already listens to — only fires for buffer edits,
+not for `fs.write` straight to disk. This was the long-standing file-pane gap.
+
+The fix is one new event, mirroring `buffer.changed`. The `fs.write` op now returns an
+**`fs.changed {path}`** event (the write-sibling of the buffer path: `buffer.changed`
+covers open buffers, `fs.changed` covers the disk). The agent's `apply_write` **forwards**
+it on the two paths that write disk directly — a `propose_create` and a closed-file
+`propose_edit` — so an approved agent write reaches every connected frontend the same way
+an edit does. (The open-buffer edit path already rides `buffer.changed`, so it needs
+nothing new; and the file was already visible.) `file.save` deliberately does **not** emit
+`fs.changed`: the user's own Save refreshes the dock locally in `do_save`, so emitting
+would only double-repaint the initiating GUI — a second-frontend sync for user saves is a
+separate concern, left out.
+
+GUI side (`on_fs_changed`): the git pane's status is project-wide, so it always repaints;
+the files pane is a **single-directory** navigator, so it repaints only when the change
+lands in the directory currently shown (`file normalize` on both sides, since a write to
+another subtree wouldn't be visible there anyway). Same seam is ready for the future
+`fs.*` delete/rename ops (D-file-management): each should emit `fs.changed` on the
+affected path and this handler already does the right thing.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
