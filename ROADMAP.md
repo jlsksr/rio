@@ -17,16 +17,15 @@ Each entry notes its state:
 
 ## Editor & UI
 
-- **File-pane auto-refresh** — *gap.* The file tree doesn't update when the agent
-  creates a file; it refreshes on the next manual reload. Fold into a proper
-  file-pane pass.
 - **File-management context actions** — *planned* (builds on AGENTS.md D44's row
   context menus). The menus do git today; the file-manager verbs — **New File / New
   Folder / Rename / Delete** — are the natural next set. Each needs a new `fs.*` write
   op (create / rename / delete, core-side so it works remote like `git.add`) and a
-  confirmation for the destructive ones, plus refreshing the pane after. Kept out of
-  D44 to keep that pass git-focused. The **inline text-input** New/Rename need now
-  exists — the D45 commit bar is the reusable primitive (an auto-showing pane entry).
+  confirmation for the destructive ones. Pane-refresh-after is already handled: each op
+  just emits `fs.changed {path}` and the D47 handler repaints the tree (extend it for a
+  rename's old→new pair). Kept out of D44 to keep that pass git-focused. The **inline
+  text-input** New/Rename need now exists — the D45 commit bar is the reusable primitive
+  (an auto-showing pane entry).
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:

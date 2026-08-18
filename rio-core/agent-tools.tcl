@@ -147,10 +147,12 @@ proc rio::agent::tools::prepare_write {name input} {
 }
 
 # --- write: apply (after approval) -------------------------------------------
-# Returns {ok, content, summary, ?events?}. `events` are buffer.changed events the
-# loop forwards on its emit so an open editor view updates. Edits to an open buffer
-# go through buffer.replace (undoable) and, when the disk flag is on, file.save;
-# edits to a closed file and all creates are written straight to disk via fs.write.
+# Returns {ok, content, summary, ?events?}. The loop forwards `events` on its emit so
+# frontends update: buffer.changed for an open-buffer edit (the editor view repaints),
+# fs.changed for a create or closed-file write (the file tree repaints, D47). Edits to
+# an open buffer go through buffer.replace (undoable) and, when the disk flag is on,
+# file.save; edits to a closed file and all creates are written straight to disk via
+# fs.write, which is what emits the fs.changed the create/closed-edit paths forward.
 #
 # The ground truth is RE-RESOLVED here, not reused from prepare_write: the editor
 # stays live while a proposal awaits its decision (the turn's coroutine is suspended
@@ -166,10 +168,13 @@ proc rio::agent::tools::apply_write {plan} {
 		if {[file exists $abs]} {
 			return [_err "$rel was created while the proposal awaited approval — use propose_edit" "error: exists"]
 		}
-		if {![_ok [rio::core::call fs.write [dict create path $abs text [dict get $plan content]]] msg]} {
+		set out [rio::core::call fs.write [dict create path $abs text [dict get $plan content]]]
+		if {![_ok $out msg]} {
 			return [_err "couldn't create $rel: $msg" "error: write failed"]
 		}
-		return [dict create ok 1 content "created $rel" summary "created $rel"]
+		# Forward fs.write's fs.changed so the GUI file tree shows the new file (D47).
+		return [dict create ok 1 content "created $rel" summary "created $rel" \
+			events [dict get $out events]]
 	}
 	# edit: locate the match afresh in the file's CURRENT text
 	set cur [_current_text $abs]
@@ -200,10 +205,12 @@ proc rio::agent::tools::apply_write {plan} {
 			summary "edited $rel ([expr {$disk ? {buffer+disk} : {buffer}}])" events $events]
 	}
 	# closed file: write straight to disk (stage-only has no buffer to land in)
-	if {![_ok [rio::core::call fs.write [dict create path $abs text [string map [list $old $new] $text]]] msg]} {
+	set out [rio::core::call fs.write [dict create path $abs text [string map [list $old $new] $text]]]
+	if {![_ok $out msg]} {
 		return [_err "couldn't write $rel: $msg" "error: write failed"]
 	}
-	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)"]
+	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)" \
+		events [dict get $out events]]
 }
 
 # --- helpers -----------------------------------------------------------------
