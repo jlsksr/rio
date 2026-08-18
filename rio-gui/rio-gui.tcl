@@ -599,10 +599,42 @@ proc on_project_opened {p} {
 }
 
 # Repaint whichever dock pane is showing (the other repaints when next shown). rio
-# does no file-watching, so the panes' git state is refreshed at the moments rio
-# knows something changed — opening a folder, saving a file — rather than live.
+# does no file-watching, so the panes' state is refreshed at the moments rio knows
+# something might have changed — opening a folder, saving a file, an fs.changed from the
+# core (D47), or regaining OS focus (app_focus_event) — rather than live.
 proc refresh_dock {} {
 	if {$::dock_pane eq "git"} { refresh_git } else { populate_nav }
+}
+
+# Re-sync the dock when rio regains OS input focus. The fs.changed auto-refresh (D47)
+# only fires for writes rio's own core makes; this catches changes rio *didn't* make — a
+# file created in a terminal, a `git pull`, a build artifact — at the moment the user
+# alt-tabs back. One refresh_dock per app-return, not a poll, so it stays cheap.
+#
+# Tk delivers FocusIn/FocusOut on the toplevel for internal widget-to-widget moves too,
+# so we debounce onto an idle callback and then consult `focus -displayof` — empty exactly
+# when another application holds focus. A within-app move leaves it non-empty, so only a
+# genuine app-level return flips the flag and refreshes.
+set ::app_focused 1        ;# assume focused at launch
+set ::focus_settle ""      ;# pending idle callback that reads the settled focus state
+proc app_focus_event {} {
+	if {$::focus_settle ne ""} { after cancel $::focus_settle }
+	set ::focus_settle [after idle app_focus_settle]
+}
+proc app_focus_settle {} {
+	set ::focus_settle ""
+	note_app_focus [expr {[focus -displayof .] ne ""}]
+}
+# The testable core: act on a settled focus state. A false→true edge (the app regained
+# focus) re-syncs the dock; within-app churn and focus loss only record the flag. Guarded
+# on a live core so a refresh never runs while disconnected.
+proc note_app_focus {has} {
+	if {$has} {
+		if {!$::app_focused && [info exists ::core_chan]} { refresh_dock }
+		set ::app_focused 1
+	} else {
+		set ::app_focused 0
+	}
 }
 
 # ---------------------------------------------------------------------------
@@ -5208,6 +5240,12 @@ menu .m.settings.editmode -tearoff 0
 # make_editor_group (editor_bindings + editor_proxy). Only the window-manager close
 # needs binding here.
 wm protocol . WM_DELETE_WINDOW do_quit
+
+# Re-sync the dock whenever rio regains OS focus, to pick up changes made outside rio
+# (see app_focus_event). The binding lives on the toplevel bindtag, so a focus event on
+# any descendant reaches it; app_focus_settle debounces the flurry into one check.
+bind . <FocusIn>  app_focus_event
+bind . <FocusOut> app_focus_event
 
 # Load the syntax highlighters before the first apply_theme (which configures a
 # text tag per token type from the theme's syntax.* roles) and before any buffer

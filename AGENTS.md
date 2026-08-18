@@ -2621,6 +2621,18 @@ only fires for writes rio's own core makes; `⟳` is the escape hatch for change
 didn't — an external editor, a `git pull`, a build artifact — re-listing the directory
 and re-reading git flags on demand.
 
+Between those two, a **focus-return refresh** covers the same external-change case without
+a click: rio re-syncs the shown dock pane whenever the application regains OS input focus
+(`app_focus_event` → `refresh_dock`), the "I alt-tabbed back to rio" moment. It is not a
+poll — one `refresh_dock` per app-return. The mechanism is deliberately GUI-side and
+dependency-free (no inotify/kqueue): FocusIn/FocusOut on the toplevel bindtag, debounced
+onto an idle callback that reads `focus -displayof .` (empty exactly when another app
+holds focus), so only a genuine app-level false→true edge refreshes — within-app widget
+moves don't. `note_app_focus` is factored out as the testable core (edge logic without a
+real window manager). This is the cheap 90% answer; true live file-watching in the core
+(emitting `fs.changed`) stays the deferred "proper" path in ROADMAP, with its dependency
+and per-platform cost.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

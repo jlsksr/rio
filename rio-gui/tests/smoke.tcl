@@ -239,8 +239,23 @@ ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] d
 ok "pane: refresh control wired"   [bind .dock.files.hdr.refresh <Button-1>] populate_nav
 uplevel #0 [bind .dock.files.hdr.refresh <Button-1>]
 ok "pane: refresh reloads the dir" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 1
+file delete [file join $proj delta.txt]
+
+# Regaining OS focus re-syncs the dock (note_app_focus's false→true edge), so a file
+# created while rio was in the background shows on return. Drive the testable core
+# directly: mark unfocused, create epsilon.txt behind the pane's back, then mark focused.
+note_app_focus 0
+set ef [open [file join $proj epsilon.txt] w] ; puts -nonewline $ef "E\n" ; close $ef
+ok "pane: focus-return absent first" [expr {[lsearch -exact [nav_labels] epsilon.txt] >= 0}] 0
+note_app_focus 1
+ok "pane: focus-return reveals file"  [expr {[lsearch -exact [nav_labels] epsilon.txt] >= 0}] 1
+# A no-op re-focus (already focused) does not spuriously reload: delete on disk, re-mark
+# focused, and the stale row is still shown (no refresh fired on the true→true no-edge).
+file delete [file join $proj epsilon.txt]
+note_app_focus 1
+ok "pane: no reload without an edge"  [expr {[lsearch -exact [nav_labels] epsilon.txt] >= 0}] 1
 # Restore the original tree ({sub/ zeta.txt}) for the row-index tests that follow.
-file delete [file join $proj gamma.txt] [file join $proj delta.txt] ; populate_nav
+file delete [file join $proj gamma.txt] ; populate_nav
 
 # Activating a file row opens it in a tab (row 1 = zeta.txt, after sub/).
 nav_click 1
