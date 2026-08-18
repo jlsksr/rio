@@ -1058,6 +1058,18 @@ proc git_commit_bar {show} {
 	}
 }
 
+# Show the greyed "message" hint exactly while the commit entry is empty; hide it once
+# the user has typed anything. Driven by the git_commit_msg textvariable trace, so it
+# tracks typing, clearing, and refresh-driven resets alike.
+proc git_commit_hint {args} {
+	global git_commit_msg
+	if {$git_commit_msg eq ""} {
+		place .dock.git.commit.msg.ph -x 3 -rely 0.5 -anchor w
+	} else {
+		place forget .dock.git.commit.msg.ph
+	}
+}
+
 # Commit the staged index with the bar's summary line. Empty (or whitespace) message is
 # refused quietly — a flash, focus kept, no core call — rather than letting git abort.
 # On success the staged changes vanish, so refresh_dock auto-hides the bar; the header
@@ -2742,6 +2754,10 @@ proc apply_theme {theme} {
 	.dock.git.commit.msg configure -font RioUIFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor]
+	# The placeholder hint: on the entry surface, in a muted grey blended toward it.
+	.dock.git.commit.msg.ph configure -font RioUIFont \
+		-background [dict get $c editor.bg] \
+		-foreground [blend_hex [dict get $c editor.fg] [dict get $c editor.bg] 50]
 	# The agent chat pane (D26): the chat.* roles + RioChatFont; accent on labels.
 	.chat configure -background [dict get $c chat.bg]
 	.chat.hdr configure -background [dict get $c chat.bg]
@@ -4120,8 +4136,15 @@ rl_init .dock.git.well.body git_pick {} git_context_menu
 # ONLY when something is staged (and hidden otherwise) — "appears only when needed", the
 # D36 find-bar quality bar. Enter in the entry commits too. Built here, not packed.
 frame  .dock.git.commit -background "#dddddd"
-entry  .dock.git.commit.msg -font {monospace 9}
+entry  .dock.git.commit.msg -font {monospace 9} -textvariable git_commit_msg
 button .dock.git.commit.go  -text "✓ Commit" -font {monospace 9} -command git_commit
+# A greyed "message" hint, shown only while the entry is empty (Tk has no native
+# placeholder). It is a child label placed inside the entry, so it never becomes part of
+# `.msg get` — the empty check and the commit stay honest. A trace toggles it on content.
+label .dock.git.commit.msg.ph -text message -font {monospace 9} -takefocus 0 -borderwidth 0
+place .dock.git.commit.msg.ph -x 3 -rely 0.5 -anchor w
+bind  .dock.git.commit.msg.ph <Button-1> {focus .dock.git.commit.msg}
+trace add variable git_commit_msg write git_commit_hint
 pack .dock.git.commit.go  -side right -padx {2 4} -pady 2
 pack .dock.git.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
 bind .dock.git.commit.msg <Return> git_commit

@@ -384,6 +384,14 @@ if {![catch {exec git --version}]} {
 	# now staged (M ) from the refresh above, so the bar is packed into the git pane.
 	proc git_bar_shown {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.commit] >= 0} }
 	ok "commit: bar shown when staged" [git_bar_shown] 1
+	# The greyed "message" hint shows while the entry is empty and hides once text is typed.
+	proc git_hint_shown {} { expr {[place info .dock.git.commit.msg.ph] ne ""} }
+	.dock.git.commit.msg delete 0 end
+	ok "commit: hint shown when empty" [git_hint_shown] 1
+	.dock.git.commit.msg insert 0 "x"
+	ok "commit: hint hidden when typed" [git_hint_shown] 0
+	.dock.git.commit.msg delete 0 end
+	ok "commit: hint back when cleared" [git_hint_shown] 1
 	# An empty (whitespace) summary is refused without touching the repo: still staged.
 	.dock.git.commit.msg delete 0 end ; .dock.git.commit.msg insert 0 "   " ; git_commit
 	ok "commit: empty message no-ops"  [git_xy_for a.txt] "M "
