@@ -131,3 +131,63 @@ proc rio::ops::fs_write {params} {
 		events [list $ev]]
 }
 rio::dispatch::register fs.write rio::ops::fs_write
+
+# The file-management write ops (D48): create / rename / delete a path, core-side so
+# they work over a remote core exactly like git.add. Each mirrors fs.write's shape —
+# resolve against the project root, wrap the I/O in a catch surfaced as io_error, and
+# emit fs.changed so the GUI's file pane (D47) repaints without a manual reload. The
+# GUI supplies the New/Rename names (a modal prompt) and the Delete confirmation; the
+# core just does the work and announces it.
+
+# fs.create {path, ?type file|dir?} -> {path} ; make an empty file (default) or a dir.
+proc rio::ops::fs_create {params} {
+	if {![dict exists $params path]} {
+		rio::error::raise bad_request "fs.create requires a path"
+	}
+	set type [expr {[dict exists $params type] ? [dict get $params type] : "file"}]
+	if {$type ni {file dir}} {
+		rio::error::raise bad_request "fs.create type must be file or dir"
+	}
+	set abs [rio::project::resolve [dict get $params path]]
+	if {[catch {rio::fs::create $abs $type} err]} {
+		rio::error::raise io_error $err
+	}
+	set ev [dict create event fs.changed params [dict create path $abs]]
+	return [dict create result [dict create path $abs] events [list $ev]]
+}
+rio::dispatch::register fs.create rio::ops::fs_create
+
+# fs.rename {path, to} -> {from, to} ; move/rename, refusing to overwrite. Emits TWO
+# fs.changed events — one for the source, one for the destination — so a move across
+# directories repaints both ends (on_fs_changed keys the repaint on each path's dir).
+proc rio::ops::fs_rename {params} {
+	foreach k {path to} {
+		if {![dict exists $params $k]} {
+			rio::error::raise bad_request "fs.rename requires $k"
+		}
+	}
+	set from [rio::project::resolve [dict get $params path]]
+	set to   [rio::project::resolve [dict get $params to]]
+	if {[catch {rio::fs::rename $from $to} err]} {
+		rio::error::raise io_error $err
+	}
+	set evs [list \
+		[dict create event fs.changed params [dict create path $from]] \
+		[dict create event fs.changed params [dict create path $to]]]
+	return [dict create result [dict create from $from to $to] events $evs]
+}
+rio::dispatch::register fs.rename rio::ops::fs_rename
+
+# fs.delete {path} -> {path} ; delete a file or a whole directory tree (recursive).
+proc rio::ops::fs_delete {params} {
+	if {![dict exists $params path]} {
+		rio::error::raise bad_request "fs.delete requires a path"
+	}
+	set abs [rio::project::resolve [dict get $params path]]
+	if {[catch {rio::fs::delete $abs} err]} {
+		rio::error::raise io_error $err
+	}
+	set ev [dict create event fs.changed params [dict create path $abs]]
+	return [dict create result [dict create path $abs] events [list $ev]]
+}
+rio::dispatch::register fs.delete rio::ops::fs_delete

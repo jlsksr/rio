@@ -2640,6 +2640,54 @@ real window manager). This is the cheap 90% answer; true live file-watching in t
 (emitting `fs.changed`) stays the deferred "proper" path in ROADMAP, with its dependency
 and per-platform cost.
 
+### D48 — File-management context actions: New / Rename / Delete
+
+The file pane could browse and (D44) drive git, but not **manage** files — creating,
+renaming, or deleting meant dropping to a terminal. This closes that loop with the
+file-manager verbs off the row context menu: **New File / New Folder / Rename / Delete**.
+
+The work is done **core-side**, as three new `fs.*` write ops beside `fs.write`, so it
+works over a remote core exactly like `git.add` (the frontend never touches the disk):
+`fs.create {path, ?type file|dir?}`, `fs.rename {path, to}`, `fs.delete {path}`. Each
+mirrors `fs.write`'s shape — resolve against the project root, wrap the I/O in a catch
+surfaced as `io_error`, and emit **`fs.changed`** so the D47 handler repaints without a
+manual reload. Two deliberate safety choices live in the pure-I/O layer (`rio::fs`):
+create and rename **refuse to clobber** an existing path (rename uses no `-force`), while
+delete **is** recursive (`file delete -force`) so a folder goes in one call — gated behind
+a GUI confirmation, since it's the one destructive verb. `fs.rename` emits **two**
+`fs.changed` events (the old path and the new), so a move across directories repaints both
+ends — `on_fs_changed` keys each repaint on the path's directory (the D47 seam anticipated
+exactly this old→new pair).
+
+**Open buffers are kept honest.** Renaming or deleting a file that's open in a tab can't
+just touch the disk: the tab would still point at the old path. So the GUI **retargets**
+open buffers — on rename, `retarget_buffers` rewrites each affected buffer's path (a
+directory rename sweeps everything under it) both client-side (the tab retitles via
+`tab_name`) and in the core via a new **`buffer.setpath {buffer, path}`** op, a no-write
+path update (the same `rio::doc::setmeta` `file.save`'s save-as already uses). Without the
+core half, the retargeted tab's next Save would recreate the *old* name from the core's
+stale meta path — so `buffer.setpath` is what makes a rename durable. On delete,
+`close_buffers_under` closes each affected tab; it clears the modified flag first so
+`close_tab` (reused for its group-reactivation/collapse logic) doesn't offer to save a
+file that no longer exists.
+
+**Name input is a modal prompt** (`name_prompt`), not an inline pane bar — a decision
+taken with jbm. The auto-showing D45 commit bar proved the inline-input pattern, but a
+small centred modal (New file name / New folder name / Rename to) is period-appropriate
+(Windows-2000-era), simplest, and needs no theme wiring; rio's first custom modal input
+(the others are `tk_messageBox`/`tk_chooseDirectory`). The inline in-pane rename stays a
+noted deferral. Placement follows the flat one-directory navigator: **New** always creates
+in the *shown* directory (`$::nav_dir` — "new here"; descend first to create inside a
+subfolder), so it appears whenever a folder is open; **Rename/Delete** appear only on a
+real entry *of* the shown directory (`[file dirname $path] eq $::nav_dir`), which
+naturally excludes the ".." row and the no-folder placeholder. As with D47, the verb procs
+(`nav_new`/`nav_rename`/`nav_delete`, doing the modal/confirm) are split from the testable
+appliers (`fs_apply_*`, doing the core call + retarget + repaint) so the headless smoke
+drives the effect without a dialog. Names are validated to a **single path component**
+(no separators, not `.`/`..`) — nested-path creation from one prompt is a non-goal — with
+a rejected name flashing the header (`nav_flash`, the files sibling of `git_flash`) and
+changing nothing.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

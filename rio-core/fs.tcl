@@ -99,6 +99,42 @@ proc rio::fs::listdir {dir} {
 	return $entries
 }
 
+# Create an empty file (type "file") or a directory (type "dir") at `path` (an
+# absolute path the caller has already resolved). Refuses to clobber an existing
+# path, so New never silently overwrites. Parents are created as needed — the same
+# mkdir-on-write courtesy fs.write extends. Pure I/O; the ops layer maps the error.
+proc rio::fs::create {path type} {
+	if {[file exists $path]} { error "already exists: $path" }
+	switch -- $type {
+		dir  { file mkdir $path }
+		file {
+			file mkdir [file dirname $path]
+			close [open $path w]
+		}
+		default { error "unknown create type: $type" }
+	}
+	return
+}
+
+# Move/rename `from` to `to` (both absolute). Refuses an existing destination — no
+# -force — so a rename can never overwrite another file; the destination's parents
+# are created so a rename can also move across directories.
+proc rio::fs::rename {from to} {
+	if {[file exists $to]} { error "destination exists: $to" }
+	file mkdir [file dirname $to]
+	file rename -- $from $to
+	return
+}
+
+# Delete `path` (an absolute file or directory). A directory goes recursively in one
+# call (-force), so the whole subtree is removed — the GUI gates this behind a
+# confirmation. Errors when the path is already gone rather than passing silently.
+proc rio::fs::delete {path} {
+	if {![file exists $path]} { error "no such path: $path" }
+	file delete -force -- $path
+	return
+}
+
 # --- UTF-8 well-formedness (RFC 3629 / Unicode Table 3-7) --------------------
 #
 # True iff every byte sequence is a valid UTF-8 encoding — rejecting overlong

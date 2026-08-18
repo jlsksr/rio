@@ -17,15 +17,6 @@ Each entry notes its state:
 
 ## Editor & UI
 
-- **File-management context actions** — *planned* (builds on AGENTS.md D44's row
-  context menus). The menus do git today; the file-manager verbs — **New File / New
-  Folder / Rename / Delete** — are the natural next set. Each needs a new `fs.*` write
-  op (create / rename / delete, core-side so it works remote like `git.add`) and a
-  confirmation for the destructive ones. Pane-refresh-after is already handled: each op
-  just emits `fs.changed {path}` and the D47 handler repaints the tree (extend it for a
-  rename's old→new pair). Kept out of D44 to keep that pass git-focused. The **inline
-  text-input** New/Rename need now exists — the D45 commit bar is the reusable primitive
-  (an auto-showing pane entry).
 - **Live file-watching in the core** — *deferred* (AGENTS.md D47). The file pane now
   refreshes on rio's own core writes (`fs.changed`), on regaining OS focus, and on a
   manual ⟳ — which covers external changes at the "alt-tab back" moment without a poll.
@@ -35,6 +26,13 @@ Each entry notes its state:
   its cost: Tcl has no built-in inotify, so it means a C extension or shelling to
   per-platform watchers — a dependency plus a platform matrix — against the no-heavy-deps
   grain. The focus-return refresh is the cheap 90% stand-in until then.
+- **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
+  New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
+  Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45
+  commit bar is the reusable inline primitive when this is wanted); move via
+  drag-and-drop; multi-select delete; duplicate/copy; and nested-path creation from one
+  prompt (v1 validates a single path component). None are structural — each is an added
+  verb or an alternative input on the same `fs.*` ops.
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:

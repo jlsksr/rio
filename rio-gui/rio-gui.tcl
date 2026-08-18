@@ -904,7 +904,25 @@ proc nav_menu_build {m payload} {
 	if {$type eq "file"} {
 		$m add command -label "Copy Path" -command [list rio_copy_clip $path]
 	}
+	nav_menu_fs $m $type $path
 	nav_menu_git $m $type $path
+}
+# Append the file-management verbs (D48). New File/New Folder create in the shown
+# directory ($::nav_dir) — the flat navigator shows one dir, so "new here" is the honest
+# model (descend first to create inside a subfolder); they appear whenever a folder is
+# open. Rename/Delete act on the clicked row, but only for a real entry OF the shown dir
+# — the guard [file dirname $path] eq $::nav_dir excludes the ".." row (its dirname is the
+# grandparent) and the no-folder placeholder. Names come from a modal prompt; Delete
+# confirms first (nav_delete).
+proc nav_menu_fs {m type path} {
+	if {$::nav_dir eq ""} return
+	$m add separator
+	$m add command -label "New File…"   -command [list nav_new file]
+	$m add command -label "New Folder…" -command [list nav_new dir]
+	if {$type ne "none" && [file dirname $path] eq $::nav_dir} {
+		$m add command -label "Rename…" -command [list nav_rename $path]
+		$m add command -label "Delete…" -command [list nav_delete $path]
+	}
 }
 # Append the git items for a row, given its type and abspath. A file uses its XY from
 # the stash (untracked -> Track; worktree-dirty -> Stage; staged -> Unstage); a dir
@@ -928,6 +946,163 @@ proc nav_menu_git {m type path} {
 	}
 	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
 	if {$x ne " "} { $m add command -label "Unstage" -command [list do_git unstage $path] }
+}
+
+# ---------------------------------------------------------------------------
+# File-management actions (D48). The menu-facing procs (nav_new/nav_rename/
+# nav_delete) collect the name via a modal prompt / confirm; the fs_apply_* procs
+# do the core call, retarget any open buffers, and repaint — split out so the
+# headless smoke can drive the effect without a real dialog (as note_app_focus was
+# for D47). Each fs.* op resolves its path against the project root and emits
+# fs.changed, but we refresh_dock directly too: the acting GUI shouldn't wait on the
+# round-trip event to see its own change.
+# ---------------------------------------------------------------------------
+proc nav_new {type} {
+	set what [expr {$type eq "dir" ? "folder" : "file"}]
+	set name [name_prompt "New [string totitle $what]" "Name of new $what:" ""]
+	if {$name eq ""} return
+	fs_apply_create $type $name
+}
+proc nav_rename {path} {
+	set name [name_prompt "Rename" "Rename to:" [file tail $path]]
+	if {$name eq "" || $name eq [file tail $path]} return
+	fs_apply_rename $path $name
+}
+proc nav_delete {path} {
+	set isdir [file isdirectory $path]
+	set what [expr {$isdir ? "folder and everything in it" : "file"}]
+	if {[tk_messageBox -icon warning -type yesno -default no -title "rio — delete" \
+			-message "Delete this $what?\n\n[file tail $path]\n\nThis cannot be undone."] ne "yes"} {
+		return
+	}
+	fs_apply_delete $path
+}
+
+# A single-line component name is required: non-empty, no path separator, not . or ..
+# — so a prompt can only ever create/rename WITHIN the shown directory (nested paths
+# are a deliberate non-goal). Rejected names flash the header and change nothing.
+proc nav_name_ok {name} {
+	return [expr {$name ne "" && [llength [file split $name]] == 1 && $name ni {. ..}}]
+}
+
+proc fs_apply_create {type name} {
+	if {![nav_name_ok $name]} { nav_flash "invalid name" ; return }
+	set resp [rio_call fs.create \
+		[dict create path [file join $::nav_dir $name] type $type]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	refresh_dock
+}
+proc fs_apply_rename {path newname} {
+	if {![nav_name_ok $newname]} { nav_flash "invalid name" ; return }
+	set to [file join [file dirname $path] $newname]
+	set resp [rio_call fs.rename [dict create path $path to $to]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	retarget_buffers $path $to
+	refresh_dock
+}
+proc fs_apply_delete {path} {
+	set resp [rio_call fs.delete [dict create path $path]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	close_buffers_under $path
+	refresh_dock
+}
+
+# After a rename, repoint every open buffer at the old path (or under it, for a dir
+# rename) to the new path — client-side (so the tab retitles via tab_name) AND in the
+# core via buffer.setpath (so the buffer's next Save writes the NEW name, not the old).
+proc retarget_buffers {old new} {
+	set touched 0
+	foreach id [dict keys $::buffers] {
+		set p [bufget $id path]
+		if {$p eq ""} continue
+		if {$p eq $old} {
+			set np $new
+		} elseif {[string match "$old/*" $p]} {
+			set np "$new/[string range $p [expr {[string length $old] + 1}] end]"
+		} else {
+			continue
+		}
+		bufset $id path $np
+		rio_call buffer.setpath [dict create buffer $id path $np]
+		set touched 1
+	}
+	if {$touched} refresh_all
+}
+
+# After a delete, close every open buffer at that path (or under it, for a dir). We
+# clear the modified flag first so close_tab's discard prompt doesn't offer to save a
+# file that no longer exists; close_tab reuses do_close's reactivation / group-collapse.
+proc close_buffers_under {path} {
+	foreach id [dict keys $::buffers] {
+		set p [bufget $id path]
+		if {$p eq ""} continue
+		if {$p eq $path || [string match "$path/*" $p]} {
+			bufset $id modified 0
+			close_tab $id
+		}
+	}
+}
+
+# Briefly show a message in the files-pane header, then restore the real header.
+# The files sibling of git_flash — reuses the header rather than adding a status
+# widget; the scheduled populate_nav repaints the true directory line.
+proc nav_flash {text} {
+	.dock.files.hdr.head configure -text $text
+	after cancel populate_nav
+	after 2000 populate_nav
+}
+
+# A modal single-line name prompt (New / Rename). rio's first custom modal input —
+# existing dialogs are tk_messageBox / tk_chooseDirectory. Returns the entered string,
+# or "" on Cancel/Escape/empty. Grab + tkwait make it synchronous like those helpers.
+proc name_prompt {title label prefill} {
+	set w .nameprompt
+	catch {destroy $w}
+	toplevel $w
+	wm title $w $title
+	wm transient $w .
+	wm resizable $w 0 0
+	set ::name_prompt_result ""
+	label $w.l -text $label -anchor w
+	entry $w.e -width 32
+	$w.e insert 0 $prefill
+	frame $w.b
+	button $w.b.ok     -text OK     -width 8 -command [list name_prompt_done $w 1]
+	button $w.b.cancel -text Cancel -width 8 -command [list name_prompt_done $w 0]
+	pack $w.b.ok $w.b.cancel -side left -padx 4
+	pack $w.l -side top -fill x -padx 8 -pady {8 2}
+	pack $w.e -side top -fill x -padx 8
+	pack $w.b -side top -pady 8
+	bind $w.e <Return> [list name_prompt_done $w 1]
+	bind $w   <Escape> [list name_prompt_done $w 0]
+	wm protocol $w WM_DELETE_WINDOW [list name_prompt_done $w 0]
+	# Centre over the main window, then grab focus for the modal wait.
+	wm withdraw $w
+	update idletasks
+	set x [expr {[winfo rootx .] + ([winfo width .]  - [winfo reqwidth $w])  / 2}]
+	set y [expr {[winfo rooty .] + ([winfo height .] - [winfo reqheight $w]) / 3}]
+	wm geometry $w +$x+$y
+	wm deiconify $w
+	$w.e selection range 0 end
+	focus $w.e
+	grab $w
+	tkwait window $w
+	return $::name_prompt_result
+}
+proc name_prompt_done {w ok} {
+	if {$ok} { set ::name_prompt_result [string trim [$w.e get]] } \
+	else     { set ::name_prompt_result "" }
+	catch {grab release $w}
+	destroy $w
 }
 
 proc open_folder_dialog {} {
