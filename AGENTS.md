@@ -2690,6 +2690,42 @@ changing nothing.
 
 ---
 
+### D49 — Line-number gutter
+
+A VSCode-style **line-number gutter** down the left of each editor group, on by default
+(a decision taken with jbm — it's a code editor), toggled by **View ▸ Line Numbers**
+(`Ctrl+L`) and persisted in `prefs.json` (`line_numbers`) beside `wrap`/`wrap_indent`, so
+the whole thing mirrors `::wrap_lines`/`apply_wrap` — a global view flag applied to every
+group.
+
+The gutter is a thin, unfocusable **canvas** gridded into column 0 (the text moves to
+column 1, the tab strip spans all three), *not* a sibling text widget. The reason is
+**wrap** (D-era `View ▸ Wrap Lines`): under wrap a logical line spans several display
+rows, and a second text widget can't stay aligned. Instead `gutter_redraw` paints from the
+text widget's own **`dlineinfo "$line.0"`** — the y-pixel of each logical line's *first*
+display row — so a wrapped line shows its number once, at the top, exactly like VSCode, and
+the two views can never drift. It walks only the visible logical lines (`@0,0` down to the
+bottom pixel) and skips any line whose display box is empty (scrolled past / elided).
+
+Repaint is driven by the two signals that mean "the view moved": the text widget's
+**`-yscrollcommand`** (rewired to `edscroll`, which sets the group's scrollbar *and* marks
+the gutter — this fires on every scroll and every edit that shifts a line) and its
+**`<Configure>`** (resize / re-wrap). Both funnel through `gutter_mark`, which coalesces to
+a single `after idle` pass so a fast scroll paints once. The gutter **width** tracks the
+last line's digit count (floored at two digits) and is set even while the window is
+off-screen — width needs only `[$t index end-1c]`, not a render — so it's stable and
+headless-testable; the numbers themselves need a mapped window (dlineinfo has no geometry
+otherwise), which is the one part the withdrawn smoke can't assert (the standalone draw
+mechanism was verified separately). Colours reuse the existing **`gutter.fg`** role over
+`editor.bg`, wired in `restyle_group` so a theme switch repaints. The gutter's mouse wheel
+forwards to the text so a scroll begun over the numbers still moves the buffer.
+
+**Non-goals (noted):** click-a-number to select the line, relative line numbers, and line
+numbers in the side-by-side compare panes — all deferred; the gutter is the editor groups
+only.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

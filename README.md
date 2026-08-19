@@ -29,7 +29,7 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
 
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
-  buffers as tabs, scrollbars, and optional line wrap.
+  buffers as tabs, scrollbars, a line-number gutter, and optional line wrap.
 - **Find & Replace** — a find bar (`Ctrl+F`, `Ctrl+H` for the replace row) with
   live match highlighting and a match count, `F3`/`Shift+F3` stepping with
   wrap-around, match-case toggle, two-step Replace (see it selected, then
