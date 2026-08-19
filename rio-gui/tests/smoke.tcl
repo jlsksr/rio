@@ -388,6 +388,19 @@ ok "gutter: pref round-trips"    $::line_numbers                      0
 set ::line_numbers 1 ; apply_line_numbers ; prefs_save   ;# restore the default for later tests
 do_close ; do_close                                      ;# close the two temp buffers
 
+# --- cursor position in the status bar ---------------------------------------
+# refresh_status carries a compact "Ln L, Col C" segment for the focused group's
+# insert mark; a cursor move (cursor_moved on the focused group) repaints it. Col is
+# char+1 (Tk indexes from 0). No focus / no group -> "" rather than an error.
+set pc [tmpbytes "one\ntwo three\nfour\n"]
+do_open $pc
+[fgw] mark set insert 2.4 ; cursor_moved $::focus
+ok "cursor: segment reads Ln/Col"   [cursor_status]                       "Ln 2, Col 5"
+ok "cursor: status bar shows it"    [expr {[string match {*Ln 2, Col 5*} [.status cget -text]]}] 1
+[fgw] mark set insert 1.0 ; cursor_moved $::focus
+ok "cursor: column is 1-based"      [cursor_status]                       "Ln 1, Col 1"
+do_close                                                 ;# close the temp buffer
+
 # --- git pane: branch + changed files + diff ---------------------------------
 if {![catch {exec git --version}]} {
 	set gdir [file join [file dirname $tpath] riogui-git-[clock clicks]]

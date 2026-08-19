@@ -2726,6 +2726,27 @@ only.
 
 ---
 
+### D50 — Cursor position (Ln/Col) in the status bar
+
+The status bar carries a compact **`Ln L, Col C`** segment for the focused group's insert
+mark, between the language and buffer-count segments. It's computed by `cursor_status`
+(reads `[fgw] index insert`, splits on `.`, reports `char + 1` so the column is 1-based like
+VSCode/most editors while Tk indexes from 0) and rendered as one more `%s` in
+`refresh_status`'s single-label format — no extra widget, in keeping with the one-label
+status bar.
+
+Keeping it live is two bindings per group (`make_editor_group`): **`<KeyRelease>`** and
+**`<ButtonRelease-1>`** call `cursor_moved $g`, which repaints only when `$g` is the focused
+group (a background split never owns the shown position). KeyRelease covers arrow/nav keys
+and typing; ButtonRelease covers click-to-place and the end of a drag-select. Edits already
+route through `refresh_all`, so this adds coverage for *pure navigation* that doesn't touch
+the buffer. `cursor_status` is guarded (no focus / no group / a failing `index` → `""`) so
+an early or transitional call is a harmless empty segment, not an error — the same defensive
+shape the gutter's redraw uses. Selection extent (VSCode's "(N selected)") is deliberately
+left out; the ask was line/column, kept compact.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
