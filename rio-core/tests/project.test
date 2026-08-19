@@ -145,7 +145,7 @@ proc setup_search {} { set ::stree [make_search_tree]; rio::project::open $::str
 proc teardown_search {} { rio::project::close; file delete -force $::stree }
 
 test search-groups-by-file {case-sensitive search groups matching lines by file, root skipped .git} -setup setup_search -body {
-	set r [rio::project::search needle 0]
+	set r [rio::project::search needle 0 0]
 	set rels {} ; foreach f [dict get $r results] { lappend rels [dict get $f rel] }
 	# a.txt: lines 1 and 3 match (case-sensitive, so "NEEDLE" in src/b.txt does not);
 	# .git/ and the binary file are skipped.
@@ -155,29 +155,50 @@ test search-groups-by-file {case-sensitive search groups matching lines by file,
 
 test search-counts-occurrences {count totals every hit, not just matching lines} -setup setup_search -body {
 	# a.txt has "needle" x3 (line 1 once, line 3 twice) across 2 rows.
-	dict get [rio::project::search needle 0] count
+	dict get [rio::project::search needle 0 0] count
 } -cleanup teardown_search -result 3
 
 test search-nocase {a case-insensitive search also finds the upper-case hit in the subdir} -setup setup_search -body {
-	set r [rio::project::search needle 1]
+	set r [rio::project::search needle 1 0]
 	set rels {} ; foreach f [dict get $r results] { lappend rels [dict get $f rel] }
 	list [dict get $r files] [lsort $rels]
 } -cleanup teardown_search -result {2 {a.txt src/b.txt}}
 
-test search-match-fields {a match row carries 1-based line/col and the line text} -setup setup_search -body {
-	set r [rio::project::search needle 0]
-	set m [lindex [dict get [lindex [dict get $r results] 0] matches] 0]
-	list [dict get $m line] [dict get $m col] [dict get $m text]
-} -cleanup teardown_search -result {1 7 {alpha needle}}
+test search-match-fields {a match row carries 1-based line/col, every hit's cols, and the text} -setup setup_search -body {
+	set r [rio::project::search needle 0 0]
+	set ms [dict get [lindex [dict get $r results] 0] matches]
+	set m0 [lindex $ms 0] ; set m1 [lindex $ms 1]
+	# line 1 has one hit at col 7; line 3 ("needle needle again") has two, cols 1 and 8.
+	list [dict get $m0 line] [dict get $m0 col] [dict get $m0 cols] [dict get $m0 text] \
+		[dict get $m1 cols]
+} -cleanup teardown_search -result {1 7 7 {alpha needle} {1 8}}
+
+test search-wholeword {whole-word skips a hit embedded in a larger word} -setup {
+	set ::stree [make_search_tree]
+	set f [open [file join $::stree c.txt] w]
+	puts -nonewline $f "needle\nneedles pin\na needle.\n" ; close $f
+	rio::project::open $::stree
+} -body {
+	# c.txt rows in each mode. Plain: all three lines (needle, needleS, needle.).
+	# Whole-word: "needles" is skipped; "needle" and "needle." (a dot is a boundary) match.
+	proc crows {ww} {
+		set r [rio::project::search needle 0 $ww]
+		foreach fdict [dict get $r results] {
+			if {[dict get $fdict rel] eq "c.txt"} { return [llength [dict get $fdict matches]] }
+		}
+		return 0
+	}
+	list [crows 0] [crows 1]
+} -cleanup teardown_search -result {3 2}
 
 test search-no-project {searching with no project open raises bad_request} -body {
 	rio::project::close
-	catch {rio::project::search needle 0} m opts
+	catch {rio::project::search needle 0 0} m opts
 	rio::error::code_of $opts
 } -result bad_request
 
 test search-empty-needle {an empty needle raises bad_request} -setup setup_search -body {
-	catch {rio::project::search "" 0} m opts
+	catch {rio::project::search "" 0 0} m opts
 	rio::error::code_of $opts
 } -cleanup teardown_search -result bad_request
 
@@ -191,12 +212,12 @@ test search-op-empty-needle {project.search with no needle raises bad_request} -
 	list [dict get $resp ok] [dict get $resp error code]
 } -cleanup teardown_search -result {false bad_request}
 
-test search-wire {project.search encodes the two-level result to JSON} -body {
+test search-wire {project.search encodes the two-level result (with the cols array) to JSON} -body {
 	set result [dict create count 2 files 1 truncated 0 results \
 		[list [dict create path /p/a.txt rel a.txt matches \
-			[list [dict create line 1 col 7 text {alpha needle}]]]]]
+			[list [dict create line 3 col 1 cols {1 8} text {needle needle}]]]]]
 	rio::wire::response [dict create id 1 ok true op project.search result $result]
-} -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"1","col":"7","text":"alpha needle"}]}]}}}
+} -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"3","col":"1","cols":["1","8"],"text":"needle needle"}]}]}}}
 
 test fs-list-wire {fs.list encodes to JSON with path + an entries array} -body {
 	set result [dict create path /p entries \
