@@ -38,6 +38,11 @@ Each entry notes its state:
   number to select the line**, **relative line numbers**, and gutter numbers in the
   side-by-side **compare panes**. Each rides the same `gutter_redraw` seam — an added
   binding, an alternate number source, or a second call site — not a structural change.
+- **Window / taskbar icon** — *deferred.* rio sets no `_NET_WM_ICON`, so the xfwm4 title
+  bar and the xfce4-panel taskbar each fall back to their own default (hence the mismatch).
+  jbm has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image
+  at a few sizes (16/32/48). Note this is a *raster* asset, distinct from the mono-Unicode
+  in-UI iconography rule — a glyph would have to be rendered to a pixmap first.
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:
