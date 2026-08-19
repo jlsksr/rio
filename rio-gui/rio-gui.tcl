@@ -2219,6 +2219,106 @@ proc find_replace_all {} {
 	find_status "Replaced $n"
 }
 
+# ---------------------------------------------------------------------------
+# Find in Files (AGENTS.md D51): a project-wide search whose engine is the core
+# op project.search (the only place that sees the tree in remote mode, D36) and
+# whose results land in a bottom tool window — the Visual Studio "Find Results"
+# model, documents in the center, tool windows docked (D35). The panel is a
+# first small paving stone toward the deferred dock-site system: one bottom
+# strip, not yet a general dock. rl_* draws the grouped result list.
+# ---------------------------------------------------------------------------
+set ::fif_shown 0
+set ::fif_case  0   ;# "Match case" in Find in Files (off = case-insensitive, the friendlier first search)
+
+# Show the panel (above the find bar / status), seed the query from the selection
+# like the find bar, and search at once if there is already a needle. With no
+# project open there is nothing to search, so the count line says so instead.
+proc fif_open {} {
+	set root ""
+	catch { set root [dict get [rio_result project.get {}] root] }
+	set ::fif_shown 1
+	pack .results -after .status -side bottom -fill x
+	catch {
+		set sel [[gw $::focus] get sel.first sel.last]
+		if {$sel ne "" && [string first "\n" $sel] < 0} {
+			.results.hdr.e delete 0 end ; .results.hdr.e insert 0 $sel
+		}
+	}
+	focus .results.hdr.e
+	.results.hdr.e selection range 0 end
+	.results.hdr.e icursor end
+	if {$root eq ""} {
+		fif_paint {} ; .results.hdr.count configure -text "open a folder to search"
+		return
+	}
+	if {[string trim [.results.hdr.e get]] ne ""} fif_run
+}
+
+# Hide the panel and hand focus back to the editor.
+proc fif_close {} {
+	if {!$::fif_shown} return
+	set ::fif_shown 0
+	pack forget .results
+	focus [gget $::focus path]
+}
+
+# Run the query: call project.search and repaint the grouped result list. Empty
+# needle clears; the case toggle re-runs (its -command). One round-trip per Enter
+# — project search is not a per-keystroke live paint (it walks the tree), unlike
+# the in-buffer find bar.
+proc fif_run {} {
+	if {!$::fif_shown} return
+	set needle [.results.hdr.e get]
+	if {[string trim $needle] eq ""} { fif_paint {} ; .results.hdr.count configure -text "" ; return }
+	set resp [rio_call project.search [dict create needle $needle nocase [expr {!$::fif_case}]]]
+	if {![dict get $resp ok]} {
+		fif_paint {} ; .results.hdr.count configure -text [dict get $resp error message]
+		return
+	}
+	set r [dict get $resp result]
+	fif_paint [dict get $r results]
+	set n [dict get $r count] ; set f [dict get $r files]
+	if {$n == 0} {
+		set msg "No results"
+	} else {
+		set msg "$n [expr {$n == 1 ? {match} : {matches}}] · $f [expr {$f == 1 ? {file} : {files}}]"
+		if {[dict get $r truncated]} { append msg " (truncated)" }
+	}
+	.results.hdr.count configure -text $msg
+}
+
+# Repaint the rich-list: a non-selectable file-header row (relative path) then one
+# selectable row per matching line ("<line>  <text>"), its payload the location to
+# open. Mirrors the git/files panes' rl_* rendering.
+proc fif_paint {results} {
+	set b .results.well.body
+	rl_begin $b
+	foreach fdict $results {
+		$b insert end "[dict get $fdict rel]\n" fifile
+		rl_row $b 0 ""
+		foreach m [dict get $fdict matches] {
+			$b insert end [format "  %5d  %s\n" [dict get $m line] \
+				[string trimright [dict get $m text]]]
+			rl_row $b 1 [dict create path [dict get $fdict path] \
+				line [dict get $m line] col [dict get $m col]]
+		}
+	}
+	rl_end $b
+}
+
+# Activate a result row: open (or switch to) its file and move the caret to the
+# match. The index is built as a string, not through expr, so a column like 10
+# isn't coerced to a float (the editor_proxy / buffer.find float trap, met again).
+proc fif_activate {payload} {
+	if {![do_open [dict get $payload path]]} return
+	set t [gw $::focus]              ;# widget COMMAND for the subcommands below…
+	catch {
+		$t mark set insert "[dict get $payload line].[expr {[dict get $payload col] - 1}]"
+		$t see insert
+	}
+	focus [gget $::focus path]       ;# …but focus takes the window PATH (the gutter-bug trap)
+}
+
 # Close the active buffer of the focused group; guard unsaved changes. If this empties
 # one of two groups, the group collapses (unsplit); the sole group instead keeps at
 # least one tab by minting a scratch (D33).
@@ -3120,6 +3220,27 @@ proc apply_theme {theme} {
 			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 			-insertbackground [dict get $c editor.cursor]
 	}
+	# The Find-in-Files panel (D51): chrome like the find bar, the query entry on the
+	# editor surface (a place to type), the well + rich-list like the dock panes. The
+	# file-header rows take the accent; the match rows the editor foreground.
+	foreach w {.results .results.hdr} { $w configure -background [dict get $c ui.bg] }
+	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case} {
+		$w configure -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	}
+	.results.hdr.case configure -activebackground [dict get $c ui.bg] \
+		-activeforeground [dict get $c ui.fg]
+	.results.hdr.e configure -font RioChatFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor]
+	.results.well configure -background [dict get $c editor.bg]
+	set rbody .results.well.body
+	$rbody configure -font RioEditorFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+	$rbody tag configure selrow   -background [dict get $c editor.selection]
+	$rbody tag configure hoverrow -background [blend_hex [dict get $c editor.bg] [dict get $c editor.selection] 25]
+	$rbody tag raise selrow
+	$rbody tag configure fifile -foreground [dict get $c accent]
 	# The compare/diff view (D28): the panes take the editor surface, the headers the
 	# UI chrome (like the dock); row tags tint removed/added lines and grey the
 	# fillers so a changed line reads as a coloured band (VSCode-style).
@@ -4839,6 +4960,7 @@ set ::keymap_default {
 	replace        {Control-h            {find_open 1}                                                 "Replace…"}
 	find-next      {F3                   find_next                                                     "Find next"}
 	find-prev      {Shift-F3             find_prev                                                     "Find previous"}
+	find-in-files  {Control-F            fif_open                                                      "Find in files…"}
 	next-tab       {Control-Tab          {cycle 1}                                                     "Next tab"}
 	prev-tab       {Control-Shift-Tab    {cycle -1}                                                    "Previous tab"}
 	show-files     {Control-E            {show_pane files}                                             "Show files pane"}
@@ -5000,6 +5122,7 @@ proc keymap_refresh_menus {} {
 	.m.edit entryconfigure "Replace…"      -accelerator [key_accel replace]
 	.m.edit entryconfigure "Find Next"     -accelerator [key_accel find-next]
 	.m.edit entryconfigure "Find Previous" -accelerator [key_accel find-prev]
+	.m.edit entryconfigure "Find in Files…" -accelerator [key_accel find-in-files]
 	.m.view entryconfigure "Show Files"   -accelerator [key_accel show-files]
 	.m.view entryconfigure "Show Git"     -accelerator [key_accel show-git]
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
@@ -5431,6 +5554,41 @@ bind .find.re <Return> {find_replace_one ; break}
 bind .find.e  <KeyRelease> find_update
 unset _w
 
+# The Find-in-Files panel (D51): a bottom tool window built hidden; fif_open packs
+# it above the find bar / status. A query row (needle + Match case + count + ×) over
+# a sunken well holding an rl_* rich-list of results grouped by file. Colours are
+# bootstrap; apply_theme restyles (the query entry takes the editor surface, the
+# well the rich-list chrome the dock panes use).
+frame .results -borderwidth 1 -relief raised -background "#dddddd"
+frame .results.hdr -background "#dddddd"
+label .results.hdr.l -text "Find in Files:" -font {monospace 9} -background "#dddddd"
+entry .results.hdr.e -font {monospace 11} -width 28
+checkbutton .results.hdr.case -text "Match case" -font {monospace 9} \
+	-variable ::fif_case -command fif_run -background "#dddddd"
+label .results.hdr.count -font {monospace 9} -anchor w -background "#dddddd"
+label .results.hdr.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 -background "#dddddd"
+pack .results.hdr.l     -side left  -padx {6 2} -pady 2
+pack .results.hdr.e     -side left  -pady 2
+pack .results.hdr.case  -side left  -padx 6
+pack .results.hdr.close -side right -padx {2 6}
+pack .results.hdr.count -side right -padx 6
+pack .results.hdr -side top -fill x
+frame .results.well -borderwidth 2 -relief sunken -background white
+scrollbar .results.well.sb -command {.results.well.body yview}
+text .results.well.body -width 40 -height 8 -wrap none -state disabled \
+	-cursor arrow -insertwidth 0 -takefocus 1 \
+	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
+	-background white -foreground black \
+	-yscrollcommand {autoscroll .results.well.sb .results.well.body}
+pack .results.well -side top -fill both -expand 1
+pack .results.well.body -side left -fill both -expand 1
+# .results.well.sb is packed on demand by autoscroll. A double-click / Return on a
+# match row opens the file at the line (fif_activate); mere selection does nothing.
+rl_init .results.well.body {} fif_activate {}
+bind .results.hdr.e    <Return> {fif_run ; break}
+bind .results.hdr.e    <Escape> {fif_close ; break}
+bind .results.hdr.close <Button-1> fif_close
+
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .status -side bottom -fill x
@@ -5468,6 +5626,7 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Replace…"      -accelerator [key_accel replace]   -command {find_open 1}
 .m.edit add command -label "Find Next"     -accelerator [key_accel find-next] -command find_next
 .m.edit add command -label "Find Previous" -accelerator [key_accel find-prev] -command find_prev
+.m.edit add command -label "Find in Files…" -accelerator [key_accel find-in-files] -command fif_open
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
 .m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}

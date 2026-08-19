@@ -117,11 +117,86 @@ test fs-list-op-not-a-directory {fs.list on a file raises io_error} -setup setup
 	list [dict get $resp ok] [dict get $resp error code]
 } -cleanup teardown_proj -result {false io_error}
 
-test project-ops-registered {project.open, project.get, fs.list are in the live registry} -body {
+test project-ops-registered {project.open, project.get, project.search, fs.list are in the live registry} -body {
 	expr {"project.open" in [rio::dispatch::opnames] \
 		&& "project.get" in [rio::dispatch::opnames] \
+		&& "project.search" in [rio::dispatch::opnames] \
 		&& "fs.list" in [rio::dispatch::opnames]}
 } -result 1
+
+# --- find in files (rio::project::search, D51) ------------------------------
+# A tree with the needle spread across files, subdirs, a .git/ dir (must be
+# skipped), a binary file (a NUL — must be skipped), and case variation.
+proc make_search_tree {} {
+	set d [file join [::tcltest::temporaryDirectory] riosearch-[clock clicks]]
+	file mkdir [file join $d src]
+	file mkdir [file join $d .git]
+	set f [open [file join $d a.txt] w]
+	puts -nonewline $f "alpha needle\nplain line\nneedle needle again\n" ; close $f
+	set f [open [file join $d src b.txt] w]
+	puts -nonewline $f "no hit here\na NEEDLE upper\n" ; close $f
+	set f [open [file join $d .git config] w]
+	puts -nonewline $f "needle in git should be skipped\n" ; close $f
+	set f [open [file join $d bin.dat] wb]
+	puts -nonewline $f "needle\x00needle\n" ; close $f
+	return $d
+}
+proc setup_search {} { set ::stree [make_search_tree]; rio::project::open $::stree }
+proc teardown_search {} { rio::project::close; file delete -force $::stree }
+
+test search-groups-by-file {case-sensitive search groups matching lines by file, root skipped .git} -setup setup_search -body {
+	set r [rio::project::search needle 0]
+	set rels {} ; foreach f [dict get $r results] { lappend rels [dict get $f rel] }
+	# a.txt: lines 1 and 3 match (case-sensitive, so "NEEDLE" in src/b.txt does not);
+	# .git/ and the binary file are skipped.
+	list [dict get $r files] $rels \
+		[llength [dict get [lindex [dict get $r results] 0] matches]]
+} -cleanup teardown_search -result {1 a.txt 2}
+
+test search-counts-occurrences {count totals every hit, not just matching lines} -setup setup_search -body {
+	# a.txt has "needle" x3 (line 1 once, line 3 twice) across 2 rows.
+	dict get [rio::project::search needle 0] count
+} -cleanup teardown_search -result 3
+
+test search-nocase {a case-insensitive search also finds the upper-case hit in the subdir} -setup setup_search -body {
+	set r [rio::project::search needle 1]
+	set rels {} ; foreach f [dict get $r results] { lappend rels [dict get $f rel] }
+	list [dict get $r files] [lsort $rels]
+} -cleanup teardown_search -result {2 {a.txt src/b.txt}}
+
+test search-match-fields {a match row carries 1-based line/col and the line text} -setup setup_search -body {
+	set r [rio::project::search needle 0]
+	set m [lindex [dict get [lindex [dict get $r results] 0] matches] 0]
+	list [dict get $m line] [dict get $m col] [dict get $m text]
+} -cleanup teardown_search -result {1 7 {alpha needle}}
+
+test search-no-project {searching with no project open raises bad_request} -body {
+	rio::project::close
+	catch {rio::project::search needle 0} m opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test search-empty-needle {an empty needle raises bad_request} -setup setup_search -body {
+	catch {rio::project::search "" 0} m opts
+	rio::error::code_of $opts
+} -cleanup teardown_search -result bad_request
+
+test search-op {project.search through the core replies with the grouped result} -setup setup_search -body {
+	set resp [dict get [rio::core::call project.search [dict create needle needle]] response]
+	list [dict get $resp ok] [dict get $resp result count] [dict get $resp result files]
+} -cleanup teardown_search -result {true 3 1}
+
+test search-op-empty-needle {project.search with no needle raises bad_request} -setup setup_search -body {
+	set resp [dict get [rio::core::call project.search {}] response]
+	list [dict get $resp ok] [dict get $resp error code]
+} -cleanup teardown_search -result {false bad_request}
+
+test search-wire {project.search encodes the two-level result to JSON} -body {
+	set result [dict create count 2 files 1 truncated 0 results \
+		[list [dict create path /p/a.txt rel a.txt matches \
+			[list [dict create line 1 col 7 text {alpha needle}]]]]]
+	rio::wire::response [dict create id 1 ok true op project.search result $result]
+} -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"1","col":"7","text":"alpha needle"}]}]}}}
 
 test fs-list-wire {fs.list encodes to JSON with path + an entries array} -body {
 	set result [dict create path /p entries \
