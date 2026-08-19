@@ -2770,9 +2770,19 @@ proc refresh_status {} {
 	set lang [expr {[gget $::focus hl_lang] ne "" ? [gget $::focus hl_lang] : "plain text"}]
 	set mode ""   ;# the editing mode's segment (vi's "-- INSERT --"), when it has one
 	if {$::editmode_status ne ""} { set mode "      $::editmode_status" }
-	.status configure -text [format "%s      %s  %s%s      %s      %d buffer(s)%s" \
+	.status configure -text [format "%s      %s  %s%s      %s      %s      %d buffer(s)%s" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
-		$lang [dict size $::buffers] $mode]
+		$lang [cursor_status] [dict size $::buffers] $mode]
+}
+# The compact cursor-position segment for the status bar: "Ln 12, Col 5" for the
+# focused group's insert mark. Tk indexes columns from 0, so Col is char+1 to match
+# the 1-based feel VSCode/editors show. Guarded so an early or focus-less call is a
+# harmless "" rather than an error.
+proc cursor_status {} {
+	if {$::focus eq "" || ![dict exists $::grp $::focus]} { return "" }
+	if {[catch {[fgw] index insert} idx]} { return "" }
+	lassign [split $idx .] line char
+	return [format "Ln %d, Col %d" $line [expr {$char + 1}]]
 }
 # Put text on the clipboard (a no-op for empty text). The one clipboard idiom the
 # context menus share.
@@ -5238,11 +5248,21 @@ proc make_editor_group {g} {
 	# is attached covers this group with no per-widget rebinding.
 	bindtags $f.t [linsert [bindtags $f.t] 1 RioMode]
 	bind $f.t <Button-1> [list focus_group $g]   ;# clicking a group focuses it
+	# Keep the status bar's Ln/Col segment live: any key-up or click-release may have
+	# moved the insert mark (arrows, typing, click-to-place). Cheap; edits already
+	# refresh, this covers pure navigation. Guarded on focus so a stray event is a no-op.
+	bind $f.t <KeyRelease>      [list cursor_moved $g]
+	bind $f.t <ButtonRelease-1> [list cursor_moved $g]
 	return $g
 }
 
 # Make group `g` the focused one (::cur mirrors its active buffer). Tk moves keyboard
 # focus on a click itself; this just repoints our state and repaints the chrome.
+# A cursor-moving event fired in group g; repaint the status only when g is the
+# focused group (a background group never owns the shown Ln/Col).
+proc cursor_moved {g} {
+	if {$g eq $::focus} refresh_status
+}
 proc focus_group {g} {
 	if {$g eq $::focus} return
 	set ::focus $g
