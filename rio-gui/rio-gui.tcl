@@ -2074,6 +2074,7 @@ proc do_redo {} {
 set ::find_shown   0  ;# find bar visible? (Ctrl+F / Ctrl+H; Esc hides it)
 set ::find_case    0  ;# Match case checkbox (off = fold case, the familiar default)
 set ::find_word    0  ;# Whole word checkbox (off = substring; on = word-bounded, D51)
+set ::find_regex   0  ;# Regex checkbox (on = needle is a Tcl-ARE pattern, D52 Phase C)
 set ::find_starts  {} ;# match starts from the last find_update ("i of n" lookup)
 set ::find_pending 0  ;# a coalesced find_update is queued (see apply_change)
 
@@ -2129,7 +2130,7 @@ proc find_update {} {
 	set needle [.find.e get]
 	if {$needle eq ""} { find_status "" ; return }
 	set resp [rio_call buffer.matches [dict create buffer [gcur $g] \
-		needle $needle nocase [expr {!$::find_case}] wholeword $::find_word]]
+		needle $needle nocase [expr {!$::find_case}] wholeword $::find_word regex $::find_regex]]
 	if {![dict get $resp ok]} { find_status "" ; return }
 	set n [dict get $resp result count]
 	set painted 0
@@ -2157,7 +2158,8 @@ proc find_step {backwards} {
 		if {[catch {$t index sel.last} from]} { set from [$t index insert] }
 	}
 	set resp [rio_call buffer.find [dict create buffer [gcur $g] needle $needle \
-		from $from nocase [expr {!$::find_case}] backwards $backwards wholeword $::find_word]]
+		from $from nocase [expr {!$::find_case}] backwards $backwards \
+		wholeword $::find_word regex $::find_regex]]
 	if {![dict get $resp ok]} return
 	set r [dict get $resp result]
 	if {![dict get $r found]} { find_status "No matches" ; return }
@@ -2179,6 +2181,13 @@ proc find_step {backwards} {
 proc find_next {} { find_step 0 }
 proc find_prev {} { find_step 1 }
 
+# Regex supersedes whole-word (a pattern writes its own boundaries), so grey the
+# Whole word box while Regex is on, then re-run the search with the new mode.
+proc find_regex_changed {} {
+	.find.word configure -state [expr {$::find_regex ? "disabled" : "normal"}]
+	find_update
+}
+
 # Replace the current match, then jump to the next: if the selection IS a
 # match of the needle, replace it through the ordinary edit op; otherwise this
 # first click just selects the next match and the next click replaces it (the
@@ -2191,11 +2200,22 @@ proc find_replace_one {} {
 	if {![catch {list [$t index sel.first] [$t index sel.last]} range]} {
 		lassign $range s e
 		set cur [$t get $s $e]
-		set same [expr {$::find_case ? [string equal $cur $needle] \
-		                             : [string equal -nocase $cur $needle]}]
+		# Does the selection stand as a match? Literal: an exact (case-folded) equality.
+		# Regex: the whole selection matches the pattern — and the replacement is the
+		# regsub of the pattern over the selection, so backreferences resolve against
+		# this actual match (a client-side substitution of an already-matched string).
+		set newtext [.find.re get]
+		if {$::find_regex} {
+			set flags {} ; if {!$::find_case} { lappend flags -nocase }
+			set same [expr {![catch {regexp {*}$flags -- "^(?:$needle)\$" $cur} m] && $m}]
+			if {$same} { catch {regsub {*}$flags -- $needle $cur [.find.re get] newtext} }
+		} else {
+			set same [expr {$::find_case ? [string equal $cur $needle] \
+			                             : [string equal -nocase $cur $needle]}]
+		}
 		if {$same} {
 			if {[dict get [rio_call buffer.replace [dict create buffer [gcur $g] \
-				start $s end $e text [.find.re get]]] ok]} { mark_modified 1 }
+				start $s end $e text $newtext]] ok]} { mark_modified 1 }
 		}
 	}
 	find_step 0
@@ -2211,7 +2231,8 @@ proc find_replace_all {} {
 	set g $::focus ; set t [gw $g]
 	set at [$t index insert]
 	set resp [rio_call buffer.replace_all [dict create buffer [gcur $g] \
-		needle $needle text [.find.re get] nocase [expr {!$::find_case}] wholeword $::find_word]]
+		needle $needle text [.find.re get] nocase [expr {!$::find_case}] \
+		wholeword $::find_word regex $::find_regex]]
 	if {![dict get $resp ok]} return
 	set n [dict get $resp result count]
 	if {$n > 0} { mark_modified 1 }
@@ -2286,20 +2307,21 @@ proc search_run {} {
 	set needle [.results.hdr.e get]
 	if {[string trim $needle] eq ""} { search_paint {} ; .results.hdr.count configure -text "" ; return }
 	set nocase [expr {!$::search_case}]
+	set rx $::search_regex
 	switch -- $::search_scope {
 		"Open docs" {
 			set resp [rio_call buffers.search [dict create needle $needle \
-				nocase $nocase wholeword $::search_word]]
+				nocase $nocase wholeword $::search_word regex $rx]]
 		}
 		"Current doc" {
 			set only ""
 			catch { set only [gcur $::focus] }
 			set resp [rio_call buffers.search [dict create needle $needle \
-				nocase $nocase wholeword $::search_word only $only]]
+				nocase $nocase wholeword $::search_word regex $rx only $only]]
 		}
 		default {
 			set resp [rio_call project.search [dict create needle $needle \
-				nocase $nocase wholeword $::search_word]]
+				nocase $nocase wholeword $::search_word regex $rx]]
 		}
 	}
 	if {![dict get $resp ok]} {
@@ -2326,14 +2348,14 @@ proc search_run {} {
 # path, from project.search) or `name` (an open buffer, from buffers.search) for
 # the header, and its rows a `path` (open via do_open) or a `buffer` id (switch via
 # activate) — so one render path serves every scope. Every occurrence on a row is
-# tinted with the `fimatch` band (D51): the core hands back each hit's 1-based column
-# in `cols`, offset here by the "<line>  " prefix. `L` tracks the text-widget line as
-# rows are appended (header rows count too); the needle length sizes each band.
+# tinted with the `fimatch` band (D51): the core hands back each hit's 1-based start
+# column in `cols` and its char length in the parallel `lens` (so a variable-length
+# regex hit sizes correctly, D52 Phase C), offset here by the "<line>  " prefix. `L`
+# tracks the text-widget line as rows are appended (header rows count too).
 proc search_paint {results} {
 	set b .results.well.body
 	rl_begin $b
 	set L 0
-	set nlen [string length [.results.hdr.e get]]
 	set isbuf 0
 	foreach fdict $results {
 		set isbuf [dict exists $fdict buffer]
@@ -2355,10 +2377,10 @@ proc search_paint {results} {
 			incr L
 			set plen [string length $prefix]
 			set tend [expr {$plen + [string length $txt]}]
-			foreach c [dict get $m cols] {
+			foreach c [dict get $m cols] len [dict get $m lens] {
 				set s [expr {$plen + $c - 1}]
-				if {$s >= $tend} continue          ;# hit past the trimmed/capped text
-				set e [expr {min($s + $nlen, $tend)}]
+				if {$s >= $tend || $len <= 0} continue   ;# past the trimmed/capped text, or zero-width
+				set e [expr {min($s + $len, $tend)}]
 				$b tag add fimatch $L.$s $L.$e
 			}
 		}
@@ -2394,13 +2416,23 @@ proc search_activate {payload} {
 proc search_from_bar {} {
 	set ::search_case  $::find_case
 	set ::search_word  $::find_word
+	set ::search_regex $::find_regex
 	set ::search_scope "Project"
+	search_regex_sync
 	if {[llength [grid info .find.rep]] > 0} {
 		.results.rep.e delete 0 end ; .results.rep.e insert 0 [.find.re get]
 		search_show_replace 1
 	}
 	search_open [.find.e get]
 }
+
+# Regex supersedes whole-word in the panel too: grey the panel's Whole word box
+# while Regex is on. `search_regex_changed` also re-runs the query (the checkbox's
+# -command); `search_regex_sync` only reflects the state (used on a handoff).
+proc search_regex_sync {} {
+	.results.hdr.word configure -state [expr {$::search_regex ? "disabled" : "normal"}]
+}
+proc search_regex_changed {} { search_regex_sync ; search_run }
 
 # Show or hide the replace row (D52 Phase B), packed just under the query row and
 # above the results well — the find bar's Ctrl+H, brought to the panel.
@@ -2427,10 +2459,11 @@ proc search_replace_all {} {
 	set repl   [.results.rep.e get]
 	set nocase [expr {!$::search_case}]
 	set ww     $::search_word
+	set rx     $::search_regex
 	switch -- $::search_scope {
 		"Current doc" {
 			set resp [rio_call buffer.replace_all [dict create buffer [gcur $::focus] \
-				needle $needle text $repl nocase $nocase wholeword $ww]]
+				needle $needle text $repl nocase $nocase wholeword $ww regex $rx]]
 			set n [expr {[dict get $resp ok] ? [dict get $resp result count] : 0}]
 			if {$n > 0} { mark_modified 1 }
 			set msg "Replaced $n"
@@ -2439,7 +2472,7 @@ proc search_replace_all {} {
 			set n 0 ; set touched 0
 			foreach id [dict keys $::buffers] {
 				set resp [rio_call buffer.replace_all [dict create buffer $id \
-					needle $needle text $repl nocase $nocase wholeword $ww]]
+					needle $needle text $repl nocase $nocase wholeword $ww regex $rx]]
 				if {[dict get $resp ok] && [dict get $resp result count] > 0} {
 					incr n [dict get $resp result count] ; incr touched
 					bufset $id modified 1
@@ -2451,14 +2484,14 @@ proc search_replace_all {} {
 		default {
 			# Project: destructive on disk for closed files — count, then confirm.
 			set sresp [rio_call project.search [dict create needle $needle \
-				nocase $nocase wholeword $ww]]
+				nocase $nocase wholeword $ww regex $rx]]
 			set cnt [expr {[dict get $sresp ok] ? [dict get $sresp result count] : 0}]
 			if {$cnt == 0} { search_paint {} ; .results.hdr.count configure -text "No results" ; return }
 			set ans [tk_messageBox -icon warning -type yesno -title "Replace in Project" \
 				-message "Replace all $cnt occurrence[expr {$cnt == 1 ? {} : {s}}] of \"$needle\" across the project?\n\nOpen documents are edited in the editor (undoable); files not open are written to disk and cannot be undone."]
 			if {$ans ne "yes"} return
 			set resp [rio_call project.replace [dict create needle $needle text $repl \
-				nocase $nocase wholeword $ww]]
+				nocase $nocase wholeword $ww regex $rx]]
 			if {![dict get $resp ok]} {
 				.results.hdr.count configure -text [dict get $resp error message] ; return
 			}
@@ -3362,11 +3395,11 @@ proc apply_theme {theme} {
 	.chat.isash configure -background [dict get $c tab.bar.bg]
 	# The find/replace bar (D36): UI chrome, entries on the editor surface.
 	.find configure -background [dict get $c ui.bg]
-	foreach w {.find.fl .find.rl .find.count .find.close .find.case .find.word} {
+	foreach w {.find.fl .find.rl .find.count .find.close .find.case .find.word .find.regex} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
-	foreach w {.find.case .find.word} {
+	foreach w {.find.case .find.word .find.regex} {
 		$w configure -activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
 	}
 	foreach w {.find.next .find.prev .find.rep .find.repall} {
@@ -3381,12 +3414,12 @@ proc apply_theme {theme} {
 	# surface (a place to type), the well + rich-list like the dock panes. The
 	# file/buffer-header rows take the accent; the match rows the editor foreground.
 	foreach w {.results .results.hdr .results.rep} { $w configure -background [dict get $c ui.bg] }
-	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case .results.hdr.word .results.rep.l} {
+	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case .results.hdr.word .results.hdr.regex .results.rep.l} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
 	.results.rep.all configure -font RioUIFont
-	foreach w {.results.hdr.case .results.hdr.word} {
+	foreach w {.results.hdr.case .results.hdr.word .results.hdr.regex} {
 		$w configure -activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
 	}
 	# The scope option menu (menubutton + its dropdown) takes the UI chrome.
@@ -5697,6 +5730,8 @@ checkbutton .find.case -text "Match case" -font {monospace 9} \
 	-variable ::find_case -command find_update -background "#dddddd"
 checkbutton .find.word -text "Whole word" -font {monospace 9} \
 	-variable ::find_word -command find_update -background "#dddddd"
+checkbutton .find.regex -text "Regex" -font {monospace 9} \
+	-variable ::find_regex -command find_regex_changed -background "#dddddd"
 label .find.count -font {monospace 9} -anchor w -background "#dddddd"
 label .find.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 \
 	-background "#dddddd"
@@ -5708,14 +5743,15 @@ grid .find.next   -row 0 -column 2 -padx 2
 grid .find.prev   -row 0 -column 3 -padx 2
 grid .find.case   -row 0 -column 4 -padx 4
 grid .find.word   -row 0 -column 5 -padx 4
-grid .find.count  -row 0 -column 6 -sticky ew -padx 4
-grid .find.close  -row 0 -column 7 -sticky e  -padx {2 6}
+grid .find.regex  -row 0 -column 6 -padx 4
+grid .find.count  -row 0 -column 7 -sticky ew -padx 4
+grid .find.close  -row 0 -column 8 -sticky e  -padx {2 6}
 grid .find.rl     -row 1 -column 0 -sticky e  -padx {6 2} -pady {0 2}
 grid .find.re     -row 1 -column 1 -sticky ew -pady {0 2}
 grid .find.rep    -row 1 -column 2 -padx 2 -pady {0 2}
 grid .find.repall -row 1 -column 3 -columnspan 2 -sticky w -padx 2 -pady {0 2}
 grid columnconfigure .find 1 -weight 1
-grid columnconfigure .find 6 -weight 1
+grid columnconfigure .find 7 -weight 1
 bind .find.close <Button-1> find_close
 # Both entries: Enter steps (Shift-Enter steps back), Esc closes, F3 works too.
 # In the Replace entry, Enter replaces instead — you are aiming at a replace.
@@ -5757,13 +5793,16 @@ checkbutton .results.hdr.case -text "Match case" -font {monospace 9} \
 	-variable ::search_case -command search_run -background "#dddddd"
 checkbutton .results.hdr.word -text "Whole word" -font {monospace 9} \
 	-variable ::search_word -command search_run -background "#dddddd"
+checkbutton .results.hdr.regex -text "Regex" -font {monospace 9} \
+	-variable ::search_regex -command search_regex_changed -background "#dddddd"
 label .results.hdr.count -font {monospace 9} -anchor w -background "#dddddd"
 label .results.hdr.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 -background "#dddddd"
 pack .results.hdr.l     -side left  -padx {6 2} -pady 2
 pack .results.hdr.e     -side left  -pady 2
 pack .results.hdr.scope -side left  -padx 6
 pack .results.hdr.case  -side left  -padx 6
-pack .results.hdr.word  -side left  -padx {0 6}
+pack .results.hdr.word  -side left  -padx {0 4}
+pack .results.hdr.regex -side left  -padx {0 6}
 pack .results.hdr.close -side right -padx {2 6}
 pack .results.hdr.count -side right -padx 6
 pack .results.hdr -side top -fill x

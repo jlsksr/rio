@@ -103,7 +103,8 @@ proc rio::ops::buffer_find {params} {
 	set from 1.0
 	if {[dict exists $params from]} { set from [dict get $params from] }
 	set m [rio::doc::find $id $needle $from \
-		[_flag $params nocase] [_flag $params backwards] [_flag $params wholeword]]
+		[_flag $params nocase] [_flag $params backwards] [_flag $params wholeword] \
+		[_flag $params regex]]
 	if {$m eq ""} { return [dict create result [dict create found 0]] }
 	return [dict create result [dict merge [dict create found 1] $m]]
 }
@@ -115,7 +116,7 @@ rio::dispatch::register buffer.find rio::ops::buffer_find
 proc rio::ops::buffer_matches {params} {
 	set id [_bufid $params]
 	set ms [rio::doc::matches $id [_needle $params buffer.matches] \
-		[_flag $params nocase] [_flag $params wholeword]]
+		[_flag $params nocase] [_flag $params wholeword] [_flag $params regex]]
 	return [dict create result [dict create count [llength $ms] matches $ms]]
 }
 rio::dispatch::register buffer.matches rio::ops::buffer_matches
@@ -130,7 +131,7 @@ proc rio::ops::buffer_replace_all {params} {
 		rio::error::raise bad_request "buffer.replace_all requires text"
 	}
 	set ch [rio::doc::replace_all $id $needle [dict get $params text] \
-		[_flag $params nocase] [_flag $params wholeword]]
+		[_flag $params nocase] [_flag $params wholeword] [_flag $params regex]]
 	if {$ch eq ""} { return [dict create result [dict create count 0]] }
 	set ev [dict create event buffer.changed params [dict create buffer $id \
 		start [dict get $ch start] end [dict get $ch end] \
@@ -153,13 +154,14 @@ proc rio::ops::buffers_search {params} {
 	set needle [_needle $params buffers.search]
 	set nocase [_flag $params nocase]
 	set wholeword [_flag $params wholeword]
+	set regex [_flag $params regex]
 	set only [expr {[dict exists $params only] ? [dict get $params only] : ""}]
 	set results {}
 	set total 0
 	foreach b [rio::doc::inventory] {
 		set id [dict get $b buffer]
 		if {$only ne "" && $id ne $only} continue
-		lassign [rio::doc::grep_lines [rio::doc::lines $id] $needle $nocase $wholeword] \
+		lassign [rio::doc::grep_lines [rio::doc::lines $id] $needle $nocase $wholeword 200 $regex] \
 			matches occ
 		if {[llength $matches] == 0} continue
 		incr total $occ

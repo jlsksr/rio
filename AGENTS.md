@@ -2896,9 +2896,9 @@ bar's needle + `::find_case`/`::find_word` into the panel and widens the scope t
 point of escalating). Relabelled *Search…* throughout (menu, keymap action `search`, panel
 label); `Ctrl+Shift+F` is unchanged.
 
-**Phasing. Phase A** was search only. **Phase B — Replace** (below) is now in. **Regex** (a
-shared flag across `buffer.*` and `project.*`) and re-homing the panel into the D35 bottom
-dock-site are **Phase C** — a later arc.
+**Phasing. Phase A** was search only; **Phase B — Replace** and **Phase C — Regex** (both
+below) are now in. Re-homing the panel into the D35 bottom dock-site is the one piece still
+deferred — it waits on D35's container, so it rides along when D35 lands.
 
 **Phase B — Replace across the scopes.** The panel gains a **replace row** (a replacement
 entry + Replace All, toggled with `Ctrl+H` like the bar; the bar's escalate carries its
@@ -2925,6 +2925,29 @@ routes by scope:
   itself. After a replace the old hit locations are stale, so the list is cleared and the count
   line reports what changed.
 
+**Phase C — Regex.** A `regex` flag rides every search/replace op (`buffer.find`,
+`buffer.matches`, `buffer.replace_all`, `project.search`, `buffers.search`, `project.replace`)
+and both GUI surfaces (a **Regex** checkbox on the find bar and the Search panel). When on, the
+needle is a **Tcl ARE** pattern. Three decisions, settled with jbm:
+- **Line-oriented** (`regexp/regsub -line`): `^`/`$` anchor at each line boundary and `.` /
+  negated classes do not cross a newline — the predictable editor default, and it matches the
+  line-grouped panel naturally. `nocase` maps to `-nocase`.
+- **Whole-word is superseded** — a pattern writes its own boundaries (`\y`, `\m…\M`), so the
+  Whole-word box greys out while Regex is on (`find_regex_changed` / `search_regex_changed`).
+- **Backreferences in Replace** — replacement is a `regsub` subSpec, so `\1`/`&` resolve
+  against the match (the two-step find-bar Replace does the substitution **client-side** on the
+  already-matched selection — a presentation concern, not matching over canonical text).
+
+Regex matching centralizes in **`rio::doc::_regex_spans {hay pat nocase}`** → a list of
+`{start end}` char-offset spans: `-about` gives the capture-group count so submatches (which
+`-all -inline -indices` interleaves) are strided over; an **invalid pattern is caught and
+treated as "matches nothing"**, never an error, so a half-typed regex under a live search just
+shows no hits. `find` computes the span set once and picks next/prev with wrap; `matches` maps
+spans to line.col; `_replace_text` delegates to `regsub -all`; the per-line `grep_lines` runs
+spans per line. Because a regex hit is **variable-length**, each line-match row now carries a
+parallel **`lens`** array beside `cols` (start column + char length per hit), so the panel's
+green band sizes to the actual match rather than a fixed needle length — the one wire-shape
+change (a `lens` array in `_linematch`).
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

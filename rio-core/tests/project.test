@@ -215,9 +215,9 @@ test search-op-empty-needle {project.search with no needle raises bad_request} -
 test search-wire {project.search encodes the two-level result (with the cols array) to JSON} -body {
 	set result [dict create count 2 files 1 truncated 0 results \
 		[list [dict create path /p/a.txt rel a.txt matches \
-			[list [dict create line 3 col 1 cols {1 8} text {needle needle}]]]]]
+			[list [dict create line 3 col 1 cols {1 8} lens {6 6} text {needle needle}]]]]]
 	rio::wire::response [dict create id 1 ok true op project.search result $result]
-} -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"3","col":"1","cols":["1","8"],"text":"needle needle"}]}]}}}
+} -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"3","col":"1","cols":["1","8"],"lens":["6","6"],"text":"needle needle"}]}]}}}
 
 # --- replace in files (rio::ops::project_replace, D52 Phase B) ---------------
 # A tree with a token across a closed file and (in the open-buffer test) a file
@@ -291,6 +291,24 @@ test project-replace-wire {project.replace encodes count/files + a bufferids arr
 	set result [dict create count 3 files 1 bufferids {7 9}]
 	rio::wire::response [dict create id 1 ok true op project.replace result $result]
 } -result {{"id":"1","ok":true,"result":{"count":"3","files":"1","bufferids":["7","9"]}}}
+
+test search-regex {project.search honours the regex flag, line-anchored ($ per line)} -setup setup_search -body {
+	set r [rio::project::search {needle$} 0 0 1]
+	set rels {} ; foreach f [dict get $r results] { lappend rels [dict get $f rel] }
+	# a.txt line 1 "alpha needle" ends with needle; line 3 ends with "again" — one hit.
+	list [dict get $r count] $rels
+} -cleanup teardown_search -result {1 a.txt}
+
+test project-replace-regex {project.replace applies a regex with a backref on disk} -setup {
+	set ::rtree [make_replace_tree] ; rio::project::open $::rtree
+} -body {
+	set r [dict get [dict get [rio::core::call project.replace \
+		[dict create needle {c(at)} text {C\1} regex 1]] response] result]
+	list [dict get $r count] \
+		[dict get [rio::fs::read [file join $::rtree a.txt]] text] \
+		[dict get [rio::fs::read [file join $::rtree b.txt]] text]
+} -cleanup { rio::project::close ; file delete -force $::rtree } \
+  -result [list 3 "Cat and Cat\n" "one Cat here\n"]
 
 test fs-list-wire {fs.list encodes to JSON with path + an entries array} -body {
 	set result [dict create path /p entries \

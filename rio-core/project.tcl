@@ -81,7 +81,7 @@ proc rio::project::close {} {
 variable rio::project::search_max_rows  2000
 variable rio::project::search_max_bytes 2000000
 
-proc rio::project::search {needle nocase wholeword} {
+proc rio::project::search {needle nocase wholeword {regex 0}} {
 	variable root
 	variable search_max_rows
 	if {$root eq ""} {
@@ -98,7 +98,7 @@ proc rio::project::search {needle nocase wholeword} {
 	set truncated 0
 	foreach path [lsort -dictionary $files] {
 		if {$rows >= $search_max_rows} { set truncated 1 ; break }
-		lassign [_search_file $path $needle $nocase $wholeword [expr {$search_max_rows - $rows}]] \
+		lassign [_search_file $path $needle $nocase $wholeword [expr {$search_max_rows - $rows}] $regex] \
 			matches occ trunc
 		if {[llength $matches] == 0} continue
 		incr total $occ
@@ -141,13 +141,13 @@ proc rio::project::_search_walk {dir accVar} {
 # occurrence total is recomputed over the kept rows). Skips a file that is too
 # large, is binary (holds a NUL), or won't read — a search silently passes over
 # what it can't show.
-proc rio::project::_search_file {path needle nocase wholeword budget} {
+proc rio::project::_search_file {path needle nocase wholeword budget {regex 0}} {
 	variable search_max_bytes
 	if {[catch {file size $path} sz] || $sz > $search_max_bytes} { return [list {} 0 0] }
 	if {[catch {rio::fs::read $path} rd]} { return [list {} 0 0] }
 	set text [dict get $rd text]
 	if {[string first "\x00" $text] >= 0} { return [list {} 0 0] }
-	lassign [rio::doc::grep_lines [split $text "\n"] $needle $nocase $wholeword] matches occ
+	lassign [rio::doc::grep_lines [split $text "\n"] $needle $nocase $wholeword 200 $regex] matches occ
 	set trunc 0
 	if {[llength $matches] > $budget} {
 		set matches [lrange $matches 0 [expr {$budget - 1}]]
