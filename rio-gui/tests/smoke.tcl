@@ -702,6 +702,52 @@ ok "find: whole-word starts list"     [llength $::find_starts]         1
 set ::find_word 0 ; find_close
 do_close
 
+# --- Regex (D52 Phase C) -----------------------------------------------------
+# The find bar and the Search panel gain a Regex toggle: the needle becomes a
+# Tcl-ARE pattern (line-oriented), regsub backreferences drive replace, and Regex
+# greys the Whole-word box (a pattern writes its own boundaries).
+set xf [tmpbytes "id=7 name=al\nid=42 name=bo\n"]
+do_open $xf
+find_open 1
+.find.e delete 0 end ; .find.e insert 0 {[0-9]+}
+set ::find_case 1 ; set ::find_word 0 ; set ::find_regex 1 ; find_regex_changed
+ok "find: regex counts variable-length hits" [.find.count cget -text]     "2 matches"
+ok "find: regex greys the whole-word box" [.find.word cget -state]        disabled
+# Replace with a backreference: id=N -> [N].
+.find.e delete 0 end ; .find.e insert 0 {id=([0-9]+)}
+.find.re delete 0 end ; .find.re insert 0 {[\1]}
+find_replace_all
+ok "find: regex replace-all applied backrefs" [buf_text $::cur] "\[7\] name=al\n\[42\] name=bo\n"
+set ::find_regex 0 ; find_regex_changed
+ok "find: clearing regex restores whole-word" [.find.word cget -state]    normal
+find_close
+bufset $::cur modified 0 ; do_close
+
+# The panel's Regex toggle over a project (Current doc scope keeps it deterministic).
+set xdir [file join [file dirname $tpath] riogui-rx-[clock clicks]]
+file mkdir $xdir
+set ff [open [file join $xdir n.txt] w] ; puts -nonewline $ff "aa11 bb22 cc33\n" ; close $ff
+open_folder $xdir
+do_open [file join $xdir n.txt] ; set nbuf $::cur
+search_open
+set ::search_scope "Current doc" ; set ::search_case 1 ; set ::search_word 0 ; set ::search_regex 1
+search_regex_changed
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 {[a-z]+[0-9]+}
+search_run
+ok "panel: regex counts three hits"   [.results.hdr.count cget -text]     "3 matches · 1 buffer"
+ok "panel: regex greys whole-word"    [.results.hdr.word cget -state]     disabled
+# The variable-length hits highlight to their own lengths (not a fixed needle len):
+# "aa11" is 4 chars at line-col 1, so widget cols 9..13 after the 9-char row prefix.
+ok "panel: regex hit sized to its match" [lrange [.results.well.body tag ranges fimatch] 0 1] {2.9 2.13}
+# Regex replace with a backref through the buffer.
+search_show_replace 1
+.results.rep.e delete 0 end ; .results.rep.e insert 0 {\0!}
+search_replace_all
+ok "panel: regex replace applied" [buf_text $nbuf] "aa11! bb22! cc33!\n"
+set ::search_regex 0 ; search_show_replace 0 ; search_close
+bufset $nbuf modified 0 ; activate $nbuf ; do_close
+file delete -force $xdir
+
 # --- agent chat over the channel (D26/D30) -----------------------------------
 # The agent now lives in the core and is driven over the channel: an agent turn is
 # ordinary broadcast traffic (agent.* events) routed to the chat view, and the

@@ -108,11 +108,13 @@ rio::wire::result_encoder buffer.matches rio::wire::_result_buffer_matches
 # {line, col, cols, text} are shared; the two ops differ only in the per-file
 # header keys, so each supplies its own header encoder.
 
-# One line-match {line,col,cols,text} object.
+# One line-match {line,col,cols,lens,text} object. `cols`/`lens` are parallel
+# arrays — each hit's 1-based start column and its char length (a variable-length
+# regex hit highlights correctly; D52 Phase C).
 proc rio::wire::_linematch {m} {
-	set cols {}
-	foreach c [dict get $m cols] { lappend cols [str $c] }
-	return "{\"line\":[str [dict get $m line]],\"col\":[str [dict get $m col]],\"cols\":[arr $cols],\"text\":[str [dict get $m text]]}"
+	set cols {} ; foreach c [dict get $m cols] { lappend cols [str $c] }
+	set lens {} ; foreach l [dict get $m lens] { lappend lens [str $l] }
+	return "{\"line\":[str [dict get $m line]],\"col\":[str [dict get $m col]],\"cols\":[arr $cols],\"lens\":[arr $lens],\"text\":[str [dict get $m text]]}"
 }
 
 # The {count, files, truncated, results} envelope, given the already-encoded

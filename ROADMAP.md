@@ -78,10 +78,12 @@ Each entry notes its state:
   row** then landed across all three scopes (D52 Phase B): buffer scopes via `buffer.replace_all`
   (undoable, unsaved), Project via a new confirm-gated `project.replace` that edits open files
   through their buffers and rewrites closed files on disk (one shared `rio::doc::_replace_text`).
-  **Whole-word** rides every path (one shared `rio::doc::_bounded` rule). Still wanted: **regex**
-  options (D52 Phase C — a flag on the same ops); one **row per match** rather than per line, and
+  **Regex** then landed as a flag on every search/replace op + a toggle on both surfaces (D52
+  Phase C): line-oriented Tcl-ARE patterns with `\1`/`&` backreferences in replace, centralized
+  in `rio::doc::_regex_spans`. **Whole-word** rides every literal path (one shared
+  `rio::doc::_bounded` rule). Still wanted: one **row per match** rather than per line, and
   richer scope filters (globs, honour `.gitignore`); and re-homing the panel into a real
-  dock-site tenant once D35 lands (it is a hand-packed bottom strip today — D52 Phase C).
+  dock-site tenant once D35 lands (it is a hand-packed bottom strip today — rides along with D35).
 - **Dock-site system for tool windows** — *design, build shape settled* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites

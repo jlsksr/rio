@@ -32,9 +32,10 @@ proc rio::ops::project_search {params} {
 	if {![dict exists $params needle] || [dict get $params needle] eq ""} {
 		rio::error::raise bad_request "project.search requires a non-empty needle"
 	}
-	set nocase    [expr {[dict exists $params nocase]    && [dict get $params nocase]    ? 1 : 0}]
-	set wholeword [expr {[dict exists $params wholeword] && [dict get $params wholeword] ? 1 : 0}]
-	set r [rio::project::search [dict get $params needle] $nocase $wholeword]
+	set nocase    [_flag $params nocase]
+	set wholeword [_flag $params wholeword]
+	set regex     [_flag $params regex]
+	set r [rio::project::search [dict get $params needle] $nocase $wholeword $regex]
 	return [dict create result $r]
 }
 rio::dispatch::register project.search rio::ops::project_search
@@ -61,8 +62,9 @@ proc rio::ops::project_replace {params} {
 	set repl      [dict get $params text]
 	set nocase    [_flag $params nocase]
 	set wholeword [_flag $params wholeword]
+	set regex     [_flag $params regex]
 	# The matching files (empty needle / no project already raised by search).
-	set sr [rio::project::search $needle $nocase $wholeword]
+	set sr [rio::project::search $needle $nocase $wholeword $regex]
 	# Open-buffer paths -> ids, so an open file is replaced through its buffer.
 	# Normalized on both sides so a buffer path in a different-but-equivalent form
 	# still matches the search's absolute path (search paths are already normalized).
@@ -78,7 +80,7 @@ proc rio::ops::project_replace {params} {
 			# Open file: replace THROUGH the buffer (undoable, unsaved), shaping the
 			# same buffer.changed event buffer.replace_all emits.
 			set id [dict get $openbuf [file normalize $path]]
-			set ch [rio::doc::replace_all $id $needle $repl $nocase $wholeword]
+			set ch [rio::doc::replace_all $id $needle $repl $nocase $wholeword $regex]
 			if {$ch eq ""} continue
 			incr total [dict get $ch count]
 			lappend bufferids $id
@@ -88,7 +90,7 @@ proc rio::ops::project_replace {params} {
 		} else {
 			# Closed file: rewrite on disk, preserving encoding/EOL, then fs.changed.
 			if {[catch {rio::fs::read $path} rd]} continue
-			lassign [rio::doc::_replace_text [dict get $rd text] $needle $repl $nocase $wholeword] \
+			lassign [rio::doc::_replace_text [dict get $rd text] $needle $repl $nocase $wholeword $regex] \
 				newtext n
 			if {!$n} continue
 			set meta {}

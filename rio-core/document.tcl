@@ -251,15 +251,59 @@ proc rio::doc::_scan_bwd {hay ndl last len ww} {
 	return -1
 }
 
-# The next match of literal `needle` starting at or after `from` — or, with
-# `backwards`, the nearest match starting before it — wrapping around the
-# document. Returns {start end wrapped} or "" when the needle occurs nowhere.
-# `nocase` folds case (Tcl's simple one-to-one mapping, so offsets are stable);
-# `wholeword` keeps only word-bounded hits (D51).
-proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0}} {
+# --- regex matching (D52 Phase C) ---------------------------------------------
+# Every match of the Tcl-ARE pattern `pat` in `hay`, as a list of {start end}
+# exclusive-end CHAR offsets (empty for none). `-line` makes the match
+# line-oriented — `^`/`$` anchor at each line boundary and `.`/negated classes do
+# not cross a newline — the predictable editor default, matching the line-grouped
+# panel; `nocase` maps to `-nocase`. An INVALID pattern (a half-typed regex under a
+# live search) is caught and treated as "matches nothing" rather than an error, so
+# the UI just shows no hits while you type. Whole-match spans only: `-about` gives
+# the capture-group count so submatches (which `-all -inline -indices` interleaves)
+# are strided over. A zero-width match reports start == end.
+proc rio::doc::_regex_spans {hay pat nocase} {
+	if {[catch {regexp -about -- $pat} about]} { return {} }
+	set groups [lindex $about 0]
+	set flags {-all -inline -indices -line}
+	if {$nocase} { lappend flags -nocase }
+	if {[catch {regexp {*}$flags -- $pat $hay} all]} { return {} }
+	set spans {}
+	set stride [expr {$groups + 1}]
+	for {set i 0} {$i < [llength $all]} {incr i $stride} {
+		lassign [lindex $all $i] s e
+		lappend spans [list $s [expr {$e < $s ? $s : $e + 1}]]
+	}
+	return $spans
+}
+
+# The next match of `needle` starting at or after `from` — or, with `backwards`,
+# the nearest match starting before it — wrapping around the document. Returns
+# {start end wrapped} or "" when the needle occurs nowhere. `nocase` folds case
+# (Tcl's simple one-to-one mapping, so offsets are stable); `wholeword` keeps only
+# word-bounded hits (D51); with `regex`, `needle` is a Tcl-ARE pattern
+# (line-oriented, `-nocase`; whole-word is ignored — a regex writes its own
+# boundaries). Regex navigation computes the match set once and picks from it.
+proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
 	set hay [join $lines "\n"]
+	if {$regex} {
+		set spans [_regex_spans $hay $needle $nocase]
+		if {![llength $spans]} { return "" }
+		set off [_offset $lines $from]
+		set wrapped 0
+		if {$backwards} {
+			set pick ""
+			foreach sp $spans { if {[lindex $sp 0] < $off} { set pick $sp } }
+			if {$pick eq ""} { set pick [lindex $spans end] ; set wrapped 1 }
+		} else {
+			set pick ""
+			foreach sp $spans { if {[lindex $sp 0] >= $off} { set pick $sp ; break } }
+			if {$pick eq ""} { set pick [lindex $spans 0] ; set wrapped 1 }
+		}
+		lassign $pick s e
+		return [dict create start [_at $lines $s] end [_at $lines $e] wrapped $wrapped]
+	}
 	set ndl $needle
 	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
 	set len [string length $ndl]
@@ -282,11 +326,20 @@ proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0}} {
 
 # Every match of `needle`, first to last, non-overlapping: a list of
 # {start end} dicts (empty for none) — a frontend paints and counts them.
-# `wholeword` drops hits flanked by a word char (D51).
-proc rio::doc::matches {id needle {nocase 0} {wholeword 0}} {
+# `wholeword` drops hits flanked by a word char (D51); with `regex`, `needle` is a
+# Tcl-ARE pattern (whole-word ignored).
+proc rio::doc::matches {id needle {nocase 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return {} }
 	set hay [join $lines "\n"]
+	if {$regex} {
+		set out {}
+		foreach sp [_regex_spans $hay $needle $nocase] {
+			lassign $sp s e
+			lappend out [dict create start [_at $lines $s] end [_at $lines $e]]
+		}
+		return $out
+	}
 	set ndl $needle
 	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
 	set len [string length $ndl]
@@ -310,47 +363,54 @@ proc rio::doc::matches {id needle {nocase 0} {wholeword 0}} {
 # shape lives — extracted here so the disk walk and the buffer walk share one
 # matcher and can never disagree (the D36 "matching is core-side" discipline).
 #
-# Returns {matches occurrences}: `matches` is a list of {line col cols text} dicts
-# — `line` is 1-based, `cols` holds the 1-based start column of EVERY occurrence
-# on the line (the frontend's per-hit highlight), `col` is the first (the jump
-# target), `text` is the raw line capped to `textcap` chars for the view.
-# `occurrences` totals every hit (a line with two counts twice). No row cap here —
-# the caller, which knows its budget, truncates; a buffer needs no cap at all.
-# `nocase` folds case; `wholeword` keeps only word-bounded hits (reusing the
-# _bounded/_wordchar test, so a line edge bounds a word for free).
-proc rio::doc::grep_lines {lines needle nocase wholeword {textcap 200}} {
-	set ndl $needle
-	if {$nocase} { set ndl [string tolower $needle] }
-	set nlen [string length $ndl]
+# Returns {matches occurrences}: `matches` is a list of {line col cols lens text}
+# dicts — `line` is 1-based, `cols` holds the 1-based start column of EVERY
+# occurrence on the line and `lens` the matching char length of each (parallel to
+# `cols`, so a variable-length regex hit highlights correctly), `col` is the first
+# start (the jump target), `text` is the raw line capped to `textcap` chars for the
+# view. `occurrences` totals every hit (a line with two counts twice). No row cap
+# here — the caller, which knows its budget, truncates; a buffer needs no cap at
+# all. `nocase` folds case; `wholeword` keeps only word-bounded hits (D51); `regex`
+# treats `needle` as a Tcl-ARE pattern (whole-word ignored).
+proc rio::doc::grep_lines {lines needle nocase wholeword {textcap 200} {regex 0}} {
 	set matches {}
 	set occ 0
 	set ln 0
 	foreach line $lines {
 		incr ln
-		set h $line
-		if {$nocase} { set h [string tolower $line] }
-		set cols [_line_cols $h $ndl $nlen $wholeword]
+		lassign [_line_hits $line $needle $nocase $wholeword $regex] cols lens
 		if {[llength $cols] == 0} continue
 		incr occ [llength $cols]
-		lappend matches [dict create line $ln col [lindex $cols 0] cols $cols \
+		lappend matches [dict create line $ln col [lindex $cols 0] cols $cols lens $lens \
 			text [string range $line 0 [expr {$textcap - 1}]]]
 	}
 	return [list $matches $occ]
 }
 
-# The 1-based start columns of every occurrence of `ndl` (length `nlen`) on a
-# single already-folded line `h`. Occurrences are non-overlapping (advance past
-# each). With `wholeword`, a hit counts only when neither flank is a word char.
-proc rio::doc::_line_cols {h ndl nlen wholeword} {
-	set cols {}
+# The occurrences of `needle` on a single line, as parallel {cols lens} lists: 1-based
+# start columns and matching char lengths. Literal (default), folding case under
+# `nocase` and, with `wholeword`, keeping only word-bounded hits; or, with `regex`, a
+# Tcl-ARE pattern (line = the whole string here, so `^`/`$` bound it naturally).
+proc rio::doc::_line_hits {line needle nocase wholeword regex} {
+	set cols {} ; set lens {}
+	if {$regex} {
+		foreach sp [_regex_spans $line $needle $nocase] {
+			lassign $sp s e
+			lappend cols [expr {$s + 1}] ; lappend lens [expr {$e - $s}]
+		}
+		return [list $cols $lens]
+	}
+	set h $line ; set ndl $needle
+	if {$nocase} { set h [string tolower $line] ; set ndl [string tolower $needle] }
+	set nlen [string length $ndl]
 	set from 0
 	while {1} {
 		set i [string first $ndl $h $from]
 		if {$i < 0} break
-		if {!$wholeword || [_bounded $h $i $nlen]} { lappend cols [expr {$i + 1}] }
+		if {!$wholeword || [_bounded $h $i $nlen]} { lappend cols [expr {$i + 1}] ; lappend lens $nlen }
 		set from [expr {$i + $nlen}]
 	}
-	return $cols
+	return [list $cols $lens]
 }
 
 # Replace every match of `needle` with `text`, as ONE recorded edit: Replace All
@@ -359,11 +419,11 @@ proc rio::doc::_line_cols {h ndl nlen wholeword} {
 # is untouched under `nocase`. Returns "" when nothing matched (no edit
 # recorded), else a change dict {count start end text removed} spanning the
 # whole document, ready to shape an event.
-proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
+proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
 	set old [join $lines "\n"]
-	lassign [_replace_text $old $needle $text $nocase $wholeword] out count
+	lassign [_replace_text $old $needle $text $nocase $wholeword $regex] out count
 	if {!$count} { return "" }
 	set endpos "[llength $lines].[string length [lindex $lines end]]"
 	edit $id 1.0 $endpos $out
@@ -371,14 +431,23 @@ proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
 }
 
 # Replace every match of `needle` with `text` in the string `old`, returning
-# {newtext count}. The literal-search engine as a pure string function (no buffer,
-# no undo), so it serves both `replace_all` (an open buffer) and the on-disk arm of
+# {newtext count}. The search engine as a pure string function (no buffer, no undo),
+# so it serves both `replace_all` (an open buffer) and the on-disk arm of
 # project.replace (a closed file, D52 Phase B) — one matcher for both, the same way
-# grep_lines unified the search side. Replacement segments come from the ORIGINAL
-# text, so case outside the matches is untouched under `nocase`; in whole-word mode
-# an embedded hit is left in place (not appended, `pos` not advanced) so the next
-# accepted match carries it through. Zero matches yields {<old> 0}.
-proc rio::doc::_replace_text {old needle text nocase wholeword} {
+# grep_lines unified the search side. Literal by default: replacement segments come
+# from the ORIGINAL text, so case outside the matches is untouched under `nocase`;
+# in whole-word mode an embedded hit is left in place (not appended, `pos` not
+# advanced) so the next accepted match carries it through. With `regex`, `needle` is
+# a Tcl-ARE pattern and `text` a regsub replacement (line-oriented, `-nocase`,
+# backreferences `\1`/`&` honoured; whole-word ignored); an invalid pattern yields
+# {<old> 0}. Zero matches yields {<old> 0}.
+proc rio::doc::_replace_text {old needle text nocase wholeword {regex 0}} {
+	if {$regex} {
+		set flags {-all -line}
+		if {$nocase} { lappend flags -nocase }
+		if {[catch {regsub {*}$flags -- $needle $old $text out} count]} { return [list $old 0] }
+		return [list $out $count]
+	}
 	set hay $old
 	set ndl $needle
 	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
