@@ -77,14 +77,20 @@ Each entry notes its state:
   one **row per match** rather than per line, and richer scope filters (globs, honour
   `.gitignore`) for `project.search`; and making the results panel a real dock-site tenant
   once D35 lands (it is a hand-packed bottom strip today, not a dock).
-- **Dock-site system for tool windows** — *design* (AGENTS.md D35). Tool panels
-  (the agent chat today; a git log, search results, a REPL, extension panels later)
-  become first-class views hosted by a small set of dock sites (left/right/bottom),
-  each a tabbed container the user can move panels between — the Visual Studio docking
-  model, kept distinct from the document editor groups (D33). Gives user-controlled
-  placement and one universal embedding seam for D17/D18 UI contributions, without
-  overloading the core `buffer` concept. Direction settled; not built — the chat stays
-  a dedicated pane (D14) until it lands. Quality bar for these panes: the D36 find
+- **Dock-site system for tool windows** — *design, build shape settled* (AGENTS.md D35 +
+  its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
+  extension panels later) become first-class views hosted by a small set of dock sites
+  (left/right/bottom), each a tabbed container the user can move panels between — the Visual
+  Studio docking model, kept distinct from the document editor groups (D33). Gives
+  user-controlled placement and one universal embedding seam for D17/D18 UI contributions,
+  without overloading the core `buffer` concept. The **Refinement** now fixes the build
+  shape: v1 hosts *core-team panels only* (files/git/chat/results — the plugin
+  UI-contribution seam is deferred); a data-registry **panel contract**; one persisted
+  `layout` object replacing the `dock_side`/`dock_pane`/`chat_shown` flags; the find bar and
+  compare view stay OUT (they aren't tool windows); and an incremental path whose opening
+  move is **extracting a reusable panel component** and migrating the four existing panes
+  onto it (no behaviour change). Not built — the chat stays a dedicated pane (D14) until it
+  lands. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a
   non-modal tool window and re-hosts into a dock site when this lands. The **git

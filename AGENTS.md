@@ -1945,6 +1945,59 @@ the chat pane stays exactly as it is (a dedicated pane, D14), and when the exten
 surface is built it lands as a dock site rather than as pseudo-document tabs. Recorded
 as a *direction*; see ROADMAP for the build item.
 
+**Refinement — the build shape (design pass, not yet built).** The direction above is
+settled; this fixes the *concrete seams* the build lands on, so the refactor is
+incremental rather than a big-bang rewrite of the most delicate GUI code. Six decisions:
+
+1. **v1 scope: core-team panels only; the plugin UI-contribution seam is deferred.** The
+   dock-site host is built for the panes rio *already ships* — files, git, chat, and the
+   find-in-files results strip (D51). A *plugin* contributing a panel waits on the
+   still-unsettled plugin interface (ROADMAP → "Plugin interface — design"), so it is out
+   of v1. This unblocks D35 from the plugin timeline; the panel contract below is shaped
+   so a plugin-contributed panel is a later *caller* of it, not a redesign. (Consumers now
+   exist — four real tool panes — which is what "why now" was waiting on.)
+
+2. **Three sites, mapped onto what exists.** `left` / `right` / `bottom`. Today's dock
+   (files+git, `place_dock` / `::dock_side`) and the chat column (`.chat`, `::chat_shown`)
+   become **side-site** tenants; the results strip (`.results`, `-side bottom`) is the
+   first **bottom-site** tenant. `::dock_side` (left|right) generalises to "which side a
+   panel prefers." The editor groups (`.groups`, D33) are emphatically **not** a site —
+   documents stay their own region; keeping the two categories apart *is* D35.
+
+3. **The panel contract is a small data registry — the modes/themes/`rl_*` idiom, not a
+   bespoke widget tree.** A tool panel is *declared as data* — `{id, title, site, build,
+   refresh, …}` — the same registration shape highlighters (D32), editing modes (D38), and
+   the rich-list (D42) already use. The **host** owns the chrome (the tab, the header, the
+   close/refresh affordances, the theme hooks); a panel supplies only its *body widget* and
+   a *refresh hook*. Files, git, chat, and results become the first four registered panels.
+
+4. **One persisted `layout` object replaces the ad-hoc flags.** Today the layout is flat
+   booleans — `dock_side`, `dock_pane`, `chat_shown` (plus `compare_shown`, which is not a
+   panel — see below). D35 needs per-site state: each site's visibility, its size, the
+   *ordered* list of panels docked there, and which is active. Persist one `layout` dict and
+   **migrate** the old keys into it (`dock_side` → the side its panels sit on, `dock_pane` →
+   that side's active panel, `chat_shown` → the chat panel's presence/visibility). Settle the
+   schema before building; it is the part that is painful to retrofit.
+
+5. **What stays OUT of the site system: the find bar and the compare view.** The find bar
+   (`.find`, D36) is an *inline overlay bound to the focused document*, not a tool window —
+   it stays special. The compare view (`.cmp`, D28) is a *document-area swap*, not a tool
+   panel — it stays too. Only genuine tool windows become tenants, so the abstraction does
+   not over-reach into things that aren't panels.
+
+6. **Headless-testability is a design constraint, not an afterthought.** The layout must be
+   **queryable as state** — "panel *X* is docked in site *Y* at tab *N*, visible" — so smoke
+   asserts placement without a mapped window (the withdrawn-window wall we keep hitting:
+   the gutter D49, the results panel D51). The layout manager owns that model; the actual
+   `pack`/`grid` is *derived* from it, never the source of truth.
+
+**Incremental path (each step ships green on its own).** (a) Extract the panel component +
+registry and migrate the four existing panes onto it — *no* behaviour change, fully
+testable; (b) unify all non-document placement (`place_dock`, `show_pane`, the self-packing
+bottom strips) into one layout manager reading the `layout` state; (c) introduce the sites,
+their tab strips, and move-a-panel-between-sites, driven by that state. D35 is "done" when a
+user can drag, say, the git panel to the bottom. Step (a) is the recommended opening move.
+
 ---
 
 ### D36 — Find / Replace: the engine in the core, a bar in the GUI
