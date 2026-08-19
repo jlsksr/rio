@@ -219,6 +219,79 @@ test search-wire {project.search encodes the two-level result (with the cols arr
 	rio::wire::response [dict create id 1 ok true op project.search result $result]
 } -result {{"id":"1","ok":true,"result":{"count":"2","files":"1","truncated":"0","results":[{"path":"/p/a.txt","rel":"a.txt","matches":[{"line":"3","col":"1","cols":["1","8"],"text":"needle needle"}]}]}}}
 
+# --- replace in files (rio::ops::project_replace, D52 Phase B) ---------------
+# A tree with a token across a closed file and (in the open-buffer test) a file
+# opened as a buffer, to exercise both arms: disk rewrite vs in-buffer replace.
+proc make_replace_tree {} {
+	set d [file join [::tcltest::temporaryDirectory] riorepl-[clock clicks]]
+	file mkdir $d
+	set f [open [file join $d a.txt] w] ; puts -nonewline $f "cat and cat\n" ; close $f
+	set f [open [file join $d b.txt] w] ; puts -nonewline $f "one cat here\n" ; close $f
+	return $d
+}
+
+test project-replace-disk {closed files are rewritten on disk; count/files + fs.changed} -setup {
+	set ::rtree [make_replace_tree] ; rio::project::open $::rtree
+} -body {
+	set call [rio::core::call project.replace [dict create needle cat text dog]]
+	set r [dict get [dict get $call response] result]
+	set evs {} ; foreach e [dict get $call events] { lappend evs [dict get $e event] }
+	set a [dict get [rio::fs::read [file join $::rtree a.txt]] text]
+	set b [dict get [rio::fs::read [file join $::rtree b.txt]] text]
+	# a.txt 2 hits + b.txt 1 = 3 across 2 disk files, no open buffers; two fs.changed.
+	list [dict get $r count] [dict get $r files] [dict get $r bufferids] \
+		[lsort -unique $evs] $a $b
+} -cleanup { rio::project::close ; file delete -force $::rtree } \
+  -result [list 3 2 {} fs.changed "dog and dog\n" "one dog here\n"]
+
+test project-replace-open-buffer {an OPEN file is replaced through its buffer, disk untouched} -setup {
+	set ::rtree [make_replace_tree] ; rio::project::open $::rtree
+} -body {
+	set open [dict get [dict get [rio::core::call file.open \
+		[dict create path [file join $::rtree a.txt]]] response] result]
+	set aid [dict get $open buffer]
+	set call [rio::core::call project.replace [dict create needle cat text dog]]
+	set r [dict get [dict get $call response] result]
+	set evs {} ; foreach e [dict get $call events] { lappend evs [dict get $e event] }
+	# a.txt via the buffer (unsaved: disk still "cat"), b.txt via disk. count 3,
+	# 1 disk file, bufferids = [a's id]; events carry both a buffer.changed and an fs.changed.
+	list [dict get $r count] [dict get $r files] \
+		[expr {[dict get $r bufferids] eq $aid}] [lsort -unique $evs] \
+		[rio::doc::text $aid] \
+		[dict get [rio::fs::read [file join $::rtree a.txt]] text] \
+		[dict get [rio::fs::read [file join $::rtree b.txt]] text]
+} -cleanup { rio::doc::close $aid ; rio::project::close ; file delete -force $::rtree } \
+  -result [list 3 1 1 {buffer.changed fs.changed} "dog and dog\n" "cat and cat\n" "one dog here\n"]
+
+test project-replace-wholeword {the wholeword flag reaches the replace} -setup {
+	set ::rtree [file join [::tcltest::temporaryDirectory] riorepl-[clock clicks]]
+	file mkdir $::rtree
+	set f [open [file join $::rtree w.txt] w] ; puts -nonewline $f "cat cats cat\n" ; close $f
+	rio::project::open $::rtree
+} -body {
+	rio::core::call project.replace [dict create needle cat text dog wholeword 1]
+	dict get [rio::fs::read [file join $::rtree w.txt]] text
+} -cleanup { rio::project::close ; file delete -force $::rtree } -result "dog cats dog\n"
+
+test project-replace-needs-text {a missing replacement text is a bad_request} -setup setup_search -body {
+	set resp [dict get [rio::core::call project.replace [dict create needle needle]] response]
+	list [dict get $resp ok] [dict get $resp error code]
+} -cleanup teardown_search -result {false bad_request}
+
+test project-replace-empty-needle {an empty needle is a bad_request} -setup setup_search -body {
+	set resp [dict get [rio::core::call project.replace [dict create needle "" text x]] response]
+	list [dict get $resp ok] [dict get $resp error code]
+} -cleanup teardown_search -result {false bad_request}
+
+test project-replace-registered {project.replace is in the live registry} -body {
+	expr {"project.replace" in [rio::dispatch::opnames]}
+} -result 1
+
+test project-replace-wire {project.replace encodes count/files + a bufferids array} -body {
+	set result [dict create count 3 files 1 bufferids {7 9}]
+	rio::wire::response [dict create id 1 ok true op project.replace result $result]
+} -result {{"id":"1","ok":true,"result":{"count":"3","files":"1","bufferids":["7","9"]}}}
+
 test fs-list-wire {fs.list encodes to JSON with path + an entries array} -body {
 	set result [dict create path /p entries \
 		[list [dict create name a.txt type file] [dict create name src type dir]]]

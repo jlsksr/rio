@@ -2896,11 +2896,34 @@ bar's needle + `::find_case`/`::find_word` into the panel and widens the scope t
 point of escalating). Relabelled *Search…* throughout (menu, keymap action `search`, panel
 label); `Ctrl+Shift+F` is unchanged.
 
-**Phasing.** This is **Phase A** — search only. **Replace** (a replace row; buffer scopes via
-`buffer.replace_all`, Project via a new confirm-gated, `fs.changed`-emitting `project.replace`
-that guards open-buffer divergence) is **Phase B**; **regex** (a shared flag across `buffer.*`
-and `project.*`) and re-homing the panel into the D35 bottom dock-site are **Phase C** — each
-its own later arc.
+**Phasing. Phase A** was search only. **Phase B — Replace** (below) is now in. **Regex** (a
+shared flag across `buffer.*` and `project.*`) and re-homing the panel into the D35 bottom
+dock-site are **Phase C** — a later arc.
+
+**Phase B — Replace across the scopes.** The panel gains a **replace row** (a replacement
+entry + Replace All, toggled with `Ctrl+H` like the bar; the bar's escalate carries its
+replacement text and opens the row when the bar was in Replace mode). `search_replace_all`
+routes by scope:
+- **Buffer scopes** (Current doc / Open docs) → `buffer.replace_all` — one undo step per
+  buffer, the change left **unsaved**; each touched buffer is flagged modified. Open docs
+  loops every open buffer; Current doc hits just the focused one.
+- **Project** → a new **`project.replace {needle, text, ?nocase?, ?wholeword?}`** op, gated by
+  a GUI **confirm** (it can write disk). It reuses `project.search` to find the matching files
+  (same `.git`/binary/oversized skips), then **routes each by whether it is open in the
+  editor** — the same open-vs-closed split the agent's writes use (agent-tools `apply_write`):
+  an open file is replaced **through its buffer** (`rio::doc::replace_all`, undoable, unsaved,
+  a `buffer.changed`), a closed file is **rewritten on disk** (`rio::fs::write`, encoding/EOL
+  preserved, an `fs.changed`). Routing open files through the buffer is the **divergence
+  guard**: disk is never rewritten under an open view. It returns `{count, files, bufferids}`;
+  the GUI flags the returned `bufferids` modified (their changes are unsaved). The replace uses
+  the shared **`rio::doc::_replace_text {old needle text nocase wholeword}`** pure string
+  function, extracted from `replace_all` so the buffer path and the disk path share one matcher
+  — the mirror of how `grep_lines` unified the search side. A key implementation trap: because
+  `project.replace` mutates buffers/disk *and* returns a batch of events, it must NOT drive its
+  sub-work through nested `rio::core::call` (that shares one `evbuf` and would double/leak
+  events into the outer batch); it calls the model functions directly and shapes the events
+  itself. After a replace the old hit locations are stale, so the list is cleared and the count
+  line reports what changed.
 
 ---
 

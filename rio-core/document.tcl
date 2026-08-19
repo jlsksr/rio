@@ -363,6 +363,22 @@ proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
 	set old [join $lines "\n"]
+	lassign [_replace_text $old $needle $text $nocase $wholeword] out count
+	if {!$count} { return "" }
+	set endpos "[llength $lines].[string length [lindex $lines end]]"
+	edit $id 1.0 $endpos $out
+	return [dict create count $count start 1.0 end $endpos text $out removed $old]
+}
+
+# Replace every match of `needle` with `text` in the string `old`, returning
+# {newtext count}. The literal-search engine as a pure string function (no buffer,
+# no undo), so it serves both `replace_all` (an open buffer) and the on-disk arm of
+# project.replace (a closed file, D52 Phase B) — one matcher for both, the same way
+# grep_lines unified the search side. Replacement segments come from the ORIGINAL
+# text, so case outside the matches is untouched under `nocase`; in whole-word mode
+# an embedded hit is left in place (not appended, `pos` not advanced) so the next
+# accepted match carries it through. Zero matches yields {<old> 0}.
+proc rio::doc::_replace_text {old needle text nocase wholeword} {
 	set hay $old
 	set ndl $needle
 	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
@@ -370,9 +386,6 @@ proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
 	set out "" ; set count 0 ; set pos 0
 	set i [string first $ndl $hay]
 	while {$i >= 0} {
-		# In whole-word mode, an embedded hit is left untouched: don't append the
-		# replacement and don't advance `pos`, so the original text (including this
-		# occurrence) is carried through by the next accepted match's copy span.
 		if {!$wholeword || [_bounded $hay $i $len]} {
 			append out [string range $old $pos [expr {$i - 1}]] $text
 			incr count
@@ -380,11 +393,8 @@ proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
 		}
 		set i [string first $ndl $hay [expr {$i + $len}]]
 	}
-	if {!$count} { return "" }
 	append out [string range $old $pos end]
-	set endpos "[llength $lines].[string length [lindex $lines end]]"
-	edit $id 1.0 $endpos $out
-	return [dict create count $count start 1.0 end $endpos text $out removed $old]
+	return [list $out $count]
 }
 
 # --- pure helpers (no buffer registry; unit-testable on a bare line list) ----
