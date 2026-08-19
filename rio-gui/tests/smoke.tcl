@@ -545,6 +545,7 @@ set fdir [file join [file dirname $tpath] riogui-fif-[clock clicks]]
 file mkdir [file join $fdir src] ; file mkdir [file join $fdir .git]
 set ff [open [file join $fdir a.txt] w]  ; puts -nonewline $ff "alpha needle\nplain\nneedle needle\n" ; close $ff
 set ff [open [file join $fdir src b.txt] w] ; puts -nonewline $ff "a NEEDLE here\n" ; close $ff
+set ff [open [file join $fdir c.txt] w] ; puts -nonewline $ff "needleworks\nplain needle here\n" ; close $ff
 set ff [open [file join $fdir .git config] w] ; puts -nonewline $ff "needle skip me\n" ; close $ff
 open_folder $fdir
 # Panel widgets exist and start hidden; fif_open packs the strip and focuses the entry.
@@ -553,18 +554,26 @@ ok "fif: hidden at boot"          $::fif_shown                         0
 proc fif_packed {} { expr {[lsearch -exact [pack slaves .] .results] >= 0} }
 fif_open
 ok "fif: open shows the panel"    [fif_packed]                         1
-# A case-sensitive search: a.txt matches (lines 1 and 3), src/b.txt's "NEEDLE" does not.
-set ::fif_case 1
+# Case-sensitive substring: a.txt (lines 1,3 = 3 hits) + c.txt (needleWORKS, needle = 2);
+# src/b.txt's "NEEDLE" is excluded by case. Five hits across two files.
+set ::fif_case 1 ; set ::fif_word 0
 .results.hdr.e delete 0 end ; .results.hdr.e insert 0 needle ; fif_run
 proc fif_rowtext {i} { set L [expr {$i + 1}] ; .results.well.body get "$L.0" "$L.0 lineend" }
-ok "fif: case-sensitive count · files" [.results.hdr.count cget -text] "3 matches · 1 file"
+ok "fif: case-sensitive count · files" [.results.hdr.count cget -text] "5 matches · 2 files"
 ok "fif: file header row 0"       [string trim [fif_rowtext 0]]        a.txt
 ok "fif: header row not selectable" [rl_selectable .results.well.body 0] 0
 ok "fif: match row selectable"    [rl_selectable .results.well.body 1] 1
 ok "fif: match row payload line"  [dict get [rl_payload .results.well.body 1] line] 1
-# Case-insensitive: now src/b.txt matches too, two files.
+# The match is highlighted (fimatch band): row 1's "needle" starts at line-col 7, so
+# after the "      1  " 9-char prefix the span is widget cols 15..21 on text line 2.
+ok "fif: first match highlighted" [lrange [.results.well.body tag ranges fimatch] 0 1] {2.15 2.21}
+# Whole word drops the embedded hit in "needleworks" (c.txt row 1) — four hits left.
+set ::fif_word 1 ; fif_run
+ok "fif: whole-word excludes needleworks" [.results.hdr.count cget -text] "4 matches · 2 files"
+set ::fif_word 0
+# Case-insensitive: now src/b.txt matches too — six hits across three files.
 set ::fif_case 0 ; fif_run
-ok "fif: nocase spans two files"  [.results.hdr.count cget -text]      "4 matches · 2 files"
+ok "fif: nocase spans three files" [.results.hdr.count cget -text]     "6 matches · 3 files"
 # Activating a match row opens the file and jumps to the matched line.
 fif_activate [dict create path [file join $fdir a.txt] line 3 col 1]
 ok "fif: activate opened the file" [file tail [bufget $::cur path]]    a.txt

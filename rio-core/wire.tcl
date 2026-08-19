@@ -109,7 +109,11 @@ proc rio::wire::_result_project_search {result} {
 	set files {}
 	foreach f [dict get $result results] {
 		set ms {}
-		foreach m [dict get $f matches] { lappend ms [obj $m] }
+		foreach m [dict get $f matches] {
+			set cols {}
+			foreach c [dict get $m cols] { lappend cols [str $c] }
+			lappend ms "{\"line\":[str [dict get $m line]],\"col\":[str [dict get $m col]],\"cols\":[arr $cols],\"text\":[str [dict get $m text]]}"
+		}
 		lappend files "{\"path\":[str [dict get $f path]],\"rel\":[str [dict get $f rel]],\"matches\":[arr $ms]}"
 	}
 	set parts {}

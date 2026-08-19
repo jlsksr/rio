@@ -2229,6 +2229,7 @@ proc find_replace_all {} {
 # ---------------------------------------------------------------------------
 set ::fif_shown 0
 set ::fif_case  0   ;# "Match case" in Find in Files (off = case-insensitive, the friendlier first search)
+set ::fif_word  0   ;# "Whole word" in Find in Files (off = substring; on = word-bounded, D51)
 
 # Show the panel (above the find bar / status), seed the query from the selection
 # like the find bar, and search at once if there is already a needle. With no
@@ -2270,7 +2271,8 @@ proc fif_run {} {
 	if {!$::fif_shown} return
 	set needle [.results.hdr.e get]
 	if {[string trim $needle] eq ""} { fif_paint {} ; .results.hdr.count configure -text "" ; return }
-	set resp [rio_call project.search [dict create needle $needle nocase [expr {!$::fif_case}]]]
+	set resp [rio_call project.search [dict create needle $needle \
+		nocase [expr {!$::fif_case}] wholeword $::fif_word]]
 	if {![dict get $resp ok]} {
 		fif_paint {} ; .results.hdr.count configure -text [dict get $resp error message]
 		return
@@ -2289,18 +2291,35 @@ proc fif_run {} {
 
 # Repaint the rich-list: a non-selectable file-header row (relative path) then one
 # selectable row per matching line ("<line>  <text>"), its payload the location to
-# open. Mirrors the git/files panes' rl_* rendering.
+# open. Mirrors the git/files panes' rl_* rendering. Every occurrence on a row is
+# tinted with the `fimatch` band (D51) — the core hands back each hit's 1-based
+# column in `cols`, offset here by the "<line>  " prefix. `L` tracks the text-widget
+# line as rows are appended (header rows count too), so a span lands on its own row;
+# the needle length (all hits are the substring) sizes each band.
 proc fif_paint {results} {
 	set b .results.well.body
 	rl_begin $b
+	set L 0
+	set nlen [string length [.results.hdr.e get]]
 	foreach fdict $results {
 		$b insert end "[dict get $fdict rel]\n" fifile
 		rl_row $b 0 ""
+		incr L
 		foreach m [dict get $fdict matches] {
-			$b insert end [format "  %5d  %s\n" [dict get $m line] \
-				[string trimright [dict get $m text]]]
+			set prefix [format "  %5d  " [dict get $m line]]
+			set txt [string trimright [dict get $m text]]
+			$b insert end "$prefix$txt\n"
 			rl_row $b 1 [dict create path [dict get $fdict path] \
 				line [dict get $m line] col [dict get $m col]]
+			incr L
+			set plen [string length $prefix]
+			set tend [expr {$plen + [string length $txt]}]
+			foreach c [dict get $m cols] {
+				set s [expr {$plen + $c - 1}]
+				if {$s >= $tend} continue          ;# hit past the trimmed/capped text
+				set e [expr {min($s + $nlen, $tend)}]
+				$b tag add fimatch $L.$s $L.$e
+			}
 		}
 	}
 	rl_end $b
@@ -3224,12 +3243,13 @@ proc apply_theme {theme} {
 	# editor surface (a place to type), the well + rich-list like the dock panes. The
 	# file-header rows take the accent; the match rows the editor foreground.
 	foreach w {.results .results.hdr} { $w configure -background [dict get $c ui.bg] }
-	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case} {
+	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case .results.hdr.word} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
-	.results.hdr.case configure -activebackground [dict get $c ui.bg] \
-		-activeforeground [dict get $c ui.fg]
+	foreach w {.results.hdr.case .results.hdr.word} {
+		$w configure -activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+	}
 	.results.hdr.e configure -font RioChatFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor]
@@ -3239,8 +3259,13 @@ proc apply_theme {theme} {
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
 	$rbody tag configure selrow   -background [dict get $c editor.selection]
 	$rbody tag configure hoverrow -background [blend_hex [dict get $c editor.bg] [dict get $c editor.selection] 25]
-	$rbody tag raise selrow
 	$rbody tag configure fifile -foreground [dict get $c accent]
+	# The per-match band: the theme's diff-added green (light green on light themes,
+	# a dark green on dark ones — always readable under editor.fg, D51). Raised above
+	# the selection band so a hit stays visible on the selected row.
+	$rbody tag configure fimatch -background [dict get $c diff.added.bg]
+	$rbody tag raise selrow
+	$rbody tag raise fimatch
 	# The compare/diff view (D28): the panes take the editor surface, the headers the
 	# UI chrome (like the dock); row tags tint removed/added lines and grey the
 	# fillers so a changed line reads as a coloured band (VSCode-style).
@@ -5565,11 +5590,14 @@ label .results.hdr.l -text "Find in Files:" -font {monospace 9} -background "#dd
 entry .results.hdr.e -font {monospace 11} -width 28
 checkbutton .results.hdr.case -text "Match case" -font {monospace 9} \
 	-variable ::fif_case -command fif_run -background "#dddddd"
+checkbutton .results.hdr.word -text "Whole word" -font {monospace 9} \
+	-variable ::fif_word -command fif_run -background "#dddddd"
 label .results.hdr.count -font {monospace 9} -anchor w -background "#dddddd"
 label .results.hdr.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 -background "#dddddd"
 pack .results.hdr.l     -side left  -padx {6 2} -pady 2
 pack .results.hdr.e     -side left  -pady 2
 pack .results.hdr.case  -side left  -padx 6
+pack .results.hdr.word  -side left  -padx {0 6}
 pack .results.hdr.close -side right -padx {2 6}
 pack .results.hdr.count -side right -padx 6
 pack .results.hdr -side top -fill x

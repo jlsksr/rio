@@ -2758,12 +2758,17 @@ the one **two-level** result in the protocol, so the wire layer spells both nest
 out in a registered shape encoder rather than guessing (D25). The in-buffer search (D36) and
 this now share a single search architecture, not two — exactly the payoff D36 predicted.
 
-Scope is deliberately small for v1, mirroring `buffer.find`: a plain substring match with an
-optional `nocase`. It skips the VCS dir (`.git/`), binary files (a NUL byte), and oversized
-files, and caps result **rows** (surfaced as `truncated`) so a broad needle can't walk away
-with the core. `count` is total **occurrences** (a line with two hits counts twice) while the
-list shows **one row per matching line** (jumping to the first hit) — the VSCode convention.
-Whole-word / regex / glob filters and multi-match-per-line rows are left deferred.
+Scope is deliberately small for v1, mirroring `buffer.find`: a substring match with optional
+`nocase` and `wholeword`. It skips the VCS dir (`.git/`), binary files (a NUL byte), and
+oversized files, and caps result **rows** (surfaced as `truncated`) so a broad needle can't
+walk away with the core. `count` is total **occurrences** (a line with two hits counts twice)
+while the list shows **one row per matching line** (jumping to the first hit) — the VSCode
+convention. **Whole-word** is a boundary test the engine applies itself (`_word_bounded`: a
+hit counts only when neither flank is a letter/digit/underscore, Unicode letters included) —
+the `\m…\M` feel without a regex per line. Each matching line also carries **`cols`**, the
+1-based start column of *every* occurrence on it, so the frontend can highlight each hit
+rather than re-deriving matches from its mirror (the D36 dumb-view discipline). Regex / glob
+filters, Replace-in-Files, and one-row-per-match are left deferred.
 
 **The results surface in a bottom panel**, decided with jbm against a dock tab or a separate
 window. This is the load-bearing UI choice and it is the **Visual Studio "Find Results" tool
@@ -2773,10 +2778,14 @@ system, built as one bottom strip (`.results`, packed `-after .status -side bott
 find bar) rather than a general dock. It is a query row (needle + Match case + count + ×)
 over an **`rl_*` rich-list** (the same reusable list the files/git panes use, D42/D43): a
 non-selectable file-header row then one selectable row per match, whose payload is the
-location. `Ctrl+Shift+F` / *Edit ▸ Find in Files…* opens it (seeding from the selection like
-the find bar); double-click / Return on a match opens the file and jumps the caret to the
-line. Search runs on Enter, not per-keystroke — it walks the tree, unlike the in-buffer
-bar's live paint. The panel is transient (not persisted), like the find bar.
+location. Match/Whole-word are checkboxes on the query row (each re-runs the search). Every
+hit on a row is tinted with the **`fimatch`** band, which reuses the theme's `diff.added.bg`
+(a light green on light themes, a dark green on dark ones — always readable under `editor.fg`,
+raised above the selection band); the columns come straight from the op's `cols`, offset by
+the `"<line>  "` row prefix. `Ctrl+Shift+F` / *Edit ▸ Find in Files…* opens it (seeding from
+the selection like the find bar); double-click / Return on a match opens the file and jumps
+the caret to the line. Search runs on Enter, not per-keystroke — it walks the tree, unlike the
+in-buffer bar's live paint. The panel is transient (not persisted), like the find bar.
 
 One trap met again: `fif_activate` uses the group's widget **command** (`gw`) for
 `mark set`/`see` but the window **path** (`gget … path`) for `focus` — the same
