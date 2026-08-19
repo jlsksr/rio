@@ -92,7 +92,7 @@ proc rio::ops::_flag {params key} {
 	return [expr {[dict exists $params $key] && [dict get $params $key] ? 1 : 0}]
 }
 
-# buffer.find {needle, ?from?, ?nocase?, ?backwards?, ?buffer?} ->
+# buffer.find {needle, ?from?, ?nocase?, ?backwards?, ?wholeword?, ?buffer?} ->
 #   {found 0} | {found 1, start, end, wrapped} ; the next match from `from`
 # (default 1.0), wrapping around the document.
 proc rio::ops::buffer_find {params} {
@@ -103,24 +103,24 @@ proc rio::ops::buffer_find {params} {
 	set from 1.0
 	if {[dict exists $params from]} { set from [dict get $params from] }
 	set m [rio::doc::find $id $needle $from \
-		[_flag $params nocase] [_flag $params backwards]]
+		[_flag $params nocase] [_flag $params backwards] [_flag $params wholeword]]
 	if {$m eq ""} { return [dict create result [dict create found 0]] }
 	return [dict create result [dict merge [dict create found 1] $m]]
 }
 rio::dispatch::register buffer.find rio::ops::buffer_find
 
-# buffer.matches {needle, ?nocase?, ?buffer?} -> {count, matches:[{start,end}]}
+# buffer.matches {needle, ?nocase?, ?wholeword?, ?buffer?} -> {count, matches:[{start,end}]}
 # Every match, first to last — a frontend's highlight-all and match count. A
 # non-flat result (an array), so the wire layer registers a shape encoder (D25).
 proc rio::ops::buffer_matches {params} {
 	set id [_bufid $params]
 	set ms [rio::doc::matches $id [_needle $params buffer.matches] \
-		[_flag $params nocase]]
+		[_flag $params nocase] [_flag $params wholeword]]
 	return [dict create result [dict create count [llength $ms] matches $ms]]
 }
 rio::dispatch::register buffer.matches rio::ops::buffer_matches
 
-# buffer.replace_all {needle, text, ?nocase?, ?buffer?} -> {count} ; replaces
+# buffer.replace_all {needle, text, ?nocase?, ?wholeword?, ?buffer?} -> {count} ; replaces
 # every match as ONE recorded edit — one undo step, one buffer.changed — so a
 # Replace All undoes as the single action it was.
 proc rio::ops::buffer_replace_all {params} {
@@ -130,7 +130,7 @@ proc rio::ops::buffer_replace_all {params} {
 		rio::error::raise bad_request "buffer.replace_all requires text"
 	}
 	set ch [rio::doc::replace_all $id $needle [dict get $params text] \
-		[_flag $params nocase]]
+		[_flag $params nocase] [_flag $params wholeword]]
 	if {$ch eq ""} { return [dict create result [dict create count 0]] }
 	set ev [dict create event buffer.changed params [dict create buffer $id \
 		start [dict get $ch start] end [dict get $ch end] \

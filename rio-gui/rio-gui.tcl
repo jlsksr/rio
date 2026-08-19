@@ -2073,6 +2073,7 @@ proc do_redo {} {
 # ---------------------------------------------------------------------------
 set ::find_shown   0  ;# find bar visible? (Ctrl+F / Ctrl+H; Esc hides it)
 set ::find_case    0  ;# Match case checkbox (off = fold case, the familiar default)
+set ::find_word    0  ;# Whole word checkbox (off = substring; on = word-bounded, D51)
 set ::find_starts  {} ;# match starts from the last find_update ("i of n" lookup)
 set ::find_pending 0  ;# a coalesced find_update is queued (see apply_change)
 
@@ -2128,7 +2129,7 @@ proc find_update {} {
 	set needle [.find.e get]
 	if {$needle eq ""} { find_status "" ; return }
 	set resp [rio_call buffer.matches [dict create buffer [gcur $g] \
-		needle $needle nocase [expr {!$::find_case}]]]
+		needle $needle nocase [expr {!$::find_case}] wholeword $::find_word]]
 	if {![dict get $resp ok]} { find_status "" ; return }
 	set n [dict get $resp result count]
 	set painted 0
@@ -2156,7 +2157,7 @@ proc find_step {backwards} {
 		if {[catch {$t index sel.last} from]} { set from [$t index insert] }
 	}
 	set resp [rio_call buffer.find [dict create buffer [gcur $g] needle $needle \
-		from $from nocase [expr {!$::find_case}] backwards $backwards]]
+		from $from nocase [expr {!$::find_case}] backwards $backwards wholeword $::find_word]]
 	if {![dict get $resp ok]} return
 	set r [dict get $resp result]
 	if {![dict get $r found]} { find_status "No matches" ; return }
@@ -2210,7 +2211,7 @@ proc find_replace_all {} {
 	set g $::focus ; set t [gw $g]
 	set at [$t index insert]
 	set resp [rio_call buffer.replace_all [dict create buffer [gcur $g] \
-		needle $needle text [.find.re get] nocase [expr {!$::find_case}]]]
+		needle $needle text [.find.re get] nocase [expr {!$::find_case}] wholeword $::find_word]]
 	if {![dict get $resp ok]} return
 	set n [dict get $resp result count]
 	if {$n > 0} { mark_modified 1 }
@@ -3225,12 +3226,13 @@ proc apply_theme {theme} {
 	.chat.isash configure -background [dict get $c tab.bar.bg]
 	# The find/replace bar (D36): UI chrome, entries on the editor surface.
 	.find configure -background [dict get $c ui.bg]
-	foreach w {.find.fl .find.rl .find.count .find.close .find.case} {
+	foreach w {.find.fl .find.rl .find.count .find.close .find.case .find.word} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
-	.find.case configure -activebackground [dict get $c ui.bg] \
-		-activeforeground [dict get $c ui.fg]
+	foreach w {.find.case .find.word} {
+		$w configure -activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+	}
 	foreach w {.find.next .find.prev .find.rep .find.repall} {
 		$w configure -font RioUIFont
 	}
@@ -5547,6 +5549,8 @@ button .find.next -text "↓" -width 2 -font {monospace 9} -command find_next
 button .find.prev -text "↑" -width 2 -font {monospace 9} -command find_prev
 checkbutton .find.case -text "Match case" -font {monospace 9} \
 	-variable ::find_case -command find_update -background "#dddddd"
+checkbutton .find.word -text "Whole word" -font {monospace 9} \
+	-variable ::find_word -command find_update -background "#dddddd"
 label .find.count -font {monospace 9} -anchor w -background "#dddddd"
 label .find.close -text "×" -font {monospace 9} -padx 6 -cursor hand2 \
 	-background "#dddddd"
@@ -5557,14 +5561,15 @@ grid .find.e      -row 0 -column 1 -sticky ew -pady 2
 grid .find.next   -row 0 -column 2 -padx 2
 grid .find.prev   -row 0 -column 3 -padx 2
 grid .find.case   -row 0 -column 4 -padx 4
-grid .find.count  -row 0 -column 5 -sticky ew -padx 4
-grid .find.close  -row 0 -column 6 -sticky e  -padx {2 6}
+grid .find.word   -row 0 -column 5 -padx 4
+grid .find.count  -row 0 -column 6 -sticky ew -padx 4
+grid .find.close  -row 0 -column 7 -sticky e  -padx {2 6}
 grid .find.rl     -row 1 -column 0 -sticky e  -padx {6 2} -pady {0 2}
 grid .find.re     -row 1 -column 1 -sticky ew -pady {0 2}
 grid .find.rep    -row 1 -column 2 -padx 2 -pady {0 2}
 grid .find.repall -row 1 -column 3 -columnspan 2 -sticky w -padx 2 -pady {0 2}
 grid columnconfigure .find 1 -weight 1
-grid columnconfigure .find 5 -weight 1
+grid columnconfigure .find 6 -weight 1
 bind .find.close <Button-1> find_close
 # Both entries: Enter steps (Shift-Enter steps back), Esc closes, F3 works too.
 # In the Replace entry, Enter replaces instead — you are aiming at a replace.
