@@ -1963,23 +1963,30 @@ precedent is `diff.lines` (D28): a pure text computation every frontend needs
 runs core-side, once. So matching lives in the document model
 (rio-core/document.tcl) and is exposed as three **stateless** ops:
 
-- **`buffer.find {needle, ?from?, ?nocase?, ?backwards?}`** → the next match at
-  or after `from` (or the nearest one starting before it), **wrapping around**
-  the document; returns `{found, start, end, wrapped}`. Statelessness is the
+- **`buffer.find {needle, ?from?, ?nocase?, ?backwards?, ?wholeword?}`** → the next
+  match at or after `from` (or the nearest one starting before it), **wrapping
+  around** the document; returns `{found, start, end, wrapped}`. Statelessness is the
   D22 boundary honoured: *where the caret is* is frontend-local — two frontends
   on one core each have their own — so the caller passes its position in and no
   find state lives in the core. Matching is by character offset over the joined
   text, so a needle may span lines; `nocase` uses Tcl's simple one-to-one case
   mapping, so offsets stay stable.
-- **`buffer.matches {needle, ?nocase?}`** → `{count, matches:[{start,end}]}`,
+- **`buffer.matches {needle, ?nocase?, ?wholeword?}`** → `{count, matches:[{start,end}]}`,
   every match first-to-last — the frontend's match count and highlight-all.
   A non-flat result, so the wire layer registers a shape encoder (D25).
-- **`buffer.replace_all {needle, text, ?nocase?}`** → `{count}`; replaces every
+- **`buffer.replace_all {needle, text, ?nocase?, ?wholeword?}`** → `{count}`; replaces every
   match as **one recorded edit** — Replace All is one user action, so it is
   one undo step and one `buffer.changed`, not N of each. The replacement
   segments come from the original text, so case outside the matches survives
   `nocase`. Zero matches means no edit and no event. (Single **Replace** needed
   no new op at all: it is a found range plus the existing `buffer.replace`.)
+
+**`wholeword`** (D51) is shared by all three: a hit counts only when neither flank is
+a word character (letter/digit/underscore, Unicode letters included). The one boundary
+test (`rio::doc::_bounded`, over the joined text so a line break bounds a word for free)
+serves find, matches, and replace_all alike — so the bar's count, its step-to-next, and
+Replace All all agree, and the same rule is what core-side find-in-files uses. It arrived
+first on `project.search` (D51) and was folded back here so the in-buffer bar matches.
 
 Two further reasons the core-side placement is load-bearing: a future TUI or
 third-party client (D2/D30: "any language at the far end") gets the same engine

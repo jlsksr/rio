@@ -216,36 +216,74 @@ proc rio::doc::_at {lines off} {
 	return "[llength $lines].[string length [lindex $lines end]]"
 }
 
+# --- whole-word matching (D51) ----------------------------------------------
+# A word char is a letter, digit, or underscore (Unicode letters included). A hit
+# is "whole-word" when neither flank is a word char — the `\m…\M` feel without a
+# regex. `hay` is the joined document, so a line break (a non-word char) bounds a
+# hit at a line edge for free. The same rule the core-side find-in-files uses.
+proc rio::doc::_wordchar {ch} { expr {$ch eq "_" || [string is alnum -strict $ch]} }
+proc rio::doc::_bounded {hay i len} {
+	set b [expr {$i - 1}]
+	set a [expr {$i + $len}]
+	if {$b >= 0 && [_wordchar [string index $hay $b]]} { return 0 }
+	if {$a < [string length $hay] && [_wordchar [string index $hay $a]]} { return 0 }
+	return 1
+}
+# The first occurrence of `ndl` (length `len`) at or after `start` that passes the
+# whole-word test (or the first at all, when `ww` is 0), or -1. Rejected embedded
+# hits are stepped over one char at a time so none in between is skipped.
+proc rio::doc::_scan_fwd {hay ndl start len ww} {
+	set i [string first $ndl $hay $start]
+	while {$i >= 0} {
+		if {!$ww || [_bounded $hay $i $len]} { return $i }
+		set i [string first $ndl $hay [expr {$i + 1}]]
+	}
+	return -1
+}
+# The last such occurrence at or before `last`, or -1.
+proc rio::doc::_scan_bwd {hay ndl last len ww} {
+	set i [string last $ndl $hay $last]
+	while {$i >= 0} {
+		if {!$ww || [_bounded $hay $i $len]} { return $i }
+		if {$i == 0} { return -1 }
+		set i [string last $ndl $hay [expr {$i - 1}]]
+	}
+	return -1
+}
+
 # The next match of literal `needle` starting at or after `from` — or, with
 # `backwards`, the nearest match starting before it — wrapping around the
 # document. Returns {start end wrapped} or "" when the needle occurs nowhere.
-# `nocase` folds case (Tcl's simple one-to-one mapping, so offsets are stable).
-proc rio::doc::find {id needle from {nocase 0} {backwards 0}} {
+# `nocase` folds case (Tcl's simple one-to-one mapping, so offsets are stable);
+# `wholeword` keeps only word-bounded hits (D51).
+proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
 	set hay [join $lines "\n"]
 	set ndl $needle
 	if {$nocase} { set hay [string tolower $hay] ; set ndl [string tolower $ndl] }
+	set len [string length $ndl]
 	set off [_offset $lines $from]
 	set wrapped 0
 	if {$backwards} {
 		set i -1
-		if {$off > 0} { set i [string last $ndl $hay [expr {$off - 1}]] }
-		if {$i < 0} { set i [string last $ndl $hay] ; set wrapped 1 }
+		if {$off > 0} { set i [_scan_bwd $hay $ndl [expr {$off - 1}] $len $wholeword] }
+		if {$i < 0} { set i [_scan_bwd $hay $ndl [string length $hay] $len $wholeword] ; set wrapped 1 }
 	} else {
-		set i [string first $ndl $hay $off]
-		if {$i < 0} { set i [string first $ndl $hay] ; set wrapped 1 }
+		set i [_scan_fwd $hay $ndl $off $len $wholeword]
+		if {$i < 0} { set i [_scan_fwd $hay $ndl 0 $len $wholeword] ; set wrapped 1 }
 	}
 	if {$i < 0} { return "" }
 	return [dict create \
 		start   [_at $lines $i] \
-		end     [_at $lines [expr {$i + [string length $ndl]}]] \
+		end     [_at $lines [expr {$i + $len}]] \
 		wrapped $wrapped]
 }
 
 # Every match of `needle`, first to last, non-overlapping: a list of
 # {start end} dicts (empty for none) — a frontend paints and counts them.
-proc rio::doc::matches {id needle {nocase 0}} {
+# `wholeword` drops hits flanked by a word char (D51).
+proc rio::doc::matches {id needle {nocase 0} {wholeword 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return {} }
 	set hay [join $lines "\n"]
@@ -255,8 +293,10 @@ proc rio::doc::matches {id needle {nocase 0}} {
 	set out {}
 	set i [string first $ndl $hay]
 	while {$i >= 0} {
-		lappend out [dict create \
-			start [_at $lines $i] end [_at $lines [expr {$i + $len}]]]
+		if {!$wholeword || [_bounded $hay $i $len]} {
+			lappend out [dict create \
+				start [_at $lines $i] end [_at $lines [expr {$i + $len}]]]
+		}
 		set i [string first $ndl $hay [expr {$i + $len}]]
 	}
 	return $out
@@ -268,7 +308,7 @@ proc rio::doc::matches {id needle {nocase 0}} {
 # is untouched under `nocase`. Returns "" when nothing matched (no edit
 # recorded), else a change dict {count start end text removed} spanning the
 # whole document, ready to shape an event.
-proc rio::doc::replace_all {id needle text {nocase 0}} {
+proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
 	set old [join $lines "\n"]
@@ -279,10 +319,15 @@ proc rio::doc::replace_all {id needle text {nocase 0}} {
 	set out "" ; set count 0 ; set pos 0
 	set i [string first $ndl $hay]
 	while {$i >= 0} {
-		append out [string range $old $pos [expr {$i - 1}]] $text
-		incr count
-		set pos [expr {$i + $len}]
-		set i [string first $ndl $hay $pos]
+		# In whole-word mode, an embedded hit is left untouched: don't append the
+		# replacement and don't advance `pos`, so the original text (including this
+		# occurrence) is carried through by the next accepted match's copy span.
+		if {!$wholeword || [_bounded $hay $i $len]} {
+			append out [string range $old $pos [expr {$i - 1}]] $text
+			incr count
+			set pos [expr {$i + $len}]
+		}
+		set i [string first $ndl $hay [expr {$i + $len}]]
 	}
 	if {!$count} { return "" }
 	append out [string range $old $pos end]

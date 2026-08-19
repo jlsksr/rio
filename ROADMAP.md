@@ -71,12 +71,12 @@ Each entry notes its state:
 - **Search extensions** — *deferred* (AGENTS.md D36, D51). In-buffer Find/Replace
   shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`), and
   **Find in Files** landed (D51: core-side `project.search`, a bottom results panel with
-  per-hit highlighting and a **whole-word** toggle). Still wanted: **whole-word on the
-  in-buffer bar too** (`project.search` has it; `buffer.find`/`matches` don't yet) and
-  **regex** options (a flag on the same ops); **Replace in Files** (project-wide replace,
-  gated per-file); one **row per match** rather than per line, and richer scope filters
-  (globs, honour `.gitignore`) for `project.search`; and making the results panel a real
-  dock-site tenant once D35 lands (it is a hand-packed bottom strip today, not a dock).
+  per-hit highlighting). **Whole-word** now rides both the in-buffer bar and
+  `project.search` (one shared `rio::doc::_bounded` rule). Still wanted: **regex** options
+  (a flag on the same ops); **Replace in Files** (project-wide replace, gated per-file);
+  one **row per match** rather than per line, and richer scope filters (globs, honour
+  `.gitignore`) for `project.search`; and making the results panel a real dock-site tenant
+  once D35 lands (it is a hand-packed bottom strip today, not a dock).
 - **Dock-site system for tool windows** — *design* (AGENTS.md D35). Tool panels
   (the agent chat today; a git log, search results, a REPL, extension panels later)
   become first-class views hosted by a small set of dock sites (left/right/bottom),

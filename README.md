@@ -33,7 +33,7 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   readout in the status bar, and optional line wrap.
 - **Find & Replace** — a find bar (`Ctrl+F`, `Ctrl+H` for the replace row) with
   live match highlighting and a match count, `F3`/`Shift+F3` stepping with
-  wrap-around, match-case toggle, two-step Replace (see it selected, then
+  wrap-around, match-case and whole-word toggles, two-step Replace (see it selected, then
   replace it), and **Replace All as a single undo step**. The search itself runs
   in the core, so it works identically over a remote core — and any frontend
   gets it over the protocol.

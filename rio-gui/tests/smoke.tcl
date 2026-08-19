@@ -587,6 +587,22 @@ ok "fif: close hides the panel"   [fif_packed]                         0
 do_close
 file delete -force $fdir
 
+# --- find bar: whole-word toggle (D51) ---------------------------------------
+# The bar's Whole word checkbox flows through buffer.matches: "one" appears three
+# times in the buffer (standalone, inside "someone", inside "one_two"), but only
+# the standalone one is a whole word.
+set wf [tmpbytes "one someone one_two\n"]
+do_open $wf
+find_open 0
+.find.e delete 0 end ; .find.e insert 0 one
+set ::find_case 1 ; set ::find_word 0 ; find_update
+ok "find: substring counts embedded"  [.find.count cget -text]         "3 matches"
+set ::find_word 1 ; find_update
+ok "find: whole-word counts standalone" [.find.count cget -text]       "1 match"
+ok "find: whole-word starts list"     [llength $::find_starts]         1
+set ::find_word 0 ; find_close
+do_close
+
 # --- agent chat over the channel (D26/D30) -----------------------------------
 # The agent now lives in the core and is driven over the channel: an agent turn is
 # ordinary broadcast traffic (agent.* events) routed to the chat view, and the

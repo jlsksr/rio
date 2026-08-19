@@ -134,6 +134,42 @@ test repall-multiline-needle {a needle spanning lines replaces across them} -bod
 	list [dict get $ch count] [rio::doc::text $b]
 } -result {1 a-d}
 
+# --- whole-word (D51) -----------------------------------------------------------
+# The 5th arg to find, 4th to matches/replace_all. "one" is embedded in "someone"
+# and "oneself" — whole-word must skip both and keep only the standalone word.
+
+test find-wholeword-skips-embedded {whole-word find steps over an embedded hit} -body {
+	set b [rio::doc::new "someone said one"]
+	rio::doc::find $b one 1.0 0 0 1
+} -result {start 1.13 end 1.16 wrapped 0}
+
+test find-wholeword-backward {whole-word backward skips embedded too} -body {
+	set b [rio::doc::new "one someone"]
+	rio::doc::find $b one 1.11 0 1 1
+} -result {start 1.0 end 1.3 wrapped 0}
+
+test find-wholeword-boundary-punct {punctuation and line edges bound a word} -body {
+	set b [rio::doc::new "(one)\noneself"]
+	rio::doc::find $b one 1.0 0 0 1
+} -result {start 1.1 end 1.4 wrapped 0}
+
+test matches-wholeword {matches keeps only word-bounded hits} -body {
+	set b [rio::doc::new "one someone one_two one."]
+	rio::doc::matches $b one 0 1
+} -result {{start 1.0 end 1.3} {start 1.20 end 1.23}}
+
+test repall-wholeword {replace-all leaves embedded hits untouched} -body {
+	set b [rio::doc::new "one someone oneself one"]
+	set ch [rio::doc::replace_all $b one X 0 1]
+	list [dict get $ch count] [rio::doc::text $b]
+} -result {2 {X someone oneself X}}
+
+test op-find-wholeword {the wholeword flag flows through buffer.find} -body {
+	set b [rio::doc::new "someone one"]
+	dict get [rio::ops::buffer_find \
+		[dict create buffer $b needle one from 1.0 wholeword 1]] result
+} -result {found 1 start 1.8 end 1.11 wrapped 0}
+
 # --- the ops (handler-level; events shaped for the wire) -------------------------
 
 test op-find {buffer.find returns found+range+wrapped} -body {
