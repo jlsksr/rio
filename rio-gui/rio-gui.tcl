@@ -124,6 +124,7 @@ set ::dock_side left   ;# left | right — which edge the dock occupies
 set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
+set ::line_numbers 1   ;# 1 = show a line-number gutter down each editor group (View menu)
 set ::col_on 0         ;# column/block editing (Ctrl+Shift+drag) enabled? (D40)
 set ::col_active 0     ;# a column selection is currently live
 set ::col_w ""         ;# the editor PROXY path the column selection lives on
@@ -1467,6 +1468,77 @@ proc cmp_apply_wrap {} {
 }
 
 # ---------------------------------------------------------------------------
+# Line-number gutter (View ▸ Line Numbers). A thin canvas down the left of each
+# editor group showing one number per LOGICAL line, drawn from the text widget's
+# own dlineinfo so a wrapped line's number sits at its FIRST display row (VSCode's
+# behaviour) and the two never drift. It repaints whenever the view moves — hooked
+# off the widget's -yscrollcommand (every scroll and edit) and its <Configure>
+# (resize / re-wrap) — coalesced to one idle pass so a fast scroll paints once. Pure
+# display: the numbers live only in the canvas, never in the buffer text (D12).
+# ---------------------------------------------------------------------------
+
+# The editor's -yscrollcommand: drive the group's own vertical scrollbar, then mark
+# its gutter for repaint (the scrollbar move is exactly our "view changed" signal).
+proc edscroll {g lo hi} {
+	[gget $g frame].vsb set $lo $hi
+	gutter_mark $g
+}
+
+# Coalesce a group's gutter repaints into a single idle callback.
+proc gutter_mark {g} {
+	after cancel [list gutter_redraw $g]
+	after idle   [list gutter_redraw $g]
+}
+
+# Repaint group g's line-number canvas to match its visible lines. The width (sized
+# to the last line's digit count, min two) is set even off-screen so it is stable
+# without a render; the numbers themselves are drawn only once the canvas is mapped —
+# dlineinfo needs a real geometry. Walks the visible logical lines (@0,0 down to the
+# bottom pixel); a line with no display box (scrolled past / elided) is skipped, so
+# wrapped lines fall out naturally. No-op when the gutter is off or the group is gone.
+proc gutter_redraw {g} {
+	if {!$::line_numbers} return
+	if {![dict exists $::grp $g]} return
+	set gut [gget $g frame].gutter
+	if {![winfo exists $gut]} return
+	set t [gw $g]                 ;# the renamed widget COMMAND (::real$g) — subcommands only
+	set win [gget $g path]        ;# its window PATH (.eg$g.t) — what winfo takes
+	set last [expr {int([$t index end-1c])}]
+	set digits [expr {max(2, [string length $last])}]
+	set w [expr {$digits * [font measure RioEditorFont 0] + 12}]
+	if {[$gut cget -width] != $w} { $gut configure -width $w }
+	$gut delete all
+	if {![winfo ismapped $gut]} return
+	set fg [dict get $::theme_colors gutter.fg]
+	set top [expr {int([$t index @0,0])}]
+	set bot [expr {int([$t index @0,[winfo height $win]])}]
+	if {$bot > $last} { set bot $last }
+	for {set ln $top} {$ln <= $bot} {incr ln} {
+		set dl [$t dlineinfo $ln.0]
+		if {$dl eq ""} continue
+		set y [expr {[lindex $dl 1] + [lindex $dl 3] / 2}]
+		$gut create text [expr {$w - 6}] $y -text $ln -anchor e \
+			-fill $fg -font RioEditorFont
+	}
+}
+
+# View-menu toggle: show or hide every group's gutter, then persist. Showing it
+# re-grids the canvas into column 0 (grid remembers the cell) and paints it; hiding
+# grid-removes it. The gutter's colours ride apply_theme (restyle_group).
+proc apply_line_numbers {} {
+	foreach g $::groups {
+		set gut [gget $g frame].gutter
+		if {$::line_numbers} {
+			grid $gut
+			gutter_redraw $g
+		} else {
+			grid remove $gut
+		}
+	}
+	prefs_save
+}
+
+# ---------------------------------------------------------------------------
 # Wrap indent (View ▸ Indent Wrapped Lines). With line wrap on, Tk shows a
 # logical line's leading indentation on its FIRST display line only; the wrapped
 # continuation lines fall back to the left margin. With this on, each continuation
@@ -2220,7 +2292,8 @@ proc add_group {} {
 	lappend ::groups $g
 	relayout_groups
 	restyle_group $g
-	apply_wrap        ;# sync the new group's wrap mode + horizontal scrollbar
+	apply_wrap          ;# sync the new group's wrap mode + horizontal scrollbar
+	apply_line_numbers  ;# sync the new group's gutter to ::line_numbers
 	# The shared RioMode tag already covers the new widget's keys; re-attaching
 	# (idempotent by contract, D38) lets the active mode set up its per-group
 	# state too — vi's cursor shape and normal/insert state for the new half.
@@ -2900,6 +2973,8 @@ proc restyle_group {g} {
 	wrapind_refont $t   ;# the font's column width may have moved — keep margins in step
 	[gget $g frame] configure -background [dict get $c editor.bg]
 	[gget $g tabs]  configure -background [dict get $c tab.bar.bg]
+	[gget $g frame].gutter configure -background [dict get $c editor.bg]
+	gutter_redraw $g    ;# gutter.fg / font may have moved — repaint the numbers
 	if {[info procs rio::syntax::tokens] ne ""} {
 		foreach tok [rio::syntax::tokens] {
 			set role syntax.$tok
@@ -3391,6 +3466,7 @@ proc prefs_load {} {
 	if {[dict exists $d theme]}      { set ::theme_name [dict get $d theme] }
 	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
+	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d chat_shown]} { set ::chat_shown [expr {[dict get $d chat_shown] ? 1 : 0}] }
 	if {[dict exists $d dock_side] && [dict get $d dock_side] in {left right}} {
@@ -3416,6 +3492,7 @@ proc prefs_save {} {
 			theme       $::theme_name \
 			wrap        $::wrap_lines \
 			wrap_indent $::wrap_indent \
+			line_numbers $::line_numbers \
 			column_edit $::col_on \
 			dock_side  $::dock_side \
 			dock_pane  $::dock_pane \
@@ -4757,6 +4834,7 @@ set ::keymap_default {
 	show-files     {Control-E            {show_pane files}                                             "Show files pane"}
 	show-git       {Control-G            {show_pane git}                                               "Show git pane"}
 	toggle-wrap    {Control-W            {set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap}        "Toggle line wrap"}
+	toggle-linenums {Control-l           {set ::line_numbers [expr {!$::line_numbers}] ; apply_line_numbers} "Toggle line numbers"}
 	toggle-chat    {Control-A            {set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility} "Toggle agent chat"}
 	split-editor   {Control-backslash    toggle_split                                                  "Toggle editor split"}
 	move-tab-other {Control-bracketright move_tab_other                                                "Move tab to other group"}
@@ -5132,15 +5210,24 @@ proc make_editor_group {g} {
 	text $f.t -wrap none -undo 0 -font {monospace 12} -width 80 -height 28 \
 		-background white -foreground black -insertbackground black \
 		-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
-		-yscrollcommand [list $f.vsb set] -xscrollcommand [list gridscroll $f.hsb]
+		-yscrollcommand [list edscroll $g] -xscrollcommand [list gridscroll $f.hsb]
+	# The line-number gutter (D49): a thin, unfocusable canvas in column 0 that
+	# gutter_redraw paints from the text widget's dlineinfo. Its wheel forwards to
+	# the text so a scroll begun over the numbers still moves the buffer.
+	canvas $f.gutter -width 1 -highlightthickness 0 -borderwidth 0 -takefocus 0
+	bind $f.gutter <MouseWheel> "$f.t yview scroll \[expr {%D > 0 ? -1 : 1}\] units"
+	bind $f.gutter <Button-4>   [list $f.t yview scroll -1 units]
+	bind $f.gutter <Button-5>   [list $f.t yview scroll  1 units]
+	bind $f.t <Configure> [list gutter_mark $g]   ;# resize / re-wrap → repaint the gutter
 	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
 	scrollbar $f.hsb -orient horizontal -command [list $f.t xview]
-	grid $f.tabs -row 0 -column 0 -columnspan 2 -sticky ew
-	grid $f.t   -row 1 -column 0 -sticky nsew
-	grid $f.vsb -row 1 -column 1 -sticky ns
-	grid $f.hsb -row 2 -column 0 -sticky ew
+	grid $f.tabs   -row 0 -column 0 -columnspan 3 -sticky ew
+	grid $f.gutter -row 1 -column 0 -sticky ns
+	grid $f.t      -row 1 -column 1 -sticky nsew
+	grid $f.vsb    -row 1 -column 2 -sticky ns
+	grid $f.hsb    -row 2 -column 1 -sticky ew
 	grid rowconfigure    $f 1 -weight 1
-	grid columnconfigure $f 0 -weight 1
+	grid columnconfigure $f 1 -weight 1
 	rename $f.t ::real$g
 	dict set ::grp $g [dict merge [new_group_state] \
 		[dict create w ::real$g path $f.t frame $f tabs $f.tabs]]
@@ -5373,6 +5460,8 @@ menu .m.view -tearoff 0
 	-variable ::wrap_lines -command apply_wrap
 .m.view add checkbutton -label "Indent Wrapped Lines" \
 	-variable ::wrap_indent -command apply_wrap_indent
+.m.view add checkbutton -label "Line Numbers" -accelerator [key_accel toggle-linenums] \
+	-variable ::line_numbers -command apply_line_numbers
 .m.view add checkbutton -label "Agent Chat" -accelerator [key_accel toggle-chat] \
 	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
@@ -5466,6 +5555,7 @@ place_dock                 ;# pack the dock (default left) and the editor
 show_pane $::dock_pane     ;# default files; also does the first populate
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
 apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
+apply_line_numbers         ;# grid each group's gutter to ::line_numbers (default on)
 apply_editmode             ;# attach the editing mode (windows default) to the RioMode tag (D38)
 adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {

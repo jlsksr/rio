@@ -341,12 +341,13 @@ ok "sash: parked on the dock edge" [dict get [pack info .sash] -side] left
 ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
 
 # --- editor scrollbars + line wrapping ---------------------------------------
-# The vertical bar is wired straight to the text; the horizontal bar auto-hides
-# (gridscroll) when no line overflows, and wrapping drops it (no h-scroll wrapped).
-# The auto-hide logic is driven directly with fractions: in a withdrawn window the
-# text never reports real overflow, so we can't lean on live geometry here.
+# The vertical bar is driven through edscroll (which sets .eg0.vsb and repaints the
+# gutter, D49); the horizontal bar auto-hides (gridscroll) when no line overflows, and
+# wrapping drops it (no h-scroll wrapped). The auto-hide logic is driven directly with
+# fractions: in a withdrawn window the text never reports real overflow, so we can't
+# lean on live geometry here.
 proc hsb_shown {} { expr {[lsearch -exact [grid slaves .eg0] .eg0.hsb] >= 0} }
-ok "editor: vsb wired to text"   [::rio_real_t cget -yscrollcommand] {.eg0.vsb set}
+ok "editor: vsb wired via edscroll" [::rio_real_t cget -yscrollcommand] {edscroll 0}
 ok "editor: hsb auto-hides"      [::rio_real_t cget -xscrollcommand] {gridscroll .eg0.hsb}
 ok "editor: default no wrap"     [::rio_real_t cget -wrap]           none
 gridscroll .eg0.hsb 0.0 0.5 ; ok "editor: hsb shown when a line overflows" [hsb_shown] 1
@@ -358,6 +359,34 @@ ok "editor: wrap word applied"        [::rio_real_t cget -wrap] word
 ok "editor: hsb hidden when wrapping" [hsb_shown] 0
 set ::wrap_lines 0 ; apply_wrap
 ok "editor: wrap off restores no-wrap" [::rio_real_t cget -wrap] none
+
+# --- line-number gutter (D49) ------------------------------------------------
+# The gutter is a canvas in column 0, gridded while ::line_numbers is on, its width
+# sized to the last line's digit count (min two). The numbers themselves come from
+# dlineinfo, which needs a mapped window, so a withdrawn smoke can't assert the
+# painted glyphs — it checks the state, the grid slot, and the digit-driven width.
+ok "gutter: default on"          $::line_numbers                      1
+ok "gutter: canvas exists"       [winfo class .eg0.gutter]            Canvas
+ok "gutter: gridded when on"     [expr {[llength [grid info .eg0.gutter]] > 0}] 1
+ok "gutter: in column 0"         [dict get [grid info .eg0.gutter] -column]     0
+set cw [font measure RioEditorFont 0]
+set p2 [tmpbytes "a\nb\nc\n"]              ;# 3 lines → 2 digits (the floor)
+do_open $p2 ; gutter_redraw $::focus
+ok "gutter: width floors at two digits" [.eg0.gutter cget -width] [expr {2 * $cw + 12}]
+set big "" ; for {set i 1} {$i <= 120} {incr i} { append big "line $i\n" }
+set p3 [tmpbytes $big]                     ;# 120 lines → 3 digits, wider
+do_open $p3 ; gutter_redraw $::focus
+ok "gutter: width grows with digits"    [.eg0.gutter cget -width] [expr {3 * $cw + 12}]
+# Toggling off grid-removes the canvas (its cell config is kept); back on re-grids it.
+set ::line_numbers 0 ; apply_line_numbers
+ok "gutter: removed when off"    [llength [grid info .eg0.gutter]]    0
+set ::line_numbers 1 ; apply_line_numbers
+ok "gutter: re-gridded when on"  [expr {[llength [grid info .eg0.gutter]] > 0}] 1
+# Persisted like the other view toggles (prefs_load reads back what prefs_save wrote).
+set ::line_numbers 0 ; prefs_save ; set ::line_numbers 1 ; prefs_load
+ok "gutter: pref round-trips"    $::line_numbers                      0
+set ::line_numbers 1 ; apply_line_numbers ; prefs_save   ;# restore the default for later tests
+do_close ; do_close                                      ;# close the two temp buffers
 
 # --- git pane: branch + changed files + diff ---------------------------------
 if {![catch {exec git --version}]} {

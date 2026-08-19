@@ -33,6 +33,11 @@ Each entry notes its state:
   drag-and-drop; multi-select delete; duplicate/copy; and nested-path creation from one
   prompt (v1 validates a single path component). None are structural — each is an added
   verb or an alternative input on the same `fs.*` ops.
+- **Line-number gutter extras** — *deferred* (builds on AGENTS.md D49, which shipped the
+  VSCode-style gutter, on by default, per editor group). Consciously left: **click a
+  number to select the line**, **relative line numbers**, and gutter numbers in the
+  side-by-side **compare panes**. Each rides the same `gutter_redraw` seam — an added
+  binding, an alternate number source, or a second call site — not a structural change.
 - **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:
