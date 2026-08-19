@@ -92,16 +92,13 @@ proc rio::project::search {needle nocase wholeword} {
 	}
 	set files {}
 	_search_walk $root files
-	set hay $needle
-	if {$nocase} { set hay [string tolower $needle] }
-	set nlen [string length $needle]
 	set results {}
 	set total 0
 	set rows 0
 	set truncated 0
 	foreach path [lsort -dictionary $files] {
 		if {$rows >= $search_max_rows} { set truncated 1 ; break }
-		lassign [_search_file $path $hay $nlen $nocase $wholeword [expr {$search_max_rows - $rows}]] \
+		lassign [_search_file $path $needle $nocase $wholeword [expr {$search_max_rows - $rows}]] \
 			matches occ trunc
 		if {[llength $matches] == 0} continue
 		incr total $occ
@@ -136,65 +133,27 @@ proc rio::project::_search_walk {dir accVar} {
 	}
 }
 
-# Search one file. Returns {matches occurrences truncated}: `matches` is a list of
-# {line col cols text} for each matching line — `cols` is the 1-based start column
-# of EVERY occurrence on the line (for the frontend's per-match highlight, D51), and
-# `col` is the first (the jump target); line/col are 1-based, text is capped for the
-# view. `occurrences` counts every hit (a line may hold several), `truncated` is 1 if
-# the per-call row `budget` was reached. Skips a file that is too large, is binary
-# (holds a NUL), or won't read — a search silently passes over what it can't show.
-proc rio::project::_search_file {path hay nlen nocase wholeword budget} {
+# Search one file. Returns {matches occurrences truncated}: the same line-grouped
+# {line col cols text} rows the Search panel renders — produced by the shared
+# rio::doc::grep_lines (D52), so the disk walk and the open-buffer walk
+# (buffers.search) use one matcher. `truncated` is 1 when the file held more
+# matching lines than the per-call row `budget` (the rest are dropped and the
+# occurrence total is recomputed over the kept rows). Skips a file that is too
+# large, is binary (holds a NUL), or won't read — a search silently passes over
+# what it can't show.
+proc rio::project::_search_file {path needle nocase wholeword budget} {
 	variable search_max_bytes
 	if {[catch {file size $path} sz] || $sz > $search_max_bytes} { return [list {} 0 0] }
 	if {[catch {rio::fs::read $path} rd]} { return [list {} 0 0] }
 	set text [dict get $rd text]
 	if {[string first "\x00" $text] >= 0} { return [list {} 0 0] }
-	set matches {}
-	set occ 0
+	lassign [rio::doc::grep_lines [split $text "\n"] $needle $nocase $wholeword] matches occ
 	set trunc 0
-	set ln 0
-	foreach line [split $text "\n"] {
-		incr ln
-		set h $line
-		if {$nocase} { set h [string tolower $line] }
-		set cols [_line_hits $h $hay $nlen $wholeword]
-		if {[llength $cols] == 0} continue
-		incr occ [llength $cols]
-		lappend matches [dict create line $ln col [lindex $cols 0] cols $cols \
-			text [string range $line 0 199]]
-		if {[llength $matches] >= $budget} { set trunc 1 ; break }
+	if {[llength $matches] > $budget} {
+		set matches [lrange $matches 0 [expr {$budget - 1}]]
+		set trunc 1
+		set occ 0
+		foreach m $matches { incr occ [llength [dict get $m cols]] }
 	}
 	return [list $matches $occ $trunc]
-}
-
-# The 1-based start columns of every occurrence of `hay` (length `nlen`) in the
-# haystack line `h`. With `wholeword`, an occurrence counts only when the span is
-# not flanked by a word character on either side (or sits at a line edge) — the
-# \m…\M feel without paying for a regex per line.
-proc rio::project::_line_hits {h hay nlen wholeword} {
-	set cols {}
-	set from 0
-	while {1} {
-		set i [string first $hay $h $from]
-		if {$i < 0} break
-		if {!$wholeword || [_word_bounded $h $i $nlen]} {
-			lappend cols [expr {$i + 1}]
-		}
-		set from [expr {$i + $nlen}]
-	}
-	return $cols
-}
-
-# True iff the [i, i+nlen) span in `h` has a non-word char (or nothing) on both
-# flanks — the whole-word test. A word char is a letter, digit, or underscore
-# (Unicode letters included, via `string is alnum`).
-proc rio::project::_word_bounded {h i nlen} {
-	set before [expr {$i - 1}]
-	set after  [expr {$i + $nlen}]
-	if {$before >= 0 && [_word_char [string index $h $before]]} { return 0 }
-	if {$after < [string length $h] && [_word_char [string index $h $after]]} { return 0 }
-	return 1
-}
-proc rio::project::_word_char {ch} {
-	return [expr {$ch eq "_" || [string is alnum -strict $ch]}]
 }

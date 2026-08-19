@@ -139,3 +139,34 @@ proc rio::ops::buffer_replace_all {params} {
 		events [list $ev]]
 }
 rio::dispatch::register buffer.replace_all rio::ops::buffer_replace_all
+
+# buffers.search {needle, ?nocase?, ?wholeword?, ?only?} ->
+#   {count, files, truncated, results:[{buffer, name, path, matches:[{line,col,cols,text}]}]}
+# The open-buffer counterpart to project.search (D51): the SAME line-grouped shape,
+# but over the open buffers' live text (reflecting unsaved edits), not the on-disk
+# tree — the Search panel's "Open docs" and "Current doc" scopes (D52). `only` (a
+# buffer id) restricts to that one buffer (current-doc scope); absent, every open
+# buffer is searched, in creation order. Matching runs core-side through the shared
+# rio::doc::grep_lines, so buffer and project search can never disagree. `truncated`
+# is always 0 — the open set is bounded and already in memory, so no row cap.
+proc rio::ops::buffers_search {params} {
+	set needle [_needle $params buffers.search]
+	set nocase [_flag $params nocase]
+	set wholeword [_flag $params wholeword]
+	set only [expr {[dict exists $params only] ? [dict get $params only] : ""}]
+	set results {}
+	set total 0
+	foreach b [rio::doc::inventory] {
+		set id [dict get $b buffer]
+		if {$only ne "" && $id ne $only} continue
+		lassign [rio::doc::grep_lines [rio::doc::lines $id] $needle $nocase $wholeword] \
+			matches occ
+		if {[llength $matches] == 0} continue
+		incr total $occ
+		lappend results [dict create buffer $id name [dict get $b name] \
+			path [dict get $b path] matches $matches]
+	}
+	return [dict create result [dict create count $total files [llength $results] \
+		truncated 0 results $results]]
+}
+rio::dispatch::register buffers.search rio::ops::buffers_search

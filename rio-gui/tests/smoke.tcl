@@ -537,54 +537,93 @@ if {![catch {exec git --version}]} {
 	puts "SKIP  git pane checks (git not installed)"
 }
 
-# --- find in files (D51) -----------------------------------------------------
-# The core walks the open project; the GUI paints the grouped result list in the
-# bottom panel and opens a row's file at its line. A dedicated fixture (a needle
-# across two files + a subdir + a .git/ dir the core must skip), independent of git.
-set fdir [file join [file dirname $tpath] riogui-fif-[clock clicks]]
+# --- Search panel (D52) ------------------------------------------------------
+# Three scopes on two core engines: Project walks the open project on disk
+# (project.search), Open docs / Current doc walk the open buffers' live text
+# (buffers.search). The GUI paints one grouped result list and goes to a row's
+# location (a disk file OR an open buffer tab). A dedicated fixture (a needle across
+# two files + a subdir + a .git/ dir the core must skip), independent of git. Each
+# file also carries a unique `zztok` token so the buffer-scope counts are
+# deterministic whatever else is open.
+set fdir [file join [file dirname $tpath] riogui-search-[clock clicks]]
 file mkdir [file join $fdir src] ; file mkdir [file join $fdir .git]
-set ff [open [file join $fdir a.txt] w]  ; puts -nonewline $ff "alpha needle\nplain\nneedle needle\n" ; close $ff
+set ff [open [file join $fdir a.txt] w]  ; puts -nonewline $ff "alpha needle\nplain zztok\nneedle needle\n" ; close $ff
 set ff [open [file join $fdir src b.txt] w] ; puts -nonewline $ff "a NEEDLE here\n" ; close $ff
-set ff [open [file join $fdir c.txt] w] ; puts -nonewline $ff "needleworks\nplain needle here\n" ; close $ff
+set ff [open [file join $fdir c.txt] w] ; puts -nonewline $ff "needleworks\nplain needle here zztok zztok\n" ; close $ff
 set ff [open [file join $fdir .git config] w] ; puts -nonewline $ff "needle skip me\n" ; close $ff
 open_folder $fdir
-# Panel widgets exist and start hidden; fif_open packs the strip and focuses the entry.
-ok "fif: panel canvas exists"     [winfo class .results.well.body]     Text
-ok "fif: hidden at boot"          $::fif_shown                         0
-proc fif_packed {} { expr {[lsearch -exact [pack slaves .] .results] >= 0} }
-fif_open
-ok "fif: open shows the panel"    [fif_packed]                         1
+# Panel widgets exist and start hidden; search_open packs the strip and focuses entry.
+ok "search: panel canvas exists"     [winfo class .results.well.body]     Text
+ok "search: hidden at boot"          $::search_shown                      0
+ok "search: label reads Search"      [.results.hdr.l cget -text]          "Search:"
+proc search_packed {} { expr {[lsearch -exact [pack slaves .] .results] >= 0} }
+search_open
+ok "search: open shows the panel"    [search_packed]                      1
+# --- Project scope (the on-disk tree; the D51 find-in-files behaviour) ---
+set ::search_scope "Project"
 # Case-sensitive substring: a.txt (lines 1,3 = 3 hits) + c.txt (needleWORKS, needle = 2);
 # src/b.txt's "NEEDLE" is excluded by case. Five hits across two files.
-set ::fif_case 1 ; set ::fif_word 0
-.results.hdr.e delete 0 end ; .results.hdr.e insert 0 needle ; fif_run
-proc fif_rowtext {i} { set L [expr {$i + 1}] ; .results.well.body get "$L.0" "$L.0 lineend" }
-ok "fif: case-sensitive count · files" [.results.hdr.count cget -text] "5 matches · 2 files"
-ok "fif: file header row 0"       [string trim [fif_rowtext 0]]        a.txt
-ok "fif: header row not selectable" [rl_selectable .results.well.body 0] 0
-ok "fif: match row selectable"    [rl_selectable .results.well.body 1] 1
-ok "fif: match row payload line"  [dict get [rl_payload .results.well.body 1] line] 1
+set ::search_case 1 ; set ::search_word 0
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 needle ; search_run
+proc search_rowtext {i} { set L [expr {$i + 1}] ; .results.well.body get "$L.0" "$L.0 lineend" }
+ok "search: project case-sensitive count" [.results.hdr.count cget -text] "5 matches · 2 files"
+ok "search: file header row 0"       [string trim [search_rowtext 0]]     a.txt
+ok "search: header row not selectable" [rl_selectable .results.well.body 0] 0
+ok "search: match row selectable"    [rl_selectable .results.well.body 1] 1
+ok "search: match row payload line"  [dict get [rl_payload .results.well.body 1] line] 1
+ok "search: project row carries a path" [dict exists [rl_payload .results.well.body 1] path] 1
 # The match is highlighted (fimatch band): row 1's "needle" starts at line-col 7, so
 # after the "      1  " 9-char prefix the span is widget cols 15..21 on text line 2.
-ok "fif: first match highlighted" [lrange [.results.well.body tag ranges fimatch] 0 1] {2.15 2.21}
+ok "search: first match highlighted" [lrange [.results.well.body tag ranges fimatch] 0 1] {2.15 2.21}
 # Whole word drops the embedded hit in "needleworks" (c.txt row 1) — four hits left.
-set ::fif_word 1 ; fif_run
-ok "fif: whole-word excludes needleworks" [.results.hdr.count cget -text] "4 matches · 2 files"
-set ::fif_word 0
+set ::search_word 1 ; search_run
+ok "search: whole-word excludes needleworks" [.results.hdr.count cget -text] "4 matches · 2 files"
+set ::search_word 0
 # Case-insensitive: now src/b.txt matches too — six hits across three files.
-set ::fif_case 0 ; fif_run
-ok "fif: nocase spans three files" [.results.hdr.count cget -text]     "6 matches · 3 files"
-# Activating a match row opens the file and jumps to the matched line.
-fif_activate [dict create path [file join $fdir a.txt] line 3 col 1]
-ok "fif: activate opened the file" [file tail [bufget $::cur path]]    a.txt
-ok "fif: caret jumped to the line" [lindex [split [[fgw] index insert] .] 0] 3
+set ::search_case 0 ; search_run
+ok "search: nocase spans three files" [.results.hdr.count cget -text]     "6 matches · 3 files"
+# Activating a project (disk) row opens the file and jumps to the matched line.
+search_activate [dict create path [file join $fdir a.txt] line 3 col 1]
+ok "search: activate opened the disk file" [file tail [bufget $::cur path]] a.txt
+ok "search: caret jumped to the line" [lindex [split [[fgw] index insert] .] 0] 3
+set abuf $::cur                                ;# the a.txt buffer, now open
+# --- Current doc scope (buffers.search, only the focused buffer) ---
+do_open [file join $fdir c.txt] ; set cbuf $::cur
+set ::search_scope "Current doc" ; set ::search_case 1
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 needle ; search_run
+ok "search: current-doc counts the focused buffer" [.results.hdr.count cget -text] "2 matches · 1 buffer"
+ok "search: current-doc row carries a buffer id" [dict exists [rl_payload .results.well.body 1] buffer] 1
+# --- Open docs scope (every open buffer) ---
+# The unique zztok token lives only in the two fixture buffers (a.txt once, c.txt
+# twice), so the count is deterministic: three hits across two buffers.
+set ::search_scope "Open docs"
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 zztok ; search_run
+ok "search: open-docs spans open buffers" [.results.hdr.count cget -text] "3 matches · 2 buffers"
+# Activating a buffer row switches to that tab and jumps — focus a.txt first, then
+# activate c.txt's row.
+activate $abuf
+ok "search: focused a different buffer" [expr {$::cur ne $cbuf}]          1
+search_activate [dict create buffer $cbuf line 2 col 1]
+ok "search: activate switched to the buffer tab" [expr {$::cur eq $cbuf}] 1
+ok "search: activate jumped to the buffer line" [lindex [split [[fgw] index insert] .] 0] 2
+# --- Escalate from the find bar: seed needle + options, widen to Project ---
+find_open 0
+.find.e delete 0 end ; .find.e insert 0 alpha ; set ::find_case 1 ; set ::find_word 0
+search_from_bar
+ok "search: bar handoff seeds the needle" [.results.hdr.e get]           alpha
+ok "search: bar handoff widens to Project" $::search_scope               "Project"
+ok "search: bar handoff carries Match case" $::search_case               1
+find_close
 # Empty needle clears the list and the count.
-.results.hdr.e delete 0 end ; fif_run
-ok "fif: empty needle clears"     [.results.hdr.count cget -text]      ""
-ok "fif: empty needle empties list" [llength $::rl_rows(.results.well.body)] 0
-fif_close
-ok "fif: close hides the panel"   [fif_packed]                         0
-do_close
+set ::search_case 0
+.results.hdr.e delete 0 end ; search_run
+ok "search: empty needle clears"     [.results.hdr.count cget -text]      ""
+ok "search: empty needle empties list" [llength $::rl_rows(.results.well.body)] 0
+search_close
+ok "search: close hides the panel"   [search_packed]                      0
+# Close the two fixture buffers this block opened (neither was edited, so no prompt).
+activate $abuf ; do_close
+activate $cbuf ; do_close
 file delete -force $fdir
 
 # --- find bar: whole-word toggle (D51) ---------------------------------------

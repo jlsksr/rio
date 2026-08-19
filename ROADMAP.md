@@ -68,15 +68,19 @@ Each entry notes its state:
   the block), keyboard-built columns (Alt/Ctrl+Shift+arrows), tab/pixel-accurate
   visual columns (v1 uses character columns), and arbitrary multi-caret
   (Ctrl+click) — a straight generalisation of the same one-span-replace model.
-- **Search extensions** — *deferred* (AGENTS.md D36, D51). In-buffer Find/Replace
-  shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`), and
-  **Find in Files** landed (D51: core-side `project.search`, a bottom results panel with
-  per-hit highlighting). **Whole-word** now rides both the in-buffer bar and
-  `project.search` (one shared `rio::doc::_bounded` rule). Still wanted: **regex** options
-  (a flag on the same ops); **Replace in Files** (project-wide replace, gated per-file);
-  one **row per match** rather than per line, and richer scope filters (globs, honour
-  `.gitignore`) for `project.search`; and making the results panel a real dock-site tenant
-  once D35 lands (it is a hand-packed bottom strip today, not a dock).
+- **Search extensions** — *in progress* (AGENTS.md D36, D51, D52). In-buffer Find/Replace
+  shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`); **Find in
+  Files** landed (D51: core-side `project.search`, a bottom results panel with per-hit
+  highlighting); and the panel **grew into a unified Search panel** (D52, Phase A): three
+  scopes — **Project** (disk, `project.search`), **Open docs** and **Current doc** (live
+  buffer text, new `buffers.search`) — behind one scope selector, on one shared line-grouped
+  matcher (`rio::doc::grep_lines`), with the find bar able to **escalate** into it. **Whole-word**
+  rides every path (one shared `rio::doc::_bounded` rule). Still wanted: **Replace** across the
+  scopes (D52 Phase B — buffer scopes via `buffer.replace_all`, Project via a new confirm-gated
+  `project.replace`); **regex** options (D52 Phase C — a flag on the same ops); one **row per
+  match** rather than per line, and richer scope filters (globs, honour `.gitignore`); and
+  re-homing the panel into a real dock-site tenant once D35 lands (it is a hand-packed bottom
+  strip today — D52 Phase C).
 - **Dock-site system for tool windows** — *design, build shape settled* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites

@@ -2847,9 +2847,60 @@ the selection like the find bar); double-click / Return on a match opens the fil
 the caret to the line. Search runs on Enter, not per-keystroke — it walks the tree, unlike the
 in-buffer bar's live paint. The panel is transient (not persisted), like the find bar.
 
-One trap met again: `fif_activate` uses the group's widget **command** (`gw`) for
-`mark set`/`see` but the window **path** (`gget … path`) for `focus` — the same
-command-vs-path distinction the D49 gutter bug turned on.
+One trap met again: `fif_activate` (now `search_activate`, D52) uses the group's widget
+**command** (`gw`) for `mark set`/`see` but the window **path** (`gget … path`) for `focus`
+— the same command-vs-path distinction the D49 gutter bug turned on.
+
+---
+
+### D52 — the Search panel: two engines, three scopes, one grown surface
+
+The open question from the D35 refinement (#5) was whether the inline find bar should fold
+into the bottom panel like Notepad++'s one "all things search" dialog. **Decided with jbm:
+keep them as two jobs, connected, not one.** The inline bar (D36) stays the quick in-buffer
+path — jbm values its low-fuss immediacy — and the D51 find-in-files panel **grows into a
+unified Search panel**: find across three **scopes** in one bottom tool window, with the bar
+gaining an *escalate* handoff into it. Both sit on one core engine, so they can never disagree.
+This *refines* D35 (the panel is the concrete bottom-site tenant, built now on the hand-packed
+`.results` strip and re-homed into the dock when D35 lands) and supersedes D51's narrower scope.
+
+**Two engines behind a scope selector.** Matching stays core-side (the D36 discipline), and
+the line-grouped matcher D51 buried in `project::_search_file` is extracted to a shared
+**`rio::doc::grep_lines {lines needle nocase wholeword}`** → `{line, col, cols, text}` rows, so
+the disk walk and the buffer walk use *one* matcher:
+
+| Scope        | Op                              | Reads                          |
+|--------------|---------------------------------|--------------------------------|
+| Project      | `project.search` (D51)          | the on-disk tree               |
+| Open docs    | **new** `buffers.search`        | every open buffer's live text  |
+| Current doc  | `buffers.search` with `only`    | the focused buffer             |
+
+`buffers.search {needle, ?nocase?, ?wholeword?, ?only?}` iterates `rio::doc::inventory` and
+returns the **same** two-level shape as `project.search` but with per-buffer headers
+(`{buffer, name, path, matches:[…]}`); the wire encoder shares the envelope + line-match
+encoding with `project.search` and differs only in those header keys. `truncated` is always 0
+(the open set is bounded and in memory). The buffer scopes read **live** text, so they reflect
+**unsaved edits** — the useful "in opened documents" semantic, distinct from Project's on-disk
+view. `project::_search_file` now just reads the file, splits, and calls `grep_lines` (the
+refactor is inert — every D51 case still passes).
+
+**The GUI is the D51 panel, generalized** (the `.results.*` widget paths are kept to limit
+churn; `fif_*` → `search_*`). The query row gains a **scope option menu** (`tk_optionMenu`
+driving `::search_scope`, each entry re-running the search). `search_run` routes by scope;
+`search_paint` renders a file object carrying *either* `rel` (a disk header) or `name` (a
+buffer header), and rows whose payload carries *either* `path` (→ `do_open`) or `buffer` id
+(→ `activate`); `search_activate` branches on which — so one render + one activate path serve
+every scope. The result count's noun follows the scope (files vs buffers). The **escalate**
+handoff: `Ctrl+Shift+F` while a find-bar entry is focused (`search_from_bar`) carries the
+bar's needle + `::find_case`/`::find_word` into the panel and widens the scope to Project (the
+point of escalating). Relabelled *Search…* throughout (menu, keymap action `search`, panel
+label); `Ctrl+Shift+F` is unchanged.
+
+**Phasing.** This is **Phase A** — search only. **Replace** (a replace row; buffer scopes via
+`buffer.replace_all`, Project via a new confirm-gated, `fs.changed`-emitting `project.replace`
+that guards open-buffer divergence) is **Phase B**; **regex** (a shared flag across `buffer.*`
+and `project.*`) and re-homing the panel into the D35 bottom dock-site are **Phase C** — each
+its own later arc.
 
 ---
 
