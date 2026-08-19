@@ -37,6 +37,10 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   replace it), and **Replace All as a single undo step**. The search itself runs
   in the core, so it works identically over a remote core — and any frontend
   gets it over the protocol.
+- **Find in Files** — search the whole open project (`Ctrl+Shift+F`), with results
+  grouped by file in a bottom panel; double-click a match to open the file at that
+  line. Case-insensitive by default, with a Match-case toggle. The walk runs in the
+  core, so it searches the project on whichever box the core runs on.
 - **Split editor** — show **two buffers side by side** in independent editor groups,
   each with its own tabs (`Ctrl+\` to split). **Drag tabs to reorder them within a
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a

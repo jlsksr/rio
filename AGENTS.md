@@ -2747,6 +2747,43 @@ left out; the ask was line/column, kept compact.
 
 ---
 
+### D51 — Find in Files: a core engine + a bottom results panel
+
+The D36 note promised it: **find-in-files is *necessarily* core-side**, because in remote
+mode only the core can see the project tree. So the engine is one op, **`project.search
+{needle, ?nocase?}`**, that walks the open project (`rio::project::search`, over
+`rio::fs::listdir` + `rio::fs::read`) and returns every matching line **grouped by file**:
+`{count, files, truncated, results:[{path, rel, matches:[{line, col, text}]}]}`. This is
+the one **two-level** result in the protocol, so the wire layer spells both nesting levels
+out in a registered shape encoder rather than guessing (D25). The in-buffer search (D36) and
+this now share a single search architecture, not two — exactly the payoff D36 predicted.
+
+Scope is deliberately small for v1, mirroring `buffer.find`: a plain substring match with an
+optional `nocase`. It skips the VCS dir (`.git/`), binary files (a NUL byte), and oversized
+files, and caps result **rows** (surfaced as `truncated`) so a broad needle can't walk away
+with the core. `count` is total **occurrences** (a line with two hits counts twice) while the
+list shows **one row per matching line** (jumping to the first hit) — the VSCode convention.
+Whole-word / regex / glob filters and multi-match-per-line rows are left deferred.
+
+**The results surface in a bottom panel**, decided with jbm against a dock tab or a separate
+window. This is the load-bearing UI choice and it is the **Visual Studio "Find Results" tool
+window** (D35's north star made concrete): documents stay in the center, this is a *tool
+window docked at the bottom* — the first small paving stone toward the deferred dock-site
+system, built as one bottom strip (`.results`, packed `-after .status -side bottom` like the
+find bar) rather than a general dock. It is a query row (needle + Match case + count + ×)
+over an **`rl_*` rich-list** (the same reusable list the files/git panes use, D42/D43): a
+non-selectable file-header row then one selectable row per match, whose payload is the
+location. `Ctrl+Shift+F` / *Edit ▸ Find in Files…* opens it (seeding from the selection like
+the find bar); double-click / Return on a match opens the file and jumps the caret to the
+line. Search runs on Enter, not per-keystroke — it walks the tree, unlike the in-buffer
+bar's live paint. The panel is transient (not persisted), like the find bar.
+
+One trap met again: `fif_activate` uses the group's widget **command** (`gw`) for
+`mark set`/`see` but the window **path** (`gget … path`) for `focus` — the same
+command-vs-path distinction the D49 gutter bug turned on.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

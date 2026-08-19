@@ -68,12 +68,14 @@ Each entry notes its state:
   the block), keyboard-built columns (Alt/Ctrl+Shift+arrows), tab/pixel-accurate
   visual columns (v1 uses character columns), and arbitrary multi-caret
   (Ctrl+click) — a straight generalisation of the same one-span-replace model.
-- **Search extensions** — *deferred* (AGENTS.md D36). In-buffer Find/Replace
-  shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`);
-  still wanted: whole-word and regex options (a flag on the same ops), and
-  **Find in Files** — core-side like the in-buffer engine (in remote mode only
-  the core sees the project tree), surfacing as a search-results panel in a
-  dock site once D35's tool-window mechanism exists.
+- **Search extensions** — *deferred* (AGENTS.md D36, D51). In-buffer Find/Replace
+  shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`), and
+  **Find in Files** landed (D51: core-side `project.search`, a bottom results panel).
+  Still wanted: **whole-word and regex** options (a flag on both the in-buffer ops and
+  `project.search`); **Replace in Files** (project-wide replace, gated per-file); one
+  **row per match** rather than per line, and richer scope filters (globs, honour
+  `.gitignore`) for `project.search`; and making the results panel a real dock-site
+  tenant once D35 lands (it is a hand-packed bottom strip today, not yet a general dock).
 - **Dock-site system for tool windows** — *design* (AGENTS.md D35). Tool panels
   (the agent chat today; a git log, search results, a REPL, extension panels later)
   become first-class views hosted by a small set of dock sites (left/right/bottom),

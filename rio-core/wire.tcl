@@ -101,6 +101,26 @@ proc rio::wire::_result_buffer_matches {result} {
 }
 rio::wire::result_encoder buffer.matches rio::wire::_result_buffer_matches
 
+# project.search: count/files/truncated are string leaves; `results` is an array
+# of objects, each carrying a nested `matches` array of flat objects — the one
+# two-level result in the protocol, so the encoder spells both levels out rather
+# than guessing them from Tcl values (D25).
+proc rio::wire::_result_project_search {result} {
+	set files {}
+	foreach f [dict get $result results] {
+		set ms {}
+		foreach m [dict get $f matches] { lappend ms [obj $m] }
+		lappend files "{\"path\":[str [dict get $f path]],\"rel\":[str [dict get $f rel]],\"matches\":[arr $ms]}"
+	}
+	set parts {}
+	lappend parts "\"count\":[str [dict get $result count]]"
+	lappend parts "\"files\":[str [dict get $result files]]"
+	lappend parts "\"truncated\":[str [dict get $result truncated]]"
+	lappend parts "\"results\":[arr $files]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder project.search rio::wire::_result_project_search
+
 # session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
 proc rio::wire::_result_session_hello {result} {
 	set parts {}

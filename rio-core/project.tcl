@@ -63,3 +63,109 @@ proc rio::project::close {} {
 	variable root
 	set root ""
 }
+
+# --- project-wide text search (Find in Files, AGENTS.md D51) -----------------
+# Walk the open project's tree and return every LINE that contains `needle`,
+# grouped by file. Pure logic over rio::fs (listdir + read), so it tests headless
+# and — the load-bearing reason — runs core-side: in remote mode only the core
+# can see the project tree (D36's "find-in-files is necessarily core-side" note),
+# so the in-buffer search ops (D36) and this share one engine, not two.
+#
+# Scope kept small for v1: a plain substring match (optionally case-insensitive,
+# mirroring buffer.find's `nocase`), skipping the VCS dir (.git), binary files (a
+# NUL byte), and oversized files. Whole-word / regex / glob filters are deferred.
+# One row per matching line (jumping to the first hit on it); `count` is total
+# occurrences (a line with two hits shows once but counts twice, like VSCode).
+# Rows are capped so a broad needle can't walk away with the core; the cap
+# surfaces as `truncated`.
+variable rio::project::search_max_rows  2000
+variable rio::project::search_max_bytes 2000000
+
+proc rio::project::search {needle nocase} {
+	variable root
+	variable search_max_rows
+	if {$root eq ""} {
+		rio::error::raise bad_request "no project open"
+	}
+	if {$needle eq ""} {
+		rio::error::raise bad_request "project.search requires a non-empty needle"
+	}
+	set files {}
+	_search_walk $root files
+	set hay $needle
+	if {$nocase} { set hay [string tolower $needle] }
+	set nlen [string length $needle]
+	set results {}
+	set total 0
+	set rows 0
+	set truncated 0
+	foreach path [lsort -dictionary $files] {
+		if {$rows >= $search_max_rows} { set truncated 1 ; break }
+		lassign [_search_file $path $hay $nlen $nocase [expr {$search_max_rows - $rows}]] \
+			matches occ trunc
+		if {[llength $matches] == 0} continue
+		incr total $occ
+		incr rows [llength $matches]
+		if {$trunc} { set truncated 1 }
+		set rel $path
+		if {[string first "$root/" "$path/"] == 0} {
+			set rel [string range $path [expr {[string length $root] + 1}] end]
+		}
+		lappend results [dict create path $path rel $rel matches $matches]
+		if {$truncated} break
+	}
+	return [dict create count $total files [llength $results] \
+		truncated $truncated results $results]
+}
+
+# Recursively collect the regular files under `dir` into the list var `accVar`,
+# skipping the VCS metadata dir so a search never wanders into .git/. Other
+# dotfiles stay searchable (the files pane shows them too — filtering is a
+# frontend choice, D22/fs.listdir).
+proc rio::project::_search_walk {dir accVar} {
+	upvar 1 $accVar acc
+	foreach e [rio::fs::listdir $dir] {
+		set name [dict get $e name]
+		set p [file join $dir $name]
+		if {[dict get $e type] eq "dir"} {
+			if {$name eq ".git"} continue
+			_search_walk $p acc
+		} else {
+			lappend acc $p
+		}
+	}
+}
+
+# Search one file. Returns {matches occurrences truncated}: `matches` is a list of
+# {line col text} for each matching line (line/col 1-based, text capped for the
+# view), `occurrences` counts every hit (a line may hold several), `truncated` is
+# 1 if the per-call row `budget` was reached. Skips a file that is too large, is
+# binary (holds a NUL), or won't read — a search silently passes over what it
+# can't meaningfully show.
+proc rio::project::_search_file {path hay nlen nocase budget} {
+	variable search_max_bytes
+	if {[catch {file size $path} sz] || $sz > $search_max_bytes} { return [list {} 0 0] }
+	if {[catch {rio::fs::read $path} rd]} { return [list {} 0 0] }
+	set text [dict get $rd text]
+	if {[string first "\x00" $text] >= 0} { return [list {} 0 0] }
+	set matches {}
+	set occ 0
+	set trunc 0
+	set ln 0
+	foreach line [split $text "\n"] {
+		incr ln
+		set h $line
+		if {$nocase} { set h [string tolower $line] }
+		set col [string first $hay $h]
+		if {$col < 0} continue
+		set from $col
+		while {$from >= 0} {
+			incr occ
+			set from [string first $hay $h [expr {$from + $nlen}]]
+		}
+		lappend matches [dict create line $ln col [expr {$col + 1}] \
+			text [string range $line 0 199]]
+		if {[llength $matches] >= $budget} { set trunc 1 ; break }
+	}
+	return [list $matches $occ $trunc]
+}

@@ -537,6 +537,47 @@ if {![catch {exec git --version}]} {
 	puts "SKIP  git pane checks (git not installed)"
 }
 
+# --- find in files (D51) -----------------------------------------------------
+# The core walks the open project; the GUI paints the grouped result list in the
+# bottom panel and opens a row's file at its line. A dedicated fixture (a needle
+# across two files + a subdir + a .git/ dir the core must skip), independent of git.
+set fdir [file join [file dirname $tpath] riogui-fif-[clock clicks]]
+file mkdir [file join $fdir src] ; file mkdir [file join $fdir .git]
+set ff [open [file join $fdir a.txt] w]  ; puts -nonewline $ff "alpha needle\nplain\nneedle needle\n" ; close $ff
+set ff [open [file join $fdir src b.txt] w] ; puts -nonewline $ff "a NEEDLE here\n" ; close $ff
+set ff [open [file join $fdir .git config] w] ; puts -nonewline $ff "needle skip me\n" ; close $ff
+open_folder $fdir
+# Panel widgets exist and start hidden; fif_open packs the strip and focuses the entry.
+ok "fif: panel canvas exists"     [winfo class .results.well.body]     Text
+ok "fif: hidden at boot"          $::fif_shown                         0
+proc fif_packed {} { expr {[lsearch -exact [pack slaves .] .results] >= 0} }
+fif_open
+ok "fif: open shows the panel"    [fif_packed]                         1
+# A case-sensitive search: a.txt matches (lines 1 and 3), src/b.txt's "NEEDLE" does not.
+set ::fif_case 1
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 needle ; fif_run
+proc fif_rowtext {i} { set L [expr {$i + 1}] ; .results.well.body get "$L.0" "$L.0 lineend" }
+ok "fif: case-sensitive count · files" [.results.hdr.count cget -text] "3 matches · 1 file"
+ok "fif: file header row 0"       [string trim [fif_rowtext 0]]        a.txt
+ok "fif: header row not selectable" [rl_selectable .results.well.body 0] 0
+ok "fif: match row selectable"    [rl_selectable .results.well.body 1] 1
+ok "fif: match row payload line"  [dict get [rl_payload .results.well.body 1] line] 1
+# Case-insensitive: now src/b.txt matches too, two files.
+set ::fif_case 0 ; fif_run
+ok "fif: nocase spans two files"  [.results.hdr.count cget -text]      "4 matches · 2 files"
+# Activating a match row opens the file and jumps to the matched line.
+fif_activate [dict create path [file join $fdir a.txt] line 3 col 1]
+ok "fif: activate opened the file" [file tail [bufget $::cur path]]    a.txt
+ok "fif: caret jumped to the line" [lindex [split [[fgw] index insert] .] 0] 3
+# Empty needle clears the list and the count.
+.results.hdr.e delete 0 end ; fif_run
+ok "fif: empty needle clears"     [.results.hdr.count cget -text]      ""
+ok "fif: empty needle empties list" [llength $::rl_rows(.results.well.body)] 0
+fif_close
+ok "fif: close hides the panel"   [fif_packed]                         0
+do_close
+file delete -force $fdir
+
 # --- agent chat over the channel (D26/D30) -----------------------------------
 # The agent now lives in the core and is driven over the channel: an agent turn is
 # ordinary broadcast traffic (agent.* events) routed to the chat view, and the
