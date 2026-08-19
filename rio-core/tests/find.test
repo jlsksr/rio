@@ -4,6 +4,15 @@ package require tcltest
 namespace import ::tcltest::*
 
 source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+
+# The buffer registry is process-global (and core.tcl mints a default buffer), so
+# a GLOBAL buffers.search would see every buffer earlier tests left open. Reset it
+# to a clean slate before each such test — the `only`/id-based tests above don't
+# need this, but the whole-inventory ones do.
+proc reset_buffers {} {
+	foreach b [rio::doc::inventory] { rio::doc::close [dict get $b buffer] }
+}
 
 # --- offset <-> position helpers ----------------------------------------------
 
@@ -232,5 +241,90 @@ test op-no-buffer {a vanished buffer raises no_buffer} -body {
 	catch {rio::ops::buffer_find [dict create buffer 99999 needle x]} msg opts
 	rio::error::code_of $opts
 } -result no_buffer
+
+# --- line-grouped search: rio::doc::grep_lines (D52) ----------------------------
+# The shared matcher behind project.search and buffers.search: one row per matching
+# line, `cols` for every occurrence on it, an occurrence total.
+
+test grep-basic {one row per matching line; col is the first hit, cols lists all} -body {
+	lassign [rio::doc::grep_lines {"alpha needle" "plain" "needle needle again"} needle 0 0] ms occ
+	list [llength $ms] $occ \
+		[dict get [lindex $ms 0] line] [dict get [lindex $ms 0] col] [dict get [lindex $ms 0] cols] \
+		[dict get [lindex $ms 1] cols] [dict get [lindex $ms 1] text]
+} -result {2 3 1 7 7 {1 8} {needle needle again}}
+
+test grep-none {no matching line is an empty row list and zero occurrences} -body {
+	rio::doc::grep_lines {"abc" "def"} zzz 0 0
+} -result {{} 0}
+
+test grep-nocase {nocase folds both sides but text/cols stay on the raw line} -body {
+	lassign [rio::doc::grep_lines {"NEEDLE here"} needle 1 0] ms occ
+	list $occ [dict get [lindex $ms 0] col] [dict get [lindex $ms 0] text]
+} -result {1 1 {NEEDLE here}}
+
+test grep-wholeword {whole-word drops the embedded hit, keeps the standalone} -body {
+	lassign [rio::doc::grep_lines {"needle needles needle."} needle 0 1] ms occ
+	list $occ [dict get [lindex $ms 0] cols]
+} -result {2 {1 16}}
+
+test grep-textcap {a long line's stored text is capped, cols are not} -body {
+	set long [string repeat x 300]
+	lassign [rio::doc::grep_lines [list "${long}needle"] needle 0 0 200] ms occ
+	list [string length [dict get [lindex $ms 0] text]] [dict get [lindex $ms 0] col]
+} -result {200 301}
+
+# --- buffers.search op (D52) ----------------------------------------------------
+# Open-buffer search: the project.search shape over live buffer text. Uses the
+# creation-order inventory, reflects unsaved edits, and `only` restricts to one.
+
+test buffers-search-groups {groups matching lines per buffer, across two buffers} -setup reset_buffers -body {
+	set a [rio::doc::new "one two\nthree one" alpha]
+	set b [rio::doc::new "nothing here" beta]
+	set c [rio::doc::new "one\none more" gamma]
+	set r [dict get [rio::ops::buffers_search [dict create needle one]] result]
+	set names {} ; foreach f [dict get $r results] { lappend names [dict get $f name] }
+	list [dict get $r count] [dict get $r files] $names [dict get $r truncated]
+} -result {4 2 {alpha gamma} 0}
+
+test buffers-search-fields {a buffer result row carries buffer id, name, path, and line matches} -setup reset_buffers -body {
+	set a [rio::doc::new "x\nfind me\ny" note {path /tmp/note.txt}]
+	set r [dict get [rio::ops::buffers_search [dict create needle {find}]] result]
+	set f [lindex [dict get $r results] 0]
+	list [expr {[dict get $f buffer] eq $a}] [dict get $f name] [dict get $f path] \
+		[dict get [lindex [dict get $f matches] 0] line]
+} -result {1 note /tmp/note.txt 2}
+
+test buffers-search-only {only restricts the search to a single buffer} -setup reset_buffers -body {
+	set a [rio::doc::new "target" a]
+	set b [rio::doc::new "target" b]
+	set r [dict get [rio::ops::buffers_search [dict create needle target only $b]] result]
+	list [dict get $r files] [expr {[dict get [lindex [dict get $r results] 0] buffer] eq $b}]
+} -result {1 1}
+
+test buffers-search-reflects-edit {an unsaved edit is visible to buffers.search at once} -setup reset_buffers -body {
+	set a [rio::doc::new "before" a]
+	rio::doc::edit $a 1.0 1.6 "after word"
+	set r [dict get [rio::ops::buffers_search [dict create needle word]] result]
+	dict get $r count
+} -result 1
+
+test buffers-search-nocase {nocase and wholeword flags flow through} -setup reset_buffers -body {
+	set a [rio::doc::new "Word words wordy word." a]
+	set plain [dict get [rio::ops::buffers_search [dict create needle word nocase 1]] result]
+	set ww    [dict get [rio::ops::buffers_search [dict create needle word nocase 1 wholeword 1]] result]
+	list [dict get $plain count] [dict get $ww count]
+} -result {4 2}
+
+test buffers-search-empty-needle {an empty needle is a bad_request} -body {
+	catch {rio::ops::buffers_search [dict create needle ""]} msg opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test buffers-search-wire {buffers.search encodes the two-level result to JSON} -body {
+	set result [dict create count 1 files 1 truncated 0 results \
+		[list [dict create buffer 7 name note path /tmp/n.txt matches \
+			[list [dict create line 2 col 1 cols 1 text {find me}]]]]]
+	rio::wire::response [dict create id 1 ok true op buffers.search result $result]
+} -result {{"id":"1","ok":true,"result":{"count":"1","files":"1","truncated":"0","results":[{"buffer":"7","name":"note","path":"/tmp/n.txt","matches":[{"line":"2","col":"1","cols":["1"],"text":"find me"}]}]}}}
 
 cleanupTests

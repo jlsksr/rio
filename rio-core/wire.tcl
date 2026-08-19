@@ -101,29 +101,56 @@ proc rio::wire::_result_buffer_matches {result} {
 }
 rio::wire::result_encoder buffer.matches rio::wire::_result_buffer_matches
 
-# project.search: count/files/truncated are string leaves; `results` is an array
-# of objects, each carrying a nested `matches` array of flat objects — the one
-# two-level result in the protocol, so the encoder spells both levels out rather
-# than guessing them from Tcl values (D25).
-proc rio::wire::_result_project_search {result} {
-	set files {}
-	foreach f [dict get $result results] {
-		set ms {}
-		foreach m [dict get $f matches] {
-			set cols {}
-			foreach c [dict get $m cols] { lappend cols [str $c] }
-			lappend ms "{\"line\":[str [dict get $m line]],\"col\":[str [dict get $m col]],\"cols\":[arr $cols],\"text\":[str [dict get $m text]]}"
-		}
-		lappend files "{\"path\":[str [dict get $f path]],\"rel\":[str [dict get $f rel]],\"matches\":[arr $ms]}"
-	}
+# The two-level search result (project.search / buffers.search, D51/D52) — the
+# only two-level shape in the protocol, so the encoder spells BOTH levels out
+# rather than guessing them from Tcl values (D25). The envelope (count / files /
+# truncated string leaves + a `results` array) and each line-match object
+# {line, col, cols, text} are shared; the two ops differ only in the per-file
+# header keys, so each supplies its own header encoder.
+
+# One line-match {line,col,cols,text} object.
+proc rio::wire::_linematch {m} {
+	set cols {}
+	foreach c [dict get $m cols] { lappend cols [str $c] }
+	return "{\"line\":[str [dict get $m line]],\"col\":[str [dict get $m col]],\"cols\":[arr $cols],\"text\":[str [dict get $m text]]}"
+}
+
+# The {count, files, truncated, results} envelope, given the already-encoded
+# per-file objects.
+proc rio::wire::_search_envelope {result fileobjs} {
 	set parts {}
 	lappend parts "\"count\":[str [dict get $result count]]"
 	lappend parts "\"files\":[str [dict get $result files]]"
 	lappend parts "\"truncated\":[str [dict get $result truncated]]"
-	lappend parts "\"results\":[arr $files]"
+	lappend parts "\"results\":[arr $fileobjs]"
 	return "{[join $parts ,]}"
 }
+
+# project.search: each file object carries `path` + `rel` (the disk path and its
+# root-relative form) alongside the nested `matches` array.
+proc rio::wire::_result_project_search {result} {
+	set files {}
+	foreach f [dict get $result results] {
+		set ms {}
+		foreach m [dict get $f matches] { lappend ms [_linematch $m] }
+		lappend files "{\"path\":[str [dict get $f path]],\"rel\":[str [dict get $f rel]],\"matches\":[arr $ms]}"
+	}
+	return [_search_envelope $result $files]
+}
 rio::wire::result_encoder project.search rio::wire::_result_project_search
+
+# buffers.search: each file object carries the open buffer's `buffer` id, `name`,
+# and `path` ("" for an unsaved scratch) alongside the nested `matches` array.
+proc rio::wire::_result_buffers_search {result} {
+	set files {}
+	foreach f [dict get $result results] {
+		set ms {}
+		foreach m [dict get $f matches] { lappend ms [_linematch $m] }
+		lappend files "{\"buffer\":[str [dict get $f buffer]],\"name\":[str [dict get $f name]],\"path\":[str [dict get $f path]],\"matches\":[arr $ms]}"
+	}
+	return [_search_envelope $result $files]
+}
+rio::wire::result_encoder buffers.search rio::wire::_result_buffers_search
 
 # session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
 proc rio::wire::_result_session_hello {result} {

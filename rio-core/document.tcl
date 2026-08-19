@@ -302,6 +302,57 @@ proc rio::doc::matches {id needle {nocase 0} {wholeword 0}} {
 	return $out
 }
 
+# --- line-grouped search (D52) ------------------------------------------------
+# The shared engine behind BOTH find-in-files (project.search, D51) and
+# open-buffer search (buffers.search): given a list of line strings, return every
+# LINE that contains `needle`, grouped so each row names the line and every hit on
+# it. This is where the "one row per matching line, cols for each occurrence"
+# shape lives — extracted here so the disk walk and the buffer walk share one
+# matcher and can never disagree (the D36 "matching is core-side" discipline).
+#
+# Returns {matches occurrences}: `matches` is a list of {line col cols text} dicts
+# — `line` is 1-based, `cols` holds the 1-based start column of EVERY occurrence
+# on the line (the frontend's per-hit highlight), `col` is the first (the jump
+# target), `text` is the raw line capped to `textcap` chars for the view.
+# `occurrences` totals every hit (a line with two counts twice). No row cap here —
+# the caller, which knows its budget, truncates; a buffer needs no cap at all.
+# `nocase` folds case; `wholeword` keeps only word-bounded hits (reusing the
+# _bounded/_wordchar test, so a line edge bounds a word for free).
+proc rio::doc::grep_lines {lines needle nocase wholeword {textcap 200}} {
+	set ndl $needle
+	if {$nocase} { set ndl [string tolower $needle] }
+	set nlen [string length $ndl]
+	set matches {}
+	set occ 0
+	set ln 0
+	foreach line $lines {
+		incr ln
+		set h $line
+		if {$nocase} { set h [string tolower $line] }
+		set cols [_line_cols $h $ndl $nlen $wholeword]
+		if {[llength $cols] == 0} continue
+		incr occ [llength $cols]
+		lappend matches [dict create line $ln col [lindex $cols 0] cols $cols \
+			text [string range $line 0 [expr {$textcap - 1}]]]
+	}
+	return [list $matches $occ]
+}
+
+# The 1-based start columns of every occurrence of `ndl` (length `nlen`) on a
+# single already-folded line `h`. Occurrences are non-overlapping (advance past
+# each). With `wholeword`, a hit counts only when neither flank is a word char.
+proc rio::doc::_line_cols {h ndl nlen wholeword} {
+	set cols {}
+	set from 0
+	while {1} {
+		set i [string first $ndl $h $from]
+		if {$i < 0} break
+		if {!$wholeword || [_bounded $h $i $nlen]} { lappend cols [expr {$i + 1}] }
+		set from [expr {$i + $nlen}]
+	}
+	return $cols
+}
+
 # Replace every match of `needle` with `text`, as ONE recorded edit: Replace All
 # is one user action, so it is one undo step and one buffer.changed. The
 # replacement segments come from the ORIGINAL text, so case outside the matches
