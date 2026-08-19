@@ -152,6 +152,17 @@ proc rio::wire::_result_buffers_search {result} {
 }
 rio::wire::result_encoder buffers.search rio::wire::_result_buffers_search
 
+# project.replace: count/files are string leaves; `bufferids` is an array of id
+# strings (the open buffers that were edited, D52 Phase B).
+proc rio::wire::_result_project_replace {result} {
+	set parts {}
+	lappend parts "\"count\":[str [dict get $result count]]"
+	lappend parts "\"files\":[str [dict get $result files]]"
+	lappend parts "\"bufferids\":[strarr [dict get $result bufferids]]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder project.replace rio::wire::_result_project_replace
+
 # session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
 proc rio::wire::_result_session_hello {result} {
 	set parts {}

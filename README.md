@@ -41,9 +41,12 @@ sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
   the whole open **project** on disk, all **open documents** (reflecting unsaved edits), or
   just the **current document**. Results are grouped in a list with each hit highlighted in
   its line; double-click a match to jump to it (a disk file opens, an open document switches
-  tabs). Match-case and whole-word toggles; case-insensitive by default. The quick in-buffer
-  find bar can **escalate** into the panel, carrying its needle across. All matching runs in
-  the core, so it searches the project on whichever box the core runs on.
+  tabs). Match-case and whole-word toggles; case-insensitive by default. A **replace row**
+  (`Ctrl+H`) replaces across the same scopes — open documents in the editor (undoable), and a
+  project-wide replace (confirmed first) rewrites files on disk while editing any that are open
+  through their buffers, so an open view never falls out of step with the disk. The quick
+  in-buffer find bar can **escalate** into the panel, carrying its needle across. All matching
+  and replacing runs in the core, so it works over the project on whichever box the core runs on.
 - **Split editor** — show **two buffers side by side** in independent editor groups,
   each with its own tabs (`Ctrl+\` to split). **Drag tabs to reorder them within a
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a

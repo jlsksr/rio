@@ -2233,10 +2233,11 @@ proc find_replace_all {} {
 # (Phase B) and regex (Phase C) are later arcs; the query row leaves room. rl_*
 # draws the grouped list; the inline find bar stays the quick in-buffer path (D35 #5).
 # ---------------------------------------------------------------------------
-set ::search_shown 0
-set ::search_case  0          ;# "Match case" (off = case-insensitive, the friendlier first search)
-set ::search_word  0          ;# "Whole word" (off = substring; on = word-bounded, D51)
-set ::search_scope "Project"  ;# one of: Project | Open docs | Current doc
+set ::search_shown   0        ;# panel visible?
+set ::search_case    0        ;# "Match case" (off = case-insensitive, the friendlier first search)
+set ::search_word    0        ;# "Whole word" (off = substring; on = word-bounded, D51)
+set ::search_scope   "Project" ;# one of: Project | Open docs | Current doc
+set ::search_replace 0        ;# the replace row shown? (Ctrl+H, like the find bar)
 
 # Show the panel (above the find bar / status). `seed` overrides the query text —
 # the sentinel __sel__ (the default) seeds from the editor selection like the find
@@ -2388,12 +2389,90 @@ proc search_activate {payload} {
 
 # Escalate from the inline find bar into the Search panel (Ctrl+Shift+F while the
 # bar is focused): carry the bar's needle + options across and widen to Project
-# scope (the point of escalating). The panel then owns the query.
+# scope (the point of escalating). If the bar was in Replace mode, carry the
+# replacement text and open the panel's replace row too. The panel then owns the query.
 proc search_from_bar {} {
 	set ::search_case  $::find_case
 	set ::search_word  $::find_word
 	set ::search_scope "Project"
+	if {[llength [grid info .find.rep]] > 0} {
+		.results.rep.e delete 0 end ; .results.rep.e insert 0 [.find.re get]
+		search_show_replace 1
+	}
 	search_open [.find.e get]
+}
+
+# Show or hide the replace row (D52 Phase B), packed just under the query row and
+# above the results well — the find bar's Ctrl+H, brought to the panel.
+proc search_show_replace {on} {
+	set ::search_replace $on
+	if {$on} {
+		pack .results.rep -after .results.hdr -side top -fill x
+		focus .results.rep.e
+	} else {
+		pack forget .results.rep
+	}
+}
+
+# Replace every match for the current scope (D52 Phase B). Buffer scopes go through
+# buffer.replace_all — one undo step per buffer, the change UNSAVED — with each
+# touched buffer flagged modified. Project goes through the destructive, confirm-
+# gated project.replace: open files are edited in their buffers (undoable), closed
+# files rewritten on disk. The old hit locations are stale afterwards, so the list
+# is cleared and the count line reports what changed (mirroring the find bar).
+proc search_replace_all {} {
+	if {!$::search_shown} return
+	set needle [.results.hdr.e get]
+	if {[string trim $needle] eq ""} { focus .results.hdr.e ; return }
+	set repl   [.results.rep.e get]
+	set nocase [expr {!$::search_case}]
+	set ww     $::search_word
+	switch -- $::search_scope {
+		"Current doc" {
+			set resp [rio_call buffer.replace_all [dict create buffer [gcur $::focus] \
+				needle $needle text $repl nocase $nocase wholeword $ww]]
+			set n [expr {[dict get $resp ok] ? [dict get $resp result count] : 0}]
+			if {$n > 0} { mark_modified 1 }
+			set msg "Replaced $n"
+		}
+		"Open docs" {
+			set n 0 ; set touched 0
+			foreach id [dict keys $::buffers] {
+				set resp [rio_call buffer.replace_all [dict create buffer $id \
+					needle $needle text $repl nocase $nocase wholeword $ww]]
+				if {[dict get $resp ok] && [dict get $resp result count] > 0} {
+					incr n [dict get $resp result count] ; incr touched
+					bufset $id modified 1
+				}
+			}
+			if {$touched > 0} refresh_all
+			set msg "Replaced $n · $touched buffer[expr {$touched == 1 ? {} : {s}}]"
+		}
+		default {
+			# Project: destructive on disk for closed files — count, then confirm.
+			set sresp [rio_call project.search [dict create needle $needle \
+				nocase $nocase wholeword $ww]]
+			set cnt [expr {[dict get $sresp ok] ? [dict get $sresp result count] : 0}]
+			if {$cnt == 0} { search_paint {} ; .results.hdr.count configure -text "No results" ; return }
+			set ans [tk_messageBox -icon warning -type yesno -title "Replace in Project" \
+				-message "Replace all $cnt occurrence[expr {$cnt == 1 ? {} : {s}}] of \"$needle\" across the project?\n\nOpen documents are edited in the editor (undoable); files not open are written to disk and cannot be undone."]
+			if {$ans ne "yes"} return
+			set resp [rio_call project.replace [dict create needle $needle text $repl \
+				nocase $nocase wholeword $ww]]
+			if {![dict get $resp ok]} {
+				.results.hdr.count configure -text [dict get $resp error message] ; return
+			}
+			set r [dict get $resp result]
+			foreach id [dict get $r bufferids] {
+				if {[dict exists $::buffers $id]} { bufset $id modified 1 }
+			}
+			if {[llength [dict get $r bufferids]] > 0} refresh_all
+			set nb [llength [dict get $r bufferids]] ; set nf [dict get $r files]
+			set msg "Replaced [dict get $r count] · $nf file[expr {$nf == 1 ? {} : {s}}], $nb buffer[expr {$nb == 1 ? {} : {s}}]"
+		}
+	}
+	search_paint {}
+	.results.hdr.count configure -text $msg
 }
 
 # Close the active buffer of the focused group; guard unsaved changes. If this empties
@@ -3301,11 +3380,12 @@ proc apply_theme {theme} {
 	# The Search panel (D52): chrome like the find bar, the query entry on the editor
 	# surface (a place to type), the well + rich-list like the dock panes. The
 	# file/buffer-header rows take the accent; the match rows the editor foreground.
-	foreach w {.results .results.hdr} { $w configure -background [dict get $c ui.bg] }
-	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case .results.hdr.word} {
+	foreach w {.results .results.hdr .results.rep} { $w configure -background [dict get $c ui.bg] }
+	foreach w {.results.hdr.l .results.hdr.count .results.hdr.close .results.hdr.case .results.hdr.word .results.rep.l} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
+	.results.rep.all configure -font RioUIFont
 	foreach w {.results.hdr.case .results.hdr.word} {
 		$w configure -activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
 	}
@@ -3316,9 +3396,11 @@ proc apply_theme {theme} {
 	.results.hdr.scope.menu configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-activebackground [dict get $c editor.selection] -activeforeground [dict get $c ui.fg]
-	.results.hdr.e configure -font RioChatFont \
-		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
-		-insertbackground [dict get $c editor.cursor]
+	foreach w {.results.hdr.e .results.rep.e} {
+		$w configure -font RioChatFont \
+			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+			-insertbackground [dict get $c editor.cursor]
+	}
 	.results.well configure -background [dict get $c editor.bg]
 	set rbody .results.well.body
 	$rbody configure -font RioEditorFont \
@@ -5685,6 +5767,16 @@ pack .results.hdr.word  -side left  -padx {0 6}
 pack .results.hdr.close -side right -padx {2 6}
 pack .results.hdr.count -side right -padx 6
 pack .results.hdr -side top -fill x
+# The replace row (D52 Phase B): built hidden; search_show_replace (Ctrl+H) packs
+# it under the query row. Replacement entry + Replace All — the scope selector on
+# the query row above decides where it lands (buffers vs disk, confirm-gated).
+frame .results.rep -background "#dddddd"
+label .results.rep.l -text "Replace:" -font {monospace 9} -background "#dddddd"
+entry .results.rep.e -font {monospace 11} -width 28
+button .results.rep.all -text "Replace All" -font {monospace 9} -command search_replace_all
+pack .results.rep.l   -side left -padx {6 2} -pady {0 2}
+pack .results.rep.e   -side left -pady {0 2}
+pack .results.rep.all -side left -padx 6
 frame .results.well -borderwidth 2 -relief sunken -background white
 scrollbar .results.well.sb -command {.results.well.body yview}
 text .results.well.body -width 40 -height 8 -wrap none -state disabled \
@@ -5697,8 +5789,12 @@ pack .results.well.body -side left -fill both -expand 1
 # .results.well.sb is packed on demand by autoscroll. A double-click / Return on a
 # match row goes to it (search_activate); mere selection does nothing.
 rl_init .results.well.body {} search_activate {}
-bind .results.hdr.e    <Return> {search_run ; break}
-bind .results.hdr.e    <Escape> {search_close ; break}
+bind .results.hdr.e    <Return>    {search_run ; break}
+bind .results.hdr.e    <Escape>    {search_close ; break}
+bind .results.hdr.e    <Control-h> {search_show_replace 1 ; break}
+bind .results.rep.e    <Return>    {search_replace_all ; break}
+bind .results.rep.e    <Escape>    {search_close ; break}
+bind .results.rep.e    <Control-h> {search_show_replace 0 ; focus .results.hdr.e ; break}
 bind .results.hdr.close <Button-1> search_close
 
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \

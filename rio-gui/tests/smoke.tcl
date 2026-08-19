@@ -626,6 +626,66 @@ activate $abuf ; do_close
 activate $cbuf ; do_close
 file delete -force $fdir
 
+# --- Search panel: Replace (D52 Phase B) -------------------------------------
+# Buffer scopes replace through buffer.replace_all (undoable, unsaved); Project
+# replace is confirm-gated and rewrites CLOSED files on disk (open files go through
+# their buffers). A distinctive token (zqcat) keeps the Open-docs count deterministic.
+set rdir [file join [file dirname $tpath] riogui-repl-[clock clicks]]
+file mkdir $rdir
+set ff [open [file join $rdir p.txt] w] ; puts -nonewline $ff "zqcat and zqcat\n" ; close $ff
+set ff [open [file join $rdir q.txt] w] ; puts -nonewline $ff "one zqcat two\n" ; close $ff
+set ff [open [file join $rdir r.txt] w] ; puts -nonewline $ff "red red\n" ; close $ff
+open_folder $rdir
+search_open
+# The replace row toggles with Ctrl+H (search_show_replace).
+proc rep_packed {} { expr {[lsearch -exact [pack slaves .results] .results.rep] >= 0} }
+ok "replace: row hidden by default"  [rep_packed]                         0
+search_show_replace 1
+ok "replace: Ctrl+H shows the row"   [rep_packed]                         1
+# Open two buffers, both carrying zqcat.
+do_open [file join $rdir p.txt] ; set pbuf $::cur
+do_open [file join $rdir q.txt] ; set qbuf $::cur
+# Open docs: replace zqcat -> ZQ across both buffers (3 hits, 2 buffers).
+set ::search_scope "Open docs" ; set ::search_case 1 ; set ::search_word 0
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 zqcat
+.results.rep.e delete 0 end ; .results.rep.e insert 0 ZQ
+search_replace_all
+ok "replace: open-docs edited both buffers" [list [buf_text $pbuf] [buf_text $qbuf]] \
+	[list "ZQ and ZQ\n" "one ZQ two\n"]
+ok "replace: open-docs count message" [string match "Replaced 3 * 2 buffers" [.results.hdr.count cget -text]] 1
+ok "replace: open-docs flagged a buffer modified" [bufget $pbuf modified] 1
+# Current doc: replace one -> 1 in the focused buffer only (qbuf).
+activate $qbuf
+set ::search_scope "Current doc"
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 one
+.results.rep.e delete 0 end ; .results.rep.e insert 0 1
+search_replace_all
+ok "replace: current-doc edited the buffer" [buf_text $qbuf]              "1 ZQ two\n"
+ok "replace: current-doc count message" [.results.hdr.count cget -text]   "Replaced 1"
+# Project: r.txt is CLOSED — replace red -> RED rewrites it on disk (confirm stubbed).
+rename tk_messageBox _real_mb ; proc tk_messageBox {args} { return yes }
+set ::search_scope "Project"
+.results.hdr.e delete 0 end ; .results.hdr.e insert 0 red
+.results.rep.e delete 0 end ; .results.rep.e insert 0 RED
+search_replace_all
+rename tk_messageBox {} ; rename _real_mb tk_messageBox
+set fh [open [file join $rdir r.txt] r] ; set rc [read $fh] ; close $fh
+ok "replace: project rewrote the closed file on disk" [string trim $rc] "RED RED"
+ok "replace: project count message" [string match "Replaced 2 *file*" [.results.hdr.count cget -text]] 1
+# The find bar's Replace mode escalates carrying its replacement text.
+find_open 1
+.find.e delete 0 end ; .find.e insert 0 foo
+.find.re delete 0 end ; .find.re insert 0 baz
+search_from_bar
+ok "replace: bar handoff opens the replace row" $::search_replace         1
+ok "replace: bar handoff carries the replacement" [.results.rep.e get]    baz
+find_close
+search_show_replace 0
+search_close
+# Clean up the two edited buffers without a discard prompt.
+foreach id [list $pbuf $qbuf] { if {[dict exists $::buffers $id]} { activate $id ; bufset $id modified 0 ; do_close } }
+file delete -force $rdir
+
 # --- find bar: whole-word toggle (D51) ---------------------------------------
 # The bar's Whole word checkbox flows through buffer.matches: "one" appears three
 # times in the buffer (standalone, inside "someone", inside "one_two"), but only
