@@ -565,6 +565,7 @@ open_folder $fdir
 # Panel widgets exist and start hidden; search_open packs the strip and focuses entry.
 ok "search: panel canvas exists"     [winfo class .results.well.body]     Text
 ok "search: hidden at boot"          $::search_shown                      0
+ok "search: default scope current doc" $::search_scope                    "Current doc"
 ok "search: label reads Search"      [.results.hdr.l cget -text]          "Search:"
 proc search_packed {} { expr {[lsearch -exact [pack slaves .sitebottom.body] .results] >= 0} }
 search_open
@@ -1242,6 +1243,27 @@ ok "reveal: brings the site back"  [rio::layout::get bottom visible] 1
 ok "reveal: makes git active"      [rio::layout::get bottom active] git
 ok "reveal: git body is shown"     [site_shows bottom .pgit] 1
 set ::layout $_layout_rec ; apply_layout
+
+# --- D35: dock sizes are user-chosen and stable (not content-driven) -----------
+# A dock's size stays what the user chose; switching between its tabs (a tall git
+# diff vs the short Search strip) must not resize it. Side sites are fixed-width,
+# the bottom fixed-height (propagate off); only a sash drag changes a dock's size.
+set _layout_sz $::layout
+dict set ::layout sites bottom panels {search git}
+dict set ::layout sites left   panels {files}
+set ::layout [rio::layout::normalize $::layout]
+rio::layout::put bottom visible 1
+rio::layout::put bottom size 200
+apply_layout
+ok "size: bottom propagate off"        [pack propagate .sitebottom] 0
+ok "size: bottom height from layout"   [.sitebottom cget -height] 200
+site_tab_click bottom git    ; set hg [.sitebottom cget -height]
+site_tab_click bottom search ; set hs [.sitebottom cget -height]
+ok "size: bottom height stable on switch" [list $hg $hs] {200 200}
+# The bsash drag records the new height into the layout on release.
+.sitebottom configure -height 999 ; bsash_drag          ;# pointer off-sash -> clamps
+ok "size: bsash clamps and drives height" [expr {[.sitebottom cget -height] >= 60}] 1
+set ::layout $_layout_sz ; apply_layout
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

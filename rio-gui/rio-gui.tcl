@@ -1604,7 +1604,7 @@ proc apply_layout {} {
 	set ::chat_shown [rio::layout::get [rio::layout::site_of chat] visible]
 	set ::search_shown [rio::layout::get bottom visible]
 
-	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .groups .cmp}
+	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .bsash .groups .cmp}
 	foreach id [rio::panel::ids] { catch {pack forget [rio::panel::field $id body]} }
 
 	set showL [expr {[rio::layout::get left   visible] && [llength [rio::layout::get left   panels]]}]
@@ -1614,6 +1614,8 @@ proc apply_layout {} {
 	if {$showB} {
 		render_tabs bottom ; render_site_body bottom
 		pack .sitebottom -side bottom -fill x
+		pack .bsash -side bottom -fill x          ;# height grip on the dock's top edge
+		.sitebottom configure -height [rio::layout::get bottom size]
 	}
 	if {$showL} {
 		render_tabs left ; render_site_body left
@@ -2124,6 +2126,19 @@ proc csash_drag {} {
 	.siteright configure -width $w
 }
 
+# Drag the bsash to resize the BOTTOM site's height (D35). Its bottom edge is fixed
+# just above the status bar, so the height is the window's bottom minus the status
+# bar minus the pointer — measured against the toplevel's STABLE edge like sash_drag.
+proc bsash_drag {} {
+	set total [winfo height .]
+	set min 60
+	set max [expr {$total - 150}]
+	set h [expr {[winfo rooty .] + $total - [winfo height .status] - [winfo pointery .]}]
+	if {$h < $min} { set h $min }
+	if {$max > $min && $h > $max} { set h $max }
+	.sitebottom configure -height $h
+}
+
 # Drag the composer sash to resize the input box. Its height is in text lines, so we
 # anchor on the press (start height + pointer y) and convert the vertical drag to a
 # line delta via the font's line height — dragging up grows the input, down shrinks
@@ -2597,7 +2612,7 @@ proc find_replace_all {} {
 set ::search_shown   0        ;# panel visible?
 set ::search_case    0        ;# "Match case" (off = case-insensitive, the friendlier first search)
 set ::search_word    0        ;# "Whole word" (off = substring; on = word-bounded, D51)
-set ::search_scope   "Project" ;# one of: Project | Open docs | Current doc
+set ::search_scope   "Current doc" ;# default; one of: Project | Open docs | Current doc
 set ::search_replace 0        ;# the replace row shown? (Ctrl+H, like the find bar)
 
 # Show the panel (above the find bar / status). `seed` overrides the query text —
@@ -3648,6 +3663,7 @@ proc apply_theme {theme} {
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.sash configure -background [dict get $c tab.bar.bg]   ;# the dock divider/grip
+	.bsash configure -background [dict get $c tab.bar.bg]  ;# the bottom-dock height grip
 	# The dock sites + the file/git panes: reuse the UI role (no dedicated sidebar
 	# role yet); list selections borrow the editor's selection colour so the panes
 	# match the surface. Each site's tab strip is coloured by restyle_tabs (below).
@@ -5062,7 +5078,11 @@ foreach {_s _w} {left 220 right 340} {
 	pack .site$_s.tabs -side top -fill x
 	pack .site$_s.body -side top -fill both -expand 1
 }
-frame .sitebottom -background "#dddddd"
+# The bottom site keeps a STABLE height (propagate off) like the side sites keep a
+# stable width — so switching between its tabs (e.g. a tall git diff and the short
+# Search strip) never resizes the dock; only the user's bsash drag does.
+frame .sitebottom -background "#dddddd" -height 160
+pack propagate .sitebottom 0
 frame .sitebottom.tabs -background "#dddddd"
 frame .sitebottom.body -background "#dddddd"
 pack .sitebottom.tabs -side top -fill x
@@ -5158,6 +5178,12 @@ frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
 # Record the dock's final width into its site on release (sizes persist now, D35 b).
 bind .sash <ButtonRelease-1> { rio::layout::put left size [winfo width .siteleft] ; prefs_save }
+
+# A horizontal divider between the editor and the bottom dock; dragging it resizes
+# the bottom site's HEIGHT (the editor, which -expands, absorbs the difference).
+frame .bsash -height 5 -cursor sb_v_double_arrow -background "#bbbbbb"
+bind .bsash <B1-Motion> bsash_drag
+bind .bsash <ButtonRelease-1> { rio::layout::put bottom size [winfo height .sitebottom] ; prefs_save }
 
 # The editor region (AGENTS.md D33). The center is a .groups panedwindow that holds one
 # or two editor GROUPS side by side with a draggable divider; each group is an

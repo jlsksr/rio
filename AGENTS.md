@@ -2108,6 +2108,16 @@ panel *wherever it lives* (makes its site visible + the panel active), so the Vi
 unreachable. General principle for the site system: **no arrangement may strand a panel with
 no menu path back.**
 
+**Dock sizes are user-chosen and stable (live-review fix).** A dock's extent is a property of
+the *site*, not its content: the side sites were already fixed-width (`pack propagate 0` +
+`-width`), and the bottom site now matches with fixed-height (`propagate 0` + `-height`), so
+switching between its tabs (a tall git diff vs the short Search strip) never resizes the dock.
+The bottom gained its own resize grip — a horizontal `.bsash` (`bsash_drag`) mirroring the
+side `.sash`/`.csash` — so the user *chooses* the height, and it persists like the widths.
+Only a sash drag changes a dock's size; never its content. (Also: the Search panel's default
+scope is now **Current doc**, not Project — the find-bar escalation still deliberately widens
+to Project.)
+
 ---
 
 ### D36 — Find / Replace: the engine in the core, a bar in the GUI
