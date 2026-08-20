@@ -2014,9 +2014,10 @@ manager and (c) the sites/tab-strips/drag remain later arcs (each its own branch
 Search panel finally re-homes into the bottom site (D52) and the `layout` schema is settled.
 
 **Step (b) — built (the `layout` object + one derivation).** The persisted `layout` schema
-(decision #4) is settled and live: one dict, three sites, each `{panels, active, visible,
-size}` — an *ordered* panel list, the active one, site visibility, and size (width for the
-side sites, height for the bottom). It is the **single source of truth** for all
+(decision #4) is settled and live: one dict, three sites, each `{panels, hidden, active,
+visible, size}` — an *ordered* membership list, the subset with no tab (`hidden`, added for
+per-pane show/hide — see D35 below), the foreground pane, derived site visibility, and size
+(width for the side sites, height for the bottom). It is the **single source of truth** for all
 non-document placement; **`apply_layout` derives the pack from it** (decision #6 — state
 authoritative, pack derived), replacing the old `place_dock`/`show_pane`/search packing as
 the one choke point. The four call sites became state mutations + `apply_layout`: `show_pane`
@@ -2131,24 +2132,29 @@ panel *wherever it lives* (makes its site visible + the panel active), so the re
 General principle for the site system: **no arrangement may strand a panel with no menu path
 back.**
 
-**View-menu pane items are show/hide toggles (live-review fix).** They were reveal-only
-commands — clicking *Show Git* when Git was already the front tab did nothing visible, which
-read as broken. They are now **checkbuttons** (`Files / Git / Agent / Search`) whose checkmark
-tracks whether the pane is shown (its site visible *and* it the active tab, `rio::layout::shown`,
-mirrored into `::shown_*` by apply_layout). Clicking runs **`panel_toggle`**: a shown pane hides
-— the whole site when it is the site's only tenant, else it just yields to a sibling tab so a
-shared dock (files+git) stays open on the other pane, never hiding a sibling; a not-shown pane
-is revealed. The reveal *keys* stay idempotent "go-to" (`panel_reveal`); only the Agent's
-`Ctrl+Shift+A` toggles (a solo pane, unambiguous). The old standalone *Agent Chat* checkbutton
-folded into the new `Agent` item (`apply_chat_visibility` survives as the site-visibility mirror
-path).
+**Per-pane show/hide — a tab-presence model (live-review, two rounds).** The View-menu pane
+items are **checkbuttons** (`Files / Git / Agent / Search`); each toggles whether that pane is
+*shown*, where **shown means it has a tab at all** — *not* merely which tab is foreground. This
+needed a schema change: each site now carries a **`hidden`** list (members present but with no
+tab) beside `panels` (membership); `visible` became **derived** — a dock is on screen iff it has
+a non-hidden pane. `rio::layout::shown id` = "id has a tab" (`id ∉ hidden`), mirrored into
+`::shown_*`. `panel_toggle` adds/removes a tab: hiding the foreground pane hands the foreground to
+another shown sibling; **hiding a site's last shown pane collapses the whole dock** — so any pane
+can be *fully* hidden, exactly as the solo Search pane always could (the earlier "toggle switches
+foreground" attempt couldn't hide a pane sharing a dock, which read as broken). The reveal *keys*
+(`Ctrl+E`/`Ctrl+G`) stay idempotent "go-to" (`panel_reveal` = give a tab + foreground); the
+Agent's `Ctrl+Shift+A` toggles. `hidden` persists in `layout` JSON; old layouts without it recover
+it in `normalize` from the stored `visible` (collapsed dock → all hidden). The standalone *Agent
+Chat* checkbutton folded into `Agent`; `apply_chat_visibility` survives (now a hide/unhide of the
+chat tab) for the tests that flip `::chat_shown` directly.
 
 **First-run default layout.** A brand-new user (no prefs → `rio::layout::default`, not the
-migrate path) sees **Files shown on the left** (Git a background tab beside it), the **Agent
-hidden** on the right, **Search hidden** at the bottom — a clean editor with just the file tree.
-Everything past that is the user's own choice and persists (`prefs.json`'s `layout`). Upgraders
-keep their old arrangement via `migrate` (which still defaults the agent shown, their prior
-experience); only the first-run seed changed.
+migrate path) sees **only the Files tab, on the left** — Git lives there too but starts *hidden*
+(no tab), and the Agent (right) and Search (bottom) start hidden — a clean editor with just the
+file tree. Everything past that is the user's own choice and persists (`prefs.json`'s `layout`).
+Upgraders keep their old arrangement via `migrate`, which shows a tab for every dock member (git
+a background tab, agent per the old `chat_shown`) — the pre-layout behaviour; only the first-run
+seed hides git.
 
 **Dock sizes are user-chosen and stable (live-review fix).** A dock's extent is a property of
 the *site*, not its content: the side sites were already fixed-width (`pack propagate 0` +

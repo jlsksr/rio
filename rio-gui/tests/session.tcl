@@ -77,10 +77,11 @@ ok "prefs: wrap recorded" [dict get [json::json2dict [slurp [prefs_path]]] wrap]
 set ::theme_name solarized-dark
 set ::wrap_lines 1
 set ::wrap_indent 1
-dock_set_side right                ;# files+git -> the right site
-rio::layout::put right active git  ;# git the active tab
-rio::layout::put right size 400    ;# a distinctive dock width (sizes persist, boot-safe)
-apply_layout                       ;# derive the mirrors + persist
+dock_set_side right                     ;# files+git -> the right site
+rio::layout::unhide right git ; rio::layout::put right active git ;# git a tab + foreground
+rio::layout::put right size 400         ;# a distinctive dock width (sizes persist, boot-safe)
+set ::layout [rio::layout::normalize $::layout]
+apply_layout                            ;# derive the mirrors + persist
 prefs_save
 # clobber the live state IN MEMORY (no apply_layout — that would prefs_save over the
 # file we just wrote), then load it back from disk and re-derive.
