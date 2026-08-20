@@ -1569,10 +1569,24 @@ proc render_tabs {site} {
 	}
 }
 
-# Activate panel `id` in site `site` (a tab click), then re-derive and refresh it.
+# Activate panel `id` in site `site` (a tab click). Only which body shows in THIS
+# site changes — sizes, edges and the other sites are untouched — so we swap in
+# place instead of calling apply_layout, which forgets and re-packs every site,
+# sash and the center editor area and makes the whole window flicker (D35 polish).
+# The outgoing body is forgotten, this site's tab strip + body re-rendered, the
+# dockside mirror kept correct (View menu radios read ::dock_pane), and prefs saved.
 proc site_tab_click {site id} {
+	set prev [rio::layout::get $site active]
+	if {$prev eq $id} { rio::panel::refresh $id ; return }
 	rio::layout::put $site active $id
-	apply_layout
+	if {$prev ne ""} { catch {pack forget [rio::panel::field $prev body]} }
+	render_tabs $site
+	render_site_body $site
+	if {$site eq [rio::layout::dockside]} {
+		set da [rio::layout::get $site active]
+		set ::dock_pane [expr {$da in {files git} ? $da : "files"}]
+	}
+	prefs_save
 	rio::panel::refresh $id
 }
 
