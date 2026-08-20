@@ -1548,8 +1548,11 @@ proc render_tabs {site} {
 			-foreground [dict get $c tab.fg] \
 			-background [expr {$id eq $active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		pack $t -side left -padx 1 -pady 1
-		bind $t <Button-1> [list site_tab_click $site $id]
-		bind $t <Button-3> [list site_tab_menu $site $id %X %Y]   ;# Move to ▸ (D35 c2)
+		# Press/motion/release drive click-vs-drag (D35 c3); right-click is Move to (c2).
+		bind $t <ButtonPress-1>   [list tab_press $site $id %X %Y]
+		bind $t <B1-Motion>       [list tab_motion %X %Y]
+		bind $t <ButtonRelease-1> [list tab_release $site $id %X %Y]
+		bind $t <Button-3>        [list site_tab_menu $site $id %X %Y]
 	}
 }
 
@@ -1664,6 +1667,66 @@ proc site_tab_menu {site id X Y} {
 			-command [list panel_move $id $t]
 	}
 	tk_popup .sitetabmenu $X $Y
+}
+
+# Which dock site (left|right|bottom) the pointer at screen X,Y is over, or "" if
+# none — used as the drop target while dragging a tab (D35 c3). The pointer may be
+# over a site's chrome (.site$s.*) OR over a panel body, which is a toplevel child
+# packed -in the site (path .pfiles/.chat/.results, not under .site$s), so map that
+# body back to its panel and thence to the site it currently sits in.
+proc site_under_pointer {X Y} {
+	set w [winfo containing $X $Y]
+	if {$w eq ""} return ""
+	foreach s {left right bottom} {
+		if {$w eq ".site$s" || [string match ".site$s.*" $w]} { return $s }
+	}
+	foreach id [rio::panel::ids] {
+		set body [rio::panel::field $id body]
+		if {$w eq $body || [string match "$body.*" $w]} { return [rio::layout::site_of $id] }
+	}
+	return ""
+}
+
+# Tint each site's tab strip: the drop-target `site` gets the accent, the rest go
+# back to their normal bar colour. Called during a drag and cleared on drop.
+proc tabdrag_highlight {site} {
+	foreach s {left right bottom} {
+		if {![winfo exists .site$s.tabs]} continue
+		.site$s.tabs configure -background \
+			[dict get $::theme_colors [expr {$s eq $site ? "accent" : "ui.bg"}]]
+	}
+}
+
+# Tab drag (D35 c3): the same relocation as the right-click menu, by dragging. Press
+# records the candidate without activating; a motion past a small threshold starts a
+# real drag and previews the drop target (the hovered site, if different, lit with
+# the accent); release relocates there, or — if it was really just a click, never
+# passing the threshold — activates the tab. An invalid/self drop snaps back.
+proc tab_press {site id X Y} {
+	set ::tabdrag [dict create id $id from $site x0 $X y0 $Y active 0 over ""]
+}
+proc tab_motion {X Y} {
+	if {![info exists ::tabdrag]} return
+	if {![dict get $::tabdrag active]} {
+		if {abs($X - [dict get $::tabdrag x0]) < 6 && abs($Y - [dict get $::tabdrag y0]) < 6} return
+		dict set ::tabdrag active 1
+	}
+	set over [site_under_pointer $X $Y]
+	if {$over ne [dict get $::tabdrag over]} {
+		dict set ::tabdrag over $over
+		set from [dict get $::tabdrag from]
+		tabdrag_highlight [expr {($over ne "" && $over ne $from) ? $over : ""}]
+	}
+}
+proc tab_release {site id X Y} {
+	if {![info exists ::tabdrag]} { site_tab_click $site $id ; return }
+	set dragging [dict get $::tabdrag active]
+	set from     [dict get $::tabdrag from]
+	unset ::tabdrag
+	tabdrag_highlight ""
+	if {!$dragging} { site_tab_click $site $id ; return }   ;# never crossed the threshold — a click
+	set over [site_under_pointer $X $Y]
+	if {$over ne "" && $over ne $from} { panel_move $id $over }
 }
 
 # Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are

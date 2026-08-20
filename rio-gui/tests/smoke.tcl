@@ -1199,5 +1199,32 @@ panel_move chat left ; panel_move chat nowhere
 ok "c2: no-op move is inert"        $::layout $snap
 set ::layout $_layout_c2 ; apply_layout
 
+# --- D35 c3: relocate a panel by DRAGGING its tab ------------------------------
+set _layout_c3 $::layout
+# A press + release that never crosses the drag threshold is a click — it activates.
+show_pane files
+tab_press left git 50 50
+tab_release left git 51 51
+ok "c3: sub-threshold is a click"  $::dock_pane git
+show_pane files
+# A motion past the threshold arms a real drag.
+tab_press left git 0 0
+tab_motion 100 100
+ok "c3: motion arms the drag"      [dict get $::tabdrag active] 1
+# Release over a valid target site relocates (headless can't winfo-contain, so stub
+# the hit-test to name the drop site — same seam the pointer would resolve live).
+rename site_under_pointer _real_sup
+proc site_under_pointer {X Y} { return bottom }
+tab_release left git 100 100
+ok "c3: drag relocated to bottom"  [expr {"git" in [rio::layout::get bottom panels]}] 1
+ok "c3: drag cleared its state"    [info exists ::tabdrag] 0
+# A drop onto the source site (or nowhere) is a no-op.
+proc site_under_pointer {X Y} { return left }
+set snap $::layout
+tab_press left files 0 0 ; tab_motion 100 100 ; tab_release left files 100 100
+ok "c3: self-drop is a no-op"      $::layout $snap
+rename site_under_pointer {} ; rename _real_sup site_under_pointer
+set ::layout $_layout_c3 ; apply_layout
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
