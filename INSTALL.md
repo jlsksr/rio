@@ -249,6 +249,19 @@ no longer installed, rio falls back to Windows rather than failing. The source t
 carries a ready-to-serve repository of both under `extensions/` — rsync it to a
 plain-HTTP webdir and it *is* the repository.
 
+**Your repository list, by hand.** The URLs you add under *View ▸ Extensions… ▸
+Repositories…* are just an apt-style sources file you can edit yourself:
+`$XDG_CONFIG_HOME/rio/sources.list` (default `~/.config/rio/sources.list`), **one
+`http://` base URL per line**, `#` comments and blank lines allowed. The dialog reads
+and writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
+picked up the next time the Extensions window scans. Optional — no file means no
+repositories. What you've actually installed (and from where) is tracked separately in
+a provenance ledger, `$XDG_DATA_HOME/rio/extensions.json` (default
+`~/.local/share/rio/extensions.json`): rio writes it, and each entry records the source
+URL and version a `kind/name` came from. Publishing a repository of your own is a
+separate topic — see *Extension repositories* in
+[CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).
+
 ### Keyboard shortcuts
 
 Every editor shortcut is data, remappable in **one** place. Two ways to change them:
