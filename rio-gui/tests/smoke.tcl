@@ -181,7 +181,7 @@ set ::captured {}
 # "<flag-gutter:2><glyph> <name>", so a label is the line text past a 4-char prefix
 # (the 2-char git-flag gutter, the type glyph, and its space).
 proc nav_labels {} {
-	set b .dock.files.well.body
+	set b .pfiles.well.body
 	set out {}
 	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
 		set L [expr {$i + 1}]
@@ -190,7 +190,7 @@ proc nav_labels {} {
 	return $out
 }
 proc nav_click {row} {
-	rl_select .dock.files.well.body $row ; rl_activate .dock.files.well.body
+	rl_select .pfiles.well.body $row ; rl_activate .pfiles.well.body
 }
 
 set tf [file tempfile tpath] ; close $tf
@@ -201,17 +201,17 @@ set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; clos
 ok "pane: empty before folder open" [nav_labels] {{Open a folder…}}
 open_folder $proj
 ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
-ok "pane: header is project name" [.dock.files.hdr.head cget -text] [file tail $proj]
+ok "pane: header is project name" [.pfiles.hdr.head cget -text] [file tail $proj]
 ok "pane: dirs then files"        [nav_labels]           {sub/ zeta.txt}
 # Bands: a selection covers exactly its row (through the newline, so it spans full
 # width); a hover tags the hovered row. (D42 rich-list.)
-rl_select .dock.files.well.body 0
-ok "pane: selection band on row 0" [.dock.files.well.body tag ranges selrow]   {1.0 2.0}
-rl_set_hover .dock.files.well.body 1
-ok "pane: hover band on row 1"     [.dock.files.well.body tag ranges hoverrow] {2.0 3.0}
+rl_select .pfiles.well.body 0
+ok "pane: selection band on row 0" [.pfiles.well.body tag ranges selrow]   {1.0 2.0}
+rl_set_hover .pfiles.well.body 1
+ok "pane: hover band on row 1"     [.pfiles.well.body tag ranges hoverrow] {2.0 3.0}
 update idletasks
 ok "pane: scrollbar hidden when list fits" \
-	[expr {[lsearch -exact [pack slaves .dock.files.well] .dock.files.well.sb] < 0}] 1
+	[expr {[lsearch -exact [pack slaves .pfiles.well] .pfiles.well.sb] < 0}] 1
 
 # Descend into the subdir (row 0 = sub/), then back up via "..".
 nav_click 0
@@ -236,8 +236,8 @@ ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] d
 # The ⟳ refresh control reloads the shown directory on demand — the manual path for
 # changes rio didn't make. delta.txt is on disk in the root but not yet shown (the
 # out-of-dir event above skipped its repaint); running the control's action reveals it.
-ok "pane: refresh control wired"   [bind .dock.files.hdr.refresh <Button-1>] populate_nav
-uplevel #0 [bind .dock.files.hdr.refresh <Button-1>]
+ok "pane: refresh control wired"   [bind .pfiles.hdr.refresh <Button-1>] populate_nav
+uplevel #0 [bind .pfiles.hdr.refresh <Button-1>]
 ok "pane: refresh reloads the dir" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 1
 file delete [file join $proj delta.txt]
 
@@ -315,10 +315,10 @@ proc dock_slaves {} { pack slaves .dock }
 proc dock_shows {w} { expr {[lsearch -exact [dock_slaves] $w] >= 0} }
 
 show_pane git
-ok "dock: git pane shown"         [list [dock_shows .dock.git] [dock_shows .dock.files]] {1 0}
+ok "dock: git pane shown"         [list [dock_shows .pgit] [dock_shows .pfiles]] {1 0}
 ok "dock: dock_pane is git"       $::dock_pane           git
 show_pane files
-ok "dock: files pane shown"       [list [dock_shows .dock.files] [dock_shows .dock.git]] {1 0}
+ok "dock: files pane shown"       [list [dock_shows .pfiles] [dock_shows .pgit]] {1 0}
 
 # The dock width must NOT change when switching panes (regression: the git pane's
 # diff defaults to 80 cols / editor font and ballooned the whole window).
@@ -424,7 +424,7 @@ if {![catch {exec git --version}]} {
 	# after open_folder) shows an "M" flag on the file and a "·" rollup dot on the dir.
 	# (Look up by name — the pane also lists .git/, so row order isn't fixed.)
 	proc fpane_flag {name} {
-		set b .dock.files.well.body
+		set b .pfiles.well.body
 		for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
 			if {[file tail [lindex [rl_payload $b $i] 1]] eq $name} {
 				set L [expr {$i + 1}]
@@ -449,17 +449,17 @@ if {![catch {exec git --version}]} {
 	# The git list is an rl_* rich-list too now (D43): a row is "<XY> <path>" in the
 	# body text widget, picked via rl_select (which fires git_pick).
 	proc git_line {row} {
-		set b .dock.git.well.body ; set L [expr {$row + 1}]
+		set b .pgit.well.body ; set L [expr {$row + 1}]
 		return [$b get "$L.0" "$L.0 lineend"]
 	}
 	show_pane git              ;# the file pane was active above; git refreshes on show
-	proc git_shows_diff {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.diff] >= 0} }
-	ok "git: branch shown"        [.dock.git.hdr.branch cget -text] "⎇ main"
+	proc git_shows_diff {} { expr {[lsearch -exact [pack slaves .pgit] .pgit.diff] >= 0} }
+	ok "git: branch shown"        [.pgit.hdr.branch cget -text] "⎇ main"
 	ok "git: change listed"       [string match "* M a.txt" [git_line 0]] 1
 	ok "git: diff hidden until pick" [git_shows_diff] 0
-	rl_select .dock.git.well.body 0
+	rl_select .pgit.well.body 0
 	ok "git: diff shows on pick"   [git_shows_diff] 1
-	ok "git: diff shows the edit"  [string match "*+two*" [.dock.git.diff get 1.0 end-1c]] 1
+	ok "git: diff shows the edit"  [string match "*+two*" [.pgit.diff get 1.0 end-1c]] 1
 
 	# Context menus (D44). Build the menus without posting (tk_popup would grab) and
 	# read back their entry labels; ::nav_git still reflects the last file-pane paint
@@ -491,7 +491,7 @@ if {![catch {exec git --version}]} {
 	# The action proc: stage/unstage a path through the core, then the pane repaints.
 	# git_xy_for reads a path's two status chars back out of the git list.
 	proc git_xy_for {name} {
-		set b .dock.git.well.body
+		set b .pgit.well.body
 		for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
 			set p [rl_payload $b $i]
 			if {$p ne "" && [dict get $p path] eq $name} {
@@ -513,24 +513,24 @@ if {![catch {exec git --version}]} {
 
 	# The commit bar (D45) auto-shows only when the index has a staged change. a.txt is
 	# now staged (M ) from the refresh above, so the bar is packed into the git pane.
-	proc git_bar_shown {} { expr {[lsearch -exact [pack slaves .dock.git] .dock.git.commit] >= 0} }
+	proc git_bar_shown {} { expr {[lsearch -exact [pack slaves .pgit] .pgit.commit] >= 0} }
 	ok "commit: bar shown when staged" [git_bar_shown] 1
 	# The greyed "message" hint shows while the entry is empty and hides once text is typed.
-	proc git_hint_shown {} { expr {[place info .dock.git.commit.msg.ph] ne ""} }
-	.dock.git.commit.msg delete 0 end
+	proc git_hint_shown {} { expr {[place info .pgit.commit.msg.ph] ne ""} }
+	.pgit.commit.msg delete 0 end
 	ok "commit: hint shown when empty" [git_hint_shown] 1
-	.dock.git.commit.msg insert 0 "x"
+	.pgit.commit.msg insert 0 "x"
 	ok "commit: hint hidden when typed" [git_hint_shown] 0
-	.dock.git.commit.msg delete 0 end
+	.pgit.commit.msg delete 0 end
 	ok "commit: hint back when cleared" [git_hint_shown] 1
 	# An empty (whitespace) summary is refused without touching the repo: still staged.
-	.dock.git.commit.msg delete 0 end ; .dock.git.commit.msg insert 0 "   " ; git_commit
+	.pgit.commit.msg delete 0 end ; .pgit.commit.msg insert 0 "   " ; git_commit
 	ok "commit: empty message no-ops"  [git_xy_for a.txt] "M "
 	# A real summary commits the index: a.txt leaves the change list, the entry clears,
 	# and with nothing staged left the bar auto-hides (b.txt/u.txt stay unstaged).
-	.dock.git.commit.msg delete 0 end ; .dock.git.commit.msg insert 0 "smoke commit" ; git_commit
+	.pgit.commit.msg delete 0 end ; .pgit.commit.msg insert 0 "smoke commit" ; git_commit
 	ok "commit: staged change committed" [git_xy_for a.txt] ""
-	ok "commit: entry cleared"           [.dock.git.commit.msg get] ""
+	ok "commit: entry cleared"           [.pgit.commit.msg get] ""
 	ok "commit: bar hidden after commit" [git_bar_shown] 0
 	after cancel refresh_git   ;# drop the pending git_flash restore before teardown
 	file delete -force $gdir
@@ -1053,7 +1053,7 @@ ok "panel: files site"           [rio::panel::field files site]    left
 ok "panel: git site"             [rio::panel::field git site]      left
 ok "panel: chat site"            [rio::panel::field chat site]     right
 ok "panel: search site bottom"   [rio::panel::field search site]   bottom
-ok "panel: files body widget"    [rio::panel::field files body]    .dock.files
+ok "panel: files body widget"    [rio::panel::field files body]    .pfiles
 ok "panel: git refresh hook"     [rio::panel::field git refresh]   refresh_git
 ok "panel: search refresh hook"  [rio::panel::field search refresh] search_run
 ok "panel: chat refresh is none" [rio::panel::field chat refresh]  ""

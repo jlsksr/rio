@@ -932,10 +932,10 @@ proc rl_set_hover {b row} {
 # a mono glyph icon (▴ up · ▸ dir · ▪ file, all U+25xx so they render monochrome,
 # never emoji), then the name. The body is an rl_* rich-list.
 proc populate_nav {} {
-	set b .dock.files.well.body
+	set b .pfiles.well.body
 	rl_begin $b
 	if {$::nav_dir eq ""} {
-		.dock.files.hdr.head configure -text "(no folder)"
+		.pfiles.hdr.head configure -text "(no folder)"
 		$b insert end "    Open a folder…\n"
 		rl_row $b 0 [list none ""]
 		set ::nav_git {}
@@ -943,7 +943,7 @@ proc populate_nav {} {
 		return
 	}
 	set root [dict get [rio_call project.get {}] result root]
-	.dock.files.hdr.head configure -text [nav_header $::nav_dir $root]
+	.pfiles.hdr.head configure -text [nav_header $::nav_dir $root]
 	set git [nav_git_map $root]
 	set ::nav_git $git   ;# stashed so the row context menu can read status (D44)
 	if {$::nav_dir ne $root} {
@@ -1009,7 +1009,7 @@ proc nav_dir_status {git path} {
 # spaces when clean), then the type glyph (tagged navicon) and the label. Records
 # {type abspath} as the row payload. Caller has the body in -state normal.
 proc nav_render_row {type path label glyph status} {
-	set b .dock.files.well.body
+	set b .pfiles.well.body
 	if {$status eq ""} {
 		$b insert end "  "
 	} else {
@@ -1214,7 +1214,7 @@ proc close_buffers_under {path} {
 # The files sibling of git_flash — reuses the header rather than adding a status
 # widget; the scheduled populate_nav repaints the true directory line.
 proc nav_flash {text} {
-	.dock.files.hdr.head configure -text $text
+	.pfiles.hdr.head configure -text $text
 	after cancel populate_nav
 	after 2000 populate_nav
 }
@@ -1287,29 +1287,29 @@ proc open_folder_dialog {} {
 # pane — and the diff slides in below (sharing the height) only when there is one
 # to read, instead of sitting empty and looking like dead space.
 proc git_show_diff {text} {
-	.dock.git.diff configure -state normal
-	.dock.git.diff delete 1.0 end
-	.dock.git.diff insert 1.0 $text
-	.dock.git.diff configure -state disabled
-	if {[lsearch -exact [pack slaves .dock.git] .dock.git.diff] < 0} {
-		pack .dock.git.diff -side top -fill both -expand 1
+	.pgit.diff configure -state normal
+	.pgit.diff delete 1.0 end
+	.pgit.diff insert 1.0 $text
+	.pgit.diff configure -state disabled
+	if {[lsearch -exact [pack slaves .pgit] .pgit.diff] < 0} {
+		pack .pgit.diff -side top -fill both -expand 1
 	}
 }
 proc git_hide_diff {} {
-	.dock.git.diff configure -state normal
-	.dock.git.diff delete 1.0 end
-	.dock.git.diff configure -state disabled
-	pack forget .dock.git.diff
+	.pgit.diff configure -state normal
+	.pgit.diff delete 1.0 end
+	.pgit.diff configure -state disabled
+	pack forget .pgit.diff
 }
 
 proc refresh_git {} {
-	set b .dock.git.well.body
+	set b .pgit.well.body
 	rl_begin $b
 	git_hide_diff
 	# With no folder open, git.* would fall back to rio's OWN process cwd and show
 	# the wrong repo — so the pane is honest about needing a project first.
 	if {[dict get [rio_call project.get {}] result root] eq ""} {
-		.dock.git.hdr.branch configure -text "git"
+		.pgit.hdr.branch configure -text "git"
 		git_placeholder "(open a folder)"
 		git_commit_bar 0
 		rl_end $b
@@ -1317,7 +1317,7 @@ proc refresh_git {} {
 	}
 	set resp [rio_call git.status {}]
 	if {![dict get $resp ok]} {
-		.dock.git.hdr.branch configure -text "git"
+		.pgit.hdr.branch configure -text "git"
 		set code [dict get $resp error code]
 		git_placeholder [expr {$code eq "bad_request" ? "(not a git repository)" \
 			: [dict get $resp error message]}]
@@ -1326,7 +1326,7 @@ proc refresh_git {} {
 		return
 	}
 	set r [dict get $resp result]
-	.dock.git.hdr.branch configure -text "⎇ [dict get $r branch]"
+	.pgit.hdr.branch configure -text "⎇ [dict get $r branch]"
 	set changes [dict get $r changes]
 	if {![llength $changes]} {
 		git_placeholder "(clean)"
@@ -1349,13 +1349,13 @@ proc refresh_git {} {
 # A non-selectable message row (no folder / not a repo / clean). Two-space indent
 # keeps it clear of the status gutter column. Caller has the body in -state normal.
 proc git_placeholder {text} {
-	.dock.git.well.body insert end "  $text\n"
-	rl_row .dock.git.well.body 0 ""
+	.pgit.well.body insert end "  $text\n"
+	rl_row .pgit.well.body 0 ""
 }
 # One change row: the two porcelain status chars (each colour-tagged by kind), a
 # space, then the path. Payload is the whole change dict.
 proc git_render_row {c} {
-	set b .dock.git.well.body
+	set b .pgit.well.body
 	foreach ch [list [dict get $c x] [dict get $c y]] {
 		set tag [git_status_tag $ch]
 		if {$tag eq ""} { $b insert end $ch } else { $b insert end $ch $tag }
@@ -1432,12 +1432,12 @@ proc do_git {op path} {
 # diff). Hiding clears the entry so a stale message never lingers into the next repo.
 proc git_commit_bar {show} {
 	if {$show} {
-		if {[lsearch -exact [pack slaves .dock.git] .dock.git.commit] < 0} {
-			pack .dock.git.commit -side bottom -fill x
+		if {[lsearch -exact [pack slaves .pgit] .pgit.commit] < 0} {
+			pack .pgit.commit -side bottom -fill x
 		}
 	} else {
-		pack forget .dock.git.commit
-		.dock.git.commit.msg delete 0 end
+		pack forget .pgit.commit
+		.pgit.commit.msg delete 0 end
 	}
 }
 
@@ -1447,9 +1447,9 @@ proc git_commit_bar {show} {
 proc git_commit_hint {args} {
 	global git_commit_msg
 	if {$git_commit_msg eq ""} {
-		place .dock.git.commit.msg.ph -x 3 -rely 0.5 -anchor w
+		place .pgit.commit.msg.ph -x 3 -rely 0.5 -anchor w
 	} else {
-		place forget .dock.git.commit.msg.ph
+		place forget .pgit.commit.msg.ph
 	}
 }
 
@@ -1458,14 +1458,14 @@ proc git_commit_hint {args} {
 # On success the staged changes vanish, so refresh_dock auto-hides the bar; the header
 # then flashes the new short hash (git_flash outlives the refresh via `after`).
 proc git_commit {} {
-	set msg [string trim [.dock.git.commit.msg get]]
-	if {$msg eq ""} { git_flash "enter a commit message" ; focus .dock.git.commit.msg ; return }
+	set msg [string trim [.pgit.commit.msg get]]
+	if {$msg eq ""} { git_flash "enter a commit message" ; focus .pgit.commit.msg ; return }
 	set resp [rio_call git.commit [dict create message $msg]]
 	if {![dict get $resp ok]} {
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
-	.dock.git.commit.msg delete 0 end
+	.pgit.commit.msg delete 0 end
 	refresh_dock
 	git_flash "✓ committed [dict get $resp result hash]"
 }
@@ -1474,7 +1474,7 @@ proc git_commit {} {
 # header rather than adding a status widget; the scheduled refresh_git repaints the real
 # branch line. Runs after refresh_dock, so the flash survives that repaint.
 proc git_flash {text} {
-	.dock.git.hdr.branch configure -text $text
+	.pgit.hdr.branch configure -text $text
 	after cancel refresh_git
 	after 2500 refresh_git
 }
@@ -1550,8 +1550,14 @@ proc apply_layout {} {
 		pack .dock -side $ds -fill y
 		pack .sash -side $ds -fill y              ;# between the dock and the editor
 		.dock configure -width [rio::layout::get $ds size]
-		pack forget .dock.files .dock.git
-		pack .dock.$::dock_pane -side top -fill both -expand 1
+		# The files/git bodies are children of the toplevel now (D35 c1a — so they can
+		# later dock into any site), shown inside .dock via -in. A slave packed into a
+		# non-parent master must be raised above it or it is obscured, so raise the
+		# active body over the dock frame.
+		pack forget .pfiles .pgit
+		set body [rio::panel::field $::dock_pane body]
+		pack $body -in .dock -side top -fill both -expand 1
+		raise $body .dock
 	}
 	if {$::chat_shown} {
 		pack .chat  -side right -fill y           ;# chat column on the right (D14)
@@ -3194,8 +3200,8 @@ proc reset_session_state {} {
 	set ::cur ""
 	# Project/panes: the new core starts with no folder open unless it reports one.
 	set ::nav_dir ""
-	rl_reset .dock.files.well.body
-	rl_reset .dock.git.well.body
+	rl_reset .pfiles.well.body
+	rl_reset .pgit.well.body
 	# A different core means a fresh conversation — clear the transcript.
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
@@ -3502,10 +3508,10 @@ proc apply_theme {theme} {
 	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
 	# yet); list selections borrow the editor's selection colour so the panes
 	# match the surface. The selector labels are coloured by style_selector.
-	foreach w {.dock .dock.sel .dock.files .dock.files.hdr .dock.git .dock.git.hdr} {
+	foreach w {.dock .dock.sel .pfiles .pfiles.hdr .pgit .pgit.hdr} {
 		$w configure -background [dict get $c ui.bg]
 	}
-	foreach w {.dock.files.hdr.head .dock.files.hdr.refresh .dock.git.hdr.branch .dock.git.hdr.refresh} {
+	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pgit.hdr.branch .pgit.hdr.refresh} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
@@ -3514,7 +3520,7 @@ proc apply_theme {theme} {
 	# subtler hover band blended toward it. selrow raised above hoverrow so the
 	# selection wins under the pointer. The file and git lists share this chrome.
 	set fbg [dict get $c editor.bg]
-	foreach well {.dock.files.well .dock.git.well} {
+	foreach well {.pfiles.well .pgit.well} {
 		$well configure -background $fbg
 		set body $well.body
 		$body configure -font RioUIFont -background $fbg -foreground [dict get $c ui.fg]
@@ -3525,27 +3531,27 @@ proc apply_theme {theme} {
 	# The navigator's glyph + git-flag colours (D43): navicon tints the type glyph a
 	# muted foreground; the flag letters borrow the diff/accent roles by kind (added
 	# green, deleted red, modified accent) and the dir rollup dot a muted accent.
-	.dock.files.well.body tag configure navicon  -foreground [blend_hex [dict get $c ui.fg] $fbg 35]
-	.dock.files.well.body tag configure navadd   -foreground [dict get $c diff.added]
-	.dock.files.well.body tag configure navdel   -foreground [dict get $c diff.removed]
-	.dock.files.well.body tag configure navmod   -foreground [dict get $c accent]
-	.dock.files.well.body tag configure navdirty -foreground [blend_hex [dict get $c accent] $fbg 40]
+	.pfiles.well.body tag configure navicon  -foreground [blend_hex [dict get $c ui.fg] $fbg 35]
+	.pfiles.well.body tag configure navadd   -foreground [dict get $c diff.added]
+	.pfiles.well.body tag configure navdel   -foreground [dict get $c diff.removed]
+	.pfiles.well.body tag configure navmod   -foreground [dict get $c accent]
+	.pfiles.well.body tag configure navdirty -foreground [blend_hex [dict get $c accent] $fbg 40]
 	# The git list's two status chars share the same kind->colour mapping.
-	.dock.git.well.body tag configure gitadd -foreground [dict get $c diff.added]
-	.dock.git.well.body tag configure gitdel -foreground [dict get $c diff.removed]
-	.dock.git.well.body tag configure gitmod -foreground [dict get $c accent]
+	.pgit.well.body tag configure gitadd -foreground [dict get $c diff.added]
+	.pgit.well.body tag configure gitdel -foreground [dict get $c diff.removed]
+	.pgit.well.body tag configure gitmod -foreground [dict get $c accent]
 	# The diff area is code, so it takes the editor surface.
-	.dock.git.diff configure -font RioEditorFont \
+	.pgit.diff configure -font RioEditorFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
 	# The commit bar (D45): UI chrome like the header; the summary entry on the editor
 	# surface like the find entry so it reads as a place to type.
-	.dock.git.commit configure -background [dict get $c ui.bg]
-	.dock.git.commit.go configure -font RioUIFont
-	.dock.git.commit.msg configure -font RioUIFont \
+	.pgit.commit configure -background [dict get $c ui.bg]
+	.pgit.commit.go configure -font RioUIFont
+	.pgit.commit.msg configure -font RioUIFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor]
 	# The placeholder hint: on the entry surface, in a muted grey blended toward it.
-	.dock.git.commit.msg.ph configure -font RioUIFont \
+	.pgit.commit.msg.ph configure -font RioUIFont \
 		-background [dict get $c editor.bg] \
 		-foreground [blend_hex [dict get $c editor.fg] [dict get $c editor.bg] 50]
 	# The agent chat pane (D26): the chat.* roles + RioChatFont; accent on labels.
@@ -4915,82 +4921,82 @@ bind .dock.sel.git   <Button-1> {show_pane git}
 # The text widget is simply the best stock classic-Tk canvas for per-row glyph icons
 # and full-width hover/selection bands (a listbox is text-only, one colour). -width 26
 # (cols) keeps the dock's width stable when switching to the git pane (see below).
-frame .dock.files -background "#dddddd"
+frame .pfiles -background "#dddddd"
 # Files pane header: the project/subdir name (left) + a Refresh glyph (right), the same
 # layout as the git pane header so the two panes reload the same way. ⟳ re-lists the
 # shown directory and re-reads git flags via populate_nav — the manual counterpart to the
 # fs.changed auto-refresh (D47), for changes rio didn't make (an external tool, git pull).
-frame .dock.files.hdr -background "#dddddd"
-label .dock.files.hdr.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
+frame .pfiles.hdr -background "#dddddd"
+label .pfiles.hdr.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-label .dock.files.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
+label .pfiles.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
 	-background "#dddddd" -foreground black
-pack .dock.files.hdr.refresh -side right
-pack .dock.files.hdr.head    -side left -fill x -expand 1
-pack .dock.files.hdr -side top -fill x
-bind .dock.files.hdr.refresh <Button-1> populate_nav
-frame .dock.files.well -borderwidth 2 -relief sunken -background white
-scrollbar .dock.files.well.sb -command {.dock.files.well.body yview}
-text .dock.files.well.body -width 26 -height 10 -wrap none -state disabled \
+pack .pfiles.hdr.refresh -side right
+pack .pfiles.hdr.head    -side left -fill x -expand 1
+pack .pfiles.hdr -side top -fill x
+bind .pfiles.hdr.refresh <Button-1> populate_nav
+frame .pfiles.well -borderwidth 2 -relief sunken -background white
+scrollbar .pfiles.well.sb -command {.pfiles.well.body yview}
+text .pfiles.well.body -width 26 -height 10 -wrap none -state disabled \
 	-cursor arrow -insertwidth 0 -takefocus 1 \
 	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
 	-background white -foreground black \
-	-yscrollcommand {autoscroll .dock.files.well.sb .dock.files.well.body}
-pack .dock.files.well -side top -fill both -expand 1
-pack .dock.files.well.body -side left -fill both -expand 1
-# .dock.files.well.sb is packed on demand by autoscroll (hidden when the list fits).
+	-yscrollcommand {autoscroll .pfiles.well.sb .pfiles.well.body}
+pack .pfiles.well -side top -fill both -expand 1
+pack .pfiles.well.body -side left -fill both -expand 1
+# .pfiles.well.sb is packed on demand by autoscroll (hidden when the list fits).
 # The files pane doesn't act on mere selection (onselect empty); a double-click /
 # Return opens the row (nav_open); right-click pops a context menu (nav_context_menu).
-rl_init .dock.files.well.body {} nav_open nav_context_menu
+rl_init .pfiles.well.body {} nav_open nav_context_menu
 
 # Git pane body: branch header + Refresh, the changed-file list (a rich-list well,
 # D43 — same chrome as the file pane), and a read-only diff area below it.
-frame .dock.git -background "#dddddd"
-frame .dock.git.hdr -background "#dddddd"
-label .dock.git.hdr.branch -anchor w -font {monospace 9} -padx 4 -pady 2 \
+frame .pgit -background "#dddddd"
+frame .pgit.hdr -background "#dddddd"
+label .pgit.hdr.branch -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-label .dock.git.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
+label .pgit.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
 	-background "#dddddd" -foreground black
-pack .dock.git.hdr.refresh -side right
-pack .dock.git.hdr.branch  -side left -fill x -expand 1
-pack .dock.git.hdr -side top -fill x
-bind .dock.git.hdr.refresh <Button-1> refresh_git
-frame .dock.git.well -borderwidth 2 -relief sunken -background white
-scrollbar .dock.git.well.sb -command {.dock.git.well.body yview}
-text .dock.git.well.body -width 26 -height 8 -wrap none -state disabled \
+pack .pgit.hdr.refresh -side right
+pack .pgit.hdr.branch  -side left -fill x -expand 1
+pack .pgit.hdr -side top -fill x
+bind .pgit.hdr.refresh <Button-1> refresh_git
+frame .pgit.well -borderwidth 2 -relief sunken -background white
+scrollbar .pgit.well.sb -command {.pgit.well.body yview}
+text .pgit.well.body -width 26 -height 8 -wrap none -state disabled \
 	-cursor arrow -insertwidth 0 -takefocus 1 \
 	-borderwidth 0 -highlightthickness 0 -padx 2 -pady 1 \
 	-background white -foreground black \
-	-yscrollcommand {autoscroll .dock.git.well.sb .dock.git.well.body}
+	-yscrollcommand {autoscroll .pgit.well.sb .pgit.well.body}
 # -width 26 matches the file pane so the git pane does not balloon the dock (and the
 # whole window) to the text widget's default 80 columns when it is shown.
-text .dock.git.diff -wrap none -width 26 -height 8 -state disabled \
+text .pgit.diff -wrap none -width 26 -height 8 -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black
-pack .dock.git.well -side top -fill both -expand 1
-pack .dock.git.well.body -side left -fill both -expand 1
-# .dock.git.well.sb is packed on demand by autoscroll; .dock.git.diff by git_show_diff.
+pack .pgit.well -side top -fill both -expand 1
+pack .pgit.well.body -side left -fill both -expand 1
+# .pgit.well.sb is packed on demand by autoscroll; .pgit.diff by git_show_diff.
 # Picking a change (single click / arrow) shows its diff (git_pick); no separate
 # activate; right-click pops a context menu (git_context_menu).
-rl_init .dock.git.well.body git_pick {} git_context_menu
+rl_init .pgit.well.body git_pick {} git_context_menu
 
 # The commit bar (D45): rio's first inline text-input in a dock pane. A single-line
 # summary entry + a Commit button, packed at the bottom of the git pane by refresh_git
 # ONLY when something is staged (and hidden otherwise) — "appears only when needed", the
 # D36 find-bar quality bar. Enter in the entry commits too. Built here, not packed.
-frame  .dock.git.commit -background "#dddddd"
-entry  .dock.git.commit.msg -font {monospace 9} -textvariable git_commit_msg
-button .dock.git.commit.go  -text "✓ Commit" -font {monospace 9} -command git_commit
+frame  .pgit.commit -background "#dddddd"
+entry  .pgit.commit.msg -font {monospace 9} -textvariable git_commit_msg
+button .pgit.commit.go  -text "✓ Commit" -font {monospace 9} -command git_commit
 # A greyed "message" hint, shown only while the entry is empty (Tk has no native
 # placeholder). It is a child label placed inside the entry, so it never becomes part of
 # `.msg get` — the empty check and the commit stay honest. A trace toggles it on content.
-label .dock.git.commit.msg.ph -text message -font {monospace 9} -takefocus 0 -borderwidth 0
-place .dock.git.commit.msg.ph -x 3 -rely 0.5 -anchor w
-bind  .dock.git.commit.msg.ph <Button-1> {focus .dock.git.commit.msg}
+label .pgit.commit.msg.ph -text message -font {monospace 9} -takefocus 0 -borderwidth 0
+place .pgit.commit.msg.ph -x 3 -rely 0.5 -anchor w
+bind  .pgit.commit.msg.ph <Button-1> {focus .pgit.commit.msg}
 trace add variable git_commit_msg write git_commit_hint
-pack .dock.git.commit.go  -side right -padx {2 4} -pady 2
-pack .dock.git.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
-bind .dock.git.commit.msg <Return> git_commit
+pack .pgit.commit.go  -side right -padx {2 4} -pady 2
+pack .pgit.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
+bind .pgit.commit.msg <Return> git_commit
 
 # A thin draggable divider between the dock and the editor. apply_layout parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which
@@ -6038,8 +6044,8 @@ bind .results.hdr.close <Button-1> search_close
 # (a)). Placement is still owned by apply_layout / show_pane — this only
 # declares each pane as data and gives its refresh a name. Files and git are separate
 # panels sharing today's side dock; chat is event-driven (no batch refresh hook).
-rio::panel::register files  {title Files  site left   body .dock.files refresh populate_nav}
-rio::panel::register git    {title Git    site left   body .dock.git   refresh refresh_git}
+rio::panel::register files  {title Files  site left   body .pfiles refresh populate_nav}
+rio::panel::register git    {title Git    site left   body .pgit   refresh refresh_git}
 rio::panel::register chat   {title Agent  site right  body .chat       refresh {}}
 rio::panel::register search {title Search site bottom body .results    refresh search_run}
 
