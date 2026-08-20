@@ -648,6 +648,8 @@ proc apply_change {g p} {
 	set t [gw $g]
 	$t replace [dict get $p start] [dict get $p end] [dict get $p text]
 	if {$g eq $::focus} { $t see insert }
+	gutter_mark $g ;# the line count may have changed — repaint the numbers (an edit that
+	               ;# adds/removes lines without moving the view won't trip -yscrollcommand)
 	hl_edit $g $p ;# the text changed — re-tokenise from the edit, incrementally (coalesced; D32)
 	if {$::wrap_indent} {   ;# re-size the wrap indent for just the lines this edit touched
 		set sl [lindex [split [dict get $p start] .] 0]
@@ -678,6 +680,8 @@ proc load_buffer {g} {
 	hl_select $g   ;# the file type may have changed with the buffer (D32)
 	hl_full $g     ;# repaint the whole buffer now and build the line-state cache (on switch/open)
 	wrapind_group $g   ;# size the wrapped-line indents to this buffer's leading whitespace
+	gutter_mark $g ;# the swapped-in buffer has its own line count — repaint the numbers
+	               ;# (a same-height swap won't trip -yscrollcommand, so the old ones would linger)
 }
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
@@ -1918,9 +1922,12 @@ proc cmp_apply_wrap {} {
 # Line-number gutter (View ▸ Line Numbers). A thin canvas down the left of each
 # editor group showing one number per LOGICAL line, drawn from the text widget's
 # own dlineinfo so a wrapped line's number sits at its FIRST display row (VSCode's
-# behaviour) and the two never drift. It repaints whenever the view moves — hooked
-# off the widget's -yscrollcommand (every scroll and edit) and its <Configure>
-# (resize / re-wrap) — coalesced to one idle pass so a fast scroll paints once. Pure
+# behaviour) and the two never drift. It repaints on every signal that can change what
+# the numbers should read: a view move (the widget's -yscrollcommand), a resize/re-wrap
+# (<Configure>), a text edit (apply_change) and a tab switch/open (load_buffer). The
+# last two matter because an edit that adds/removes lines — or a same-height buffer
+# swap — need not move the view, so -yscrollcommand alone would leave stale numbers.
+# All coalesced to one idle pass so a fast scroll or a burst of typing paints once. Pure
 # display: the numbers live only in the canvas, never in the buffer text (D12).
 # ---------------------------------------------------------------------------
 
