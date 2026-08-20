@@ -84,7 +84,7 @@ Each entry notes its state:
   `rio::doc::_bounded` rule). Still wanted: one **row per match** rather than per line, and
   richer scope filters (globs, honour `.gitignore`); and re-homing the panel into a real
   dock-site tenant once D35 lands (it is a hand-packed bottom strip today — rides along with D35).
-- **Dock-site system for tool windows** — *steps (a)+(b)+(c1)+(c2) built; c3 next* (AGENTS.md D35 +
+- **Dock-site system for tool windows** — *a+b+c1+c2+c3 built; D35 core met, search-fold polish left* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites
   (left/right/bottom), each a tabbed container the user can move panels between — the Visual
@@ -110,8 +110,10 @@ Each entry notes its state:
   checks — but the *visual* result isn't headless-verifiable and wants a live look. **Step
   (c2) is done:** every tab takes a right-click "Move to ▸ Left/Right/Bottom" (`panel_move`) —
   any panel to any site, so the sites are now rearrangeable (the Agent can join the left dock,
-  git can go to the bottom). **Next: (c3)** the same relocation by *dragging* a tab, and
-  folding the Search query row into the bottom site's chrome (D52 re-home polish).
+  git can go to the bottom). **Step (c3) is done:** drag a tab and drop it on another site (a
+  press/motion/release state machine, 6px threshold, accent-lit drop target) — the D35 "done"
+  gesture. **Left: the search-fold polish** — carry the Search query row in the bottom site's
+  tab-strip chrome rather than the panel's own header (the D52 re-home finish).
   The chat stays a dedicated pane (D14) until that lands. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a

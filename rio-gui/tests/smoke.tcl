@@ -1112,7 +1112,11 @@ ok "layout: repair restores git"   [expr {"git" in [dict get $fixed sites left p
 ok "layout: repair restores chat"  [expr {"chat" in [dict get $fixed sites right panels]}] 1
 ok "layout: repair restores search" [expr {"search" in [dict get $fixed sites bottom panels]}] 1
 ok "layout: normalize keeps visible" [dict get $fixed sites bottom visible] 1
-ok "layout: boot hides bottom"     [dict get [rio::layout::boot $bad] sites bottom visible] 0
+ok "layout: boot hides search-only bottom" [dict get [rio::layout::boot $bad] sites bottom visible] 0
+# But once another panel is docked at the bottom, boot must NOT hide it (else that
+# panel is stranded with no way back — the git-dragged-to-bottom regression).
+set withgit {sites {left {panels files active files visible 1 size 220} right {panels chat active chat visible 1 size 340} bottom {panels {search git} active git visible 1 size 160}}}
+ok "layout: boot keeps mixed bottom"  [dict get [rio::layout::boot $withgit] sites bottom visible] 1
 
 # JSON round-trip: encode ::layout, parse it back, and the arrangement survives.
 set dec [rio::layout::normalize [json::json2dict [rio::layout::json]]]
@@ -1198,6 +1202,46 @@ set snap $::layout
 panel_move chat left ; panel_move chat nowhere
 ok "c2: no-op move is inert"        $::layout $snap
 set ::layout $_layout_c2 ; apply_layout
+
+# --- D35 c3: relocate a panel by DRAGGING its tab ------------------------------
+set _layout_c3 $::layout
+# A press + release that never crosses the drag threshold is a click — it activates.
+show_pane files
+tab_press left git 50 50
+tab_release left git 51 51
+ok "c3: sub-threshold is a click"  $::dock_pane git
+show_pane files
+# A motion past the threshold arms a real drag.
+tab_press left git 0 0
+tab_motion 100 100
+ok "c3: motion arms the drag"      [dict get $::tabdrag active] 1
+# Release over a valid target site relocates (headless can't winfo-contain, so stub
+# the hit-test to name the drop site — same seam the pointer would resolve live).
+rename site_under_pointer _real_sup
+proc site_under_pointer {X Y} { return bottom }
+tab_release left git 100 100
+ok "c3: drag relocated to bottom"  [expr {"git" in [rio::layout::get bottom panels]}] 1
+ok "c3: drag cleared its state"    [info exists ::tabdrag] 0
+# A drop onto the source site (or nowhere) is a no-op.
+proc site_under_pointer {X Y} { return left }
+set snap $::layout
+tab_press left files 0 0 ; tab_motion 100 100 ; tab_release left files 100 100
+ok "c3: self-drop is a no-op"      $::layout $snap
+rename site_under_pointer {} ; rename _real_sup site_under_pointer
+set ::layout $_layout_c3 ; apply_layout
+
+# Recovery: a panel dragged into a site that then gets hidden must be reachable
+# from the View menu. panel_reveal shows its site and makes it the active tab —
+# no pane can become unreachable (the git-vanished-on-startup fix).
+set _layout_rec $::layout
+panel_move git bottom
+rio::layout::put bottom visible 0 ; apply_layout    ;# git now stranded in a hidden site
+ok "reveal: git starts hidden"     [rio::layout::get bottom visible] 0
+panel_reveal git
+ok "reveal: brings the site back"  [rio::layout::get bottom visible] 1
+ok "reveal: makes git active"      [rio::layout::get bottom active] git
+ok "reveal: git body is shown"     [site_shows bottom .pgit] 1
+set ::layout $_layout_rec ; apply_layout
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -288,12 +288,16 @@ proc rio::layout::normalize {L} {
 	}
 	return $out
 }
-# normalize + the boot-time policy: the Search (bottom) strip always starts hidden
-# (decision 2 — an on-demand surface), whatever was persisted. Used only at
+# normalize + the boot-time policy: the Search strip is an on-demand surface, so the
+# bottom site starts hidden *when Search is its only tenant*. But once the user has
+# docked other panels there (e.g. dragged Git down), honour the persisted visibility
+# — otherwise those panels would be stranded in a site nothing reopens. Used only at
 # prefs_load; runtime relocations use normalize so a panel moved to the bottom shows.
 proc rio::layout::boot {L} {
 	set out [normalize $L]
-	dict set out sites bottom visible 0
+	if {[dict get $out sites bottom panels] eq "search"} {
+		dict set out sites bottom visible 0
+	}
 	return $out
 }
 # Encode ::layout as a JSON object fragment for prefs.json. `panels` is a string
@@ -1527,11 +1531,20 @@ proc blend_hex {a b pct} {
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
 # driven from the View menu; apply_layout and show_pane are the two seams.
 # ---------------------------------------------------------------------------
-# Show one pane (files | git) in the dock: make it the dock site's active tab and
-# refresh it. Kept for the keymap/menu (Ctrl+E/G) — a thin alias for a tab click.
-proc show_pane {which} {
-	site_tab_click [rio::layout::dockside] $which
+# Reveal a panel wherever it currently lives: make its site visible and the panel
+# its active tab, then refresh. The robust "show me pane X" the View menu and Ctrl+E/G
+# use — it works even when the panel was dragged into a hidden or other site, so a
+# panel can always be recovered from the menu (no pane ever becomes unreachable).
+proc panel_reveal {id} {
+	set s [rio::layout::site_of $id]
+	if {$s eq ""} return
+	rio::layout::put $s visible 1
+	rio::layout::put $s active $id
+	apply_layout
+	rio::panel::refresh $id
 }
+# Back-compat: "show the files/git pane" (Ctrl+E/G, the View menu) is now a reveal.
+proc show_pane {which} { panel_reveal $which }
 
 # Draw site `site`'s host tab strip: one label per docked panel (its registry
 # title), the active one highlighted like a selected tab. Rebuilt from scratch each
@@ -1548,8 +1561,11 @@ proc render_tabs {site} {
 			-foreground [dict get $c tab.fg] \
 			-background [expr {$id eq $active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		pack $t -side left -padx 1 -pady 1
-		bind $t <Button-1> [list site_tab_click $site $id]
-		bind $t <Button-3> [list site_tab_menu $site $id %X %Y]   ;# Move to ▸ (D35 c2)
+		# Press/motion/release drive click-vs-drag (D35 c3); right-click is Move to (c2).
+		bind $t <ButtonPress-1>   [list tab_press $site $id %X %Y]
+		bind $t <B1-Motion>       [list tab_motion %X %Y]
+		bind $t <ButtonRelease-1> [list tab_release $site $id %X %Y]
+		bind $t <Button-3>        [list site_tab_menu $site $id %X %Y]
 	}
 }
 
@@ -1664,6 +1680,66 @@ proc site_tab_menu {site id X Y} {
 			-command [list panel_move $id $t]
 	}
 	tk_popup .sitetabmenu $X $Y
+}
+
+# Which dock site (left|right|bottom) the pointer at screen X,Y is over, or "" if
+# none — used as the drop target while dragging a tab (D35 c3). The pointer may be
+# over a site's chrome (.site$s.*) OR over a panel body, which is a toplevel child
+# packed -in the site (path .pfiles/.chat/.results, not under .site$s), so map that
+# body back to its panel and thence to the site it currently sits in.
+proc site_under_pointer {X Y} {
+	set w [winfo containing $X $Y]
+	if {$w eq ""} return ""
+	foreach s {left right bottom} {
+		if {$w eq ".site$s" || [string match ".site$s.*" $w]} { return $s }
+	}
+	foreach id [rio::panel::ids] {
+		set body [rio::panel::field $id body]
+		if {$w eq $body || [string match "$body.*" $w]} { return [rio::layout::site_of $id] }
+	}
+	return ""
+}
+
+# Tint each site's tab strip: the drop-target `site` gets the accent, the rest go
+# back to their normal bar colour. Called during a drag and cleared on drop.
+proc tabdrag_highlight {site} {
+	foreach s {left right bottom} {
+		if {![winfo exists .site$s.tabs]} continue
+		.site$s.tabs configure -background \
+			[dict get $::theme_colors [expr {$s eq $site ? "accent" : "ui.bg"}]]
+	}
+}
+
+# Tab drag (D35 c3): the same relocation as the right-click menu, by dragging. Press
+# records the candidate without activating; a motion past a small threshold starts a
+# real drag and previews the drop target (the hovered site, if different, lit with
+# the accent); release relocates there, or — if it was really just a click, never
+# passing the threshold — activates the tab. An invalid/self drop snaps back.
+proc tab_press {site id X Y} {
+	set ::tabdrag [dict create id $id from $site x0 $X y0 $Y active 0 over ""]
+}
+proc tab_motion {X Y} {
+	if {![info exists ::tabdrag]} return
+	if {![dict get $::tabdrag active]} {
+		if {abs($X - [dict get $::tabdrag x0]) < 6 && abs($Y - [dict get $::tabdrag y0]) < 6} return
+		dict set ::tabdrag active 1
+	}
+	set over [site_under_pointer $X $Y]
+	if {$over ne [dict get $::tabdrag over]} {
+		dict set ::tabdrag over $over
+		set from [dict get $::tabdrag from]
+		tabdrag_highlight [expr {($over ne "" && $over ne $from) ? $over : ""}]
+	}
+}
+proc tab_release {site id X Y} {
+	if {![info exists ::tabdrag]} { site_tab_click $site $id ; return }
+	set dragging [dict get $::tabdrag active]
+	set from     [dict get $::tabdrag from]
+	unset ::tabdrag
+	tabdrag_highlight ""
+	if {!$dragging} { site_tab_click $site $id ; return }   ;# never crossed the threshold — a click
+	set over [site_under_pointer $X $Y]
+	if {$over ne "" && $over ne $from} { panel_move $id $over }
 }
 
 # Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are
@@ -6166,8 +6242,10 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Search…" -accelerator [key_accel search] -command search_open
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
-.m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}
-.m.view add command -label "Show Git"   -accelerator [key_accel show-git]   -command {show_pane git}
+.m.view add command -label "Show Files"  -accelerator [key_accel show-files] -command {show_pane files}
+.m.view add command -label "Show Git"    -accelerator [key_accel show-git]   -command {show_pane git}
+.m.view add command -label "Show Agent"  -command {show_pane chat}
+.m.view add command -label "Show Search" -accelerator [key_accel search]     -command search_open
 .m.view add separator
 .m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command {dock_set_side left}
 .m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command {dock_set_side right}

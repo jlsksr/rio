@@ -2080,8 +2080,33 @@ Agent can now join the left dock beside Files/Git, git can go to the bottom besi
 etc. A key refactor rode along: the "Search boots hidden" policy (decision 2) moved out of
 `normalize` into a new `boot` (used only at `prefs_load`), so a runtime move *to* the bottom
 stays visible while a persisted-open Search still boots hidden. Smoke covers the move, the
-chat-to-left symmetry, and no-op guards. Still to come: **c3** tab drag (the same relocation
-by dragging a tab), and folding the Search query row into the bottom site's chrome.
+chat-to-left symmetry, and no-op guards.
+
+**Step (c3) — built (drag a tab to relocate).** The D35 "done" gesture: drag a tab and drop
+it on another site. The tab bindings became a press/motion/release state machine —
+`tab_press` records the candidate without activating; `tab_motion` arms a real drag once the
+pointer passes a 6px threshold (below it, a plain click) and previews the drop target (the
+hovered site, lit with the `accent`); `tab_release` relocates to the site under the pointer
+via `panel_move`, or activates the tab if it was only a click, or snaps back on a self/invalid
+drop. `site_under_pointer` resolves the drop site from `winfo containing`, mapping a panel
+*body* (a toplevel child packed `-in` a site, so its path is `.pfiles`/`.chat`/`.results`, not
+under `.site$s`) back through its panel to the site it sits in. Smoke drives the state machine
+directly (click-vs-drag, arm, relocate, snap-back) — but the **drag feel is not
+headless-verifiable** (`winfo containing` needs mapped windows) and wants a live try. **D35's
+core is now met** — a user can drag the git panel to the bottom. Remaining polish: folding the
+Search query row into the bottom site's chrome (the D52 re-home; today the Search panel is a
+proper bottom-site tenant but keeps its own query-row header rather than the site tab strip
+carrying it).
+
+**Recovery (fixed in c3, from live review).** Dragging a panel into the bottom exposed a
+stranding bug: `boot` force-hid the *whole* bottom site to keep Search on-demand, so a Git
+dragged there vanished on the next launch with no way back. Two fixes: (1) `boot` now hides
+the bottom **only when Search is its sole tenant** — once other panels are docked there it
+honours the persisted visibility; (2) `show_pane` became **`panel_reveal`** — it reveals a
+panel *wherever it lives* (makes its site visible + the panel active), so the View menu's
+**Show Files / Show Git / Show Agent / Show Search** always recover a pane, none can become
+unreachable. General principle for the site system: **no arrangement may strand a panel with
+no menu path back.**
 
 ---
 
