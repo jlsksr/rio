@@ -221,18 +221,22 @@ saved the moment you change it:
 - **By hand:** edit `prefs.json` directly — it is plain JSON, parsed never executed:
 
   ```json
-  {"theme":"solarized-dark","wrap":"1","wrap_indent":"1","column_edit":"0","dock_side":"left","dock_pane":"files","chat_shown":"1"}
+  {"theme":"solarized-dark","wrap":"1","wrap_indent":"1","line_numbers":"1","column_edit":"0","editmode":"windows","layout":{ … }}
   ```
 
   `wrap` `"1"` = word-wrap on, `"0"` = off; `wrap_indent` `"1"` aligns a wrapped
   line's continuation rows under its own indentation (only visible while `wrap` is
-  on), `"0"` leaves them at the left margin; `column_edit` `"1"` enables
-  Notepad++-style column/block editing (Ctrl+Shift+drag a vertical cursor, then
-  type/Backspace/Delete/Tab down the whole column), `"0"` off; `theme` is a name from `themes/` (or
-  `default`); `dock_side` is `left`/`right`; `dock_pane` is `files`/`git`;
-  `chat_shown` `"1"`/`"0"`. The file appears once you first change a setting (or quit),
-  and you may create it by hand before the first run. Unknown or malformed keys are
-  ignored, and a corrupt file is skipped rather than fatal.
+  on), `"0"` leaves them at the left margin; `line_numbers` `"1"`/`"0"` shows or hides
+  the gutter; `column_edit` `"1"` enables Notepad++-style column/block editing
+  (Ctrl+Shift+drag a vertical cursor, then type/Backspace/Delete/Tab down the whole
+  column), `"0"` off; `theme` is a name from `themes/` (or `default`); `editmode` is
+  `windows`/`vi`/`emacs` (the last two only take effect once installed as extensions —
+  below). `layout` is a **nested object** holding the whole dock arrangement (which
+  panes sit left/right/bottom, which are hidden, sizes) — it replaced the old flat
+  `dock_side`/`dock_pane`/`chat_shown` keys (D35); it is fiddly to write by hand, so
+  toggle it from the **View** menu and let rio record it. The file appears once you
+  first change a setting (or quit), and you may create it by hand before the first run.
+  Unknown or malformed keys are ignored, and a corrupt file is skipped rather than fatal.
 
 > **Note.** There is not yet a *separate* hand-authored settings file distinct from
 > this machine-written one: `prefs.json` is both your defaults and rio's saved state,
@@ -261,6 +265,43 @@ a provenance ledger, `$XDG_DATA_HOME/rio/extensions.json` (default
 URL and version a `kind/name` came from. Publishing a repository of your own is a
 separate topic — see *Extension repositories* in
 [CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).
+
+### All config & data files at a glance
+
+There is **no single `~/.riorc`**: rio follows the XDG base-directory layout and keeps
+one file per concern. Two roots, split by owner — **config** (your settings, safe to
+hand-edit and to keep in version control) and **data** (rio's own bookkeeping, machine-
+written, not meant for hand-editing):
+
+**Config — `$XDG_CONFIG_HOME/rio/` (default `~/.config/rio/`):**
+
+| Path | Holds | Edit by hand? |
+| ---- | ----- | ------------- |
+| `prefs.json` | GUI preferences: `theme`, `wrap`, `wrap_indent`, `line_numbers`, `column_edit`, `editmode`, and the `layout` (dock) object | yes — plain JSON (above); `layout` best left to the View menu |
+| `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes (see *Keyboard shortcuts* below) |
+| `sources.list` | extension-repository URLs, one `http://` base per line | yes (above) |
+| `themes/` | user theme files, read by the **core** | drop-in / installed |
+| `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
+| `modes/` | installed editing modes — vi, emacs (`*.tcl`) | drop-in / installed |
+| `agent/prompt.md` | overrides the shipped agent **base** prompt (tool contract) | yes, if you want to |
+
+**Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**
+
+| Path | Holds |
+| ---- | ----- |
+| `sessions/` | per-project open files + active tab, keyed by project root (§6) |
+| `extensions.json` | the provenance ledger — what's installed, from which repository, at which version |
+| `secrets/*.secret` | API keys, mode `0600` (§5) — never in `prefs.json` |
+
+**Project-local (in a project's own tree):**
+
+| Path | Holds |
+| ---- | ----- |
+| `.rio/agent.md` | project-specific agent guidance, layered on top of the base prompt |
+
+Every one of these is optional: absent means "use the built-in default." Config files
+are plain text (JSON or the conf format) — **data, parsed and never executed** — and a
+malformed one is skipped with a note, never fatal.
 
 ### Keyboard shortcuts
 

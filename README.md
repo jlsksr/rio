@@ -178,7 +178,10 @@ Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lan
 
 - **[INSTALL.md](INSTALL.md)** — install & deployment: requirements, the deploy
   scripts, local vs. remote (server mode over SSH), the agent/Claude key, and
-  troubleshooting.
+  troubleshooting. rio keeps **no single `~/.riorc`** — one file per concern under
+  `~/.config/rio/`; the
+  [config & data files reference](INSTALL.md#all-config--data-files-at-a-glance)
+  lists them all (paths, contents, which are hand-editable).
 - **[AGENTS.md](AGENTS.md)** — the living design & decision log (the *why* behind
   every choice). Start here if you want the full picture.
 - **[ROADMAP.md](ROADMAP.md)** — possible next steps: planned features, known gaps,
