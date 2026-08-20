@@ -187,6 +187,25 @@ set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 3.0 ; set ::col_active 1
 col_edit insert \t
 ok "col: tab down the column"    [buf_text $::cur] "\ta\n\tb\n\tc"
 
+# zero-width caret column paints thin blinking bars, not the old solid block: the
+# native insert bar is hidden (insertwidth 0) while it's live, and the colcaret tag
+# is gone. col_clear restores the native bar. (bbox is empty under headless, so the
+# placed bars themselves can't be counted here — the insertwidth swap is the proxy.)
+clear_buf
+.ed.t insert insert "a\nb\nc"
+set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 3.0 ; set ::col_active 1
+col_paint
+ok "col: native bar hidden"      [$W cget -insertwidth] 0
+ok "col: no colcaret tag"        [lsearch -exact [$W tag names] colcaret] -1
+col_clear
+ok "col: native bar restored"    [expr {[$W cget -insertwidth] > 0}] 1
+
+# a width selection keeps the native bar (rectangular coltag band, not a caret)
+set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 3.2 ; set ::col_active 1
+col_paint
+ok "col: width keeps native bar" [expr {[$W cget -insertwidth] > 0}] 1
+col_clear
+
 # guards: Ctrl-modified keys aren't typed; an inactive selection ignores keys;
 # and with the pref off the gesture is inert
 set ::col_w $W ; set ::col_anchor 1.0 ; set ::col_caret 1.0 ; set ::col_active 1
@@ -197,6 +216,15 @@ ok "col: key ignored when off"   [col_typed $W a 0] 0
 set ::col_on 0
 col_begin $W 0 0
 ok "col: begin inert when off"   $::col_active 0
+
+# the Column Editing toggle is greyed out outside windows mode (the gesture only
+# makes sense for the windows caret model; vi/emacs carry their own block notions)
+set _savemode $::edit_mode
+set ::edit_mode windows ; sync_column_edit_menu
+ok "col: menu on in windows"     [.m.settings entrycget "Column Editing*" -state] normal
+set ::edit_mode vi ; sync_column_edit_menu
+ok "col: menu greyed off-windows" [.m.settings entrycget "Column Editing*" -state] disabled
+set ::edit_mode $_savemode ; sync_column_edit_menu
 
 # the Edit menu items exist and share the same procs
 ok "menu: Cut entry"    [.m.edit entrycget "Cut" -command]        editor_cut

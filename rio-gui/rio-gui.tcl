@@ -130,6 +130,10 @@ set ::col_active 0     ;# a column selection is currently live
 set ::col_w ""         ;# the editor PROXY path the column selection lives on
 set ::col_anchor ""    ;# the fixed end, a Tk index "line.col"
 set ::col_caret ""     ;# the moving end, a Tk index "line.col"
+set ::col_bars {}      ;# placed thin caret-bar frames (zero-width column, one/line)
+set ::col_blink ""     ;# after-id of the caret blink loop ("" when not blinking)
+set ::col_blink_on 1   ;# blink phase: bars shown (1) or hidden (0)
+set ::col_insw ""      ;# saved widget -insertwidth while the native bar is hidden
 set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
 set ::edit_mode windows   ;# active editing mode (D38/D41): windows ships; emacs/vi & other drop-ins install as extensions
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
@@ -3655,13 +3659,12 @@ proc restyle_group {g} {
 	set fm [expr {[dict exists $c editor.findmatch] \
 		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
 	$t tag configure findmatch -background $fm
-	# Column/block editing (D40): the block reuses the selection colour, the caret
-	# column the cursor colour. Raised above the syntax colours so both stay visible.
-	$t tag configure coltag   -background [dict get $c editor.selection]
-	$t tag configure colcaret -background [dict get $c editor.cursor]
+	# Column/block editing (D40): a width selection reuses the selection colour. The
+	# zero-width caret column is drawn as placed blinking bars (col_bars_draw), not a
+	# tag, so it needs no tag config here. Raised above the syntax colours.
+	$t tag configure coltag -background [dict get $c editor.selection]
 	$t tag raise sel
 	$t tag raise coltag
-	$t tag raise colcaret
 }
 
 proc apply_theme {theme} {
@@ -3997,8 +4000,19 @@ proc apply_editmode {} {
 	set ::editmode_status ""
 	rio::modes::attach $::edit_mode RioMode
 	set ::editmode_active $::edit_mode
+	sync_column_edit_menu
 	refresh_status
 	prefs_save
+}
+
+# Column editing rearranges text in a way that only the windows mode's caret model
+# makes sense of — vi and emacs carry their own block/rectangle notions — so the
+# Settings toggle is greyed out (whatever its stored value) unless windows mode is
+# active. apply_editmode calls this on every mode switch; boot calls it once.
+proc sync_column_edit_menu {} {
+	if {![winfo exists .m.settings]} return
+	set state [expr {$::edit_mode eq "windows" ? "normal" : "disabled"}]
+	catch { .m.settings entryconfigure "Column Editing*" -state $state }
 }
 
 # Fill the Settings ▸ Editing Mode cascade from the registry — one radio per
@@ -5437,31 +5451,106 @@ proc col_motion {w x y} {
 	col_paint
 }
 
-# Repaint the block highlight (coltag) or the caret column (colcaret). The caret
-# line carries Tk's own blinking insert bar; the other lines get a static block.
+# Destroy the placed caret bars, stop the blink loop, and give the widget its native
+# insert bar back (col_bars_draw hides it so the caret line blinks in phase with the
+# rest rather than showing two out-of-phase bars). Idempotent.
+proc col_bars_clear {} {
+	if {$::col_blink ne ""} { after cancel $::col_blink ; set ::col_blink "" }
+	foreach b $::col_bars { catch {destroy $b} }
+	set ::col_bars {} ; set ::col_blink_on 1
+	if {$::col_insw ne "" && $::col_w ne ""} {
+		catch { $::col_w configure -insertwidth $::col_insw }
+	}
+	set ::col_insw ""
+}
+
+# The x pixel of column C on line L of widget w — bbox of the character there, or,
+# past the line's end (column mode's virtual space), the line-end x plus the
+# remaining columns' worth of a space glyph. "" if the line isn't laid out (off
+# screen). y/h come from the same bbox so bars match the line height.
+proc col_caret_xy {w L C} {
+	set len [col_linelen $w $L]
+	if {$C <= $len} {
+		set bb [$w bbox $L.$C]
+		if {$bb eq ""} { return "" }
+		lassign $bb x y bw h
+		return [list $x $y $h]
+	}
+	set bb [$w bbox "$L.$len"]
+	if {$bb eq ""} { return "" }
+	lassign $bb x y bw h
+	set sp [font measure [$w cget -font] " "]
+	return [list [expr {$x + $bw + ($C - $len - 1) * $sp}] $y $h]
+}
+
+# Draw one thin caret bar per spanned line at column C (the zero-width form). The
+# bars overlay the text via place; they blink together via col_blink_tick, matching
+# the look of the normal caret across every line rather than a solid block.
+proc col_bars_draw {L1 L2 C} {
+	col_bars_clear
+	set w $::col_w
+	set fg [dict get $::theme_colors editor.cursor]
+	# Hide the native insert bar so the caret line blinks with the drawn bars, not
+	# against them; col_bars_clear restores it (saved width, default 2 if unset).
+	set iw [$w cget -insertwidth]
+	set ::col_insw [expr {$iw == 0 ? 2 : $iw}]
+	catch { $w configure -insertwidth 0 }
+	for {set L $L1} {$L <= $L2} {incr L} {
+		set xy [col_caret_xy $w $L $C]
+		if {$xy eq ""} continue
+		lassign $xy x y h
+		set b $w.colbar$L
+		catch {destroy $b}
+		frame $b -background $fg -bd 0 -width 2 -height $h
+		place $b -in $w -x $x -y $y -width 2 -height $h
+		lappend ::col_bars $b
+	}
+	set ::col_blink_on 1
+	set ::col_blink [after 500 col_blink_tick]
+}
+
+# Toggle every caret bar's visibility, then reschedule — one shared blink phase.
+proc col_blink_tick {} {
+	if {![info exists ::col_bars] || $::col_bars eq ""} { set ::col_blink "" ; return }
+	set ::col_blink_on [expr {!$::col_blink_on}]
+	set fg [dict get $::theme_colors editor.cursor]
+	set w $::col_w
+	set bg [$w cget -background]
+	foreach b $::col_bars {
+		catch { $b configure -background [expr {$::col_blink_on ? $fg : $bg}] }
+	}
+	set ::col_blink [after 500 col_blink_tick]
+}
+
+# Repaint the block highlight (coltag) or the caret column. A width selection is a
+# rectangular coltag band per line; the zero-width form is a thin blinking caret
+# bar on every spanned line (col_bars_draw), so it reads as one cursor stretched
+# down the column rather than a stack of solid blocks. The caret line also carries
+# Tk's own insert bar at ::col_caret.
 proc col_paint {} {
 	if {!$::col_active} return
 	set w $::col_w
-	$w tag remove coltag 1.0 end ; $w tag remove colcaret 1.0 end
+	$w tag remove coltag 1.0 end
 	lassign [col_span] L1 L2 C1 C2
-	set cl [lindex [split $::col_caret .] 0]
-	for {set L $L1} {$L <= $L2} {incr L} {
-		set len [col_linelen $w $L]
-		if {$C2 > $C1} {
+	if {$C2 > $C1} {
+		col_bars_clear
+		for {set L $L1} {$L <= $L2} {incr L} {
+			set len [col_linelen $w $L]
 			set a [expr {min($C1,$len)}] ; set b [expr {min($C2,$len)}]
 			if {$b > $a} { $w tag add coltag $L.$a $L.$b }
-		} elseif {$L != $cl && $C1 < $len} {
-			$w tag add colcaret $L.$C1 $L.[expr {$C1 + 1}]
 		}
 	}
 	catch { $w mark set insert $::col_caret ; $w see insert }
+	# Draw the bars AFTER `see` so bbox reflects the final scroll position.
+	if {$C2 <= $C1} { col_bars_draw $L1 $L2 $C1 }
 }
 
 # Collapse the column selection and hand a single normal caret back.
 proc col_clear {} {
 	if {!$::col_active} return
 	set w $::col_w
-	catch { $w tag remove coltag 1.0 end ; $w tag remove colcaret 1.0 end }
+	col_bars_clear
+	catch { $w tag remove coltag 1.0 end }
 	catch { $w mark set insert $::col_caret ; $w see insert }
 	set ::col_active 0 ; set ::col_w ""
 }

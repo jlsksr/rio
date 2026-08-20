@@ -2534,10 +2534,25 @@ rejoin, one `buffer.replace`. So a 40-line column edit is **one undo step, one
 `rio-gui.tcl` `col_*` procs on the group PROXY path; the windows mode binds the
 Ctrl+Shift gesture plus `<KeyPress>`/`<BackSpace>`/`<Delete>`/`<Tab>` hooks that
 consume the event *only* while a selection is live (`col_here`), else normal
-editing flows through. Rendering is two theme tags — `coltag` (the block, reusing
-the selection colour) and `colcaret` (a block cursor per line, the cursor colour);
-the caret line keeps Tk's own blinking bar. Repaint rides the same post-edit path
-as wrap-indent (the `buffer.changed` redraw drops the tags, `col_paint` re-adds).
+editing flows through. Repaint rides the same post-edit path as wrap-indent (the
+`buffer.changed` redraw drops the tags, `col_paint` re-adds).
+
+**Rendering (refined on live review).** A **width** selection is the `coltag` theme
+tag — a rectangular band per line, reusing the selection colour. The **zero-width**
+caret column is *not* a tag: the first cut drew a solid `colcaret` block per line
+(a bold static bar — wrong), so it now draws a **thin blinking bar per spanned
+line** (`col_bars_draw` places 2px `frame`s at each line's caret x via `bbox`, one
+shared 500 ms blink loop in `col_blink_tick`), matching the normal caret stretched
+down the column. To keep the caret line in phase with its siblings the native
+insert bar is hidden (`-insertwidth 0`) while the caret column is live and restored
+on clear. Bars are placed *after* `see insert` so they land at the final scroll
+position; off-screen lines (empty `bbox`) are skipped.
+
+**Windows-only, and the UI says so.** The gesture already only binds in the windows
+mode, so it's inert in vi/emacs regardless — but the Settings **Column Editing**
+checkbutton was always live, which was misleading. `sync_column_edit_menu` now
+greys the entry out (whatever its stored value) unless windows mode is active;
+`apply_editmode` calls it on every mode switch, boot calls it once.
 
 **v1 boundaries (ROADMAP).** Columns are *character* columns (a tab inside the
 band can look misaligned — pixel/tab-accurate columns deferred). Deliberately out:
@@ -2546,7 +2561,8 @@ rectangular clipboard (Ctrl+C/X/V keep normal behaviour), keyboard-built columns
 straight generalisation of the one-span-replace model when wanted. Tests: the
 column group in `rio-gui/tests/modes.tcl` (caret-column typing with one-undo,
 virtual-space padding, block overwrite, per-line Delete/Backspace/Tab, the
-modifier/inactive/pref-off guards).
+modifier/inactive/pref-off guards, the native-bar-hidden-while-caret-column /
+restored-on-clear invariant, and the menu grey-out outside windows mode).
 
 ---
 
