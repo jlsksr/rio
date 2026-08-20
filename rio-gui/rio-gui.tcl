@@ -2807,12 +2807,14 @@ proc search_regex_sync {} {
 }
 proc search_regex_changed {} { search_regex_sync ; search_run }
 
-# Show or hide the replace row (D52 Phase B), packed just under the query row and
-# above the results well — the find bar's Ctrl+H, brought to the panel.
+# Show or hide the replace row (D52 Phase B) — the find bar's Ctrl+H, brought to the
+# panel. Packed -side bottom so it lands just ABOVE the bottom-anchored query row (a
+# later -side bottom slave stacks above the earlier one), keeping the query field
+# pinned to the bottom edge when the replace row appears/disappears.
 proc search_show_replace {on} {
 	set ::search_replace $on
 	if {$on} {
-		pack .results.rep -after .results.hdr -side top -fill x
+		pack .results.rep -side bottom -fill x
 		focus .results.rep.e
 	} else {
 		pack forget .results.rep
@@ -6261,12 +6263,17 @@ bind .find.re <Return> {find_replace_one ; break}
 bind .find.e  <KeyRelease> find_update
 unset _w
 
-# The Search panel (D52): a bottom tool window built hidden; search_open packs it
-# above the find bar / status. A query row (needle + scope selector + Match case +
-# Whole word + count + ×) over a sunken well holding an rl_* rich-list of results
-# grouped by file/buffer. The scope option menu picks the engine (Project vs Open
-# docs vs Current doc). Colours are bootstrap; apply_theme restyles (the query
-# entry takes the editor surface, the well the rich-list chrome the dock panes use).
+# The Search panel (D52), a D35 dock tenant. Its controls are BOTTOM-anchored like the
+# Agent composer, not a top header: Search and Chat are both "compose" panes (a real
+# input field + full controls), so their controls hug the bottom edge and the content
+# accumulates above — the type-here/output-above idiom, and the input lands in the same
+# place when switching between them. (Files/Git differ: their chrome is a *thin* caption
+# — a name + a glyph button — so it sits at the top. The split is by control weight, not
+# by pane; see AGENTS.md D35.) So the sunken well of results fills the top and the query
+# row (needle + scope + Match case + Whole word + count + ×) is pinned to the bottom;
+# Ctrl+H toggles the replace row in just ABOVE it, so the query field never moves. The
+# scope option menu picks the engine (Project vs Open docs vs Current doc). Colours are
+# bootstrap; apply_theme restyles (the query entry the editor surface, the well the chrome).
 frame .results -borderwidth 1 -relief raised -background "#dddddd"
 frame .results.hdr -background "#dddddd"
 label .results.hdr.l -text "Search:" -font {monospace 9} -background "#dddddd"
@@ -6296,10 +6303,10 @@ pack .results.hdr.word  -side left  -padx {0 4}
 pack .results.hdr.regex -side left  -padx {0 6}
 pack .results.hdr.close -side right -padx {2 6}
 pack .results.hdr.count -side right -padx 6
-pack .results.hdr -side top -fill x
-# The replace row (D52 Phase B): built hidden; search_show_replace (Ctrl+H) packs
-# it under the query row. Replacement entry + Replace All — the scope selector on
-# the query row above decides where it lands (buffers vs disk, confirm-gated).
+pack .results.hdr -side bottom -fill x   ;# controls hug the bottom edge (compose pane)
+# The replace row (D52 Phase B): built hidden; search_show_replace (Ctrl+H) packs it
+# just ABOVE the bottom-anchored query row. Replacement entry + Replace All — the scope
+# selector on the query row below decides where it lands (buffers vs disk, confirm-gated).
 frame .results.rep -background "#dddddd"
 label .results.rep.l -text "Replace:" -font {monospace 9} -background "#dddddd"
 entry .results.rep.e -font {monospace 11} -width 28

@@ -115,11 +115,14 @@ Each entry notes its state:
   gesture. **D35 is complete.** A *search-fold* was tried (query row into the tab strip) and
   **rejected** on a live look: it mixed the query controls with the tabs, made them compete for
   width, and singled Search out (Files/Git keep their ⟳ in the body; the Agent composer can't
-  fold into a one-line strip at all). Settled rule: **tab strip = tabs only; each panel's
-  controls live in its own in-body header** — the uniform convention the panels already shared.
-  *Parked design idea:* a future **per-panel `controls: top | bottom`** choice (right-click a
-  panel → Top/Bottom, persisted in the `layout` object beside active/visible/size); today the
-  list/result headers sit at the top and the chat composer at the bottom, by role.
+  fold into a one-line strip at all). Settled rule: **tab strip = tabs only; controls live in the
+  panel body**, placed **by control weight** — *browse* panes (Files/Git) put their thin caption
+  (name + glyph button) at the **top**; *compose* panes (Chat/Search) put their heavy control
+  area (input field + full controls) at the **bottom**, content above, so the input is in the
+  same place when switching between them.
+  *Parked design idea:* a future **per-panel `controls: top | bottom`** override (right-click a
+  panel → Top/Bottom, persisted in the `layout` object beside active/visible/size) to flip an
+  individual pane against its weight-class default.
   The chat stays a dedicated pane (D14) by choice. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a

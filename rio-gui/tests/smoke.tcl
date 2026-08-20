@@ -568,6 +568,10 @@ ok "search: hidden at boot"          $::search_shown                      0
 ok "search: default scope current doc" $::search_scope                    "Current doc"
 ok "search: label reads Search"      [.results.hdr.l cget -text]          "Search:"
 proc search_packed {} { expr {[lsearch -exact [pack slaves .sitebottom.body] .results] >= 0} }
+# Controls are bottom-anchored like the Agent composer (compose-pane rule, D35): the
+# query row hugs the bottom edge, the results well fills above it.
+ok "search: query row bottom-anchored" [dict get [pack info .results.hdr] -side]  bottom
+ok "search: results well fills top"    [dict get [pack info .results.well] -side]  top
 search_open
 ok "search: open shows the panel"    [search_packed]                      1
 # --- Project scope (the on-disk tree; the D51 find-in-files behaviour) ---
@@ -653,6 +657,7 @@ proc rep_packed {} { expr {[lsearch -exact [pack slaves .results] .results.rep] 
 ok "replace: row hidden by default"  [rep_packed]                         0
 search_show_replace 1
 ok "replace: Ctrl+H shows the row"   [rep_packed]                         1
+ok "replace: row sits above the query" [dict get [pack info .results.rep] -side] bottom
 # Open two buffers, both carrying zqcat.
 do_open [file join $rdir p.txt] ; set pbuf $::cur
 do_open [file join $rdir q.txt] ; set qbuf $::cur

@@ -2096,20 +2096,30 @@ headless-verifiable** (`winfo containing` needs mapped windows) and wants a live
 complete** — a user can drag the git panel to the bottom, and every tool panel follows one
 uniform chrome rule.
 
-**The settled chrome rule (a fold was tried and rejected).** A panel's **controls live in an
-in-body header**; the **tab strip is tabs only** (identity + switch + drag/move). This is what
-the panels already share: `.pfiles.hdr` = `[dirname ┄ ⟳]`, `.pgit.hdr` = `[branch ┄ ⟳]`,
-`.chat.hdr` = `[Agent ┄ Clear]` (plus a *bottom* composer, by its chat role), `.results.hdr` =
-`[Search: needle · scope · options ┄ ×]`. A "search-fold" experiment moved *only* Search's
-query row out of its body and into the site tab strip; on a live look jbm rejected it: the
-query controls **mixed visually with the tabs** ("is Git part of the search tools?"), **competed
-for width** with the tabs in a narrow window, and made Search the **lone exception** (Files/Git
-keep their ⟳ in the body; the Agent composer is a multi-line box that *cannot* sit in a one-line
-strip at all). That last point is decisive: since the Agent composer can't fold, "controls in
-the body header" is the **only** rule that can be uniform across all four panels — so the strip
-stays tabs-only and each panel owns its header. *(Parked idea, ROADMAP: a future per-panel
-`controls: top | bottom` choice — the list/result headers sit at the top today; the chat
-composer at the bottom by role.)*
+**The settled chrome rule (a fold was tried and rejected; then split by control weight).**
+A panel's **controls live in its own body**, never in the tab strip; the **tab strip is tabs
+only** (identity + switch + drag/move). A "search-fold" experiment moved *only* Search's query
+row out of its body and into the site tab strip; on a live look jbm rejected it: the query
+controls **mixed visually with the tabs** ("is Git part of the search tools?"), **competed for
+width** with the tabs in a narrow window, and made Search the **lone exception** (Files/Git keep
+their ⟳ in the body; the Agent composer is a multi-line box that *cannot* sit in a one-line strip
+at all). That last point is decisive: since the composer can't fold, "controls in the body" is
+the **only** rule that can be uniform — the strip stays tabs-only, each panel owns its chrome.
+
+*Where in the body* then splits **by control weight** (jbm's refinement), not by pane:
+- **Browse panes — top caption.** Files/Git carry a *thin* header: a name/context line plus a
+  tiny glyph button. `.pfiles.hdr` = `[dirname ┄ ⟳]`, `.pgit.hdr` = `[branch ┄ ⟳]`. A one-glyph
+  caption belongs at the top, list beneath.
+- **Compose panes — bottom controls.** Chat/Search carry a *heavy* control area: a real input
+  field + full buttons/checkboxes. That's an input, not a caption, so it hugs the **bottom** and
+  the content accumulates above — the type-here/output-above idiom (chat, terminals, REPLs), and
+  the input lands in the same place when switching between the two. `.chat` = log fills, composer
+  at bottom; `.results` = results well fills, the query row (`[needle · scope · options ┄ ×]`)
+  pinned to the bottom, and Ctrl+H toggles the replace row in *above* it (later `-side bottom`
+  slave stacks higher) so the query field never moves.
+
+*(Parked idea, ROADMAP: a future per-panel `controls: top | bottom` override, should anyone want
+to flip an individual pane against its weight-class default.)*
 
 **Recovery (fixed in c3, from live review).** Dragging a panel into the bottom exposed a
 stranding bug: `boot` force-hid the *whole* bottom site to keep Search on-demand, so a Git
