@@ -2098,6 +2098,16 @@ Search query row into the bottom site's chrome (the D52 re-home; today the Searc
 proper bottom-site tenant but keeps its own query-row header rather than the site tab strip
 carrying it).
 
+**Recovery (fixed in c3, from live review).** Dragging a panel into the bottom exposed a
+stranding bug: `boot` force-hid the *whole* bottom site to keep Search on-demand, so a Git
+dragged there vanished on the next launch with no way back. Two fixes: (1) `boot` now hides
+the bottom **only when Search is its sole tenant** — once other panels are docked there it
+honours the persisted visibility; (2) `show_pane` became **`panel_reveal`** — it reveals a
+panel *wherever it lives* (makes its site visible + the panel active), so the View menu's
+**Show Files / Show Git / Show Agent / Show Search** always recover a pane, none can become
+unreachable. General principle for the site system: **no arrangement may strand a panel with
+no menu path back.**
+
 ---
 
 ### D36 — Find / Replace: the engine in the core, a bar in the GUI

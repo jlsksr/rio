@@ -288,12 +288,16 @@ proc rio::layout::normalize {L} {
 	}
 	return $out
 }
-# normalize + the boot-time policy: the Search (bottom) strip always starts hidden
-# (decision 2 — an on-demand surface), whatever was persisted. Used only at
+# normalize + the boot-time policy: the Search strip is an on-demand surface, so the
+# bottom site starts hidden *when Search is its only tenant*. But once the user has
+# docked other panels there (e.g. dragged Git down), honour the persisted visibility
+# — otherwise those panels would be stranded in a site nothing reopens. Used only at
 # prefs_load; runtime relocations use normalize so a panel moved to the bottom shows.
 proc rio::layout::boot {L} {
 	set out [normalize $L]
-	dict set out sites bottom visible 0
+	if {[dict get $out sites bottom panels] eq "search"} {
+		dict set out sites bottom visible 0
+	}
 	return $out
 }
 # Encode ::layout as a JSON object fragment for prefs.json. `panels` is a string
@@ -1527,11 +1531,20 @@ proc blend_hex {a b pct} {
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
 # driven from the View menu; apply_layout and show_pane are the two seams.
 # ---------------------------------------------------------------------------
-# Show one pane (files | git) in the dock: make it the dock site's active tab and
-# refresh it. Kept for the keymap/menu (Ctrl+E/G) — a thin alias for a tab click.
-proc show_pane {which} {
-	site_tab_click [rio::layout::dockside] $which
+# Reveal a panel wherever it currently lives: make its site visible and the panel
+# its active tab, then refresh. The robust "show me pane X" the View menu and Ctrl+E/G
+# use — it works even when the panel was dragged into a hidden or other site, so a
+# panel can always be recovered from the menu (no pane ever becomes unreachable).
+proc panel_reveal {id} {
+	set s [rio::layout::site_of $id]
+	if {$s eq ""} return
+	rio::layout::put $s visible 1
+	rio::layout::put $s active $id
+	apply_layout
+	rio::panel::refresh $id
 }
+# Back-compat: "show the files/git pane" (Ctrl+E/G, the View menu) is now a reveal.
+proc show_pane {which} { panel_reveal $which }
 
 # Draw site `site`'s host tab strip: one label per docked panel (its registry
 # title), the active one highlighted like a selected tab. Rebuilt from scratch each
@@ -6229,8 +6242,10 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Search…" -accelerator [key_accel search] -command search_open
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
-.m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}
-.m.view add command -label "Show Git"   -accelerator [key_accel show-git]   -command {show_pane git}
+.m.view add command -label "Show Files"  -accelerator [key_accel show-files] -command {show_pane files}
+.m.view add command -label "Show Git"    -accelerator [key_accel show-git]   -command {show_pane git}
+.m.view add command -label "Show Agent"  -command {show_pane chat}
+.m.view add command -label "Show Search" -accelerator [key_accel search]     -command search_open
 .m.view add separator
 .m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command {dock_set_side left}
 .m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command {dock_set_side right}

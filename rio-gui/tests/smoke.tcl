@@ -1112,7 +1112,11 @@ ok "layout: repair restores git"   [expr {"git" in [dict get $fixed sites left p
 ok "layout: repair restores chat"  [expr {"chat" in [dict get $fixed sites right panels]}] 1
 ok "layout: repair restores search" [expr {"search" in [dict get $fixed sites bottom panels]}] 1
 ok "layout: normalize keeps visible" [dict get $fixed sites bottom visible] 1
-ok "layout: boot hides bottom"     [dict get [rio::layout::boot $bad] sites bottom visible] 0
+ok "layout: boot hides search-only bottom" [dict get [rio::layout::boot $bad] sites bottom visible] 0
+# But once another panel is docked at the bottom, boot must NOT hide it (else that
+# panel is stranded with no way back — the git-dragged-to-bottom regression).
+set withgit {sites {left {panels files active files visible 1 size 220} right {panels chat active chat visible 1 size 340} bottom {panels {search git} active git visible 1 size 160}}}
+ok "layout: boot keeps mixed bottom"  [dict get [rio::layout::boot $withgit] sites bottom visible] 1
 
 # JSON round-trip: encode ::layout, parse it back, and the arrangement survives.
 set dec [rio::layout::normalize [json::json2dict [rio::layout::json]]]
@@ -1225,6 +1229,19 @@ tab_press left files 0 0 ; tab_motion 100 100 ; tab_release left files 100 100
 ok "c3: self-drop is a no-op"      $::layout $snap
 rename site_under_pointer {} ; rename _real_sup site_under_pointer
 set ::layout $_layout_c3 ; apply_layout
+
+# Recovery: a panel dragged into a site that then gets hidden must be reachable
+# from the View menu. panel_reveal shows its site and makes it the active tab —
+# no pane can become unreachable (the git-vanished-on-startup fix).
+set _layout_rec $::layout
+panel_move git bottom
+rio::layout::put bottom visible 0 ; apply_layout    ;# git now stranded in a hidden site
+ok "reveal: git starts hidden"     [rio::layout::get bottom visible] 0
+panel_reveal git
+ok "reveal: brings the site back"  [rio::layout::get bottom visible] 1
+ok "reveal: makes git active"      [rio::layout::get bottom active] git
+ok "reveal: git body is shown"     [site_shows bottom .pgit] 1
+set ::layout $_layout_rec ; apply_layout
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
