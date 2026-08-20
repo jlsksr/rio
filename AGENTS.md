@@ -2013,6 +2013,40 @@ asserts a panel's identity/site/hook without a mapped window (19 checks). Steps 
 manager and (c) the sites/tab-strips/drag remain later arcs (each its own branch), where the
 Search panel finally re-homes into the bottom site (D52) and the `layout` schema is settled.
 
+**Step (b) — built (the `layout` object + one derivation).** The persisted `layout` schema
+(decision #4) is settled and live: one dict, three sites, each `{panels, active, visible,
+size}` — an *ordered* panel list, the active one, site visibility, and size (width for the
+side sites, height for the bottom). It is the **single source of truth** for all
+non-document placement; **`apply_layout` derives the pack from it** (decision #6 — state
+authoritative, pack derived), replacing the old `place_dock`/`show_pane`/search packing as
+the one choke point. The four call sites became state mutations + `apply_layout`: `show_pane`
+sets a site's `active`; `apply_chat_visibility` sets the right site's `visible`;
+`search_open`/`search_close` toggle the bottom site's `visible`; `dock_set_side` moves the
+files/git panels between the left/right sites. `rio::layout::{default,get,put,site_of,
+dockside,migrate,normalize,json}` are the accessors — note the setter is **`put`, not `set`**
+(a namespaced `set` would shadow the builtin for unqualified calls *inside* the namespace).
+The old flat globals **remain as read mirrors** (`::dock_side`/`::dock_pane`/`::chat_shown`/
+`::search_shown`) — `apply_layout` syncs them each pass — because the View-menu radio/
+checkbuttons bind them as `-variable` and `on_fs_changed`/`style_selector` read them; they
+are no longer persisted or authoritative. **Three settled decisions:** *(1a)* the rare
+`dock_side=right` config **unifies** the dock into the right site alongside chat (one site per
+edge — the model has three sites, not two strips per edge); *(2)* the Search (bottom) strip
+**boots hidden** regardless of what was persisted (an on-demand surface); *(3)* **clean cut** —
+after migration only `layout` is written; the old `dock_side`/`dock_pane`/`chat_shown` keys
+are dropped (a rollback resets to defaults, unsupported mid-dev). **Newly persisted:** the
+dock and chat **sizes** (were ephemeral, reset every launch; now stored per-site on sash
+release). `prefs_load` adopts a persisted `layout` or `migrate`s the old flat keys forward,
+then `normalize` repairs either into a well-formed layout (fills missing keys, returns any
+unclaimed panel to its registry-preferred site, keeps `active` a real member, forces bottom
+hidden). Encoded as a nested JSON object (composed via the wire helpers; `json2dict` reads it
+back). No visible change in the default arrangement (dock left, chat right, search on demand);
+smoke asserts migration, normalize repair, JSON round-trip, and live search/chat/size
+derivation without a mapped window (27 checks). Step (c) — the site tab strips and
+move-a-panel-between-sites (drag) — is the remaining arc, where the Search panel visibly
+re-homes into the bottom site (D52) and heterogeneous panels in one site render as one tab
+strip (today a side site still shows the dock's files/git selector and the chat column as the
+existing chrome).
+
 ---
 
 ### D36 — Find / Replace: the engine in the core, a bar in the GUI
