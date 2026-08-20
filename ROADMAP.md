@@ -84,7 +84,7 @@ Each entry notes its state:
   `rio::doc::_bounded` rule). Still wanted: one **row per match** rather than per line, and
   richer scope filters (globs, honour `.gitignore`); and re-homing the panel into a real
   dock-site tenant once D35 lands (it is a hand-packed bottom strip today — rides along with D35).
-- **Dock-site system for tool windows** — *steps (a)+(b) built; step (c) next* (AGENTS.md D35 +
+- **Dock-site system for tool windows** — *steps (a)+(b)+(c1) built; c2/c3 next* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites
   (left/right/bottom), each a tabbed container the user can move panels between — the Visual
@@ -103,9 +103,13 @@ Each entry notes its state:
   `apply_layout` derives all non-document placement from it (replacing `place_dock`/`show_pane`/
   the bottom-strip packing); the old `dock_side`/`dock_pane`/`chat_shown` flags became read
   mirrors and were dropped from prefs (clean cut). Dock/chat sizes now persist. 27 smoke checks
-  (migration, normalize, JSON round-trip, live derivation). **Next: (c)** the sites' tab
-  strips and move-a-panel-between-sites (drag) — where the Search panel visibly re-homes into
-  the bottom site and heterogeneous panels in one site render as a single tab strip.
+  (migration, normalize, JSON round-trip, live derivation). **Step (c1) is done:** three site
+  containers each with a host-owned tab strip; `apply_layout` renders every visible site (tab
+  strip + active body packed via `-in`); uniform chrome (chat/search get tabs too, VS docking
+  style); the Files/Git selector and `style_selector` retired; sashes generalised. 332 smoke
+  checks — but the *visual* result isn't headless-verifiable and wants a live look. **Next:
+  (c2)** right-click tab "Move to ▸ Left/Right/Bottom" relocation, **(c3)** tab drag, and
+  folding the Search query row into the bottom site's chrome (D52 re-home polish).
   The chat stays a dedicated pane (D14) until that lands. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a

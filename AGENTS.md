@@ -2042,10 +2042,35 @@ hidden). Encoded as a nested JSON object (composed via the wire helpers; `json2d
 back). No visible change in the default arrangement (dock left, chat right, search on demand);
 smoke asserts migration, normalize repair, JSON round-trip, and live search/chat/size
 derivation without a mapped window (27 checks). Step (c) — the site tab strips and
-move-a-panel-between-sites (drag) — is the remaining arc, where the Search panel visibly
+move-a-panel-between-sites — is the remaining arc, where the Search panel visibly
 re-homes into the bottom site (D52) and heterogeneous panels in one site render as one tab
-strip (today a side site still shows the dock's files/git selector and the chat column as the
-existing chrome).
+strip. **Relocation gesture (settled with jbm): menu first, then drag** — c2 ships a
+right-click tab "Move to ▸ Left/Right/Bottom", c3 adds drag-and-drop.
+
+**Step (c1) — built (site containers + host tab strips).** Split to isolate risk. **c1a**
+(no-op refactor): the files/git bodies were trapped under `.dock`, but Tk's `pack -in`
+requires the master be the slave's parent or a descendant of it, so a panel can only move
+between sites if its body shares a common ancestor with every site container. Renamed
+`.dock.files`→`.pfiles` and `.dock.git`→`.pgit` (now children of `.`, joining `.chat`/
+`.results` there) and shown via `pack -in` — no behaviour change. **c1b** (the visible
+slice): three site frames `.site{left,right,bottom}`, each a host tab strip (`.tabs`) over a
+body (`.body`); `apply_layout` renders every visible site from `::layout` — `render_tabs`
+draws one tab per docked panel (active highlighted), `render_site_body` packs the active
+body into `.body` via `-in` (raised — a non-parent-master slave is otherwise obscured), then
+the site claims its edge (**bottom first** so it spans full width and the side docks stop
+above it, the old Search-strip behaviour). A tab click (`site_tab_click`) sets the site's
+`active` and re-derives. **Chrome decision (jbm): uniform** — *every* visible site shows its
+tab strip, single-panel ones too (chat gets an `[Agent]` tab, search a `[Search]` tab), the
+Visual-Studio docked-tool-window look. This retired the bespoke Files/Git selector (now just
+the left site's strip) and `style_selector` (→ `render_tabs`/`restyle_tabs`); the sashes
+generalised (`.sash`=left site, `.csash`=right, no more `dock_side` math, each persisting its
+site's size on release); `show_pane` is a thin alias for a dock-site tab click; `::dock_pane`
+is pinned to files|git even when a shared site's active tab is another panel. Structurally
+verified headless (smoke 332: uniform strips, tab activation, and search+git rendering as one
+strip; the dock/chat/search suites now run through the site model) — but the **visual result
+is not headless-verifiable** and wants a live look. Still to come: **c2** the right-click
+"Move to" relocation, **c3** tab drag, and folding the Search query row into the bottom
+site's chrome.
 
 ---
 
