@@ -148,6 +148,46 @@ set ::rio_started 0       ;# false during boot: view-state/workspace writes wait
 # editor group (see new_group_state): hl_scan, hl_lang, hl_pending, hl_enter, hl_dirty,
 # hl_lastchanged, hl_scanned. Same meanings as the old ::hl_* globals, keyed per widget.
 
+# ---------------------------------------------------------------------------
+# Tool-panel registry (AGENTS.md D35, incremental path step (a)). The four tool
+# panes rio ships — files, git, the agent chat, and the Search results strip — are
+# *declared as data* here rather than hand-wired at their call sites: same idiom as
+# the core's highlighter/mode/rich-list registries. Each panel is {title, site,
+# body, refresh}: `site` is its preferred dock site (left|right|bottom — the eventual
+# D35 sites; the actual, user-movable placement becomes the persisted `layout` object
+# in step (b), not modelled here), `body` its body-widget path, `refresh` the proc
+# that repaints it ("" for the event-driven chat). The registry is the queryable
+# state seed (decision #6): smoke asserts a panel's identity/site without a mapped
+# window. Placement is untouched at this step — this only names the four panes and
+# routes their refresh through one dispatch; the sites/tab-strips/drag come in
+# steps (b)/(c). Files and git are two distinct panels that today share the .dock.
+# ---------------------------------------------------------------------------
+namespace eval rio::panel {
+	variable order {}       ;# registered ids, in registration order
+	variable meta           ;# id -> {title site body refresh}
+	array set meta {}
+}
+# Declare a panel. Idempotent (re-registering the same id is a no-op) so a reloaded
+# GUI in one interp doesn't duplicate. `spec` fills in over the defaults.
+proc rio::panel::register {id spec} {
+	variable order ; variable meta
+	if {[info exists meta($id)]} return
+	lappend order $id
+	set meta($id) [dict merge {title {} site {} body {} refresh {}} $spec]
+}
+proc rio::panel::ids {}         { variable order ; return $order }
+proc rio::panel::exists {id}    { variable meta ; info exists meta($id) }
+proc rio::panel::get {id}       { variable meta ; return $meta($id) }
+proc rio::panel::field {id key} { variable meta ; dict get $meta($id) $key }
+# Repaint one panel through its declared refresh hook (a no-op when it has none, or
+# when the id is unknown). The single dispatch the pane call sites route through.
+proc rio::panel::refresh {id} {
+	variable meta
+	if {![info exists meta($id)]} return
+	set hook [dict get $meta($id) refresh]
+	if {$hook ne ""} { uplevel #0 $hook }
+}
+
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
@@ -604,7 +644,7 @@ proc on_project_opened {p} {
 # something might have changed — opening a folder, saving a file, an fs.changed from the
 # core (D47), or regaining OS focus (app_focus_event) — rather than live.
 proc refresh_dock {} {
-	if {$::dock_pane eq "git"} { refresh_git } else { populate_nav }
+	rio::panel::refresh $::dock_pane
 }
 
 # Re-sync the dock when rio regains OS input focus. The fs.changed auto-refresh (D47)
@@ -1368,11 +1408,10 @@ proc show_pane {which} {
 	pack forget .dock.files .dock.git
 	if {$which eq "git"} {
 		pack .dock.git -side top -fill both -expand 1
-		refresh_git
 	} else {
 		pack .dock.files -side top -fill both -expand 1
-		populate_nav
 	}
+	rio::panel::refresh $which
 	style_selector
 	prefs_save
 }
@@ -5835,6 +5874,15 @@ bind .results.rep.e    <Return>    {search_replace_all ; break}
 bind .results.rep.e    <Escape>    {search_close ; break}
 bind .results.rep.e    <Control-h> {search_show_replace 0 ; focus .results.hdr.e ; break}
 bind .results.hdr.close <Button-1> search_close
+
+# Register the four tool panes now that their body widgets exist (AGENTS.md D35 step
+# (a)). Placement is still owned by place_dock / show_pane / search_open — this only
+# declares each pane as data and gives its refresh a name. Files and git are separate
+# panels sharing today's side dock; chat is event-driven (no batch refresh hook).
+rio::panel::register files  {title Files  site left   body .dock.files refresh populate_nav}
+rio::panel::register git    {title Git    site left   body .dock.git   refresh refresh_git}
+rio::panel::register chat   {title Agent  site right  body .chat       refresh {}}
+rio::panel::register search {title Search site bottom body .results    refresh search_run}
 
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black

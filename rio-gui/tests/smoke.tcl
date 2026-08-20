@@ -1045,5 +1045,34 @@ ok "glyph: find next ↓"   [.find.next cget -text] "↓"
 ok "glyph: find prev ↑"   [.find.prev cget -text] "↑"
 ok "glyph: chat send ▶"   [.chat.send cget -text] "▶"
 
+# --- D35 step (a): the tool-panel registry -----------------------------------
+# The four tool panes are declared as data and queryable without a mapped window.
+ok "panel: four registered"      [rio::panel::ids] {files git chat search}
+ok "panel: files site"           [rio::panel::field files site]    left
+ok "panel: git site"             [rio::panel::field git site]      left
+ok "panel: chat site"            [rio::panel::field chat site]     right
+ok "panel: search site bottom"   [rio::panel::field search site]   bottom
+ok "panel: files body widget"    [rio::panel::field files body]    .dock.files
+ok "panel: git refresh hook"     [rio::panel::field git refresh]   refresh_git
+ok "panel: search refresh hook"  [rio::panel::field search refresh] search_run
+ok "panel: chat refresh is none" [rio::panel::field chat refresh]  ""
+ok "panel: title carried"        [rio::panel::field chat title]    Agent
+ok "panel: exists known"         [rio::panel::exists git]          1
+ok "panel: exists unknown"       [rio::panel::exists nope]         0
+rio::panel::register files {site right}   ;# re-registering an existing id is ignored
+ok "panel: register idempotent"  [rio::panel::field files site] left
+# refresh dispatches through the declared hook: spy on git's hook, drive refresh_dock.
+set ::_git_refreshed 0
+rename refresh_git _real_refresh_git
+proc refresh_git {} { set ::_git_refreshed 1 }
+set ::dock_pane git
+refresh_dock
+ok "panel: refresh_dock -> hook" $::_git_refreshed 1
+set ::_git_refreshed 0
+set ::dock_pane files
+rio::panel::refresh chat        ;# no hook — must be a harmless no-op
+ok "panel: chat refresh no-op"  $::_git_refreshed 0
+rename refresh_git {} ; rename _real_refresh_git refresh_git
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

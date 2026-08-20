@@ -84,7 +84,7 @@ Each entry notes its state:
   `rio::doc::_bounded` rule). Still wanted: one **row per match** rather than per line, and
   richer scope filters (globs, honour `.gitignore`); and re-homing the panel into a real
   dock-site tenant once D35 lands (it is a hand-packed bottom strip today — rides along with D35).
-- **Dock-site system for tool windows** — *design, build shape settled* (AGENTS.md D35 +
+- **Dock-site system for tool windows** — *step (a) built; steps (b)/(c) next* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites
   (left/right/bottom), each a tabbed container the user can move panels between — the Visual
@@ -96,8 +96,13 @@ Each entry notes its state:
   `layout` object replacing the `dock_side`/`dock_pane`/`chat_shown` flags; the find bar and
   compare view stay OUT (they aren't tool windows); and an incremental path whose opening
   move is **extracting a reusable panel component** and migrating the four existing panes
-  onto it (no behaviour change). Not built — the chat stays a dedicated pane (D14) until it
-  lands. Quality bar for these panes: the D36 find
+  onto it (no behaviour change). **Step (a) is done:** the `rio::panel::*` registry now
+  declares files/git/chat/search as data and routes their refresh through one dispatch (no
+  behaviour change; 19 smoke checks). **Next: (b)** fold `place_dock`/`show_pane`/the bottom
+  strips into one layout manager reading a persisted `layout` object (the schema to settle —
+  it replaces the `dock_side`/`dock_pane`/`chat_shown` flags), then **(c)** the sites, tab
+  strips, and move-a-panel-between-sites — where the Search panel re-homes into the bottom
+  site. The chat stays a dedicated pane (D14) until those land. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a
   non-modal tool window and re-hosts into a dock site when this lands. The **git
