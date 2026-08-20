@@ -5501,10 +5501,13 @@ proc col_bars_draw {L1 L2 C} {
 		lassign $xy x y h
 		set b $w.colbar$L
 		catch {destroy $b}
-		# 1px wide and nudged one pixel left of the glyph edge, so the caret sits in
-		# the gap BEFORE the column rather than striking through the character there.
+		# Anchor: the cell boundary `x` (col_caret_xy = bbox left edge = the char's
+		# advance-box start). That is exactly where Tk draws the native insert bar —
+		# the whitespace between the previous glyph's right bearing and this glyph's
+		# left bearing — so it is the same spot at any font size, no pixel fudging.
+		# 1px keeps it off both neighbours as far as a boundary caret can.
 		frame $b -background $fg -bd 0 -width 1 -height $h
-		place $b -in $w -x [expr {$x - 1}] -y $y -width 1 -height $h
+		place $b -in $w -x $x -y $y -width 1 -height $h
 		lappend ::col_bars $b
 	}
 	set ::col_blink_on 1
