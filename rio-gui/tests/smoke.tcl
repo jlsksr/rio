@@ -310,36 +310,45 @@ ok "fs: open tab closed"        [dict size $::buffers] [expr {$before - 1}]
 
 file delete -force $proj
 
-# --- dock layout: switch panes and switch sides ------------------------------
-proc dock_slaves {} { pack slaves .dock }
-proc dock_shows {w} { expr {[lsearch -exact [dock_slaves] $w] >= 0} }
+# --- dock sites (D35 c1b): host tab strips, pane switch, side switch ----------
+proc body_in {site} { pack slaves .site$site.body }         ;# the active body there
+proc site_shows {site w} { expr {[lsearch -exact [body_in $site] $w] >= 0} }
+proc tabs_of {site} { lmap t [winfo children .site$site.tabs] { winfo name $t } }
 
 show_pane git
-ok "dock: git pane shown"         [list [dock_shows .pgit] [dock_shows .pfiles]] {1 0}
+ok "dock: git body shown"         [list [site_shows left .pgit] [site_shows left .pfiles]] {1 0}
 ok "dock: dock_pane is git"       $::dock_pane           git
+ok "dock: tab strip lists both"   [lsort [tabs_of left]] {files git}
+ok "dock: git tab highlighted"    [.siteleft.tabs.git cget -background]   [dict get $::theme_colors tab.active.bg]
+ok "dock: files tab recedes"      [.siteleft.tabs.files cget -background] [dict get $::theme_colors tab.inactive.bg]
 show_pane files
-ok "dock: files pane shown"       [list [dock_shows .pfiles] [dock_shows .pgit]] {1 0}
+ok "dock: files body shown"       [list [site_shows left .pfiles] [site_shows left .pgit]] {1 0}
 
-# The dock width must NOT change when switching panes (regression: the git pane's
-# diff defaults to 80 cols / editor font and ballooned the whole window).
-show_pane files ; update idletasks ; set wf [winfo reqwidth .dock]
-show_pane git   ; update idletasks ; set wg [winfo reqwidth .dock]
-ok "dock: width stable on switch"  [expr {abs($wg - $wf) < 8}] 1
+# The left site keeps a stable width (propagate off) regardless of which pane shows —
+# otherwise the git diff (editor font) would balloon the whole window on switch.
+show_pane files ; set wf [.siteleft cget -width]
+show_pane git   ; set wg [.siteleft cget -width]
+ok "dock: width stable on switch"  [expr {$wf == $wg}] 1
 show_pane files
 
-ok "dock: default side is left"   [dict get [pack info .dock] -side] left
+# A tab click activates that panel, same as show_pane.
+site_tab_click left git
+ok "dock: tab click activates"    $::dock_pane git
+site_tab_click left files
+
+ok "dock: left site on left"      [dict get [pack info .siteleft] -side] left
 dock_set_side right
-ok "dock: moved to the right"     [dict get [pack info .dock] -side] right
-ok "dock: mirror follows"         $::dock_side right
+ok "dock: dock moved to right"    [expr {[site_shows right .pfiles] && [dict get [pack info .siteright] -side] eq "right"}] 1
+ok "dock: left site emptied"      [rio::layout::get left panels] {}
+ok "dock: mirror side follows"    $::dock_side right
 ok "dock: editor still expands"   [dict get [pack info .groups] -expand] 1
 dock_set_side left
-ok "dock: back to the left"       [dict get [pack info .dock] -side] left
+ok "dock: back on the left"       [dict get [pack info .siteleft] -side] left
 
-# The sash sits between the dock and the editor (same edge as the dock), and a
-# drag clamps the dock width rather than letting it collapse or eat the editor.
-ok "sash: parked on the dock edge" [dict get [pack info .sash] -side] left
-.dock configure -width 40 ; sash_drag      ;# pointer not over sash -> clamps to min
-ok "sash: clamps to minimum width" [expr {[.dock cget -width] >= 120}] 1
+# The sash sits between the left site and the editor; a drag clamps its width.
+ok "sash: parked on left edge"    [dict get [pack info .sash] -side] left
+.siteleft configure -width 40 ; sash_drag   ;# pointer not over sash -> clamps to min
+ok "sash: clamps to minimum width" [expr {[.siteleft cget -width] >= 120}] 1
 
 # --- editor scrollbars + line wrapping ---------------------------------------
 # The vertical bar is driven through edscroll (which sets .eg0.vsb and repaints the
@@ -557,7 +566,7 @@ open_folder $fdir
 ok "search: panel canvas exists"     [winfo class .results.well.body]     Text
 ok "search: hidden at boot"          $::search_shown                      0
 ok "search: label reads Search"      [.results.hdr.l cget -text]          "Search:"
-proc search_packed {} { expr {[lsearch -exact [pack slaves .] .results] >= 0} }
+proc search_packed {} { expr {[lsearch -exact [pack slaves .sitebottom.body] .results] >= 0} }
 search_open
 ok "search: open shows the panel"    [search_packed]                      1
 # --- Project scope (the on-disk tree; the D51 find-in-files behaviour) ---
@@ -755,12 +764,15 @@ file delete -force $xdir
 # provider/key/policy are ops. The smoke's core runs in THIS process behind the
 # socket, so the view crosses the real channel while we still inspect core state
 # (rio::agent::provider_name, rio::claude::api::configured) directly.
+# The editor center (.groups / the .cmp compare view) packs straight into the toplevel.
 proc center_shows {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
-ok "chat: shown by default"          [center_shows .chat]  1
+# chat is the right site's tenant now (D35 c1b): shown = its body packed there.
+proc chat_shown {} { expr {[lsearch -exact [pack slaves .siteright.body] .chat] >= 0} }
+ok "chat: shown by default"          [chat_shown]  1
 set ::chat_shown 0 ; apply_chat_visibility
-ok "chat: toggles off"               [center_shows .chat]  0
+ok "chat: toggles off"               [chat_shown]  0
 set ::chat_shown 1 ; apply_chat_visibility
-ok "chat: toggles back on"           [center_shows .chat]  1
+ok "chat: toggles back on"           [chat_shown]  1
 ok "chat: sash on the right"         [dict get [pack info .csash] -side] right
 
 # View logic (deterministic): a streamed agent.* event applied straight to the view
@@ -843,9 +855,9 @@ ok "chat: clear empties transcript"  [string trim [.chat.log get 1.0 end]] ""
 ok "chat: clear resets core" \
 	[llength [dict get [rio_call agent.history {}] result messages]] 0
 
-# The chat sash clamps the width rather than letting the column collapse.
-.chat configure -width 50 ; csash_drag
-ok "chat: sash clamps min width"     [expr {[.chat cget -width] >= 200}] 1
+# The csash clamps the right site's width rather than letting it collapse.
+.siteright configure -width 50 ; csash_drag
+ok "chat: sash clamps min width"     [expr {[.siteright cget -width] >= 200}] 1
 
 # --- agent provider selection + the Claude API key store, over the channel ----
 # Point the core's secret store at a THROWAWAY dir so the smoke never touches the
@@ -1105,29 +1117,30 @@ set dec [rio::layout::normalize [json::json2dict [rio::layout::json]]]
 ok "layout: json roundtrip side"   [dict get $dec sites left panels] [dict get $::layout sites left panels]
 ok "layout: json roundtrip active" [dict get $dec sites left active] [dict get $::layout sites left active]
 
-# apply_layout derives real placement from the state. Search strip = bottom.visible.
-proc _packed {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
+# apply_layout derives real placement from the state. A panel body is packed into
+# its site's .body area (D35 c1b); search->bottom, chat->right.
+proc _packed {w site} { expr {[lsearch -exact [pack slaves .site$site.body] $w] >= 0} }
 search_close
 ok "search: closed to start"       $::search_shown 0
 search_open "zztok"
 ok "search: open sets flag"        $::search_shown 1
 ok "search: bottom visible state"  [rio::layout::get bottom visible] 1
-ok "search: results strip packed"  [_packed .results] 1
+ok "search: results strip packed"  [_packed .results bottom] 1
 search_close
 ok "search: close clears flag"     $::search_shown 0
-ok "search: results strip gone"    [_packed .results] 0
+ok "search: results strip gone"    [_packed .results bottom] 0
 
 # Chat visibility flows through the right site.
 set ::chat_shown 0 ; apply_chat_visibility
 ok "chat: hide -> site hidden"     [rio::layout::get right visible] 0
-ok "chat: hide -> unpacked"        [_packed .chat] 0
+ok "chat: hide -> unpacked"        [_packed .chat right] 0
 set ::chat_shown 1 ; apply_chat_visibility
 ok "chat: show -> site visible"    [rio::layout::get right visible] 1
-ok "chat: show -> packed"          [_packed .chat] 1
+ok "chat: show -> packed"          [_packed .chat right] 1
 
 # Sizes are state-driven and persisted (were ephemeral before step b).
 rio::layout::put left size 250 ; apply_layout
-ok "size: dock width derived"      [.dock cget -width] 250
+ok "size: dock width derived"      [.siteleft cget -width] 250
 prefs_save
 set pf [open [prefs_path] r] ; set pj [json::json2dict [::read $pf]] ; close $pf
 ok "prefs: layout object written"  [dict exists $pj layout] 1
@@ -1135,6 +1148,31 @@ ok "prefs: flat keys clean-cut"    [expr {[dict exists $pj dock_side] || [dict e
 ok "prefs: size persisted"         [dict get $pj layout sites left size] 250
 
 set ::layout $_layout_save ; apply_layout    ;# restore the pre-block arrangement
+
+# --- D35 c1b: host tab strips per site + heterogeneous panels in one strip -----
+set _layout_c1b $::layout
+apply_layout
+# Uniform decision: every visible site shows a tab strip, single-panel ones too.
+ok "c1b: left strip has both tabs"  [expr {[winfo exists .siteleft.tabs.files] && [winfo exists .siteleft.tabs.git]}] 1
+ok "c1b: right site has a chat tab" [winfo exists .siteright.tabs.chat] 1
+ok "c1b: chat tab titled Agent"     [.siteright.tabs.chat cget -text] Agent
+search_open "zz"
+ok "c1b: bottom site has search tab" [.sitebottom.tabs.search cget -text] Search
+search_close
+# Heterogeneous panels in one site render as ONE tab strip (the c1 acceptance):
+# dock git into the bottom site beside search; the left site drops to one tab.
+dict set ::layout sites bottom panels {search git}
+dict set ::layout sites left   panels {files}
+set ::layout [rio::layout::normalize $::layout]
+rio::layout::put bottom visible 1
+apply_layout
+ok "c1b: bottom strip lists both"   [lsort [tabs_of bottom]] {git search}
+ok "c1b: left strip single tab"     [tabs_of left] files
+# Only the active tab's body shows; activating the git tab brings its body up.
+ok "c1b: search body active first"  [list [site_shows bottom .results] [site_shows bottom .pgit]] {1 0}
+site_tab_click bottom git
+ok "c1b: git body after tab click"  [list [site_shows bottom .pgit] [site_shows bottom .results]] {1 0}
+set ::layout $_layout_c1b ; apply_layout
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

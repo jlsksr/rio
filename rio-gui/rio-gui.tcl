@@ -160,7 +160,7 @@ set ::rio_started 0       ;# false during boot: view-state/workspace writes wait
 # state seed (decision #6): smoke asserts a panel's identity/site without a mapped
 # window. Placement is untouched at this step — this only names the four panes and
 # routes their refresh through one dispatch; the sites/tab-strips/drag come in
-# steps (b)/(c). Files and git are two distinct panels that today share the .dock.
+# steps (b)/(c). Files and git are two distinct panels that share one side site.
 # ---------------------------------------------------------------------------
 namespace eval rio::panel {
 	variable order {}       ;# registered ids, in registration order
@@ -197,7 +197,7 @@ proc rio::panel::refresh {id} {
 # is authoritative, pack is derived); the old ::dock_side / ::dock_pane /
 # ::chat_shown / ::search_shown globals live on only as read *mirrors* that
 # apply_layout keeps in sync, because the View-menu radio/checkbuttons bind them
-# as -variable and several call sites (on_fs_changed, style_selector) read them.
+# as -variable and several call sites (on_fs_changed, refresh_dock) read them.
 # v1 invariants: files+git move together and are the only pair selected via a
 # site's `active`; chat is the right site's tenant; the Search strip is the
 # bottom site's, booting hidden (on-demand). Sizes are newly persisted.
@@ -1519,59 +1519,92 @@ proc blend_hex {a b pct} {
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
 # driven from the View menu; apply_layout and show_pane are the two seams.
 # ---------------------------------------------------------------------------
-# Show one pane (files | git) in the dock, hiding the other, and refresh it. The
-# choice is the dock site's `active`; apply_layout does the actual (re)packing.
+# Show one pane (files | git) in the dock: make it the dock site's active tab and
+# refresh it. Kept for the keymap/menu (Ctrl+E/G) — a thin alias for a tab click.
 proc show_pane {which} {
-	rio::layout::put [rio::layout::dockside] active $which
-	apply_layout
-	rio::panel::refresh $which
-	style_selector
+	site_tab_click [rio::layout::dockside] $which
 }
 
-# Derive the whole non-document layout from ::layout (D35 step b) — the single
-# choke point that replaces the old place_dock/show_pane/search packing. Sites are
-# authoritative; this reads them and packs. The files/git dock claims its side and
-# shows its active pane; chat is the right site's tenant; the Search strip is the
-# bottom site's; the center is the editor groups (or the compare view in their
-# place, D28). The legacy ::dock_* / ::chat_shown / ::search_shown globals are
-# refreshed from the sites here so menus and read-only call sites stay correct.
+# Draw site `site`'s host tab strip: one label per docked panel (its registry
+# title), the active one highlighted like a selected tab. Rebuilt from scratch each
+# layout pass (cheap — a handful of labels) so it always matches ::layout. Clicking
+# a tab activates that panel. This replaces the old bespoke Files/Git selector.
+proc render_tabs {site} {
+	set f .site$site.tabs
+	foreach w [winfo children $f] { destroy $w }
+	set c $::theme_colors
+	set active [rio::layout::get $site active]
+	foreach id [rio::layout::get $site panels] {
+		set t $f.$id
+		label $t -text [rio::panel::field $id title] -font RioUIFont -padx 8 -pady 1 \
+			-foreground [dict get $c tab.fg] \
+			-background [expr {$id eq $active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
+		pack $t -side left -padx 1 -pady 1
+		bind $t <Button-1> [list site_tab_click $site $id]
+	}
+}
+
+# Activate panel `id` in site `site` (a tab click), then re-derive and refresh it.
+proc site_tab_click {site id} {
+	rio::layout::put $site active $id
+	apply_layout
+	rio::panel::refresh $id
+}
+
+# Pack site `site`'s active panel body into its .body area. Bodies are toplevel
+# children moved between sites via -in; a slave packed into a non-parent master must
+# be raised above it or it is obscured.
+proc render_site_body {site} {
+	set active [rio::layout::get $site active]
+	if {$active eq ""} return
+	set body [rio::panel::field $active body]
+	pack $body -in .site$site.body -fill both -expand 1
+	raise $body .site$site.body
+}
+
+# Derive the whole non-document layout from ::layout (D35 step b/c) — the single
+# choke point that replaces the old place_dock/show_pane/search packing. Each site
+# (when visible and non-empty) renders its tab strip + active body and claims its
+# edge; the center is the editor groups (or the compare view in their place, D28).
+# The bottom site is packed first so it spans the full width and the side docks stop
+# above it (the old Search-strip behaviour). The legacy ::dock_* / ::chat_shown /
+# ::search_shown globals are refreshed from the sites so menus and read-only call
+# sites stay correct (::dock_pane is pinned to files|git — the dock's selection —
+# even when its site's active tab is another panel like chat).
 proc apply_layout {} {
 	set ds [rio::layout::dockside]                 ;# left|right — the files/git side
+	set da [rio::layout::get $ds active]
 	set ::dock_side  $ds
-	set ::dock_pane  [rio::layout::get $ds active]
+	set ::dock_pane  [expr {$da in {files git} ? $da : "files"}]
 	set ::chat_shown [rio::layout::get [rio::layout::site_of chat] visible]
 	set ::search_shown [rio::layout::get bottom visible]
 
-	catch {pack forget .dock .sash .chat .csash .groups .cmp .results}
-	# The dock, on its side, shown when that site is visible (v1: always for the
-	# left home; on the right it shares the site's visibility with chat — the
-	# accepted double-right delta, decision 1a).
-	if {[rio::layout::get $ds visible]} {
-		pack .dock -side $ds -fill y
-		pack .sash -side $ds -fill y              ;# between the dock and the editor
-		.dock configure -width [rio::layout::get $ds size]
-		# The files/git bodies are children of the toplevel now (D35 c1a — so they can
-		# later dock into any site), shown inside .dock via -in. A slave packed into a
-		# non-parent master must be raised above it or it is obscured, so raise the
-		# active body over the dock frame.
-		pack forget .pfiles .pgit
-		set body [rio::panel::field $::dock_pane body]
-		pack $body -in .dock -side top -fill both -expand 1
-		raise $body .dock
+	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .groups .cmp}
+	foreach id [rio::panel::ids] { catch {pack forget [rio::panel::field $id body]} }
+
+	set showL [expr {[rio::layout::get left   visible] && [llength [rio::layout::get left   panels]]}]
+	set showR [expr {[rio::layout::get right  visible] && [llength [rio::layout::get right  panels]]}]
+	set showB [expr {[rio::layout::get bottom visible] && [llength [rio::layout::get bottom panels]]}]
+
+	if {$showB} {
+		render_tabs bottom ; render_site_body bottom
+		pack .sitebottom -side bottom -fill x
 	}
-	if {$::chat_shown} {
-		pack .chat  -side right -fill y           ;# chat column on the right (D14)
-		pack .csash -side right -fill y           ;# between the editor and the chat
-		.chat configure -width [rio::layout::get right size]
+	if {$showL} {
+		render_tabs left ; render_site_body left
+		pack .siteleft -side left -fill y ; pack .sash -side left -fill y
+		.siteleft configure -width [rio::layout::get left size]
 	}
-	# The center is the editor-group container, or the compare view in its place
-	# while comparing (D28). The container itself holds one or two groups (D33).
+	if {$showR} {
+		render_tabs right ; render_site_body right
+		pack .siteright -side right -fill y ; pack .csash -side right -fill y
+		.siteright configure -width [rio::layout::get right size]
+	}
 	if {$::compare_shown} {
 		pack .cmp -side left -fill both -expand 1
 	} else {
 		pack .groups -side left -fill both -expand 1
 	}
-	if {$::search_shown} { pack .results -after .status -side bottom -fill x }
 	prefs_save
 }
 
@@ -1614,24 +1647,20 @@ proc even_split {} {
 	.groups sash place 0 [expr {$w / 2}] 0
 }
 
-# Drag the sash to resize the dock. The dock keeps a fixed -width (propagate off),
-# so we recompute it from the pointer measured against the TOPLEVEL'S stable edge
-# (not the dock's own, which moves as we resize it — referencing that fed back on
-# itself and made the panes jump). The toplevel also has propagation off (startup),
-# so a wider dock shrinks the editor instead of widening the whole window. Clamped
-# so neither side collapses; works on either edge because dock_side flips the math.
+# Drag the sash to resize the LEFT site (always on the left edge; D35 c1b). The site
+# keeps a fixed -width (propagate off), so we recompute it from the pointer measured
+# against the TOPLEVEL'S stable edge (not the site's own, which moves as we resize it
+# — referencing that fed back on itself and made the panes jump). The toplevel also
+# has propagation off (startup), so a wider site shrinks the editor instead of the
+# whole window. Clamped so neither side collapses.
 proc sash_drag {} {
 	set total [winfo width .]
 	set min 120
 	set max [expr {$total - 200}]
-	if {$::dock_side eq "left"} {
-		set w [expr {[winfo pointerx .] - [winfo rootx .]}]
-	} else {
-		set w [expr {[winfo rootx .] + $total - [winfo pointerx .]}]
-	}
+	set w [expr {[winfo pointerx .] - [winfo rootx .]}]
 	if {$w < $min} { set w $min }
 	if {$max > $min && $w > $max} { set w $max }
-	.dock configure -width $w
+	.siteleft configure -width $w
 }
 
 # Toggle line wrapping (View menu). With wrap on, lines fold at the word and the
@@ -1806,15 +1835,12 @@ proc apply_wrap_indent {} {
 	prefs_save
 }
 
-# Highlight the active selector label (the inactive one recedes). Guarded so it
-# can run during apply_theme before the dock might be fully realized.
-proc style_selector {} {
-	if {![winfo exists .dock.sel.files]} return
-	set c $::theme_colors
-	foreach pane {files git} {
-		set active [expr {$pane eq $::dock_pane}]
-		.dock.sel.$pane configure -foreground [dict get $c tab.fg] -background \
-			[expr {$active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
+# Recolour every site's tab strip to the current theme (the active tab stands out,
+# the rest recede). Called from apply_theme; render_tabs does the same colouring
+# when a layout pass rebuilds a strip. Guarded so it can run before the sites exist.
+proc restyle_tabs {} {
+	foreach s {left right bottom} {
+		if {[winfo exists .site$s.tabs]} { render_tabs $s }
 	}
 }
 
@@ -1968,8 +1994,8 @@ proc apply_chat_visibility {} {
 	if {$::chat_shown} { focus .chat.input }
 }
 
-# Drag the chat sash to resize the chat column. Chat is always on the right, so
-# its width is the toplevel's right edge minus the pointer — measured against the
+# Drag the csash to resize the RIGHT site (always on the right edge; D35 c1b). Its
+# width is the toplevel's right edge minus the pointer — measured against the
 # toplevel's STABLE edge like sash_drag. Clamped so neither side collapses.
 proc csash_drag {} {
 	set total [winfo width .]
@@ -1978,7 +2004,7 @@ proc csash_drag {} {
 	set w [expr {[winfo rootx .] + $total - [winfo pointerx .]}]
 	if {$w < $min} { set w $min }
 	if {$max > $min && $w > $max} { set w $max }
-	.chat configure -width $w
+	.siteright configure -width $w
 }
 
 # Drag the composer sash to resize the input box. Its height is in text lines, so we
@@ -3505,10 +3531,12 @@ proc apply_theme {theme} {
 	.status configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.sash configure -background [dict get $c tab.bar.bg]   ;# the dock divider/grip
-	# The dock (file + git panes): reuse the UI role (no dedicated sidebar role
-	# yet); list selections borrow the editor's selection colour so the panes
-	# match the surface. The selector labels are coloured by style_selector.
-	foreach w {.dock .dock.sel .pfiles .pfiles.hdr .pgit .pgit.hdr} {
+	# The dock sites + the file/git panes: reuse the UI role (no dedicated sidebar
+	# role yet); list selections borrow the editor's selection colour so the panes
+	# match the surface. Each site's tab strip is coloured by restyle_tabs (below).
+	foreach w {.siteleft .siteleft.tabs .siteleft.body .siteright .siteright.tabs .siteright.body \
+	           .sitebottom .sitebottom.tabs .sitebottom.body \
+	           .pfiles .pfiles.hdr .pgit .pgit.hdr} {
 		$w configure -background [dict get $c ui.bg]
 	}
 	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pgit.hdr.branch .pgit.hdr.refresh} {
@@ -3662,7 +3690,7 @@ proc apply_theme {theme} {
 	.cmp.bar configure -background [dict get $c ui.bg]
 	.cmp.bar.close configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	style_selector
+	restyle_tabs
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
@@ -4898,22 +4926,30 @@ proc extw_source_remove {} {
 # ---------------------------------------------------------------------------
 # (Tabs are no longer a single top bar; each editor group draws its own strip, D33.)
 
-# The side dock: a selector row (Files | Git) above the two pane bodies, of which
-# show_pane packs exactly one. apply_layout decides which edge it sits on.
-# propagate off so the dock keeps a STABLE width regardless of which pane shows —
-# otherwise the git pane's diff (editor font) is physically wider than the file
-# list (UI font) at the same column count, and the whole window jumps on switch.
-frame .dock -background "#dddddd" -width 220
-pack propagate .dock 0
-frame .dock.sel -background "#dddddd"
-label .dock.sel.files -text Files -font {monospace 9} -padx 8 -pady 1 \
-	-background "#cccccc" -foreground black
-label .dock.sel.git   -text Git   -font {monospace 9} -padx 8 -pady 1 \
-	-background "#cccccc" -foreground black
-pack .dock.sel.files .dock.sel.git -side left -padx 1 -pady 1
-pack .dock.sel -side top -fill x
-bind .dock.sel.files <Button-1> {show_pane files}
-bind .dock.sel.git   <Button-1> {show_pane git}
+# The dock sites (AGENTS.md D35 step c1b). Three tabbed tool-window containers —
+# left / right / bottom — each a host-owned tab strip (.tabs) above a body area
+# (.body) into which the active panel's body widget is packed via -in. This is the
+# Visual-Studio docked-tool-window model: every visible site shows its own tab
+# strip (render_tabs, from ::layout), and apply_layout drives all of it. It
+# replaces the old hand-packed .dock + Files/Git selector: the files/git dock is
+# just the two panels that happen to share a side site, and the selector became
+# that site's tab strip. Side sites keep a STABLE width (propagate off) like the
+# old dock — otherwise the git pane's diff (editor font) is physically wider than
+# the file list at the same column count and the window jumps on switch; the
+# bottom site takes its content's natural height (the old .results strip).
+foreach {_s _w} {left 220 right 340} {
+	frame .site$_s -background "#dddddd" -width $_w
+	pack propagate .site$_s 0
+	frame .site$_s.tabs -background "#dddddd"
+	frame .site$_s.body -background "#dddddd"
+	pack .site$_s.tabs -side top -fill x
+	pack .site$_s.body -side top -fill both -expand 1
+}
+frame .sitebottom -background "#dddddd"
+frame .sitebottom.tabs -background "#dddddd"
+frame .sitebottom.body -background "#dddddd"
+pack .sitebottom.tabs -side top -fill x
+pack .sitebottom.body -side top -fill both -expand 1
 
 # File pane body (D42): a header above a sunken "well" holding the rich-list view —
 # a read-only text widget the navigator fills. It is GUI-local CHROME, not a core
@@ -5004,7 +5040,7 @@ bind .pgit.commit.msg <Return> git_commit
 frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
 # Record the dock's final width into its site on release (sizes persist now, D35 b).
-bind .sash <ButtonRelease-1> { rio::layout::put [rio::layout::dockside] size [winfo width .dock] ; prefs_save }
+bind .sash <ButtonRelease-1> { rio::layout::put left size [winfo width .siteleft] ; prefs_save }
 
 # The editor region (AGENTS.md D33). The center is a .groups panedwindow that holds one
 # or two editor GROUPS side by side with a draggable divider; each group is an
@@ -5915,7 +5951,7 @@ pack .chat.log    -side left   -fill both -expand 1
 frame .csash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .csash <B1-Motion> csash_drag
 # Record the chat column's final width into the right site on release (D35 b).
-bind .csash <ButtonRelease-1> { rio::layout::put right size [winfo width .chat] ; prefs_save }
+bind .csash <ButtonRelease-1> { rio::layout::put right size [winfo width .siteright] ; prefs_save }
 
 # The find/replace bar (D36): built hidden; find_open packs it above the status
 # bar. Row 0 finds, row 1 replaces (gridded away in find-only mode). Plain
@@ -6052,8 +6088,8 @@ rio::panel::register search {title Search site bottom body .results    refresh s
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .status -side bottom -fill x
-# .dock and .groups are packed by apply_layout at startup (so the dock side is live);
-# each group's tab strip lives inside its own frame (D33), not in a global top bar.
+# The dock sites and .groups are packed by apply_layout at startup (from the layout);
+# each editor group's tab strip lives inside its own frame (D33), not a global top bar.
 focus [gget 0 path]
 
 menu .m ; . configure -menu .m
@@ -6190,9 +6226,8 @@ themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (
 # folder (project.open) and let the core judge; files are reached via the tree (D29).
 set ::nav_dir ""           ;# rl_* list state was initialised at widget construction
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
-apply_layout               ;# derive placement from the migrated/seeded layout (D35 b)
+apply_layout               ;# derive placement + tab strips from the layout (D35 b/c)
 rio::panel::refresh $::dock_pane   ;# first populate of the dock's active pane
-style_selector             ;# highlight the active files/git selector label
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
 apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
 apply_line_numbers         ;# grid each group's gutter to ::line_numbers (default on)
