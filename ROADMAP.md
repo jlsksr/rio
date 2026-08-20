@@ -81,10 +81,10 @@ Each entry notes its state:
   **Regex** then landed as a flag on every search/replace op + a toggle on both surfaces (D52
   Phase C): line-oriented Tcl-ARE patterns with `\1`/`&` backreferences in replace, centralized
   in `rio::doc::_regex_spans`. **Whole-word** rides every literal path (one shared
-  `rio::doc::_bounded` rule). Still wanted: one **row per match** rather than per line, and
-  richer scope filters (globs, honour `.gitignore`); and re-homing the panel into a real
-  dock-site tenant once D35 lands (it is a hand-packed bottom strip today — rides along with D35).
-- **Dock-site system for tool windows** — *a+b+c1+c2+c3 built; D35 core met, search-fold polish left* (AGENTS.md D35 +
+  `rio::doc::_bounded` rule). The panel is now a normal **D35 bottom dock-site tenant** carrying
+  its query row in its own in-body header (`.results.hdr`), like Files/Git/Agent. Still wanted:
+  one **row per match** rather than per line, and richer scope filters (globs, honour `.gitignore`).
+- **Dock-site system for tool windows** — *complete (a+b+c1+c2+c3; the search-fold was tried and rejected)* (AGENTS.md D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites
   (left/right/bottom), each a tabbed container the user can move panels between — the Visual
@@ -112,9 +112,15 @@ Each entry notes its state:
   any panel to any site, so the sites are now rearrangeable (the Agent can join the left dock,
   git can go to the bottom). **Step (c3) is done:** drag a tab and drop it on another site (a
   press/motion/release state machine, 6px threshold, accent-lit drop target) — the D35 "done"
-  gesture. **Left: the search-fold polish** — carry the Search query row in the bottom site's
-  tab-strip chrome rather than the panel's own header (the D52 re-home finish).
-  The chat stays a dedicated pane (D14) until that lands. Quality bar for these panes: the D36 find
+  gesture. **D35 is complete.** A *search-fold* was tried (query row into the tab strip) and
+  **rejected** on a live look: it mixed the query controls with the tabs, made them compete for
+  width, and singled Search out (Files/Git keep their ⟳ in the body; the Agent composer can't
+  fold into a one-line strip at all). Settled rule: **tab strip = tabs only; each panel's
+  controls live in its own in-body header** — the uniform convention the panels already shared.
+  *Parked design idea:* a future **per-panel `controls: top | bottom`** choice (right-click a
+  panel → Top/Bottom, persisted in the `layout` object beside active/visible/size); today the
+  list/result headers sit at the top and the chat composer at the bottom, by role.
+  The chat stays a dedicated pane (D14) by choice. Quality bar for these panes: the D36 find
   bar — dynamic (appears only when needed), clean, minimal controls. The
   **Extensions window (D39) is the first tenant-in-waiting**: it ships as a
   non-modal tool window and re-hosts into a dock site when this lands. The **git

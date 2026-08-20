@@ -2092,11 +2092,24 @@ drop. `site_under_pointer` resolves the drop site from `winfo containing`, mappi
 *body* (a toplevel child packed `-in` a site, so its path is `.pfiles`/`.chat`/`.results`, not
 under `.site$s`) back through its panel to the site it sits in. Smoke drives the state machine
 directly (click-vs-drag, arm, relocate, snap-back) — but the **drag feel is not
-headless-verifiable** (`winfo containing` needs mapped windows) and wants a live try. **D35's
-core is now met** — a user can drag the git panel to the bottom. Remaining polish: folding the
-Search query row into the bottom site's chrome (the D52 re-home; today the Search panel is a
-proper bottom-site tenant but keeps its own query-row header rather than the site tab strip
-carrying it).
+headless-verifiable** (`winfo containing` needs mapped windows) and wants a live try. **D35 is
+complete** — a user can drag the git panel to the bottom, and every tool panel follows one
+uniform chrome rule.
+
+**The settled chrome rule (a fold was tried and rejected).** A panel's **controls live in an
+in-body header**; the **tab strip is tabs only** (identity + switch + drag/move). This is what
+the panels already share: `.pfiles.hdr` = `[dirname ┄ ⟳]`, `.pgit.hdr` = `[branch ┄ ⟳]`,
+`.chat.hdr` = `[Agent ┄ Clear]` (plus a *bottom* composer, by its chat role), `.results.hdr` =
+`[Search: needle · scope · options ┄ ×]`. A "search-fold" experiment moved *only* Search's
+query row out of its body and into the site tab strip; on a live look jbm rejected it: the
+query controls **mixed visually with the tabs** ("is Git part of the search tools?"), **competed
+for width** with the tabs in a narrow window, and made Search the **lone exception** (Files/Git
+keep their ⟳ in the body; the Agent composer is a multi-line box that *cannot* sit in a one-line
+strip at all). That last point is decisive: since the Agent composer can't fold, "controls in
+the body header" is the **only** rule that can be uniform across all four panels — so the strip
+stays tabs-only and each panel owns its header. *(Parked idea, ROADMAP: a future per-panel
+`controls: top | bottom` choice — the list/result headers sit at the top today; the chat
+composer at the bottom by role.)*
 
 **Recovery (fixed in c3, from live review).** Dragging a panel into the bottom exposed a
 stranding bug: `boot` force-hid the *whole* bottom site to keep Search on-demand, so a Git
@@ -2997,8 +3010,10 @@ keep them as two jobs, connected, not one.** The inline bar (D36) stays the quic
 path — jbm values its low-fuss immediacy — and the D51 find-in-files panel **grows into a
 unified Search panel**: find across three **scopes** in one bottom tool window, with the bar
 gaining an *escalate* handoff into it. Both sit on one core engine, so they can never disagree.
-This *refines* D35 (the panel is the concrete bottom-site tenant, built now on the hand-packed
-`.results` strip and re-homed into the dock when D35 lands) and supersedes D51's narrower scope.
+This *refines* D35 (the panel is the concrete bottom-site tenant; since D35 landed it is a
+normal dock tenant with its **own in-body header** — `.results.hdr` — like Files/Git/Agent, per
+D35's settled chrome rule; a tab-strip fold was tried and rejected) and supersedes D51's
+narrower scope.
 
 **Two engines behind a scope selector.** Matching stays core-side (the D36 discipline), and
 the line-grouped matcher D51 buried in `project::_search_file` is extracted to a shared
@@ -3033,8 +3048,9 @@ point of escalating). Relabelled *Search…* throughout (menu, keymap action `se
 label); `Ctrl+Shift+F` is unchanged.
 
 **Phasing. Phase A** was search only; **Phase B — Replace** and **Phase C — Regex** (both
-below) are now in. Re-homing the panel into the D35 bottom dock-site is the one piece still
-deferred — it waits on D35's container, so it rides along when D35 lands.
+below) are now in. Re-homing the panel into the D35 bottom dock-site is **done**: it is a normal
+bottom-site tenant carrying its query row in its own in-body header (`.results.hdr`), per D35's
+settled chrome rule — the tab strip stays tabs-only.
 
 **Phase B — Replace across the scopes.** The panel gains a **replace row** (a replacement
 entry + Replace All, toggled with `Ctrl+H` like the bar; the bar's escalate carries its
