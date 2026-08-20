@@ -5495,19 +5495,19 @@ proc col_bars_draw {L1 L2 C} {
 	set iw [$w cget -insertwidth]
 	set ::col_insw [expr {$iw == 0 ? 2 : $iw}]
 	catch { $w configure -insertwidth 0 }
+	# bbox coordinates already include the widget's -padx/-pady, but `place -in`
+	# adds them again — a double-count that lands the bar ~half a cell into the
+	# glyph. Subtract them so the bar sits on the true cell boundary (bbox.x), the
+	# exact spot Tk draws the native insert bar. Font-size independent, no fudging.
+	set px [$w cget -padx] ; set py [$w cget -pady]
 	for {set L $L1} {$L <= $L2} {incr L} {
 		set xy [col_caret_xy $w $L $C]
 		if {$xy eq ""} continue
 		lassign $xy x y h
 		set b $w.colbar$L
 		catch {destroy $b}
-		# Anchor: the cell boundary `x` (col_caret_xy = bbox left edge = the char's
-		# advance-box start). That is exactly where Tk draws the native insert bar —
-		# the whitespace between the previous glyph's right bearing and this glyph's
-		# left bearing — so it is the same spot at any font size, no pixel fudging.
-		# 1px keeps it off both neighbours as far as a boundary caret can.
 		frame $b -background $fg -bd 0 -width 1 -height $h
-		place $b -in $w -x $x -y $y -width 1 -height $h
+		place $b -in $w -x [expr {$x - $px}] -y [expr {$y - $py}] -width 1 -height $h
 		lappend ::col_bars $b
 	}
 	set ::col_blink_on 1
