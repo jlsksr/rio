@@ -188,6 +188,123 @@ proc rio::panel::refresh {id} {
 	if {$hook ne ""} { uplevel #0 $hook }
 }
 
+# ---------------------------------------------------------------------------
+# The dock layout (AGENTS.md D35, incremental path step (b)). One persisted
+# `layout` object (::layout) is the single source of truth for all non-document
+# placement: three sites (left|right|bottom), each with an ordered `panels` list,
+# an `active` panel, `visible`, and `size` (width for the side sites, height for
+# the bottom). apply_layout DERIVES the pack from this state (decision #6 — state
+# is authoritative, pack is derived); the old ::dock_side / ::dock_pane /
+# ::chat_shown / ::search_shown globals live on only as read *mirrors* that
+# apply_layout keeps in sync, because the View-menu radio/checkbuttons bind them
+# as -variable and several call sites (on_fs_changed, style_selector) read them.
+# v1 invariants: files+git move together and are the only pair selected via a
+# site's `active`; chat is the right site's tenant; the Search strip is the
+# bottom site's, booting hidden (on-demand). Sizes are newly persisted.
+# ---------------------------------------------------------------------------
+namespace eval rio::layout {}
+
+# The seed layout — also the normalize/migrate base. Side widths (220 dock,
+# 340 chat), bottom height (160 search).
+proc rio::layout::default {} {
+	return [dict create sites [dict create \
+		left   [dict create panels {files git} active files  visible 1 size 220] \
+		right  [dict create panels {chat}      active chat   visible 1 size 340] \
+		bottom [dict create panels {search}    active search visible 0 size 160]]]
+}
+proc rio::layout::get {site key}   { dict get $::layout sites $site $key }
+proc rio::layout::put {site key v} { dict set ::layout sites $site $key $v }
+# Which site holds panel `id` (its first membership), or "" if none.
+proc rio::layout::site_of {id} {
+	dict for {s d} [dict get $::layout sites] {
+		if {$id in [dict get $d panels]} { return $s }
+	}
+	return ""
+}
+# The side (left|right) the files/git dock sits on.
+proc rio::layout::dockside {} { return [site_of files] }
+# A copy of `list` with any of `ids` removed (order preserved).
+proc rio::layout::_without {list ids} {
+	set out {} ; foreach x $list { if {$x ni $ids} { lappend out $x } }
+	return $out
+}
+
+# Build a layout from the pre-step-(b) flat keys, over the default: dock_pane ->
+# the dock site's active; chat_shown -> the right site's visibility; dock_side ->
+# which side holds files/git. dock_side=right unifies the dock into the right
+# site alongside chat (decision 1a). Sizes take defaults (were ephemeral before).
+proc rio::layout::migrate {prefs} {
+	set L [default]
+	set side [expr {[dict exists $prefs dock_side] && [dict get $prefs dock_side] eq "right" ? "right" : "left"}]
+	set pane [expr {[dict exists $prefs dock_pane] && [dict get $prefs dock_pane] eq "git" ? "git" : "files"}]
+	set chat [expr {[dict exists $prefs chat_shown] && ![dict get $prefs chat_shown] ? 0 : 1}]
+	if {$side eq "right"} {
+		dict set L sites left  panels {}
+		dict set L sites left  active ""
+		dict set L sites right panels {files git chat}
+	}
+	dict set L sites $side active $pane      ;# the dock's files|git choice
+	dict set L sites right visible $chat
+	return $L
+}
+
+# Repair a persisted or migrated layout into a well-formed one: fill missing
+# keys from the default, drop unknown sites, coerce `visible` to 0/1, ensure each
+# registered panel appears in exactly one site (unclaimed panels land in their
+# registry-preferred site), keep each `active` a real member, and force the
+# bottom (Search) site hidden at boot (decision 2 — it opens on demand).
+proc rio::layout::normalize {L} {
+	set out [default]
+	if {[dict exists $L sites]} {
+		dict for {s d} [dict get $L sites] {
+			if {$s ni {left right bottom}} continue
+			foreach k {panels active visible size} {
+				if {[dict exists $d $k]} { dict set out sites $s $k [dict get $d $k] }
+			}
+			dict set out sites $s visible [expr {[dict get $out sites $s visible] ? 1 : 0}]
+		}
+	}
+	set seen {}
+	dict for {s d} [dict get $out sites] {
+		set keep {}
+		foreach p [dict get $d panels] {
+			if {[rio::panel::exists $p] && $p ni $seen} { lappend keep $p ; lappend seen $p }
+		}
+		dict set out sites $s panels $keep
+	}
+	foreach p [rio::panel::ids] {
+		if {$p ni $seen} {
+			set pref [rio::panel::field $p site]
+			dict set out sites $pref panels [concat [dict get $out sites $pref panels] [list $p]]
+			lappend seen $p
+		}
+	}
+	dict for {s d} [dict get $out sites] {
+		set ps [dict get $d panels]
+		if {[dict get $d active] ni $ps} {
+			dict set out sites $s active [expr {[llength $ps] ? [lindex $ps 0] : ""}]
+		}
+	}
+	dict set out sites bottom visible 0
+	return $out
+}
+# Encode ::layout as a JSON object fragment for prefs.json. `panels` is a string
+# array, `visible` a JSON boolean, `size` a bare integer; the shape mirrors what
+# normalize accepts on read (json2dict yields nested dicts/lists).
+proc rio::layout::json {} {
+	set sites {}
+	dict for {s d} [dict get $::layout sites] {
+		set obj [format {{"panels":%s,"active":%s,"visible":%s,"size":%d}} \
+			[rio::wire::strarr [dict get $d panels]] \
+			[rio::wire::str [dict get $d active]] \
+			[expr {[dict get $d visible] ? "true" : "false"}] \
+			[expr {int([dict get $d size])}]]
+		lappend sites "[rio::wire::str $s]:$obj"
+	}
+	return "{\"sites\":{[join $sites ,]}}"
+}
+set ::layout [rio::layout::default]   ;# real value is set by prefs_load (migrate/adopt)
+
 proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
@@ -1400,32 +1517,46 @@ proc blend_hex {a b pct} {
 
 # ---------------------------------------------------------------------------
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
-# driven from the View menu; place_dock and show_pane are the two seams.
+# driven from the View menu; apply_layout and show_pane are the two seams.
 # ---------------------------------------------------------------------------
-# Show one pane (files | git) in the dock, hiding the other, and refresh it.
+# Show one pane (files | git) in the dock, hiding the other, and refresh it. The
+# choice is the dock site's `active`; apply_layout does the actual (re)packing.
 proc show_pane {which} {
-	set ::dock_pane $which
-	pack forget .dock.files .dock.git
-	if {$which eq "git"} {
-		pack .dock.git -side top -fill both -expand 1
-	} else {
-		pack .dock.files -side top -fill both -expand 1
-	}
+	rio::layout::put [rio::layout::dockside] active $which
+	apply_layout
 	rio::panel::refresh $which
 	style_selector
-	prefs_save
 }
 
-# Re-pack the dock against ::dock_side, with the editor filling the rest. Packing
-# the dock first claims its edge; the center then expands into what's left, so the
-# same two calls work for either side.
-proc place_dock {} {
-	catch {pack forget .dock .sash .chat .csash .groups .cmp}
-	pack .dock -side $::dock_side -fill y
-	pack .sash -side $::dock_side -fill y     ;# between the dock and the editor
+# Derive the whole non-document layout from ::layout (D35 step b) — the single
+# choke point that replaces the old place_dock/show_pane/search packing. Sites are
+# authoritative; this reads them and packs. The files/git dock claims its side and
+# shows its active pane; chat is the right site's tenant; the Search strip is the
+# bottom site's; the center is the editor groups (or the compare view in their
+# place, D28). The legacy ::dock_* / ::chat_shown / ::search_shown globals are
+# refreshed from the sites here so menus and read-only call sites stay correct.
+proc apply_layout {} {
+	set ds [rio::layout::dockside]                 ;# left|right — the files/git side
+	set ::dock_side  $ds
+	set ::dock_pane  [rio::layout::get $ds active]
+	set ::chat_shown [rio::layout::get [rio::layout::site_of chat] visible]
+	set ::search_shown [rio::layout::get bottom visible]
+
+	catch {pack forget .dock .sash .chat .csash .groups .cmp .results}
+	# The dock, on its side, shown when that site is visible (v1: always for the
+	# left home; on the right it shares the site's visibility with chat — the
+	# accepted double-right delta, decision 1a).
+	if {[rio::layout::get $ds visible]} {
+		pack .dock -side $ds -fill y
+		pack .sash -side $ds -fill y              ;# between the dock and the editor
+		.dock configure -width [rio::layout::get $ds size]
+		pack forget .dock.files .dock.git
+		pack .dock.$::dock_pane -side top -fill both -expand 1
+	}
 	if {$::chat_shown} {
-		pack .chat  -side right -fill y       ;# chat column on the right (D14)
-		pack .csash -side right -fill y       ;# between the editor and the chat
+		pack .chat  -side right -fill y           ;# chat column on the right (D14)
+		pack .csash -side right -fill y           ;# between the editor and the chat
+		.chat configure -width [rio::layout::get right size]
 	}
 	# The center is the editor-group container, or the compare view in its place
 	# while comparing (D28). The container itself holds one or two groups (D33).
@@ -1434,7 +1565,25 @@ proc place_dock {} {
 	} else {
 		pack .groups -side left -fill both -expand 1
 	}
+	if {$::search_shown} { pack .results -after .status -side bottom -fill x }
 	prefs_save
+}
+
+# Move the files/git dock to `side` (View ▸ Dock Left/Right). Carries the active
+# files|git choice and the dock's size; the other side keeps its remaining tenants
+# (e.g. chat). normalize repairs membership/actives; moving there implies showing.
+proc dock_set_side {side} {
+	if {$side ni {left right}} return
+	set cur  [rio::layout::dockside]
+	set pane [rio::layout::get $cur active]
+	set size [rio::layout::get $cur size]
+	dict set ::layout sites $cur  panels [rio::layout::_without [rio::layout::get $cur panels]  {files git}]
+	dict set ::layout sites $side panels [concat {files git} [rio::layout::_without [rio::layout::get $side panels] {files git}]]
+	dict set ::layout sites $side active $pane
+	dict set ::layout sites $side size $size
+	dict set ::layout sites $side visible 1
+	set ::layout [rio::layout::normalize $::layout]
+	apply_layout
 }
 
 # Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are
@@ -1804,9 +1953,12 @@ proc chat_clear {} {
 	set ::chat_turn_open 0
 }
 
-# Show/hide the chat pane (driven by the View-menu checkbutton's ::chat_shown).
+# Show/hide the chat pane (driven by the View-menu checkbutton / Ctrl+Shift+A,
+# which flip the ::chat_shown mirror). Push that into the chat site's visibility,
+# then re-derive; apply_layout syncs the mirror back so the two never drift.
 proc apply_chat_visibility {} {
-	place_dock
+	rio::layout::put [rio::layout::site_of chat] visible $::chat_shown
+	apply_layout
 	if {$::chat_shown} { focus .chat.input }
 }
 
@@ -1862,7 +2014,7 @@ proc clamp_input_height {} {
 # ---------------------------------------------------------------------------
 # The compare / diff view (AGENTS.md D28; D13/D14 anticipated it). Two read-only
 # panes side by side with line-level diff coloring, shown in the center INSTEAD
-# of the editor while comparing (place_dock swaps .ed <-> .cmp). A dumb view
+# of the editor while comparing (apply_layout swaps .ed <-> .cmp). A dumb view
 # (D3): the line alignment comes from the core diff.lines op; this only renders
 # it. Filler rows keep equal lines level across the panes (VSCode-style). The
 # right/proposed side is read-only for now — an editable temp buffer and a real
@@ -1877,7 +2029,7 @@ proc compare_open {ltext rtext llabel rlabel} {
 	cmp_fill $ops [split $ltext "\n"] [split $rtext "\n"]
 	cmp_apply_wrap
 	set ::compare_shown 1
-	place_dock
+	apply_layout
 	.cmp.l.t yview moveto 0
 	.cmp.r.t yview moveto 0
 }
@@ -1921,7 +2073,7 @@ proc cmp_yscroll {which lo hi} {
 proc compare_close {} {
 	if {!$::compare_shown} return
 	set ::compare_shown 0
-	place_dock
+	apply_layout
 	focus [gget $::focus path]
 }
 
@@ -2307,8 +2459,8 @@ set ::search_replace 0        ;# the replace row shown? (Ctrl+H, like the find b
 proc search_open {{seed __sel__}} {
 	set root ""
 	catch { set root [dict get [rio_result project.get {}] root] }
-	set ::search_shown 1
-	pack .results -after .status -side bottom -fill x
+	rio::layout::put bottom visible 1     ;# the bottom site's tenant; apply_layout packs it
+	apply_layout
 	if {$seed eq "__sel__"} {
 		catch {
 			set sel [[gw $::focus] get sel.first sel.last]
@@ -2332,8 +2484,8 @@ proc search_open {{seed __sel__}} {
 # Hide the panel and hand focus back to the editor.
 proc search_close {} {
 	if {!$::search_shown} return
-	set ::search_shown 0
-	pack forget .results
+	rio::layout::put bottom visible 0
+	apply_layout
 	focus [gget $::focus path]
 }
 
@@ -3844,36 +3996,39 @@ proc prefs_load {} {
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
-	if {[dict exists $d chat_shown]} { set ::chat_shown [expr {[dict get $d chat_shown] ? 1 : 0}] }
-	if {[dict exists $d dock_side] && [dict get $d dock_side] in {left right}} {
-		set ::dock_side [dict get $d dock_side]
-	}
-	if {[dict exists $d dock_pane] && [dict get $d dock_pane] in {files git}} {
-		set ::dock_pane [dict get $d dock_pane]
+	# The dock layout (D35 step b): adopt a persisted `layout` object, or migrate the
+	# pre-step-(b) flat keys (dock_side/dock_pane/chat_shown) forward. normalize repairs
+	# either into a well-formed layout (and boots the Search strip hidden).
+	if {[dict exists $d layout]} {
+		set ::layout [rio::layout::normalize [dict get $d layout]]
+	} else {
+		set ::layout [rio::layout::normalize [rio::layout::migrate $d]]
 	}
 	if {[dict exists $d editmode]} { set ::edit_mode [dict get $d editmode] }
 }
 
 # Persist the current preferences. Called from each view-state applier (do_theme,
-# apply_wrap, place_dock, show_pane) — the single choke point per setting — so any
-# menu or keyboard toggle records itself. Values are flat strings (rio::wire::obj);
-# 0/1 flags read back cleanly through expr.
+# apply_wrap, apply_layout, show_pane) — the single choke point per setting — so any
+# menu or keyboard toggle records itself. Scalars are flat strings (rio::wire::obj);
+# the dock arrangement rides as the nested `layout` object (D35 step b), which
+# replaced the old dock_side/dock_pane/chat_shown flags outright (clean cut,
+# decision 3). 0/1 flags read back cleanly through expr.
 proc prefs_save {} {
 	if {!$::rio_started} return
 	set path [prefs_path]
 	if {$path eq ""} return
 	catch {
 		file mkdir [file dirname $path]
-		set json [rio::wire::obj [dict create \
+		set scalars [rio::wire::obj [dict create \
 			theme       $::theme_name \
 			wrap        $::wrap_lines \
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
 			column_edit $::col_on \
-			dock_side  $::dock_side \
-			dock_pane  $::dock_pane \
-			chat_shown $::chat_shown \
 			editmode   $::edit_mode]]
+		# scalars minus its trailing brace, then the layout member and a final closing
+		# brace (backslash-escaped so this literal brace does not end the catch body).
+		set json "[string range $scalars 0 end-1],\"layout\":[rio::layout::json]\}"
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
 		puts -nonewline $f $json ; close $f
 	}
@@ -4738,7 +4893,7 @@ proc extw_source_remove {} {
 # (Tabs are no longer a single top bar; each editor group draws its own strip, D33.)
 
 # The side dock: a selector row (Files | Git) above the two pane bodies, of which
-# show_pane packs exactly one. place_dock decides which edge it sits on.
+# show_pane packs exactly one. apply_layout decides which edge it sits on.
 # propagate off so the dock keeps a STABLE width regardless of which pane shows —
 # otherwise the git pane's diff (editor font) is physically wider than the file
 # list (UI font) at the same column count, and the whole window jumps on switch.
@@ -4837,11 +4992,13 @@ pack .dock.git.commit.go  -side right -padx {2 4} -pady 2
 pack .dock.git.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
 bind .dock.git.commit.msg <Return> git_commit
 
-# A thin draggable divider between the dock and the editor. place_dock parks it on
+# A thin draggable divider between the dock and the editor. apply_layout parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which
 # -expands, absorbs the difference). The resize cursor on hover advertises the grip.
 frame .sash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .sash <B1-Motion> sash_drag
+# Record the dock's final width into its site on release (sizes persist now, D35 b).
+bind .sash <ButtonRelease-1> { rio::layout::put [rio::layout::dockside] size [winfo width .dock] ; prefs_save }
 
 # The editor region (AGENTS.md D33). The center is a .groups panedwindow that holds one
 # or two editor GROUPS side by side with a draggable divider; each group is an
@@ -5651,7 +5808,7 @@ relayout_groups
 
 # The compare / diff view (AGENTS.md D28): two read-only text panes side by side
 # with a single shared vertical scrollbar, packed in the center INSTEAD of .ed
-# while comparing (place_dock). Built here with bootstrap colours; apply_theme
+# while comparing (apply_layout). Built here with bootstrap colours; apply_theme
 # recolours them and configures the del/add/filler row tags. cmp_fill renders the
 # core diff.lines alignment into the panes.
 frame .cmp
@@ -5683,7 +5840,7 @@ foreach w {.cmp.l.t .cmp.r.t} {
 	bind $w <Escape>     {compare_close ; break}
 }
 
-# The agent chat pane (built here; place_dock packs it on the right when shown,
+# The agent chat pane (built here; apply_layout packs it on the right when shown,
 # apply_theme colours it via the chat.* roles + RioChatFont). propagate off so a
 # fixed -width holds across content, like the dock. A header (Agent + Clear) on
 # top, the composer (input + Send) at the bottom, the transcript filling between.
@@ -5751,6 +5908,8 @@ pack .chat.log    -side left   -fill both -expand 1
 # A thin draggable divider between the editor and the chat pane (mirror of .sash).
 frame .csash -width 5 -cursor sb_h_double_arrow -background "#bbbbbb"
 bind .csash <B1-Motion> csash_drag
+# Record the chat column's final width into the right site on release (D35 b).
+bind .csash <ButtonRelease-1> { rio::layout::put right size [winfo width .chat] ; prefs_save }
 
 # The find/replace bar (D36): built hidden; find_open packs it above the status
 # bar. Row 0 finds, row 1 replaces (gridded away in find-only mode). Plain
@@ -5876,7 +6035,7 @@ bind .results.rep.e    <Control-h> {search_show_replace 0 ; focus .results.hdr.e
 bind .results.hdr.close <Button-1> search_close
 
 # Register the four tool panes now that their body widgets exist (AGENTS.md D35 step
-# (a)). Placement is still owned by place_dock / show_pane / search_open — this only
+# (a)). Placement is still owned by apply_layout / show_pane — this only
 # declares each pane as data and gives its refresh a name. Files and git are separate
 # panels sharing today's side dock; chat is event-driven (no batch refresh hook).
 rio::panel::register files  {title Files  site left   body .dock.files refresh populate_nav}
@@ -5887,7 +6046,7 @@ rio::panel::register search {title Search site bottom body .results    refresh s
 label .status -anchor w -font {monospace 9} -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .status -side bottom -fill x
-# .dock and .groups are packed by place_dock at startup (so the dock side is live);
+# .dock and .groups are packed by apply_layout at startup (so the dock side is live);
 # each group's tab strip lives inside its own frame (D33), not in a global top bar.
 focus [gget 0 path]
 
@@ -5927,8 +6086,8 @@ menu .m.view -tearoff 0
 .m.view add command -label "Show Files" -accelerator [key_accel show-files] -command {show_pane files}
 .m.view add command -label "Show Git"   -accelerator [key_accel show-git]   -command {show_pane git}
 .m.view add separator
-.m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command place_dock
-.m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command place_dock
+.m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command {dock_set_side left}
+.m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command {dock_set_side right}
 .m.view add separator
 .m.view add checkbutton -label "Wrap Lines" -accelerator [key_accel toggle-wrap] \
 	-variable ::wrap_lines -command apply_wrap
@@ -6025,8 +6184,9 @@ themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (
 # folder (project.open) and let the core judge; files are reached via the tree (D29).
 set ::nav_dir ""           ;# rl_* list state was initialised at widget construction
 adopt_initial_buffers      ;# take over the core's existing buffer(s) (D29)
-place_dock                 ;# pack the dock (default left) and the editor
-show_pane $::dock_pane     ;# default files; also does the first populate
+apply_layout               ;# derive placement from the migrated/seeded layout (D35 b)
+rio::panel::refresh $::dock_pane   ;# first populate of the dock's active pane
+style_selector             ;# highlight the active files/git selector label
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
 apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
 apply_line_numbers         ;# grid each group's gutter to ::line_numbers (default on)

@@ -328,10 +328,11 @@ ok "dock: width stable on switch"  [expr {abs($wg - $wf) < 8}] 1
 show_pane files
 
 ok "dock: default side is left"   [dict get [pack info .dock] -side] left
-set ::dock_side right ; place_dock
+dock_set_side right
 ok "dock: moved to the right"     [dict get [pack info .dock] -side] right
+ok "dock: mirror follows"         $::dock_side right
 ok "dock: editor still expands"   [dict get [pack info .groups] -expand] 1
-set ::dock_side left ; place_dock
+dock_set_side left
 ok "dock: back to the left"       [dict get [pack info .dock] -side] left
 
 # The sash sits between the dock and the editor (same edge as the dock), and a
@@ -1073,6 +1074,67 @@ set ::dock_pane files
 rio::panel::refresh chat        ;# no hook — must be a harmless no-op
 ok "panel: chat refresh no-op"  $::_git_refreshed 0
 rename refresh_git {} ; rename _real_refresh_git refresh_git
+
+# --- D35 step (b): the persisted layout object + apply_layout derivation --------
+set _layout_save $::layout      ;# restore at the end so we don't disturb prior state
+
+# Migration from the pre-step-(b) flat keys. Empty prefs -> the default arrangement.
+set m0 [rio::layout::normalize [rio::layout::migrate {}]]
+ok "layout: default dock on left"  [expr {"files" in [dict get $m0 sites left panels]}] 1
+ok "layout: default chat shown"    [dict get $m0 sites right visible] 1
+ok "layout: search boots hidden"   [dict get $m0 sites bottom visible] 0
+# dock_side=right + chat off: files/git unify into the right site (decision 1a),
+# git is the active pane, and the right site is hidden (chat_shown=0).
+set mr [rio::layout::normalize [rio::layout::migrate {dock_side right dock_pane git chat_shown 0}]]
+ok "layout: migrate dock to right" [expr {"files" in [dict get $mr sites right panels] && "git" in [dict get $mr sites right panels]}] 1
+ok "layout: migrate active git"    [dict get $mr sites right active] git
+ok "layout: migrate right hidden"  [dict get $mr sites right visible] 0
+ok "layout: migrate left emptied"  [dict get $mr sites left panels] {}
+
+# normalize repairs a partial layout: a panel missing from every site returns to
+# its registry-preferred site, and the bottom strip is forced hidden.
+set bad {sites {left {panels files active files visible 1 size 220} right {panels {} active {} visible 1 size 340} bottom {panels {} active {} visible 1 size 160}}}
+set fixed [rio::layout::normalize $bad]
+ok "layout: repair restores git"   [expr {"git" in [dict get $fixed sites left panels]}] 1
+ok "layout: repair restores chat"  [expr {"chat" in [dict get $fixed sites right panels]}] 1
+ok "layout: repair restores search" [expr {"search" in [dict get $fixed sites bottom panels]}] 1
+ok "layout: repair forces hidden"  [dict get $fixed sites bottom visible] 0
+
+# JSON round-trip: encode ::layout, parse it back, and the arrangement survives.
+set dec [rio::layout::normalize [json::json2dict [rio::layout::json]]]
+ok "layout: json roundtrip side"   [dict get $dec sites left panels] [dict get $::layout sites left panels]
+ok "layout: json roundtrip active" [dict get $dec sites left active] [dict get $::layout sites left active]
+
+# apply_layout derives real placement from the state. Search strip = bottom.visible.
+proc _packed {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
+search_close
+ok "search: closed to start"       $::search_shown 0
+search_open "zztok"
+ok "search: open sets flag"        $::search_shown 1
+ok "search: bottom visible state"  [rio::layout::get bottom visible] 1
+ok "search: results strip packed"  [_packed .results] 1
+search_close
+ok "search: close clears flag"     $::search_shown 0
+ok "search: results strip gone"    [_packed .results] 0
+
+# Chat visibility flows through the right site.
+set ::chat_shown 0 ; apply_chat_visibility
+ok "chat: hide -> site hidden"     [rio::layout::get right visible] 0
+ok "chat: hide -> unpacked"        [_packed .chat] 0
+set ::chat_shown 1 ; apply_chat_visibility
+ok "chat: show -> site visible"    [rio::layout::get right visible] 1
+ok "chat: show -> packed"          [_packed .chat] 1
+
+# Sizes are state-driven and persisted (were ephemeral before step b).
+rio::layout::put left size 250 ; apply_layout
+ok "size: dock width derived"      [.dock cget -width] 250
+prefs_save
+set pf [open [prefs_path] r] ; set pj [json::json2dict [::read $pf]] ; close $pf
+ok "prefs: layout object written"  [dict exists $pj layout] 1
+ok "prefs: flat keys clean-cut"    [expr {[dict exists $pj dock_side] || [dict exists $pj chat_shown]}] 0
+ok "prefs: size persisted"         [dict get $pj layout sites left size] 250
+
+set ::layout $_layout_save ; apply_layout    ;# restore the pre-block arrangement
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
