@@ -5501,8 +5501,10 @@ proc col_bars_draw {L1 L2 C} {
 		lassign $xy x y h
 		set b $w.colbar$L
 		catch {destroy $b}
-		frame $b -background $fg -bd 0 -width 2 -height $h
-		place $b -in $w -x $x -y $y -width 2 -height $h
+		# 1px wide and nudged one pixel left of the glyph edge, so the caret sits in
+		# the gap BEFORE the column rather than striking through the character there.
+		frame $b -background $fg -bd 0 -width 1 -height $h
+		place $b -in $w -x [expr {$x - 1}] -y $y -width 1 -height $h
 		lappend ::col_bars $b
 	}
 	set ::col_blink_on 1
