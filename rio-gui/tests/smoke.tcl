@@ -1104,13 +1104,15 @@ ok "layout: migrate right hidden"  [dict get $mr sites right visible] 0
 ok "layout: migrate left emptied"  [dict get $mr sites left panels] {}
 
 # normalize repairs a partial layout: a panel missing from every site returns to
-# its registry-preferred site, and the bottom strip is forced hidden.
+# its registry-preferred site. It PRESERVES visibility now (the boot-only hide of
+# the bottom strip moved to `boot`, so a runtime move to the bottom shows).
 set bad {sites {left {panels files active files visible 1 size 220} right {panels {} active {} visible 1 size 340} bottom {panels {} active {} visible 1 size 160}}}
 set fixed [rio::layout::normalize $bad]
 ok "layout: repair restores git"   [expr {"git" in [dict get $fixed sites left panels]}] 1
 ok "layout: repair restores chat"  [expr {"chat" in [dict get $fixed sites right panels]}] 1
 ok "layout: repair restores search" [expr {"search" in [dict get $fixed sites bottom panels]}] 1
-ok "layout: repair forces hidden"  [dict get $fixed sites bottom visible] 0
+ok "layout: normalize keeps visible" [dict get $fixed sites bottom visible] 1
+ok "layout: boot hides bottom"     [dict get [rio::layout::boot $bad] sites bottom visible] 0
 
 # JSON round-trip: encode ::layout, parse it back, and the arrangement survives.
 set dec [rio::layout::normalize [json::json2dict [rio::layout::json]]]
@@ -1173,6 +1175,29 @@ ok "c1b: search body active first"  [list [site_shows bottom .results] [site_sho
 site_tab_click bottom git
 ok "c1b: git body after tab click"  [list [site_shows bottom .pgit] [site_shows bottom .results]] {1 0}
 set ::layout $_layout_c1b ; apply_layout
+
+# --- D35 c2: relocate a panel to another site (the "Move to" gesture) ----------
+set _layout_c2 $::layout
+# Move the git panel down to the bottom site: it leaves the left, lands in the
+# bottom as its active tab, and the bottom becomes visible (a move shows the site).
+panel_move git bottom
+ok "c2: git left the left site"     [expr {"git" ni [rio::layout::get left panels]}] 1
+ok "c2: git in the bottom site"     [expr {"git" in [rio::layout::get bottom panels]}] 1
+ok "c2: bottom now visible"         [rio::layout::get bottom visible] 1
+ok "c2: git is the active tab"      [rio::layout::get bottom active] git
+ok "c2: git body shown at bottom"   [site_shows bottom .pgit] 1
+ok "c2: files still on the left"    [rio::layout::get left panels] files
+# Bring the Agent onto the LEFT with files — the symmetry the dock-side toggle
+# couldn't reach (chat had no mover before c2).
+panel_move chat left
+ok "c2: chat joined the left site"  [expr {"chat" in [rio::layout::get left panels]}] 1
+ok "c2: left strip has a chat tab"  [winfo exists .siteleft.tabs.chat] 1
+ok "c2: chat mirror follows site"   $::chat_shown 1
+# A no-op move (already there, or an unknown target) leaves the layout untouched.
+set snap $::layout
+panel_move chat left ; panel_move chat nowhere
+ok "c2: no-op move is inert"        $::layout $snap
+set ::layout $_layout_c2 ; apply_layout
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

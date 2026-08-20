@@ -2068,9 +2068,20 @@ site's size on release); `show_pane` is a thin alias for a dock-site tab click; 
 is pinned to files|git even when a shared site's active tab is another panel. Structurally
 verified headless (smoke 332: uniform strips, tab activation, and search+git rendering as one
 strip; the dock/chat/search suites now run through the site model) — but the **visual result
-is not headless-verifiable** and wants a live look. Still to come: **c2** the right-click
-"Move to" relocation, **c3** tab drag, and folding the Search query row into the bottom
-site's chrome.
+is not headless-verifiable** and wants a live look.
+
+**Step (c2) — built (relocation via "Move to").** Every tab now takes a right-click →
+**Move to ▸ Left / Right / Bottom** (the current site greyed out): `panel_move {id target}`
+pulls the panel from its site, appends it to the target as that site's active tab, shows the
+target, and repairs the vacated site. This is what makes the sites *rearrangeable* and
+resolves the asymmetry c1 left: the "Dock Left/Right" menu item only ever moved the files/git
+*pair*, so chat was stuck on the right; `panel_move` moves **any** panel to **any** site — the
+Agent can now join the left dock beside Files/Git, git can go to the bottom beside Search,
+etc. A key refactor rode along: the "Search boots hidden" policy (decision 2) moved out of
+`normalize` into a new `boot` (used only at `prefs_load`), so a runtime move *to* the bottom
+stays visible while a persisted-open Search still boots hidden. Smoke covers the move, the
+chat-to-left symmetry, and no-op guards. Still to come: **c3** tab drag (the same relocation
+by dragging a tab), and folding the Search query row into the bottom site's chrome.
 
 ---
 
