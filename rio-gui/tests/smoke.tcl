@@ -772,9 +772,11 @@ file delete -force $xdir
 # (rio::agent::provider_name, rio::claude::api::configured) directly.
 # The editor center (.groups / the .cmp compare view) packs straight into the toplevel.
 proc center_shows {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
-# chat is the right site's tenant now (D35 c1b): shown = its body packed there.
+# chat is the right site's tenant now (D35 c1b): shown = its body packed there. (The
+# first-run default hides it — asserted on layout::default below; the dock-side ops
+# above left the right site visible here, so it's on screen for the toggle checks.)
 proc chat_shown {} { expr {[lsearch -exact [pack slaves .siteright.body] .chat] >= 0} }
-ok "chat: shown by default"          [chat_shown]  1
+ok "chat: shown while site visible"  [chat_shown]  1
 set ::chat_shown 0 ; apply_chat_visibility
 ok "chat: toggles off"               [chat_shown]  0
 set ::chat_shown 1 ; apply_chat_visibility
@@ -1096,10 +1098,20 @@ rename refresh_git {} ; rename _real_refresh_git refresh_git
 # --- D35 step (b): the persisted layout object + apply_layout derivation --------
 set _layout_save $::layout      ;# restore at the end so we don't disturb prior state
 
-# Migration from the pre-step-(b) flat keys. Empty prefs -> the default arrangement.
+# The first-run default a brand-new user sees (no prefs): Files shown left, Git a
+# background tab there, Agent hidden right, Search hidden bottom. Everything else persists.
+set dfl [rio::layout::default]
+ok "default: files site shown"     [dict get $dfl sites left visible] 1
+ok "default: files is active"      [dict get $dfl sites left active] files
+ok "default: agent hidden"         [dict get $dfl sites right visible] 0
+ok "default: search hidden"        [dict get $dfl sites bottom visible] 0
+
+# Migration from the pre-step-(b) flat keys preserves an UPGRADER's old experience
+# (chat was shown by default before the layout object), distinct from the new first-run
+# default above. Empty prefs -> the migrate default arrangement.
 set m0 [rio::layout::normalize [rio::layout::migrate {}]]
 ok "layout: default dock on left"  [expr {"files" in [dict get $m0 sites left panels]}] 1
-ok "layout: default chat shown"    [dict get $m0 sites right visible] 1
+ok "migrate: empty keeps chat shown" [dict get $m0 sites right visible] 1
 ok "layout: search boots hidden"   [dict get $m0 sites bottom visible] 0
 # dock_side=right + chat off: files/git unify into the right site (decision 1a),
 # git is the active pane, and the right site is hidden (chat_shown=0).
@@ -1149,6 +1161,20 @@ ok "chat: hide -> unpacked"        [_packed .chat right] 0
 set ::chat_shown 1 ; apply_chat_visibility
 ok "chat: show -> site visible"    [rio::layout::get right visible] 1
 ok "chat: show -> packed"          [_packed .chat right] 1
+
+# panel_toggle is the View-menu show/hide path. A solo pane (chat in right) hides its
+# whole site and reveals it again; the ::shown_* mirror the checkmarks read follows.
+panel_toggle chat
+ok "toggle: chat hides"             [list [rio::layout::shown chat] $::shown_chat] {0 0}
+panel_toggle chat
+ok "toggle: chat shows again"       [list [rio::layout::shown chat] $::shown_chat] {1 1}
+# A SHARED site (files+git on the left): toggling the shown pane yields to its sibling
+# so the dock stays open on the other pane — it never hides a sibling unexpectedly.
+panel_reveal files
+panel_toggle files
+ok "toggle: shared yields to sibling" [list [rio::layout::get left visible] [rio::layout::get left active]] {1 git}
+ok "toggle: sibling now shown"        [list $::shown_files $::shown_git] {0 1}
+panel_reveal files
 
 # Sizes are state-driven and persisted (were ephemeral before step b).
 rio::layout::put left size 250 ; apply_layout

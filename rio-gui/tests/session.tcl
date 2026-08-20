@@ -70,24 +70,30 @@ apply_wrap
 ok "prefs: applier wrote the file" [file exists [prefs_path]] 1
 ok "prefs: wrap recorded" [dict get [json::json2dict [slurp [prefs_path]]] wrap] 1
 
-# Full round-trip: set every field off its default, save, wipe the vars, reload.
+# Full round-trip. Scalars (theme, wrap, wrap_indent) persist directly; the dock
+# arrangement rides as the `layout` object — the flat dock_side/dock_pane/chat_shown
+# keys were retired (decision 3), so it's the object, not those mirrors, that round-trips.
+# Set a distinctive state (dock on the RIGHT, git active, Search open), save, wipe, reload.
 set ::theme_name solarized-dark
 set ::wrap_lines 1
 set ::wrap_indent 1
-set ::dock_side  right
-set ::dock_pane  git
-set ::chat_shown 0
+dock_set_side right                ;# files+git -> the right site
+rio::layout::put right active git  ;# git the active tab
+rio::layout::put right size 400    ;# a distinctive dock width (sizes persist, boot-safe)
+apply_layout                       ;# derive the mirrors + persist
 prefs_save
-# clobber the live vars, then load them back from disk
-set ::theme_name default ; set ::wrap_lines 0 ; set ::wrap_indent 0 ; set ::dock_side left
-set ::dock_pane files ; set ::chat_shown 1
-prefs_load
-ok "prefs: theme reloaded"      $::theme_name solarized-dark
-ok "prefs: wrap reloaded"       $::wrap_lines  1
+# clobber the live state IN MEMORY (no apply_layout — that would prefs_save over the
+# file we just wrote), then load it back from disk and re-derive.
+set ::theme_name default ; set ::wrap_lines 0 ; set ::wrap_indent 0
+set ::layout [rio::layout::default]
+ok "prefs: pre-reload is default" [rio::layout::dockside] left
+prefs_load ; apply_layout
+ok "prefs: theme reloaded"       $::theme_name solarized-dark
+ok "prefs: wrap reloaded"        $::wrap_lines  1
 ok "prefs: wrap_indent reloaded" $::wrap_indent 1
-ok "prefs: dock_side reloaded"  $::dock_side   right
-ok "prefs: dock_pane reloaded"  $::dock_pane   git
-ok "prefs: chat_shown reloaded" $::chat_shown  0
+ok "prefs: dock side reloaded"   $::dock_side   right
+ok "prefs: dock pane reloaded"   $::dock_pane   git
+ok "prefs: dock size reloaded"   [rio::layout::get right size] 400
 
 # A corrupt prefs file is ignored, not fatal: load leaves the current vars intact.
 spit [prefs_path] "@@ not json @@"

@@ -134,7 +134,10 @@ set ::col_bars {}      ;# placed thin caret-bar frames (zero-width column, one/l
 set ::col_blink ""     ;# after-id of the caret blink loop ("" when not blinking)
 set ::col_blink_on 1   ;# blink phase: bars shown (1) or hidden (0)
 set ::col_insw ""      ;# saved widget -insertwidth while the native bar is hidden
-set ::chat_shown 1     ;# agent chat pane visible? (View menu / Ctrl+Shift+A)
+set ::chat_shown 1     ;# agent chat pane visible? (a site-visibility mirror; apply_chat_visibility)
+# Per-pane "shown" mirrors for the View-menu toggle checkbuttons: 1 when the pane's
+# site is visible AND the pane is its active tab. apply_layout keeps them in sync.
+set ::shown_files 0 ; set ::shown_git 0 ; set ::shown_chat 0 ; set ::shown_search 0
 set ::edit_mode windows   ;# active editing mode (D38/D41): windows ships; emacs/vi & other drop-ins install as extensions
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
@@ -210,10 +213,13 @@ namespace eval rio::layout {}
 
 # The seed layout — also the normalize/migrate base. Side widths (220 dock,
 # 340 chat), bottom height (160 search).
+# The first-run layout a brand-new user sees (no prefs yet): Files shown on the left
+# (Git a background tab beside it), the Agent hidden on the right, Search hidden at the
+# bottom. Everything past this is the user's own choice and persists (prefs.json).
 proc rio::layout::default {} {
 	return [dict create sites [dict create \
 		left   [dict create panels {files git} active files  visible 1 size 220] \
-		right  [dict create panels {chat}      active chat   visible 1 size 340] \
+		right  [dict create panels {chat}      active chat   visible 0 size 340] \
 		bottom [dict create panels {search}    active search visible 0 size 160]]]
 }
 proc rio::layout::get {site key}   { dict get $::layout sites $site $key }
@@ -231,6 +237,14 @@ proc rio::layout::dockside {} { return [site_of files] }
 proc rio::layout::_without {list ids} {
 	set out {} ; foreach x $list { if {$x ni $ids} { lappend out $x } }
 	return $out
+}
+# Is panel `id` shown on screen — its site visible AND it the active tab? (A
+# background tab in a visible site is present but not shown.) The View-menu toggle
+# checkbuttons and panel_toggle read this.
+proc rio::layout::shown {id} {
+	set s [site_of $id]
+	if {$s eq ""} { return 0 }
+	return [expr {[get $s visible] && [get $s active] eq $id}]
 }
 
 # Build a layout from the pre-step-(b) flat keys, over the default: dock_pane ->
@@ -1547,8 +1561,32 @@ proc panel_reveal {id} {
 	apply_layout
 	rio::panel::refresh $id
 }
-# Back-compat: "show the files/git pane" (Ctrl+E/G, the View menu) is now a reveal.
+# Back-compat: "show the files/git pane" (Ctrl+E/G) is a reveal (idempotent "go to").
 proc show_pane {which} { panel_reveal $which }
+
+# Show/hide a pane — the View-menu checkbuttons' toggle. If the pane is shown (its
+# site visible and it the active tab), hide it: the whole site when the pane is its
+# only tenant, else just yield to a sibling tab so a shared dock (files+git) stays
+# open on the other pane. If it's not shown (site hidden, or a background tab),
+# reveal it. Re-derive; apply_layout resyncs the ::shown_* mirrors so the checkmarks
+# match reality (correcting the checkbutton's own optimistic flip).
+proc panel_toggle {id} {
+	set s [rio::layout::site_of $id]
+	if {$s eq ""} return
+	if {[rio::layout::shown $id]} {
+		set rest [rio::layout::_without [rio::layout::get $s panels] [list $id]]
+		if {[llength $rest] == 0} {
+			rio::layout::put $s visible 0
+		} else {
+			rio::layout::put $s active [lindex $rest 0]
+		}
+	} else {
+		rio::layout::put $s visible 1
+		rio::layout::put $s active $id
+	}
+	apply_layout
+	rio::panel::refresh $id
+}
 
 # Draw site `site`'s host tab strip: one label per docked panel (its registry
 # title), the active one highlighted like a selected tab. Rebuilt from scratch each
@@ -1621,6 +1659,8 @@ proc apply_layout {} {
 	set ::dock_pane  [expr {$da in {files git} ? $da : "files"}]
 	set ::chat_shown [rio::layout::get [rio::layout::site_of chat] visible]
 	set ::search_shown [rio::layout::get bottom visible]
+	# Per-pane shown mirrors for the View-menu toggle checkmarks (site visible + active tab).
+	foreach _p {files git chat search} { set ::shown_$_p [rio::layout::shown $_p] }
 
 	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .bsash .groups .cmp}
 	foreach id [rio::panel::ids] { catch {pack forget [rio::panel::field $id body]} }
@@ -5664,7 +5704,7 @@ set ::keymap_default {
 	show-git       {Control-G            {show_pane git}                                               "Show git pane"}
 	toggle-wrap    {Control-W            {set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap}        "Toggle line wrap"}
 	toggle-linenums {Control-l           {set ::line_numbers [expr {!$::line_numbers}] ; apply_line_numbers} "Toggle line numbers"}
-	toggle-chat    {Control-A            {set ::chat_shown [expr {!$::chat_shown}] ; apply_chat_visibility} "Toggle agent chat"}
+	toggle-chat    {Control-A            {panel_toggle chat}                                           "Toggle agent pane"}
 	split-editor   {Control-backslash    toggle_split                                                  "Toggle editor split"}
 	move-tab-other {Control-bracketright move_tab_other                                                "Move tab to other group"}
 }
@@ -5820,10 +5860,10 @@ proc keymap_refresh_menus {} {
 	.m.edit entryconfigure "Find Next"     -accelerator [key_accel find-next]
 	.m.edit entryconfigure "Find Previous" -accelerator [key_accel find-prev]
 	.m.edit entryconfigure "Search…" -accelerator [key_accel search]
-	.m.view entryconfigure "Show Files"   -accelerator [key_accel show-files]
-	.m.view entryconfigure "Show Git"     -accelerator [key_accel show-git]
+	.m.view entryconfigure "Files"        -accelerator [key_accel show-files]
+	.m.view entryconfigure "Git"          -accelerator [key_accel show-git]
+	.m.view entryconfigure "Agent"        -accelerator [key_accel toggle-chat]
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
-	.m.view entryconfigure "Agent Chat"   -accelerator [key_accel toggle-chat]
 	.m.view entryconfigure "Split Editor" -accelerator [key_accel split-editor]
 	.m.view entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]
 }
@@ -6383,10 +6423,18 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Search…" -accelerator [key_accel search] -command search_open
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
-.m.view add command -label "Show Files"  -accelerator [key_accel show-files] -command {show_pane files}
-.m.view add command -label "Show Git"    -accelerator [key_accel show-git]   -command {show_pane git}
-.m.view add command -label "Show Agent"  -command {show_pane chat}
-.m.view add command -label "Show Search" -accelerator [key_accel search]     -command search_open
+# The four tool panes toggle from here — a checkmark shows whether each is currently
+# on screen (site visible + its active tab); clicking shows or hides it (panel_toggle).
+# Ctrl+E/G stay quick "reveal" keys (idempotent go-to); the Agent's Ctrl+Shift+A
+# toggles it (a solo pane, so no ambiguity).
+.m.view add checkbutton -label "Files"  -accelerator [key_accel show-files] \
+	-variable ::shown_files  -command {panel_toggle files}
+.m.view add checkbutton -label "Git"    -accelerator [key_accel show-git] \
+	-variable ::shown_git    -command {panel_toggle git}
+.m.view add checkbutton -label "Agent"  -accelerator [key_accel toggle-chat] \
+	-variable ::shown_chat   -command {panel_toggle chat}
+.m.view add checkbutton -label "Search" \
+	-variable ::shown_search -command {panel_toggle search}
 .m.view add separator
 .m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command {dock_set_side left}
 .m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command {dock_set_side right}
@@ -6397,8 +6445,6 @@ menu .m.view -tearoff 0
 	-variable ::wrap_indent -command apply_wrap_indent
 .m.view add checkbutton -label "Line Numbers" -accelerator [key_accel toggle-linenums] \
 	-variable ::line_numbers -command apply_line_numbers
-.m.view add checkbutton -label "Agent Chat" -accelerator [key_accel toggle-chat] \
-	-variable ::chat_shown -command apply_chat_visibility
 .m.view add separator
 .m.view add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
 .m.view add command -label "Unsplit Editor"        -command unsplit_editor

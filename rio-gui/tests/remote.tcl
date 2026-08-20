@@ -51,7 +51,7 @@ ok "remote: channel open"         [expr {[info exists ::core_chan] && $::core_ch
 # The agent runs in the core wherever it is, so it's available over a remote daemon
 # too — same GUI, the turn and any key just live server-side (D26/D30). The smoke
 # exercises a full agent turn over a socket; here we only confirm it isn't gated off.
-ok "remote: agent chat available" $::chat_shown 1
+ok "remote: agent chat available" [rio::panel::exists chat] 1
 
 # --- buffer.list adoption over the socket ------------------------------------
 # adopt_initial_buffers ran at startup: it pulled the server's open buffers via
