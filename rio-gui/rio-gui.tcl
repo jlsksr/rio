@@ -251,8 +251,9 @@ proc rio::layout::migrate {prefs} {
 # Repair a persisted or migrated layout into a well-formed one: fill missing
 # keys from the default, drop unknown sites, coerce `visible` to 0/1, ensure each
 # registered panel appears in exactly one site (unclaimed panels land in their
-# registry-preferred site), keep each `active` a real member, and force the
-# bottom (Search) site hidden at boot (decision 2 — it opens on demand).
+# registry-preferred site), and keep each `active` a real member. Used at runtime
+# after a relocation (panel_move / dock_set_side) — so a panel moved TO the bottom
+# stays visible; the boot-only "Search starts hidden" policy lives in `boot`.
 proc rio::layout::normalize {L} {
 	set out [default]
 	if {[dict exists $L sites]} {
@@ -285,6 +286,13 @@ proc rio::layout::normalize {L} {
 			dict set out sites $s active [expr {[llength $ps] ? [lindex $ps 0] : ""}]
 		}
 	}
+	return $out
+}
+# normalize + the boot-time policy: the Search (bottom) strip always starts hidden
+# (decision 2 — an on-demand surface), whatever was persisted. Used only at
+# prefs_load; runtime relocations use normalize so a panel moved to the bottom shows.
+proc rio::layout::boot {L} {
+	set out [normalize $L]
 	dict set out sites bottom visible 0
 	return $out
 }
@@ -1541,6 +1549,7 @@ proc render_tabs {site} {
 			-background [expr {$id eq $active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		pack $t -side left -padx 1 -pady 1
 		bind $t <Button-1> [list site_tab_click $site $id]
+		bind $t <Button-3> [list site_tab_menu $site $id %X %Y]   ;# Move to ▸ (D35 c2)
 	}
 }
 
@@ -1623,6 +1632,38 @@ proc dock_set_side {side} {
 	dict set ::layout sites $side visible 1
 	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
+}
+
+# Relocate one panel to another site (D35 c2 — the right-click "Move to" gesture).
+# The panel becomes its new site's active tab (so you see it land) and that site is
+# shown. normalize repairs the site it left (active/emptiness); a move to the bottom
+# stays visible because normalize — not boot — runs here. Refresh so it paints fresh.
+proc panel_move {id target} {
+	if {$target ni {left right bottom}} return
+	set from [rio::layout::site_of $id]
+	if {$from eq $target || $from eq ""} return
+	dict set ::layout sites $from   panels [rio::layout::_without [rio::layout::get $from panels] [list $id]]
+	dict set ::layout sites $target panels [concat [rio::layout::get $target panels] [list $id]]
+	dict set ::layout sites $target active $id
+	dict set ::layout sites $target visible 1
+	set ::layout [rio::layout::normalize $::layout]
+	apply_layout
+	rio::panel::refresh $id
+}
+
+# Pop the tab's context menu: move this panel to a site it isn't already in. Built
+# fresh each time (like the nav/git menus), so the current site is greyed out.
+proc site_tab_menu {site id X Y} {
+	catch {destroy .sitetabmenu}
+	menu .sitetabmenu -tearoff 0
+	menu .sitetabmenu.to -tearoff 0
+	.sitetabmenu add cascade -label "Move to" -menu .sitetabmenu.to
+	foreach {t label} {left Left right Right bottom Bottom} {
+		.sitetabmenu.to add command -label $label \
+			-state [expr {$t eq $site ? "disabled" : "normal"}] \
+			-command [list panel_move $id $t]
+	}
+	tk_popup .sitetabmenu $X $Y
 }
 
 # Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are
@@ -4034,9 +4075,9 @@ proc prefs_load {} {
 	# pre-step-(b) flat keys (dock_side/dock_pane/chat_shown) forward. normalize repairs
 	# either into a well-formed layout (and boots the Search strip hidden).
 	if {[dict exists $d layout]} {
-		set ::layout [rio::layout::normalize [dict get $d layout]]
+		set ::layout [rio::layout::boot [dict get $d layout]]
 	} else {
-		set ::layout [rio::layout::normalize [rio::layout::migrate $d]]
+		set ::layout [rio::layout::boot [rio::layout::migrate $d]]
 	}
 	if {[dict exists $d editmode]} { set ::edit_mode [dict get $d editmode] }
 }
