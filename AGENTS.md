@@ -1998,6 +1998,21 @@ bottom strips) into one layout manager reading the `layout` state; (c) introduce
 their tab strips, and move-a-panel-between-sites, driven by that state. D35 is "done" when a
 user can drag, say, the git panel to the bottom. Step (a) is the recommended opening move.
 
+**Step (a) — built.** The tool-panel registry landed (`rio::panel::*` in rio-gui.tcl): the
+four panes — **files**, **git**, **chat** (`Agent`), **search** — are *declared as data*
+(`{title, site, body, refresh}`) exactly like the core's highlighter/mode/rich-list
+registries, with `register` / `ids` / `exists` / `get` / `field` / `refresh` accessors. Each
+records its **preferred** site (files/git `left`, chat `right`, search `bottom` — the eventual
+D35 sites) as static defaults; the *actual, user-movable* placement is deliberately **not**
+modelled yet — that becomes step (b)'s persisted `layout` object (decision #4), the
+painful-to-retrofit schema, kept out of this slice. **No behaviour change:** `refresh_dock`
+and `show_pane` now route their repaint through `rio::panel::refresh $id` (one dispatch),
+`on_fs_changed`'s guarded fan-out is untouched, and placement still lives in `place_dock` /
+`show_pane` / `search_open`. The registry is the queryable-state seed (decision #6): smoke
+asserts a panel's identity/site/hook without a mapped window (19 checks). Steps (b) the layout
+manager and (c) the sites/tab-strips/drag remain later arcs (each its own branch), where the
+Search panel finally re-homes into the bottom site (D52) and the `layout` schema is settled.
+
 ---
 
 ### D36 — Find / Replace: the engine in the core, a bar in the GUI
