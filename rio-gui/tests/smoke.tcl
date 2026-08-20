@@ -772,11 +772,11 @@ file delete -force $xdir
 # (rio::agent::provider_name, rio::claude::api::configured) directly.
 # The editor center (.groups / the .cmp compare view) packs straight into the toplevel.
 proc center_shows {w} { expr {[lsearch -exact [pack slaves .] $w] >= 0} }
-# chat is the right site's tenant now (D35 c1b): shown = its body packed there. (The
-# first-run default hides it — asserted on layout::default below; the dock-side ops
-# above left the right site visible here, so it's on screen for the toggle checks.)
+# chat is the right site's tenant now (D35 c1b): shown = its body packed there. The
+# first-run default hides it (no tab), so reveal it before the toggle checks.
 proc chat_shown {} { expr {[lsearch -exact [pack slaves .siteright.body] .chat] >= 0} }
-ok "chat: shown while site visible"  [chat_shown]  1
+panel_reveal chat
+ok "chat: reveal shows it"           [chat_shown]  1
 set ::chat_shown 0 ; apply_chat_visibility
 ok "chat: toggles off"               [chat_shown]  0
 set ::chat_shown 1 ; apply_chat_visibility
@@ -1113,12 +1113,14 @@ set m0 [rio::layout::normalize [rio::layout::migrate {}]]
 ok "layout: default dock on left"  [expr {"files" in [dict get $m0 sites left panels]}] 1
 ok "migrate: empty keeps chat shown" [dict get $m0 sites right visible] 1
 ok "layout: search boots hidden"   [dict get $m0 sites bottom visible] 0
-# dock_side=right + chat off: files/git unify into the right site (decision 1a),
-# git is the active pane, and the right site is hidden (chat_shown=0).
+# dock_side=right + chat off: files/git unify into the right site (decision 1a), git is
+# the active pane; the dock shows, but the Agent tab is hidden (chat_shown=0) — per-pane
+# now, so the SITE stays visible for the dock rather than the whole thing collapsing.
 set mr [rio::layout::normalize [rio::layout::migrate {dock_side right dock_pane git chat_shown 0}]]
 ok "layout: migrate dock to right" [expr {"files" in [dict get $mr sites right panels] && "git" in [dict get $mr sites right panels]}] 1
 ok "layout: migrate active git"    [dict get $mr sites right active] git
-ok "layout: migrate right hidden"  [dict get $mr sites right visible] 0
+ok "layout: migrate chat hidden"   [expr {"chat" in [dict get $mr sites right hidden]}] 1
+ok "layout: migrate dock shown"    [dict get $mr sites right visible] 1
 ok "layout: migrate left emptied"  [dict get $mr sites left panels] {}
 
 # normalize repairs a partial layout: a panel missing from every site returns to
@@ -1162,19 +1164,23 @@ set ::chat_shown 1 ; apply_chat_visibility
 ok "chat: show -> site visible"    [rio::layout::get right visible] 1
 ok "chat: show -> packed"          [_packed .chat right] 1
 
-# panel_toggle is the View-menu show/hide path. A solo pane (chat in right) hides its
-# whole site and reveals it again; the ::shown_* mirror the checkmarks read follows.
+# panel_toggle is the View-menu show/hide path — "hide" means NO TAB at all. A solo
+# pane (chat in right) loses its tab, collapsing its site; toggling again brings it back.
 panel_toggle chat
-ok "toggle: chat hides"             [list [rio::layout::shown chat] $::shown_chat] {0 0}
+ok "toggle: chat hides"             [list [rio::layout::shown chat] $::shown_chat [rio::layout::get right visible]] {0 0 0}
 panel_toggle chat
-ok "toggle: chat shows again"       [list [rio::layout::shown chat] $::shown_chat] {1 1}
-# A SHARED site (files+git on the left): toggling the shown pane yields to its sibling
-# so the dock stays open on the other pane — it never hides a sibling unexpectedly.
-panel_reveal files
+ok "toggle: chat shows again"       [list [rio::layout::shown chat] $::shown_chat [rio::layout::get right visible]] {1 1 1}
+# A SHARED site (files+git on the left): both shown, hide one -> its tab goes, the
+# sibling keeps the dock open. Hide the LAST shown pane too -> the whole dock collapses
+# (the per-pane hide the old foreground-switch model couldn't do). Reveal brings it back.
+panel_reveal files ; panel_reveal git      ;# both have tabs
 panel_toggle files
-ok "toggle: shared yields to sibling" [list [rio::layout::get left visible] [rio::layout::get left active]] {1 git}
-ok "toggle: sibling now shown"        [list $::shown_files $::shown_git] {0 1}
+ok "toggle: hidden pane loses its tab" [list [rio::layout::shown files] [tabs_of left]] {0 git}
+ok "toggle: dock stays on sibling"     [list [rio::layout::get left visible] [rio::layout::get left active]] {1 git}
+panel_toggle git
+ok "toggle: last hide collapses dock"  [list [rio::layout::shown git] [rio::layout::get left visible]] {0 0}
 panel_reveal files
+ok "toggle: reveal reopens dock"       [list [rio::layout::shown files] [rio::layout::get left visible]] {1 1}
 
 # Sizes are state-driven and persisted (were ephemeral before step b).
 rio::layout::put left size 250 ; apply_layout
@@ -1198,11 +1204,14 @@ search_open "zz"
 ok "c1b: bottom site has search tab" [.sitebottom.tabs.search cget -text] Search
 search_close
 # Heterogeneous panels in one site render as ONE tab strip (the c1 acceptance):
-# dock git into the bottom site beside search; the left site drops to one tab.
+# dock git into the bottom site beside search; the left site drops to one tab. Both
+# bottom panes are shown (hidden {}) so both get a tab.
 dict set ::layout sites bottom panels {search git}
+dict set ::layout sites bottom hidden {}
+dict set ::layout sites bottom active search
 dict set ::layout sites left   panels {files}
+dict set ::layout sites left   hidden {}
 set ::layout [rio::layout::normalize $::layout]
-rio::layout::put bottom visible 1
 apply_layout
 ok "c1b: bottom strip lists both"   [lsort [tabs_of bottom]] {git search}
 ok "c1b: left strip single tab"     [tabs_of left] files

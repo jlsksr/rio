@@ -213,14 +213,17 @@ namespace eval rio::layout {}
 
 # The seed layout — also the normalize/migrate base. Side widths (220 dock,
 # 340 chat), bottom height (160 search).
-# The first-run layout a brand-new user sees (no prefs yet): Files shown on the left
-# (Git a background tab beside it), the Agent hidden on the right, Search hidden at the
-# bottom. Everything past this is the user's own choice and persists (prefs.json).
+# The first-run layout a brand-new user sees (no prefs yet): only the Files tab is
+# shown, on the left; Git lives there too but starts HIDDEN (no tab), and the Agent
+# (right) and Search (bottom) start hidden as well — so a fresh rio is just the editor
+# and the file tree. `hidden` lists the panels with no tab; `visible` is derived from
+# it (a site shows iff it has a non-hidden pane). Everything past this is the user's
+# own choice and persists (prefs.json).
 proc rio::layout::default {} {
 	return [dict create sites [dict create \
-		left   [dict create panels {files git} active files  visible 1 size 220] \
-		right  [dict create panels {chat}      active chat   visible 0 size 340] \
-		bottom [dict create panels {search}    active search visible 0 size 160]]]
+		left   [dict create panels {files git} hidden {git}    active files  visible 1 size 220] \
+		right  [dict create panels {chat}      hidden {chat}   active chat   visible 0 size 340] \
+		bottom [dict create panels {search}    hidden {search} active search visible 0 size 160]]]
 }
 proc rio::layout::get {site key}   { dict get $::layout sites $site $key }
 proc rio::layout::put {site key v} { dict set ::layout sites $site $key $v }
@@ -238,51 +241,77 @@ proc rio::layout::_without {list ids} {
 	set out {} ; foreach x $list { if {$x ni $ids} { lappend out $x } }
 	return $out
 }
-# Is panel `id` shown on screen — its site visible AND it the active tab? (A
-# background tab in a visible site is present but not shown.) The View-menu toggle
-# checkbuttons and panel_toggle read this.
+# A site's `hidden` list (panels present but with NO tab), defaulting to empty.
+proc rio::layout::hidden_of {site} {
+	if {[dict exists $::layout sites $site hidden]} { return [dict get $::layout sites $site hidden] }
+	return {}
+}
+# The panels currently SHOWN in `site` (a tab each) — membership minus hidden, order kept.
+proc rio::layout::shown_panels {site} {
+	return [_without [get $site panels] [hidden_of $site]]
+}
+# Give panel `id` a tab in `site` (remove it from hidden) / take its tab away (add it).
+proc rio::layout::unhide {site id} { put $site hidden [_without [hidden_of $site] [list $id]] }
+proc rio::layout::hide   {site id} {
+	set h [hidden_of $site]
+	if {$id ni $h} { lappend h $id }
+	put $site hidden $h
+}
+# Is panel `id` shown — i.e. does it have a tab (is it loaded), regardless of which
+# tab is foreground? "Hide" a pane means no tab at all, so the View-menu checkmark
+# tracks tab presence, not the active/foreground selection.
 proc rio::layout::shown {id} {
 	set s [site_of $id]
 	if {$s eq ""} { return 0 }
-	return [expr {[get $s visible] && [get $s active] eq $id}]
+	return [expr {$id ni [hidden_of $s]}]
 }
 
 # Build a layout from the pre-step-(b) flat keys, over the default: dock_pane ->
-# the dock site's active; chat_shown -> the right site's visibility; dock_side ->
-# which side holds files/git. dock_side=right unifies the dock into the right
-# site alongside chat (decision 1a). Sizes take defaults (were ephemeral before).
+# the dock site's active; chat_shown -> whether the Agent has a tab; dock_side ->
+# which side holds files/git. dock_side=right unifies the dock into the right site
+# alongside chat (decision 1a). The pre-layout model showed a tab for EVERY dock
+# member (git was a background tab, not hidden), so an upgraded dock shows both files
+# and git — distinct from the new first-run default, which hides git. Search stays
+# on-demand (hidden). Sizes take defaults (were ephemeral before).
 proc rio::layout::migrate {prefs} {
 	set L [default]
 	set side [expr {[dict exists $prefs dock_side] && [dict get $prefs dock_side] eq "right" ? "right" : "left"}]
 	set pane [expr {[dict exists $prefs dock_pane] && [dict get $prefs dock_pane] eq "git" ? "git" : "files"}]
 	set chat [expr {[dict exists $prefs chat_shown] && ![dict get $prefs chat_shown] ? 0 : 1}]
+	dict set L sites left   hidden {}          ;# both files and git shown (old behaviour)
+	dict set L sites bottom hidden {search}    ;# Search on-demand
 	if {$side eq "right"} {
 		dict set L sites left  panels {}
 		dict set L sites left  active ""
 		dict set L sites right panels {files git chat}
 	}
-	dict set L sites $side active $pane      ;# the dock's files|git choice
-	dict set L sites right visible $chat
+	dict set L sites $side active $pane                       ;# the dock's files|git choice
+	dict set L sites right hidden [expr {$chat ? {} : {chat}}] ;# Agent tab per chat_shown
 	return $L
 }
 
-# Repair a persisted or migrated layout into a well-formed one: fill missing
-# keys from the default, drop unknown sites, coerce `visible` to 0/1, ensure each
-# registered panel appears in exactly one site (unclaimed panels land in their
-# registry-preferred site), and keep each `active` a real member. Used at runtime
-# after a relocation (panel_move / dock_set_side) — so a panel moved TO the bottom
-# stays visible; the boot-only "Search starts hidden" policy lives in `boot`.
+# Repair a persisted or migrated layout into a well-formed one: fill missing keys
+# from the default, drop unknown sites, ensure each registered panel appears in
+# exactly one site (unclaimed panels land in their registry-preferred site), clamp
+# `hidden` to real members, DERIVE `visible` from what's shown (a site is on-screen
+# iff it has a non-hidden pane), and keep `active` a SHOWN member. Old persisted
+# layouts predate `hidden`; for a site without it we recover it from the stored
+# `visible` (a collapsed dock — visible 0 — becomes all-hidden, else all-shown).
+# Used at runtime after a relocation; the boot-only "Search starts hidden" is in boot.
 proc rio::layout::normalize {L} {
 	set out [default]
+	set had_hidden {}   ;# sites whose source dict supplied an explicit `hidden`
 	if {[dict exists $L sites]} {
 		dict for {s d} [dict get $L sites] {
 			if {$s ni {left right bottom}} continue
-			foreach k {panels active visible size} {
+			foreach k {panels active visible size hidden} {
 				if {[dict exists $d $k]} { dict set out sites $s $k [dict get $d $k] }
 			}
-			dict set out sites $s visible [expr {[dict get $out sites $s visible] ? 1 : 0}]
+			if {[dict exists $d hidden]} { lappend had_hidden $s }
 		}
 	}
+	# Membership: each registered panel in exactly one site (first claim wins);
+	# unclaimed panels return to their registry-preferred site.
 	set seen {}
 	dict for {s d} [dict get $out sites] {
 		set keep {}
@@ -299,9 +328,22 @@ proc rio::layout::normalize {L} {
 		}
 	}
 	dict for {s d} [dict get $out sites] {
-		set ps [dict get $d panels]
-		if {[dict get $d active] ni $ps} {
-			dict set out sites $s active [expr {[llength $ps] ? [lindex $ps 0] : ""}]
+		set ps [dict get $out sites $s panels]
+		# Recover `hidden` for an old layout that lacks it: visible 0 -> the dock was
+		# collapsed (all panels hidden), visible 1/absent -> all shown.
+		if {$s ni $had_hidden} {
+			set vis [expr {[dict exists $d visible] ? [dict get $d visible] : 1}]
+			dict set out sites $s hidden [expr {$vis ? {} : $ps}]
+		}
+		# Clamp hidden to current members (read from $out, not the global ::layout).
+		set cur_hidden [expr {[dict exists $out sites $s hidden] ? [dict get $out sites $s hidden] : {}}]
+		set hid {} ; foreach p $cur_hidden { if {$p in $ps} { lappend hid $p } }
+		dict set out sites $s hidden $hid
+		# Derive visible from what's shown; keep active a shown pane.
+		set show [_without $ps $hid]
+		dict set out sites $s visible [expr {[llength $show] ? 1 : 0}]
+		if {[dict get $out sites $s active] ni $show} {
+			dict set out sites $s active [expr {[llength $show] ? [lindex $show 0] : ""}]
 		}
 	}
 	return $out
@@ -314,18 +356,20 @@ proc rio::layout::normalize {L} {
 proc rio::layout::boot {L} {
 	set out [normalize $L]
 	if {[dict get $out sites bottom panels] eq "search"} {
-		dict set out sites bottom visible 0
+		dict set out sites bottom hidden {search}
 	}
-	return $out
+	return [normalize $out]
 }
-# Encode ::layout as a JSON object fragment for prefs.json. `panels` is a string
-# array, `visible` a JSON boolean, `size` a bare integer; the shape mirrors what
-# normalize accepts on read (json2dict yields nested dicts/lists).
+# Encode ::layout as a JSON object fragment for prefs.json. `panels`/`hidden` are
+# string arrays, `visible` a JSON boolean (derived, kept for compat), `size` a bare
+# integer; the shape mirrors what normalize accepts on read (json2dict yields nested
+# dicts/lists). `hidden` is the authoritative per-pane tab-presence state.
 proc rio::layout::json {} {
 	set sites {}
 	dict for {s d} [dict get $::layout sites] {
-		set obj [format {{"panels":%s,"active":%s,"visible":%s,"size":%d}} \
+		set obj [format {{"panels":%s,"hidden":%s,"active":%s,"visible":%s,"size":%d}} \
 			[rio::wire::strarr [dict get $d panels]] \
+			[rio::wire::strarr [hidden_of $s]] \
 			[rio::wire::str [dict get $d active]] \
 			[expr {[dict get $d visible] ? "true" : "false"}] \
 			[expr {int([dict get $d size])}]]
@@ -1549,41 +1593,38 @@ proc blend_hex {a b pct} {
 # The dock: which pane shows, and which edge it sits on. Both are runtime choices
 # driven from the View menu; apply_layout and show_pane are the two seams.
 # ---------------------------------------------------------------------------
-# Reveal a panel wherever it currently lives: make its site visible and the panel
-# its active tab, then refresh. The robust "show me pane X" the View menu and Ctrl+E/G
-# use — it works even when the panel was dragged into a hidden or other site, so a
-# panel can always be recovered from the menu (no pane ever becomes unreachable).
+# Reveal a panel wherever it currently lives: give it a tab (unhide) in its site and
+# make it the active/foreground one, then refresh. The robust "show me pane X" the
+# reveal keys (Ctrl+E/G) use — it works even when the panel was hidden or in another
+# site, so a panel can always be recovered (no pane ever becomes unreachable).
 proc panel_reveal {id} {
 	set s [rio::layout::site_of $id]
 	if {$s eq ""} return
-	rio::layout::put $s visible 1
+	rio::layout::unhide $s $id
 	rio::layout::put $s active $id
+	set ::layout [rio::layout::normalize $::layout]   ;# recompute derived visible
 	apply_layout
 	rio::panel::refresh $id
 }
 # Back-compat: "show the files/git pane" (Ctrl+E/G) is a reveal (idempotent "go to").
 proc show_pane {which} { panel_reveal $which }
 
-# Show/hide a pane — the View-menu checkbuttons' toggle. If the pane is shown (its
-# site visible and it the active tab), hide it: the whole site when the pane is its
-# only tenant, else just yield to a sibling tab so a shared dock (files+git) stays
-# open on the other pane. If it's not shown (site hidden, or a background tab),
-# reveal it. Re-derive; apply_layout resyncs the ::shown_* mirrors so the checkmarks
-# match reality (correcting the checkbutton's own optimistic flip).
+# Show/hide a pane — the View-menu checkbuttons' toggle. "Hide" means NO TAB at all
+# (not merely backgrounded): a shown pane loses its tab (added to the site's hidden
+# list); if it was the foreground tab, another shown pane takes over, and if it was
+# the site's last shown pane the whole dock collapses. A hidden pane is revealed (tab
+# back + foreground). normalize re-derives the site's visibility and active; apply_layout
+# resyncs the ::shown_* mirrors so the checkmarks track tab presence.
 proc panel_toggle {id} {
 	set s [rio::layout::site_of $id]
 	if {$s eq ""} return
 	if {[rio::layout::shown $id]} {
-		set rest [rio::layout::_without [rio::layout::get $s panels] [list $id]]
-		if {[llength $rest] == 0} {
-			rio::layout::put $s visible 0
-		} else {
-			rio::layout::put $s active [lindex $rest 0]
-		}
+		rio::layout::hide $s $id
 	} else {
-		rio::layout::put $s visible 1
+		rio::layout::unhide $s $id
 		rio::layout::put $s active $id
 	}
+	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	rio::panel::refresh $id
 }
@@ -1597,7 +1638,7 @@ proc render_tabs {site} {
 	foreach w [winfo children $f] { destroy $w }
 	set c $::theme_colors
 	set active [rio::layout::get $site active]
-	foreach id [rio::layout::get $site panels] {
+	foreach id [rio::layout::shown_panels $site] {
 		set t $f.$id
 		label $t -text [rio::panel::field $id title] -font RioUIFont -padx 8 -pady 1 \
 			-foreground [dict get $c tab.fg] \
@@ -1659,7 +1700,7 @@ proc apply_layout {} {
 	set ::dock_pane  [expr {$da in {files git} ? $da : "files"}]
 	set ::chat_shown [rio::layout::get [rio::layout::site_of chat] visible]
 	set ::search_shown [rio::layout::get bottom visible]
-	# Per-pane shown mirrors for the View-menu toggle checkmarks (site visible + active tab).
+	# Per-pane shown mirrors for the View-menu toggle checkmarks (has a tab / not hidden).
 	foreach _p {files git chat search} { set ::shown_$_p [rio::layout::shown $_p] }
 
 	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .bsash .groups .cmp}
@@ -1699,29 +1740,35 @@ proc apply_layout {} {
 proc dock_set_side {side} {
 	if {$side ni {left right}} return
 	set cur  [rio::layout::dockside]
+	if {$cur eq $side} return
 	set pane [rio::layout::get $cur active]
 	set size [rio::layout::get $cur size]
-	dict set ::layout sites $cur  panels [rio::layout::_without [rio::layout::get $cur panels]  {files git}]
+	# Carry each of files/git's tab-presence (hidden) state across the move.
+	set curhid [rio::layout::hidden_of $cur]
+	set moved_hidden {} ; foreach p {files git} { if {$p in $curhid} { lappend moved_hidden $p } }
+	dict set ::layout sites $cur  panels [rio::layout::_without [rio::layout::get $cur panels] {files git}]
+	dict set ::layout sites $cur  hidden [rio::layout::_without $curhid {files git}]
 	dict set ::layout sites $side panels [concat {files git} [rio::layout::_without [rio::layout::get $side panels] {files git}]]
+	dict set ::layout sites $side hidden [concat [rio::layout::_without [rio::layout::hidden_of $side] {files git}] $moved_hidden]
 	dict set ::layout sites $side active $pane
 	dict set ::layout sites $side size $size
-	dict set ::layout sites $side visible 1
 	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 }
 
 # Relocate one panel to another site (D35 c2 — the right-click "Move to" gesture).
-# The panel becomes its new site's active tab (so you see it land) and that site is
-# shown. normalize repairs the site it left (active/emptiness); a move to the bottom
-# stays visible because normalize — not boot — runs here. Refresh so it paints fresh.
+# The panel lands with a tab (shown) and becomes its new site's foreground pane; it
+# leaves its old site's membership AND hidden list. normalize repairs the site it
+# left (active/emptiness) and derives visibility. Refresh so it paints fresh.
 proc panel_move {id target} {
 	if {$target ni {left right bottom}} return
 	set from [rio::layout::site_of $id]
 	if {$from eq $target || $from eq ""} return
 	dict set ::layout sites $from   panels [rio::layout::_without [rio::layout::get $from panels] [list $id]]
+	dict set ::layout sites $from   hidden [rio::layout::_without [rio::layout::hidden_of $from] [list $id]]
 	dict set ::layout sites $target panels [concat [rio::layout::get $target panels] [list $id]]
+	rio::layout::unhide $target $id            ;# lands with a tab
 	dict set ::layout sites $target active $id
-	dict set ::layout sites $target visible 1
 	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	rio::panel::refresh $id
@@ -2162,11 +2209,13 @@ proc chat_clear {} {
 	set ::chat_turn_open 0
 }
 
-# Show/hide the chat pane (driven by the View-menu checkbutton / Ctrl+Shift+A,
-# which flip the ::chat_shown mirror). Push that into the chat site's visibility,
-# then re-derive; apply_layout syncs the mirror back so the two never drift.
+# Show/hide the chat pane by tab presence (kept for callers that flip the ::chat_shown
+# mirror directly, e.g. tests). Give chat a tab (foreground) or take it away, re-derive,
+# then apply_layout syncs the mirror back so the two never drift.
 proc apply_chat_visibility {} {
-	rio::layout::put [rio::layout::site_of chat] visible $::chat_shown
+	set s [rio::layout::site_of chat]
+	if {$::chat_shown} { rio::layout::unhide $s chat ; rio::layout::put $s active chat } else { rio::layout::hide $s chat }
+	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	if {$::chat_shown} { focus .chat.input }
 }
@@ -2681,7 +2730,8 @@ set ::search_replace 0        ;# the replace row shown? (Ctrl+H, like the find b
 proc search_open {{seed __sel__}} {
 	set root ""
 	catch { set root [dict get [rio_result project.get {}] root] }
-	rio::layout::put bottom visible 1     ;# the bottom site's tenant; apply_layout packs it
+	rio::layout::unhide bottom search ; rio::layout::put bottom active search ;# give Search a tab
+	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	if {$seed eq "__sel__"} {
 		catch {
@@ -2705,8 +2755,9 @@ proc search_open {{seed __sel__}} {
 
 # Hide the panel and hand focus back to the editor.
 proc search_close {} {
-	if {!$::search_shown} return
-	rio::layout::put bottom visible 0
+	if {![rio::layout::shown search]} return
+	rio::layout::hide bottom search
+	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	focus [gget $::focus path]
 }
