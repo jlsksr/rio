@@ -3135,6 +3135,30 @@ spans per line. Because a regex hit is **variable-length**, each line-match row 
 parallel **`lens`** array beside `cols` (start column + char length per hit), so the panel's
 green band sizes to the actual match rather than a fixed needle length — the one wire-shape
 change (a `lens` array in `_linematch`).
+
+### D53 — LLM integration: assisted, not autonomous (the line is *autonomy*, not *capability*)
+
+How far should rio's agent go? The agent today reads the project and proposes edits behind a
+diff + approval (D8, D14, D20). The open question was whether the roadmap's run-command tool,
+test-running, and runtime use push rio toward being an **agent harness**. **Decided with jbm:
+the line is drawn at *autonomy*, not *capability*.**
+
+- **In scope — capability is not the limit.** rio's LLM integration MAY do the full in-session
+  toolset: write files, write tests, **run tests, run commands, use runtime environments** — all
+  **with a human present and in the loop**, in the propose/approve, human-driven posture. The
+  run-command tool (ROADMAP, "under explicit approval/confinement") is therefore squarely in
+  scope; running tests needs it. What gates a command is *approval*, not a ban.
+- **Out of scope — on identity, not deferred.** rio acting **on its own when no human is
+  interacting**: cron-driven, unattended, self-directed "go do things while nobody watches"
+  operation. rio does not head toward being an agent harness in that sense. This is the Win98/2000
+  conservative posture applied to LLMs — a capable assistant you drive, not an automation daemon.
+- **The constraint binds rio itself, NOT plugins.** A plugin author may build unattended /
+  agentic behavior on the plugin surface (D16–D19); rio's own restraint is not imposed on them.
+  This mirrors the extension stance (D39): rio holds a conservative line for itself without
+  caging what others may publish.
+
+Practical test when a feature is proposed: does it need a human in the loop to act? In scope.
+Does it act unattended, on a schedule or its own initiative, with no human present? Out.
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

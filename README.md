@@ -188,3 +188,5 @@ Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lan
   and deliberately deferred refinements.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — for programmers who want to hack on rio
   itself: toolchain setup, how it's laid out, and how to run the tests.
+- **[RELEASING.md](RELEASING.md)** — going-live checklist: the legal, first-run, and
+  platform gates that must be true before rio is handed to people who didn't write it.
