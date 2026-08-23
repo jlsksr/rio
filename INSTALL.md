@@ -397,6 +397,7 @@ relevant `install_*` function — the script's verifier confirms the result.
 ## 8. Platforms
 
 Linux (Debian, Alpine) and the BSDs are the deploy targets the scripts cover; the
-GUI also runs on Windows (Tcl/Tk), though the scripts don't automate that. The TUI
+GUI also runs on Windows (Tcl/Tk), though the scripts don't automate that — see
+[WINDOWS.md](WINDOWS.md) for the Windows 11 quick start. The TUI
 (Ck) frontend is **deferred** — present only behind `--with-ck` for development, not
 a supported runtime yet (AGENTS.md O1).
