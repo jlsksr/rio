@@ -35,8 +35,21 @@ Both `package require` lines should print a version, not an error.
 
 Copy or clone the repository to a folder, e.g. `C:\rio`. There is nothing to build.
 
-The `rio-dev-deploy.sh` / `rio-server-deploy.sh` scripts are POSIX `sh` and do **not**
-run on Windows — the Magicsplat installer in §1 is their Windows replacement.
+Then run the Windows deploy script from that folder:
+
+```
+powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1
+```
+
+It **verifies** the toolchain actually loads (Tk + json; tls only if you'll use the
+agent), sets up **persistence** (§3) for you, and prints the launch command. Add
+`-Shortcut` to also drop a "rio" shortcut on your Desktop, or `-VerifyOnly` to just
+check the toolchain. It changes nothing it doesn't have to and is safe to re-run.
+
+> The POSIX `rio-dev-deploy.sh` / `rio-server-deploy.sh` scripts are `sh` and do
+> **not** run on Windows — `rio-dev-deploy.ps1` is their Windows counterpart, and the
+> Magicsplat installer in §1 replaces the `apt`/`apk` toolchain install (Windows has
+> no package manager for Tcl, so that one step stays manual).
 
 ## 3. (Recommended) Turn on persistence
 
@@ -45,15 +58,17 @@ under paths taken from `XDG_CONFIG_HOME` / `XDG_DATA_HOME`, falling back to `HOM
 On Windows those are often unset — in which case **rio still launches and edits
 perfectly, but forgets your preferences and last session between runs.**
 
-To keep them, set two **user environment variables** once:
+`rio-dev-deploy.ps1` (§2) sets these up for you — this section is what it does, for
+reference or if you'd rather do it by hand. It sets two **user environment variables**:
 
 | Variable | Value (example) |
 |----------|-----------------|
 | `XDG_CONFIG_HOME` | `%USERPROFILE%\rio\config` |
 | `XDG_DATA_HOME`   | `%USERPROFILE%\rio\data`   |
 
-Set them via *Settings ▸ System ▸ About ▸ Advanced system settings ▸ Environment
-Variables…*, or from a terminal (open a **new** terminal afterwards so they take):
+By hand: set them via *Settings ▸ System ▸ About ▸ Advanced system settings ▸
+Environment Variables…*, or from a terminal (open a **new** terminal afterwards so
+they take):
 
 ```
 setx XDG_CONFIG_HOME "%USERPROFILE%\rio\config"
