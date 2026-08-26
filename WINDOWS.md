@@ -16,9 +16,17 @@ sessions use). `http` ships with Tcl itself. You do **not** need `tcltls` unless
 later use the Claude agent.
 
 The path of least resistance is **[Magicsplat Tcl/Tk](https://www.magicsplat.com/tcl-installer/)**
-— a single Windows installer that bundles Tk **and** tcllib and puts `wish.exe` and
-`tclsh.exe` on your `PATH`. (ActiveTcl works too; add tcllib afterwards with
-`teacup install tcllib`.)
+— a single distribution that bundles Tk **and** tcllib and puts `wish.exe` and
+`tclsh.exe` on your `PATH`. Install it with **winget** in one line:
+
+```
+winget install --exact --id Magicsplat.TclTk --source winget
+```
+
+(Or download the installer from the link above; ActiveTcl works too — add tcllib
+afterwards with `teacup install tcllib`.) You don't have to run this yourself: if Tcl
+is missing, `rio-dev-deploy.ps1` (§2) offers to run exactly this winget install for
+you, after asking.
 
 Verify the toolchain in a terminal:
 

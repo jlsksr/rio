@@ -17,10 +17,12 @@
          forgets everything on exit.
       3. Optionally (-Shortcut) drop a Desktop shortcut that launches rio via wish.
 
-    Installing Tcl/Tk itself is manual: get Magicsplat Tcl/Tk
-    (https://www.magicsplat.com/tcl-installer/) — one installer that bundles Tk +
-    tcllib and puts wish.exe / tclsh.exe on PATH. (ActiveTcl works too; add tcllib via
-    `teacup install tcllib`.) `winget search tcl` may also turn up a usable build.
+    If tclsh isn't found and winget is available, the script OFFERS to install
+    Magicsplat Tcl/Tk (winget id Magicsplat.TclTk) — one package that bundles Tk +
+    tcllib, exactly rio's dependency set. It always ASKS first (answer y), or pass -Yes
+    to auto-confirm, or -NoInstall to only be told how to install it by hand. Absent
+    winget, get Magicsplat directly: https://www.magicsplat.com/tcl-installer/
+    (ActiveTcl works too; add tcllib via `teacup install tcllib`).
 
     Safe to re-run: every step is idempotent.
 
@@ -32,6 +34,13 @@
 
 .PARAMETER Shortcut
     Also create a "rio" shortcut on the Desktop that launches the GUI.
+
+.PARAMETER Yes
+    Auto-confirm the winget install prompt (non-interactive). Without it the script
+    asks before installing anything.
+
+.PARAMETER NoInstall
+    Never offer to install via winget; just print manual instructions if Tcl is absent.
 
 .PARAMETER DryRun
     Print what would happen without changing anything.
@@ -51,6 +60,8 @@ param(
     [switch]$VerifyOnly,
     [switch]$NoPersist,
     [switch]$Shortcut,
+    [switch]$Yes,
+    [switch]$NoInstall,
     [switch]$DryRun,
     [switch]$Help
 )
@@ -76,6 +87,52 @@ function Find-Tcl ($stem) {
         if ($c.Name -match "^$stem\d*t?\.exe$") { return $c.Source }
     }
     return $null
+}
+
+# Ask a yes/no question; -Yes answers it affirmatively without prompting. Default No.
+function Confirm-Yes ($question) {
+    if ($Yes) { return $true }
+    $ans = Read-Host "$question [y/N]"
+    return ($ans -match '^(y|yes)$')
+}
+
+# Pull PATH changes a fresh installer made into THIS session, so a just-installed
+# tclsh becomes findable without opening a new terminal.
+function Update-PathFromRegistry {
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:PATH = @($machine, $user | Where-Object { $_ }) -join ';'
+}
+
+# Offer to install the toolchain via winget (Magicsplat.TclTk bundles Tk + tcllib —
+# rio's whole dependency set). Always asks first unless -Yes. Returns the tclsh path
+# on success, else $null (caller falls back to manual guidance).
+$WingetId = "Magicsplat.TclTk"
+function Install-Toolchain {
+    if ($NoInstall) { return $null }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Warn "winget not available — cannot offer an automatic install"
+        return $null
+    }
+    if ($DryRun) {
+        Step "prompt, then: winget install --exact --id $WingetId --source winget"
+        return $null
+    }
+    Write-Host ""
+    Write-Host "  winget can install Magicsplat Tcl/Tk ($WingetId) — Tk + tcllib, rio's"
+    Write-Host "  full dependency set, in one package."
+    if (-not (Confirm-Yes "  Install it now via winget?")) {
+        Log "skipping winget install (declined)"
+        return $null
+    }
+    Log "installing $WingetId via winget…"
+    & winget install --exact --id $WingetId --source winget --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Warn "winget install exited $LASTEXITCODE — install Magicsplat by hand and re-run"
+        return $null
+    }
+    Update-PathFromRegistry
+    return (Find-Tcl "tclsh")
 }
 
 # --- verification -----------------------------------------------------------
@@ -176,13 +233,17 @@ $rioGui = Join-Path $PSScriptRoot "rio-gui\rio-gui.tcl"
 $tclsh = Find-Tcl "tclsh"
 if (-not $tclsh) {
     Warn "tclsh not found on PATH."
+    $tclsh = Install-Toolchain
+}
+if (-not $tclsh) {
     Write-Host ""
     Write-Host "  Install Tcl/Tk with tcllib, then re-run this script:"
-    Write-Host "    - Magicsplat Tcl/Tk (recommended): https://www.magicsplat.com/tcl-installer/"
+    Write-Host "    - winget install --exact --id $WingetId --source winget"
+    Write-Host "    - Magicsplat Tcl/Tk (direct): https://www.magicsplat.com/tcl-installer/"
     Write-Host "    - or ActiveTcl, then: teacup install tcllib"
-    Write-Host "    - or try:  winget search tcl"
     Write-Host ""
-    Die "no Tcl toolchain"
+    if (-not $DryRun) { Die "no Tcl toolchain" }
+    exit 0
 }
 Log "tclsh: $tclsh"
 
