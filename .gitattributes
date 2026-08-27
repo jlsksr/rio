@@ -1,0 +1,7 @@
+# PowerShell scripts must check out with CRLF line endings: Windows PowerShell 5.1
+# mis-parses some constructs (notably here-strings) in LF-only files. Force native
+# Windows endings so a Windows checkout always gets a script PowerShell can parse.
+*.ps1 text eol=crlf
+
+# The POSIX shell scripts stay LF everywhere.
+*.sh  text eol=lf
