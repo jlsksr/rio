@@ -1,8 +1,10 @@
 # Running rio on Windows 11
 
 A quick start for using rio day-to-day on Windows: editing notes, opening scratch
-buffers for quick pasting, and viewing a logfile or two. It's the simplest slice of
-rio — no agent, no git, no remote core — and nothing in the code blocks it on Windows.
+buffers for quick pasting, and viewing a logfile or two. That's the simplest slice of
+rio — it needs nothing beyond Tk + tcllib — and nothing in the code blocks it on
+Windows. The heavier features (git, the agent, a remote core) work here too; see
+[§7](#7-beyond-notes-git-the-agent-and-remote-cores).
 
 > **Honest status:** rio's launch and editing paths are cross-platform Tcl/Tk, but
 > rio has not yet been exercised on Windows in anger (see [RELEASING.md](RELEASING.md)
@@ -130,3 +132,38 @@ If it doesn't:
 Either way, jot down exactly what broke — it's the first real
 [RELEASING.md](RELEASING.md) Gate 0 finding, and it's how the Windows claim earns its
 place in the README.
+
+## 7. Beyond notes: git, the agent, and remote cores
+
+None of these are Windows-limited — the intro calls notes the "simplest slice" only
+because it needs the least. What each adds:
+
+- **Git pane** — works once **[Git for Windows](https://git-scm.com/download/win)** is
+  installed and on `PATH`. rio shells out to `git` as a plain argument vector (no
+  shell), so it behaves the same as on Linux. Open a repo folder and the status/diff/
+  stage/commit pane is there.
+- **The agent (Claude)** — works if your Tcl build includes **`tls`** (Magicsplat's
+  batteries-included distribution normally does; `rio-dev-deploy.ps1` reports `tls ok`
+  or `MISSING` in its verify). Then pick *Settings ▸ Agent: Claude (API key)* and enter
+  your key under *Settings ▸ Claude API Key…*. One Windows note: rio's `0600` lock-down
+  of the key file is a POSIX no-op on NTFS, so the key file inherits your user-profile
+  permissions rather than being explicitly restricted — fine for a personal machine,
+  worth knowing.
+- **Remote core (Windows client → Linux core)** — the most capable path, and the one
+  with the least Windows-native risk. The GUI is a thin client; connected to a remote
+  core it supports **whatever that core supports**, and since the core runs on Linux the
+  agent, git, and files all run natively there. Windows 11 ships OpenSSH, so:
+
+  ```
+  ssh -L 7711:127.0.0.1:7711 you@linux-box     # in one terminal, keep it open
+  wish C:\rio\rio-gui\rio-gui.tcl --connect 127.0.0.1:7711 /path/on/linux
+  ```
+
+  (with the core started on the Linux box: `tclsh rio-core/server.tcl 7711`). Or connect
+  from an already-open GUI via *File ▸ Connect to Remote Core…*. See
+  [INSTALL.md §4](INSTALL.md) for the full remote/server-mode picture.
+
+**Suggested test order:** local core first (it proves the hardest Windows plumbing —
+spawn, pipe, Tk, save, persistence), then git and the agent on that local core, then a
+remote Linux core as a separate step. If the local-core agent ever gives trouble, a
+remote core hands you full agent+git immediately with Windows as a pure client.
