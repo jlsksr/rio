@@ -142,31 +142,35 @@ function Install-Toolchain {
 # rio-dev-deploy.sh). Tk needs no display on Windows, but withdraw its window so it
 # doesn't flash. tls is OPTIONAL here — only the agent's HTTPS needs it.
 
-# A plain single-quoted (non-interpolating) string, NOT a here-string: Windows
-# PowerShell 5.1 mis-tokenizes @'...'@ delimiters when the file has LF line endings,
-# and a single-quoted literal sidesteps that. Keep it apostrophe-free so the closing
-# quote isn't ambiguous (hence {*can*find*} rather than {*can't find*}).
-$Probe = 'set fail 0
-proc check {name {require 1}} {
-    global fail
-    if {[catch {package require $name} ver]} {
-        if {[string match {*find package*} $ver] || [string match {*can*find*} $ver]} {
-            puts [format "  %-8s MISSING (%s)" $name $ver]
-            if {$require} {incr fail}
-        } else {
-            puts [format "  %-8s ok (installed; load note: %s)" $name $ver]
-        }
-    } else {
-        if {$name eq "Tk"} {catch {wm withdraw .}}
-        puts [format "  %-8s ok %s" $name $ver]
-    }
-}
-check Tk 1
-check tls 0
-check json 1
-puts [format "  %-8s %s" tclsh [info patchlevel]]
-if {$fail} { puts stderr "verify: $fail required package(s) missing"; exit 1 }
-exit 0'
+# The Tcl probe, as an ARRAY of single-line strings — NOT a multi-line string literal.
+# Windows PowerShell 5.1 mis-parses multi-line string literals (here-strings AND quoted)
+# in a file with LF line endings, reading their interior as PowerShell; single-line
+# single-quoted elements sidestep that entirely. Set-Content writes one per line. Each
+# element is single-quoted (so $name/$ver etc. stay literal Tcl) and apostrophe-free
+# (so the closing quote is unambiguous — hence {*can*find*} not {*can't find*}).
+$Probe = @(
+    'set fail 0'
+    'proc check {name {require 1}} {'
+    '    global fail'
+    '    if {[catch {package require $name} ver]} {'
+    '        if {[string match {*find package*} $ver] || [string match {*can*find*} $ver]} {'
+    '            puts [format "  %-8s MISSING (%s)" $name $ver]'
+    '            if {$require} {incr fail}'
+    '        } else {'
+    '            puts [format "  %-8s ok (installed; load note: %s)" $name $ver]'
+    '        }'
+    '    } else {'
+    '        if {$name eq "Tk"} {catch {wm withdraw .}}'
+    '        puts [format "  %-8s ok %s" $name $ver]'
+    '    }'
+    '}'
+    'check Tk 1'
+    'check tls 0'
+    'check json 1'
+    'puts [format "  %-8s %s" tclsh [info patchlevel]]'
+    'if {$fail} { puts stderr "verify: $fail required package(s) missing"; exit 1 }'
+    'exit 0'
+)
 
 function Invoke-Verify ($tclsh) {
     if ($DryRun) { Log "verify: skipped (dry run)"; return }
