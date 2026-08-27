@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    rio-dev-deploy.ps1 — set up rio for daily use on Windows 11.
+    rio-dev-deploy.ps1 - set up rio for daily use on Windows 11.
 
 .DESCRIPTION
     The Windows counterpart to rio-dev-deploy.sh. That script apt/apk-installs the
@@ -8,17 +8,17 @@
     what CAN be automated here and is honest about the one step that can't:
 
       1. VERIFY the toolchain by actually loading it in tclsh (Tk + json required;
-         tls optional — only the Claude agent needs it). This is the real source of
+         tls optional - only the Claude agent needs it). This is the real source of
          truth, same as the shell script. If tclsh isn't found, it explains how to
          install Tcl/Tk and stops.
-      2. PERSISTENCE — set the XDG_CONFIG_HOME / XDG_DATA_HOME user environment
+      2. PERSISTENCE - set the XDG_CONFIG_HOME / XDG_DATA_HOME user environment
          variables (and create the folders) so rio remembers your preferences and
          reopens your last session between launches. Without these, rio runs fine but
          forgets everything on exit.
       3. Optionally (-Shortcut) drop a Desktop shortcut that launches rio via wish.
 
     If tclsh isn't found and winget is available, the script OFFERS to install
-    Magicsplat Tcl/Tk (winget id Magicsplat.TclTk) — one package that bundles Tk +
+    Magicsplat Tcl/Tk (winget id Magicsplat.TclTk) - one package that bundles Tk +
     tcllib, exactly rio's dependency set. It always ASKS first (answer y), or pass -Yes
     to auto-confirm, or -NoInstall to only be told how to install it by hand. Absent
     winget, get Magicsplat directly: https://www.magicsplat.com/tcl-installer/
@@ -53,6 +53,12 @@
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1 -VerifyOnly
+
+.NOTES
+    Keep this file ASCII-only. Windows PowerShell 5.1 reads a BOM-less .ps1 as the
+    system ANSI codepage (e.g. Windows-1252), NOT UTF-8, so a non-ASCII character
+    (em dash, ellipsis, curly quote) is mis-decoded into bytes that break parsing.
+    Use '-' and '...' rather than the typographic forms.
 #>
 
 [CmdletBinding()]
@@ -80,7 +86,7 @@ function Die  ($m) { Write-Host "error: $m" -ForegroundColor Red; exit 1 }
 function Step ($m) { if ($DryRun) { Write-Host "  [dry-run] $m" } }
 
 # Locate a Tcl program (tclsh / wish), tolerating versioned names Magicsplat and
-# ActiveTcl ship (tclsh.exe, tclsh86t.exe, tclsh90.exe, …). Returns the full path or $null.
+# ActiveTcl ship (tclsh.exe, tclsh86t.exe, tclsh90.exe, ...). Returns the full path or $null.
 function Find-Tcl ($stem) {
     $cmd = Get-Command "$stem" -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
@@ -105,14 +111,14 @@ function Update-PathFromRegistry {
     $env:PATH = @($machine, $user | Where-Object { $_ }) -join ';'
 }
 
-# Offer to install the toolchain via winget (Magicsplat.TclTk bundles Tk + tcllib —
+# Offer to install the toolchain via winget (Magicsplat.TclTk bundles Tk + tcllib -
 # rio's whole dependency set). Always asks first unless -Yes. Returns the tclsh path
 # on success, else $null (caller falls back to manual guidance).
 $WingetId = "Magicsplat.TclTk"
 function Install-Toolchain {
     if ($NoInstall) { return $null }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Warn "winget not available — cannot offer an automatic install"
+        Warn "winget not available - cannot offer an automatic install"
         return $null
     }
     if ($DryRun) {
@@ -120,16 +126,16 @@ function Install-Toolchain {
         return $null
     }
     Write-Host ""
-    Write-Host "  winget can install Magicsplat Tcl/Tk ($WingetId) — Tk + tcllib, rio's"
+    Write-Host "  winget can install Magicsplat Tcl/Tk ($WingetId) - Tk + tcllib, rio's"
     Write-Host "  full dependency set, in one package."
     if (-not (Confirm-Yes "  Install it now via winget?")) {
         Log "skipping winget install (declined)"
         return $null
     }
-    Log "installing $WingetId via winget…"
+    Log "installing $WingetId via winget..."
     & winget install --exact --id $WingetId --source winget --accept-package-agreements --accept-source-agreements
     if ($LASTEXITCODE -ne 0) {
-        Warn "winget install exited $LASTEXITCODE — install Magicsplat by hand and re-run"
+        Warn "winget install exited $LASTEXITCODE - install Magicsplat by hand and re-run"
         return $null
     }
     Update-PathFromRegistry
@@ -140,14 +146,14 @@ function Install-Toolchain {
 #
 # The real test: does the toolchain load? Probe with tclsh itself (same logic as
 # rio-dev-deploy.sh). Tk needs no display on Windows, but withdraw its window so it
-# doesn't flash. tls is OPTIONAL here — only the agent's HTTPS needs it.
+# doesn't flash. tls is OPTIONAL here - only the agent's HTTPS needs it.
 
-# The Tcl probe, as an ARRAY of single-line strings — NOT a multi-line string literal.
+# The Tcl probe, as an ARRAY of single-line strings - NOT a multi-line string literal.
 # Windows PowerShell 5.1 mis-parses multi-line string literals (here-strings AND quoted)
 # in a file with LF line endings, reading their interior as PowerShell; single-line
 # single-quoted elements sidestep that entirely. Set-Content writes one per line. Each
 # element is single-quoted (so $name/$ver etc. stay literal Tcl) and apostrophe-free
-# (so the closing quote is unambiguous — hence {*can*find*} not {*can't find*}).
+# (so the closing quote is unambiguous - hence {*can*find*} not {*can't find*}).
 $Probe = @(
     'set fail 0'
     'proc check {name {require 1}} {'
@@ -184,7 +190,7 @@ function Invoke-Verify ($tclsh) {
         Remove-Item $probePath -ErrorAction SilentlyContinue
     }
     if ($code -ne 0) {
-        Die "toolchain verify failed — Tk and/or json (tcllib) not loadable. Install/repair Tcl/Tk (see -Help), then re-run."
+        Die "toolchain verify failed - Tk and/or json (tcllib) not loadable. Install/repair Tcl/Tk (see -Help), then re-run."
     }
     Log "toolchain OK"
 }
@@ -199,7 +205,7 @@ function Set-Persistence {
         $name = $pair[0]; $val = $pair[1]
         $existing = [Environment]::GetEnvironmentVariable($name, 'User')
         if ($existing) {
-            Log "$name already set ($existing) — leaving it"
+            Log "$name already set ($existing) - leaving it"
             $val = $existing
         } elseif ($DryRun) {
             Step "setx $name `"$val`"  (User scope)"
@@ -262,8 +268,8 @@ if (-not $NoPersist) { Set-Persistence }
 
 if ($Shortcut) {
     $wish = Find-Tcl "wish"
-    if (-not $wish) { Warn "wish not found — skipping shortcut (Tk GUI stub missing?)" }
-    elseif (-not (Test-Path $rioGui)) { Warn "rio-gui.tcl not found at $rioGui — skipping shortcut" }
+    if (-not $wish) { Warn "wish not found - skipping shortcut (Tk GUI stub missing?)" }
+    elseif (-not (Test-Path $rioGui)) { Warn "rio-gui.tcl not found at $rioGui - skipping shortcut" }
     else { New-RioShortcut $wish $rioGui }
 }
 
@@ -271,4 +277,4 @@ Write-Host ""
 Log "done. Launch rio with:"
 $wishHint = (Find-Tcl "wish"); if (-not $wishHint) { $wishHint = "wish" }
 Write-Host "    $wishHint `"$rioGui`""
-if ($DryRun) { Warn "dry run — nothing was changed" }
+if ($DryRun) { Warn "dry run - nothing was changed" }
