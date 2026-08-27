@@ -93,6 +93,20 @@ function Find-Tcl ($stem) {
     foreach ($c in Get-Command "$stem*" -CommandType Application -ErrorAction SilentlyContinue) {
         if ($c.Name -match "^$stem\d*t?\.exe$") { return $c.Source }
     }
+    # Not on PATH: search the well-known Windows Tcl install dirs (Magicsplat installs
+    # to %LOCALAPPDATA%\Apps\Tcl86|Tcl90\bin; ActiveTcl to C:\Tcl\bin), so a toolchain
+    # just installed by winget is found even before PATH refreshes in this session.
+    $dirs = @(
+        (Join-Path $env:LOCALAPPDATA 'Apps\Tcl86\bin')
+        (Join-Path $env:LOCALAPPDATA 'Apps\Tcl90\bin')
+        'C:\Tcl\bin'
+    )
+    foreach ($d in $dirs) {
+        if ($d -and (Test-Path $d)) {
+            $hit = Get-ChildItem -Path $d -Filter "$stem*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) { return $hit.FullName }
+        }
+    }
     return $null
 }
 
@@ -133,7 +147,10 @@ function Install-Toolchain {
         return $null
     }
     Log "installing $WingetId via winget..."
-    & winget install --exact --id $WingetId --source winget --accept-package-agreements --accept-source-agreements
+    # Pipe winget's console output to Out-Host, NOT the pipeline: an uncaptured native
+    # command's stdout would otherwise become part of this function's return value, so
+    # the caller's $tclsh would be the winget banner text instead of the path.
+    & winget install --exact --id $WingetId --source winget --accept-package-agreements --accept-source-agreements | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Warn "winget install exited $LASTEXITCODE - install Magicsplat by hand and re-run"
         return $null
@@ -244,7 +261,7 @@ function New-RioShortcut ($wish, $rioGui) {
 $rioGui = Join-Path $PSScriptRoot "rio-gui\rio-gui.tcl"
 
 $tclsh = Find-Tcl "tclsh"
-if (-not $tclsh) {
+if (-not $tclsh -and -not $VerifyOnly) {
     Warn "tclsh not found on PATH."
     $tclsh = Install-Toolchain
 }
