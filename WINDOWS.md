@@ -41,6 +41,14 @@ tclsh
 
 Both `package require` lines should print a version, not an error.
 
+> **Open a new terminal first.** The installer adds `wish`/`tclsh` to your *user*
+> `PATH`, but only processes started **afterwards** inherit it. A terminal (or an
+> editor, or a VS Code window) that was already open keeps the `PATH` it started
+> with, so `wish` stays "not found" there no matter how the install went. This is
+> the single most common "it didn't work" on Windows and it is not a rio problem —
+> close the terminal, open a new one, and `where wish` will find it. The same
+> applies to `git` after installing Git for Windows.
+
 ## 2. Get rio
 
 Copy or clone the repository to a folder, e.g. `C:\rio`. There is nothing to build.
@@ -65,8 +73,14 @@ check the toolchain. It changes nothing it doesn't have to and is safe to re-run
 
 rio stores your preferences (theme, wrap, layout) and remembers which files were open,
 under paths taken from `XDG_CONFIG_HOME` / `XDG_DATA_HOME`, falling back to `HOME`.
-On Windows those are often unset — in which case **rio still launches and edits
-perfectly, but forgets your preferences and last session between runs.**
+
+**Persistence already works without doing anything here.** Tcl on Windows always
+provides `HOME` (it synthesises it from `HOMEDRIVE` + `HOMEPATH`), so with the XDG
+variables unset rio falls back to `%USERPROFILE%\.config\rio` and
+`%USERPROFILE%\.local\share\rio` and remembers everything across runs. Setting the
+variables below only **relocates** that state to a tidier place — it does not switch
+persistence on. (An earlier version of this section claimed rio "forgets your
+preferences" without them; that was wrong on Windows.)
 
 `rio-dev-deploy.ps1` (§2) sets these up for you — this section is what it does, for
 reference or if you'd rather do it by hand. It sets two **user environment variables**:
@@ -124,14 +138,25 @@ and rio is working for you on Windows.
 
 If it doesn't:
 
-- **`wish` not found, or a `package require` error** → the Tcl/Tk install (§1): make
-  sure Magicsplat finished and a **new** terminal sees `wish` on `PATH`.
-- **A stack trace mentioning `HOME` or a config/session path** → set the environment
-  variables in §3 and relaunch.
+- **`wish` not found** → almost always a **stale terminal**, not a failed install.
+  Check the registry value rather than the current shell:
 
-Either way, jot down exactly what broke — it's the first real
+  ```
+  powershell -c "[Environment]::GetEnvironmentVariable('Path','User')"
+  ```
+
+  If `...\Apps\Tcl86\bin` is in there, the install is fine — open a **new** terminal
+  (§1). Only if it's absent is the Tcl/Tk install itself the problem.
+- **A `package require` error** → the Tcl/Tk install is incomplete; re-run
+  `rio-dev-deploy.ps1 -VerifyOnly` (§2), which reports each package by name.
+- **The git pane does nothing** → same stale-`PATH` story for `git` (§7).
+- **A stack trace mentioning `HOME` or a config/session path** → §3, though this
+  should not happen: Tcl always provides `HOME` on Windows.
+
+Either way, jot down exactly what broke — it's a
 [RELEASING.md](RELEASING.md) Gate 0 finding, and it's how the Windows claim earns its
-place in the README.
+place in the README. The first pass of that verification is recorded in RELEASING.md
+Gate 0; §8 below is the dev loop it was done with.
 
 ## 7. Beyond notes: git, the agent, and remote cores
 
@@ -167,3 +192,69 @@ because it needs the least. What each adds:
 spawn, pipe, Tk, save, persistence), then git and the agent on that local core, then a
 remote Linux core as a separate step. If the local-core agent ever gives trouble, a
 remote core hands you full agent+git immediately with Windows as a pure client.
+
+## 8. Hacking on rio *from* Windows
+
+For contributors, not users. [CONTRIBUTING.md](CONTRIBUTING.md) assumes a POSIX shell;
+this is the same thing in PowerShell, plus the two settings a Windows clone needs.
+
+**Set up the clone.** Windows cannot store the POSIX executable bit, so a clone that
+inherited `core.filemode = true` reports every executable file as permanently modified
+and a `git commit -a` would strip the bit for the Linux hosts:
+
+```
+git config core.filemode false
+```
+
+Line endings need no setup — [.gitattributes](.gitattributes) pins the whole tree to
+LF (and `*.ps1` to CRLF) regardless of your `core.autocrlf`.
+
+**Run the suites.** All three run natively; none needs a display server:
+
+```
+tclsh rio-core\tests\all.tcl        # core (tcltest)
+tclsh syntax\tests\all.tcl          # highlighters (pure Tcl)
+wish  rio-gui\tests\smoke.tcl       # GUI, window withdrawn
+wish  rio-gui\tests\pipe.tcl        # the spawned-core pipe transport
+```
+
+Note the GUI form: CONTRIBUTING shows `RIO_GUI_HEADLESS=1 wish …`, which is POSIX
+shell syntax that PowerShell cannot parse. **No prefix is needed** — the GUI test
+scripts set `RIO_GUI_HEADLESS` themselves. To set it anyway, PowerShell wants
+`$env:RIO_GUI_HEADLESS = 1` as its own statement first.
+
+**Seeing failures — read this before you debug anything.** `wish.exe` is a
+GUI-subsystem binary: an *uncaught* error at the top level of a script does not go to
+stderr, it opens a **modal "Error in startup script" dialog and blocks until someone
+clicks OK**. Redirecting stderr captures nothing. So an aborting suite looks like
+output that simply stops early for no reason, and an *unattended* run appears to
+**hang** rather than fail — which is also why there is no Windows CI story yet.
+
+When a suite ends without its `ALL CHECKS PASSED` line, re-run it inside a catch to
+get the error and the stack on stdout instead of in a dialog:
+
+```
+# runtest.tcl
+set t [file normalize [lindex $argv 0]] ; set argv {}
+if {[catch {uplevel #0 [list source $t]} err]} {
+    puts "*** $err" ; puts $::errorInfo ; exit 99
+}
+```
+
+```
+wish runtest.tcl rio-gui\tests\highlight.tcl
+```
+
+**Where Windows stands today.** Everything is green: `rio-core` 385 passed / 0 failed
+(3 skipped — the `unix`-constrained permission tests), `syntax` 532/532, and 923
+`rio-gui` checks across thirteen suites with no failures. The one exception is
+`rio-gui/tests/reconnect.tcl`, which **hangs** and is still uninvestigated. The
+findings that got it there — and the handful of things still open — are in
+[RELEASING.md](RELEASING.md) Gate 0.
+
+**One rule to keep it that way: every entry point sets the encoding first.** Tcl 8.6
+decodes a script with the *system* encoding, which is cp1252 on Windows, so any file
+run directly — `rio-gui.tcl`, `rio-core/server.tcl`, each `rio-gui/tests/*.tcl` — opens
+with the four-line UTF-8 guard those files carry. A new test file without it will
+compare rio's correct output against its own mojibake expectations and fail confusingly.
+Non-ASCII **expected values** in a `.test` are safer written as `\u` escapes regardless.

@@ -14,6 +14,15 @@
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
+# Tcl 8.6 decodes a script with the SYSTEM encoding (cp1252 on Windows), so this
+# file's own non-ASCII expectations arrive mojibake and fail against the correctly-
+# decoded values the GUI produces. The same guard the rio-gui and server entry points
+# carry -- a test file is an entry point too. No-op where the system encoding is UTF-8.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 set ::env(RIO_GUI_HEADLESS) 1
 source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 source [file join [file dirname [info script]] .. .. rio-core server.tcl]
@@ -919,8 +928,14 @@ ok "keydlg: clear disabled w/o key"   [.claudekey.btns.clear cget -state] disabl
 claude_key_save .claudekey
 ok "keydlg: closed after save"        [winfo exists .claudekey] 0
 ok "keydlg: key now stored"           [rio::claude::api::configured] 1
-ok "keydlg: secret is 0600" \
-	[format %04o [expr {[file attributes [file join $::secdir claude-api.secret] -permissions] & 0777}]] 0600
+# POSIX-only: `file attributes -permissions` does not exist on Windows (it raises
+# "bad option -permissions"), which aborted this whole suite there rather than failing
+# one check. rio-core's secret.test/workspace.test already gate the same assertion with
+# tcltest's `unix` constraint; this suite has no constraints, so gate it by hand.
+if {$::tcl_platform(platform) eq "unix"} {
+	ok "keydlg: secret is 0600" \
+		[format %04o [expr {[file attributes [file join $::secdir claude-api.secret] -permissions] & 0777}]] 0600
+}
 
 # Re-open: Clear is enabled now, and clearing removes the secret.
 claude_key_dialog

@@ -344,6 +344,13 @@ display but stays off-screen:
 
     RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
+(On Windows that `VAR=x cmd` prefix is POSIX shell syntax PowerShell can't parse —
+but no prefix is needed there, because the GUI test scripts set the variable
+themselves: just `wish rio-gui\tests\smoke.tcl`. Windows contributors should read
+[WINDOWS.md §8](WINDOWS.md), which also covers the two `git config` settings a
+Windows clone needs and how to get an error message out of `wish`, which prints
+none for an uncaught error.)
+
 More focused GUI suites live beside it in `rio-gui/tests/` — for example
 `repos.tcl` drives the whole extension-repository flow (scan, consent,
 install, remove, the Extensions window) against fixture data, with no network

@@ -12,8 +12,16 @@ source [file join [file dirname [info script]] .. core.tcl]
 
 set ::tcl [info nameofexecutable]
 
+# The child under test is tclsh itself, and a Tcl child's stdout/stderr default to the
+# PLATFORM line-ending convention — CRLF on Windows. rio::exec::run captures the child's
+# bytes faithfully by design (no EOL translation, the D22 ethos), so a test that expects
+# bare LF without pinning the child's translation is asserting the platform's stdio
+# convention rather than rio's capture fidelity. Pin it in the child; the assertions below
+# then mean the same thing everywhere.
+set ::lf {fconfigure stdout -translation lf; fconfigure stderr -translation lf; }
+
 test exec-run-stdout {captures stdout and a zero exit} -body {
-	set r [rio::exec::run [list $::tcl] "" "puts hello"]
+	set r [rio::exec::run [list $::tcl] "" "$::lf puts hello"]
 	list [dict get $r exitcode] [dict get $r stdout] [dict get $r stderr]
 } -result {0 {hello
 } {}}
@@ -24,7 +32,7 @@ test exec-run-exitcode {a non-zero exit is a successful op; the code is data} -b
 } -result {3 {}}
 
 test exec-run-stderr-separate {stdout and stderr are captured on separate streams} -body {
-	set r [rio::exec::run [list $::tcl] "" "puts out; puts stderr oops"]
+	set r [rio::exec::run [list $::tcl] "" "$::lf puts out; puts stderr oops"]
 	list [dict get $r stdout] [dict get $r stderr]
 } -result {{out
 } {oops
@@ -32,7 +40,10 @@ test exec-run-stderr-separate {stdout and stderr are captured on separate stream
 
 test exec-run-stdin {stdin is passed through to the child} -setup {
 	set ::sp [file join [::tcltest::temporaryDirectory] exec-stdin.tcl]
-	set f [open $::sp w] ; puts $f {puts [string toupper [read stdin]]} ; close $f
+	set f [open $::sp w]
+	puts $f $::lf
+	puts $f {puts [string toupper [read stdin]]}
+	close $f
 } -body {
 	set r [rio::exec::run [list $::tcl $::sp] "" "abc"]
 	dict get $r stdout
@@ -69,7 +80,7 @@ test exec-run-launch-failure {failing to launch the command is an io_error} -bod
 # --- through the in-process core --------------------------------------------
 
 test exec-op-run {exec.run op returns the capture shape} -body {
-	set r [rio::core::call exec.run [dict create argv [list $::tcl] stdin "puts hi"]]
+	set r [rio::core::call exec.run [dict create argv [list $::tcl] stdin "$::lf puts hi"]]
 	set resp [dict get $r response]
 	list [dict get $resp ok] [dict get $resp result exitcode] \
 		[dict get $resp result stdout]

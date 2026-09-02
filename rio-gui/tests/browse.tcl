@@ -13,6 +13,15 @@
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/browse.tcl
 
+# Tcl 8.6 decodes a script with the SYSTEM encoding (cp1252 on Windows), so this
+# file's own non-ASCII expectations arrive mojibake and fail against the correctly-
+# decoded values the GUI produces. The same guard the rio-gui and server entry points
+# carry -- a test file is an entry point too. No-op where the system encoding is UTF-8.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 set ::env(RIO_GUI_HEADLESS) 1
 set argv {}                          ;# no --connect ⇒ default: spawn a local core
 source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
@@ -69,9 +78,14 @@ ok "rows: parent path"   [lindex [lindex $rows 0] 1] [file dirname $T]
 ok "rows: dirs then files" [lmap r $rows {lindex $r 2}] \
 	[list "../" "sub1/" "sub2/" "  a.txt" "  b.txt"]
 ok "rows: a.txt abspath"  [lindex [lindex $rows 3] 1] [file join $T a.txt]
-# At the filesystem root there is no synthetic parent row.
-set rootinfo [rbrowse_rows_for /]
-ok "rows: / has no parent" [expr {[lindex [lindex [dict get $rootinfo rows] 0] 2] ne "../"}] 1
+# At the filesystem root there is no synthetic parent row. Ask the platform for its
+# root rather than hardcoding "/": on Windows that is "C:/", and "/" is not even an
+# absolute path there (file pathtype calls it "volumerelative"), so the core refused
+# to list it and this aborted the whole suite.
+set ::fsroot [file normalize /]
+set rootinfo [rbrowse_rows_for $::fsroot]
+ok "rows: root listed"     [dict get $rootinfo ok] 1
+ok "rows: root has no parent" [expr {[lindex [lindex [dict get $rootinfo rows] 0] 2] ne "../"}] 1
 
 # --- unit: rbrowse_start (where the browser opens) ---------------------------
 ok "start: file seed -> its dir" [rbrowse_start [file join $T a.txt]] $T

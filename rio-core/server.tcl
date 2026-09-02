@@ -19,6 +19,18 @@
 # Source: defines the procs without blocking; only the direct-execution path enters
 #         the event loop.
 
+# The core is a process of its own (spawned `tclsh server.tcl --stdio`, or a daemon),
+# so it needs the same UTF-8 source guard the GUI entry point carries: Tcl 8.6 decodes
+# scripts with the SYSTEM encoding, which is cp1252 on Windows, and the core's own
+# non-ASCII literals (agent tool text, error messages) would arrive mojibake. Setting
+# it here covers every module the apply block sources below; the re-read covers this
+# file. No-op where the system encoding is already UTF-8.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
+
 package require json
 
 apply {{} {

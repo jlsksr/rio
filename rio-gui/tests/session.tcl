@@ -15,8 +15,22 @@
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/session.tcl
 
+# Tcl 8.6 decodes a script with the SYSTEM encoding (cp1252 on Windows), so this
+# file's own non-ASCII expectations arrive mojibake and fail against the correctly-
+# decoded values the GUI produces. The same guard the rio-gui and server entry points
+# carry -- a test file is an entry point too. No-op where the system encoding is UTF-8.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 set ::env(RIO_GUI_HEADLESS) 1
-set ::S [file join [file dirname [file tempfile]] riosess-[pid]]
+# `file dirname` of the CHANNEL that `file tempfile` returns is "." — which put this
+# whole fixture tree in the CURRENT directory (the repo root), left behind whenever
+# the suite died before its cleanup. Take the dirname of the temp PATH instead, and
+# close the channel so Windows can delete the file.
+set ::sessch [file tempfile _sp] ; close $::sessch ; file delete $_sp
+set ::S [file join [file dirname $_sp] riosess-[pid]]
 file delete -force $::S
 set ::env(XDG_CONFIG_HOME) [file join $::S config]
 set ::env(XDG_DATA_HOME)   [file join $::S data]

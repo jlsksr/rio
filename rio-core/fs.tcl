@@ -91,8 +91,12 @@ proc rio::fs::listdir {dir} {
 			lappend names $name
 		}
 	}
+	# -unique matters on Windows: there `glob *` matches dotfiles too, so the two
+	# patterns overlap and every dotfile would otherwise be listed twice (the file
+	# pane showing .git, .gitignore, ... doubled). On POSIX the patterns are
+	# disjoint and -unique changes nothing.
 	set entries {}
-	foreach name [lsort -dictionary $names] {
+	foreach name [lsort -dictionary -unique $names] {
 		set type [expr {[file isdirectory [file join $dir $name]] ? "dir" : "file"}]
 		lappend entries [dict create name $name type $type]
 	}
