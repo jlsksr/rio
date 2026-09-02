@@ -1,6 +1,14 @@
 # Personal scratch / throwaway test files (not part of rio).
 /jka-test/
 
+# Per-developer agent tool settings (permissions etc.) - personal, not shared.
+/.claude/settings.local.json
+
+# Debris from an aborted rio-gui/tests/session.tcl run: it builds its fixture
+# tree in the CURRENT directory (see RELEASING.md Gate 0), so a suite that dies
+# before its cleanup leaves one of these in the repo root.
+/riosess-*/
+
 # O1 Ck spike: the vendored Ck checkout + build (from rio-dev-deploy.sh --with-ck
 # or a manual clone). The probe harness under spike/probes/ is tracked; the
 # upstream build is not.

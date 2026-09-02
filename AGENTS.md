@@ -592,6 +592,20 @@ refusing to execute config removes a whole class of startup-fragility and
 security footguns; JSON for machine state reuses what we already parse for the
 protocol (D11); XDG + per-project `.rio/` is the least-surprising layout.
 
+*(Amended 2026-09-02 — what Windows actually does.)* The sentence above says
+"Windows uses the native equivalents (`%APPDATA%` / `%LOCALAPPDATA%`)". That was a
+design intent and **is not implemented**: `secret.tcl`, `workspace.tcl`, `theme.tcl`
+and `agent-prompt.tcl` all use the one XDG-with-`HOME`-fallback ladder on every
+platform. Verified on Windows 11 during the first native run (RELEASING.md Gate 0),
+this turns out to be **fine rather than broken**: Tcl synthesises `env(HOME)` from
+`HOMEDRIVE` + `HOMEPATH`, so with no XDG variables set rio lands in
+`%USERPROFILE%\.config\rio` and `%USERPROFILE%\.local\share\rio` and persists
+correctly. So the ladder is genuinely cross-platform and one code path serves all
+hosts — the argument for adding `%APPDATA%` is now only native-Windows convention,
+not function. Left unbuilt on purpose; noted in ROADMAP. The one real casualty is
+the `0600`/`0700` lock-down in `secret.tcl`, which is a `catch`-wrapped no-op on
+NTFS — the API key file inherits user-profile permissions instead (WINDOWS.md §7).
+
 ### D22 — Encoding, line endings, and cursor locality
 
 Resolves the easy half of the document model (D12):
