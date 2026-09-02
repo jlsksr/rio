@@ -1,3 +1,13 @@
+# Default: normalize every text file to LF in the repository AND in the working
+# tree, on every platform. Without this, a Windows checkout inherits Git for
+# Windows' core.autocrlf=true and silently gets CRLF working copies of files
+# nothing pins below (*.tcl, *.md, *.theme, *.test). That matters here because rio
+# PRESERVES a file's line endings on save (AGENTS.md D22) — so a source file that
+# flips to CRLF once stays CRLF, and extension payloads and test fixtures would
+# carry endings the Linux hosts never see. Pinning it makes the checkout identical
+# everywhere regardless of the contributor's autocrlf setting.
+* text=auto eol=lf
+
 # PowerShell scripts must check out with CRLF line endings: Windows PowerShell 5.1
 # mis-parses some constructs (notably here-strings) in LF-only files. Force native
 # Windows endings so a Windows checkout always gets a script PowerShell can parse.
