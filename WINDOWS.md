@@ -223,10 +223,15 @@ shell syntax that PowerShell cannot parse. **No prefix is needed** — the GUI t
 scripts set `RIO_GUI_HEADLESS` themselves. To set it anyway, PowerShell wants
 `$env:RIO_GUI_HEADLESS = 1` as its own statement first.
 
-**Seeing failures.** `wish.exe` is a GUI-subsystem binary: an *uncaught* error at the
-top level of a script produces **no stderr output at all**, so an aborting test looks
-like output that simply stops early with no explanation. When a suite ends without its
-`ALL CHECKS PASSED` line, re-run it inside a catch to get the error and the stack:
+**Seeing failures — read this before you debug anything.** `wish.exe` is a
+GUI-subsystem binary: an *uncaught* error at the top level of a script does not go to
+stderr, it opens a **modal "Error in startup script" dialog and blocks until someone
+clicks OK**. Redirecting stderr captures nothing. So an aborting suite looks like
+output that simply stops early for no reason, and an *unattended* run appears to
+**hang** rather than fail — which is also why there is no Windows CI story yet.
+
+When a suite ends without its `ALL CHECKS PASSED` line, re-run it inside a catch to
+get the error and the stack on stdout instead of in a dialog:
 
 ```
 # runtest.tcl
@@ -240,7 +245,16 @@ if {[catch {uplevel #0 [list source $t]} err]} {
 wish runtest.tcl rio-gui\tests\highlight.tcl
 ```
 
-**Known-failing on Windows today.** See [RELEASING.md](RELEASING.md) Gate 0 for the
-full findings; the short version is that the failures cluster into three causes, and
-the suites are otherwise green (`syntax` 532/532, `pipe`, `remote`, `repos`, `split`,
-`stale`, `vi`, `modes`, `find` all clean).
+**Where Windows stands today.** Everything is green: `rio-core` 385 passed / 0 failed
+(3 skipped — the `unix`-constrained permission tests), `syntax` 532/532, and 923
+`rio-gui` checks across thirteen suites with no failures. The one exception is
+`rio-gui/tests/reconnect.tcl`, which **hangs** and is still uninvestigated. The
+findings that got it there — and the handful of things still open — are in
+[RELEASING.md](RELEASING.md) Gate 0.
+
+**One rule to keep it that way: every entry point sets the encoding first.** Tcl 8.6
+decodes a script with the *system* encoding, which is cp1252 on Windows, so any file
+run directly — `rio-gui.tcl`, `rio-core/server.tcl`, each `rio-gui/tests/*.tcl` — opens
+with the four-line UTF-8 guard those files carry. A new test file without it will
+compare rio's correct output against its own mojibake expectations and fail confusingly.
+Non-ASCII **expected values** in a `.test` are safer written as `\u` escapes regardless.
