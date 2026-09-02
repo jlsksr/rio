@@ -12,7 +12,10 @@ set ::serverTcl [file normalize [file join [file dirname [info script]] .. serve
 # protocol stream reaches us.
 proc spawn_core {} {
 	set cmd [list [info nameofexecutable] $::serverTcl --stdio]
-	set c [open "| $cmd 2>/dev/null" r+]
+	# The bit bucket is spelled NUL on Windows; "/dev/null" there is just a path
+	# that cannot be created, and the open fails before the core ever starts.
+	set nul [expr {$::tcl_platform(platform) eq "windows" ? "NUL" : "/dev/null"}]
+	set c [open "| $cmd 2>$nul" r+]
 	fconfigure $c -buffering line -blocking 0 -translation lf -encoding utf-8
 	return $c
 }

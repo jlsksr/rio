@@ -9,6 +9,15 @@
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/pipe.tcl
 
+# Tcl 8.6 decodes a script with the SYSTEM encoding (cp1252 on Windows), so this
+# file's own non-ASCII expectations arrive mojibake and fail against the correctly-
+# decoded values the GUI produces. The same guard the rio-gui and server entry points
+# carry -- a test file is an entry point too. No-op where the system encoding is UTF-8.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 set ::env(RIO_GUI_HEADLESS) 1
 source [file join [file dirname [info script]] sandbox.tcl] ;# isolate XDG prefs/workspace (D31)
 set argv {}                          ;# no --connect ⇒ default: spawn a local core
