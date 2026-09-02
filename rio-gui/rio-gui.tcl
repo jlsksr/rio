@@ -38,6 +38,20 @@ package require json
 # A test may pre-set ::connect_to (a host:port) to attach to an in-process server.
 # Only the wire encoder is sourced here (Tk-free); the core lives in its own process.
 # ---------------------------------------------------------------------------
+# rio's sources are UTF-8, but Tcl 8.6 decodes a script with the SYSTEM encoding —
+# cp1252 on a Western Windows install — so every non-ASCII literal, and with it the
+# whole D27 glyph vocabulary, arrives mojibake ("rio - untitled" renders as
+# "rio â€" untitled"). Setting the system encoding fixes every file sourced BELOW,
+# but this file's own literals were decoded before line 1 ran, so re-read it once.
+# The guard is the first executable statement: nothing has run yet, so re-sourcing
+# repeats nothing. No-op where the system encoding is already UTF-8 (Linux, the
+# BSDs, and Tcl 9 everywhere).
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
+
 set ::rio_dir [file dirname [info script]]
 set ::rio_self [file normalize [info script]]   ;# this script, for spawning a new window
 source [file join $::rio_dir .. rio-core wire.tcl]
@@ -3155,7 +3169,12 @@ proc rbrowse_rows_for {dir} {
 	}
 	set abs [dict get $resp result path]   ;# the core's normalized dir
 	set rows {}
-	if {$abs ne "/"} { lappend rows [list dir [file dirname $abs] "../"] }
+	# At a filesystem root there is no parent to offer. Asking whether the dirname is
+	# the path itself, rather than testing `$abs ne "/"`, is what makes this right off
+	# POSIX: a Windows root is "C:/", whose dirname is itself, so the literal put a
+	# "../" row there that navigated straight back to the same directory. $abs is the
+	# CORE's normalized path, so this holds for a remote core too.
+	if {[file dirname $abs] ne $abs} { lappend rows [list dir [file dirname $abs] "../"] }
 	foreach grp {dir file} {
 		foreach e [dict get $resp result entries] {
 			if {[dict get $e type] ne $grp} continue
@@ -4276,16 +4295,29 @@ proc prefs_path {} {
 	return [file join $base rio prefs.json]
 }
 
+# Read a whole UTF-8 text file, ALWAYS closing the channel — the `finally` is the
+# point. Each config reader below parses inside a catch that tolerates a corrupt
+# file; written as one `open … ; parse ; close` chain, a throwing parse skips the
+# close and leaks the channel. That is invisible on POSIX but not on Windows, where
+# an open handle makes the file undeletable: one corrupt prefs.json or keys.json
+# locked it for the life of the process, so rio could never rewrite or reset it.
+proc slurp_utf8 {path} {
+	set f [open $path r]
+	try {
+		fconfigure $f -encoding utf-8
+		return [::read $f]
+	} finally {
+		close $f
+	}
+}
+
 # Load saved preferences over the defaults. A missing or corrupt file leaves the
 # defaults intact — a bad prefs file must never stop the editor starting. Only known
 # keys with valid values are honoured; anything else is ignored.
 proc prefs_load {} {
 	set path [prefs_path]
 	if {$path eq "" || ![file exists $path]} return
-	if {[catch {
-		set f [open $path r] ; fconfigure $f -encoding utf-8
-		set d [json::json2dict [::read $f]] ; close $f
-	}]} return
+	if {[catch {set d [json::json2dict [slurp_utf8 $path]]}]} return
 	if {[dict exists $d theme]}      { set ::theme_name [dict get $d theme] }
 	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
@@ -4409,10 +4441,7 @@ proc sources_load {} {
 	set path [sources_path]
 	if {$path eq "" || ![file exists $path]} { return {} }
 	set urls {}
-	if {[catch {
-		set f [open $path r] ; fconfigure $f -encoding utf-8
-		set text [::read $f] ; close $f
-	}]} { return {} }
+	if {[catch {set text [slurp_utf8 $path]}]} { return {} }
 	foreach line [split $text "\n"] {
 		set t [string trim $line]
 		if {$t eq "" || [string index $t 0] eq "#"} continue
@@ -4451,8 +4480,7 @@ proc ledger_load {} {
 	set path [ledger_path]
 	if {$path eq "" || ![file exists $path]} return
 	if {[catch {
-		set f [open $path r] ; fconfigure $f -encoding utf-8
-		set d [json::json2dict [::read $f]] ; close $f
+		set d [json::json2dict [slurp_utf8 $path]]
 		dict for {key e} $d {
 			foreach k {source dir version files installed} {
 				if {![dict exists $e $k]} { error "entry $key missing $k" }
@@ -5803,10 +5831,9 @@ proc keymap_resolve {} {
 	set ::keymap_bad {}
 	set path [keys_path]
 	if {$path eq "" || ![file exists $path]} return
-	if {[catch {
-		set f [open $path r] ; fconfigure $f -encoding utf-8
-		set over [json::json2dict [::read $f]] ; close $f
-	}]} { lappend ::keymap_bad "keys.json is not valid JSON — ignored" ; return }
+	if {[catch {set over [json::json2dict [slurp_utf8 $path]]}]} {
+		lappend ::keymap_bad "keys.json is not valid JSON — ignored" ; return
+	}
 	dict for {cmd chord} $over {
 		if {![dict exists $::keymap_default $cmd]} {
 			lappend ::keymap_bad "unknown command \"$cmd\"" ; continue

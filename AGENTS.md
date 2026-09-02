@@ -3173,6 +3173,49 @@ the line is drawn at *autonomy*, not *capability*.**
 
 Practical test when a feature is proposed: does it need a human in the loop to act? In scope.
 Does it act unattended, on a schedule or its own initiative, with no human present? Out.
+
+### D54 — Every entry point pins the source encoding to UTF-8
+
+rio's sources are UTF-8 and carry non-ASCII deliberately: D27's whole iconography is
+monochrome Unicode glyphs (`●` `⟳` `▸` `✓` `×` `·`) written as literals, plus em
+dashes and ellipses in user-facing strings. **Tcl 8.6 decodes a script file with the
+`encoding system` value, not UTF-8** — and on a Western Windows install that is
+cp1252. The first native Windows run (RELEASING.md Gate 0) therefore rendered every
+one of those glyphs as mojibake: the title bar read `rio â€" untitled`.
+
+**Decision:** every file that is *run* rather than *sourced by another rio file* —
+`rio-gui/rio-gui.tcl`, `rio-core/server.tcl`, and each `rio-gui/tests/*.tcl` — opens
+with the same four-line guard:
+
+```tcl
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
+```
+
+Setting the system encoding fixes every file sourced *below* it, so the guard is
+needed only at entry points; the re-read fixes the entry file's own literals, which
+were already decoded before line 1 ran. Placed as the first executable statement it
+repeats no work, and it is a **no-op** wherever the system encoding is already UTF-8 —
+Linux, the BSDs, and Tcl 9 everywhere (Tcl 9 defaults `source` to UTF-8, which is what
+makes this a 8.6-shaped problem that will age out rather than a permanent tax).
+
+**Why not `\u` escapes instead.** Escaping the ~21 distinct glyphs at 192 call sites
+would also work and needs no global state, but it trades a readable UI vocabulary for
+unreadable source at every use, and it would not help the next contributor who types a
+real character. The guard fixes the class, not the instances. Escapes are still the
+right answer in one place: a **test's expected value**, which is compared against a
+correctly-decoded runtime result and so must not depend on how the test file itself
+was read (see `rio-core/tests/fs.test`).
+
+**Why setting `encoding system` globally is safe here.** rio never relies on the
+default: `rio::fs::read`/`write` open `rb`/`wb` and call `encoding convertfrom`/
+`convertto` explicitly to implement D22's detect-and-preserve, every config reader
+pins `-encoding utf-8`, and so does the wire channel on both ends. The only thing the
+setting changes is how Tcl reads *rio's own source*, which is exactly the bug.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
