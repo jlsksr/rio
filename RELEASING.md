@@ -189,14 +189,26 @@ socket with a branch. Scratch files and buffers were removed afterwards.
 
 This is the cross-platform case the in-repo `remote.tcl` cannot cover (it uses a local
 daemon), so it stays a manual check — but the path is now exercised, not assumed.
+Re-run after D55 with all 22 green, including against a core older than that change.
+
+One behaviour confirmed by accident and worth recording: with the SSH tunnel up but
+**no core listening behind it**, `ssh` accepts the local connection and the far end
+closes the channel immediately. rio handles this correctly — `hello_core`'s bounded
+greeting notices and reports "Connected to …, but no rio core answered … most likely a
+stale SSH tunnel", rather than sitting on a blank window. On Windows that report is a
+modal dialog (see the note above), so a *scripted* run still looks like a hang even
+though the interactive behaviour is right.
 
 ### Still open
 - ~~**`rbrowse_start` still falls back to a literal `"/"`**~~ — **fixed** (D55).
   `session.hello` now reports `fsroot`, the root of the core's *own* filesystem, and
-  the GUI records it per attachment instead of guessing. Additive, so it does not bump
-  the protocol: a core too old to send it leaves the client on its `/` default, which
-  is covered by a test. Verified both ways on Windows — a local core reports `C:/` and
-  the browser opens there and lists it.
+  the GUI records it per attachment instead of guessing. Verified three ways: a local
+  Windows core reports `C:/` and the browser opens there and lists it; a stubbed
+  greeting without the field leaves the client on its default; and — the one that
+  matters — the **live vps01 core, which predates the field, was confirmed not to send
+  it** and the Windows GUI degraded to `/` and browsed correctly anyway. So the
+  additive-not-a-protocol-bump claim is tested against a genuine older peer, not only
+  a mock.
 - **`smoke.tcl`'s `pane: scrollbar hidden when list fits` is flaky** — one failure in
   seven runs, timing-dependent on the pane having repainted. Not a regression (the
   same build passes the other six); noted so the next person does not chase it as one.
