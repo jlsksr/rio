@@ -157,6 +157,12 @@ set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" 
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
 set ::theme_choice default ;# the View ▸ Theme radio: tracks theme_name, snaps back on a failed switch (D39)
+# Tab-strip overflow (D57). When a group has more tabs than fit its width, `scroll`
+# (the default) keeps them on ONE line and shows ◂ ▸ arrows to page the visible window;
+# `multi` wraps them onto as many rows as needed. A persisted View preference; the Tabs
+# menu (always reachable, whatever the width) lists every open buffer regardless.
+set ::tab_layout scroll   ;# scroll | multi — see tabstrip_layout
+set ::tabstrip_w [dict create] ;# per-group last laid-out strip width, to skip no-op <Configure>s
 # Editor-font override (D56). The document view's font is a NAMED font (RioEditorFont)
 # the theme supplies; these are the user's persisted override ON TOP of it — "" / 0
 # means "follow the theme". editor_theme_* records the theme's own values so a reset
@@ -426,7 +432,7 @@ proc group_of {id} {
 # A fresh group-state dict: no buffer yet, an empty tab order, a clean highlight cache.
 # `w`/`path`/`frame`/`tabs` are filled in by make_editor_group once the widgets exist.
 proc new_group_state {} {
-	return [dict create w "" path "" frame "" tabs "" cur "" order {} \
+	return [dict create w "" path "" frame "" tabs "" cur "" order {} taboff 0 \
 		hl_scan "" hl_lang "" hl_pending 0 hl_enter {} \
 		hl_dirty 0 hl_lastchanged 0 hl_scanned 0]
 }
@@ -3077,6 +3083,7 @@ proc group_at {X Y} { group_of_widget [winfo containing $X $Y] }
 # plain proc, so it must be renamed away or the slot can't be rebuilt on a re-split.)
 proc destroy_editor_group {g} {
 	set path [gget $g path] ; set w [gw $g]
+	set ::tabstrip_w [dict remove $::tabstrip_w $g]  ;# forget the strip's cached width (D57)
 	catch {destroy [gget $g frame]}
 	catch {rename $path ""}
 	catch {rename $w ""}
@@ -3854,9 +3861,169 @@ proc refresh_tabs {} {
 				bind $w <Button-3> [list tab_context_menu $g $id %X %Y]
 			}
 			pack $f.l -side left ; pack $f.x -side right
-			pack $f -side left -padx 1 -pady 1
+			# The handle FRAME is left unmanaged here — tabstrip_layout decides which
+			# tabs are placed, and how (one scrolled row, or wrapped onto many).
+		}
+		tabstrip_layout $g
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Tab-strip overflow layout (AGENTS.md D57). refresh_tabs builds each group's tab
+# HANDLES (the b<id> frames) but leaves them unmanaged; this proc places them, in one
+# of two modes the user picks (::tab_layout). It also runs on the strip's <Configure>
+# so a window resize re-flows the tabs. Widths are measured analytically from the tab
+# text (font measure), not from winfo reqwidth, so the layout is correct synchronously
+# — before the handles have been mapped — which keeps it testable without an event loop.
+# ---------------------------------------------------------------------------
+
+# The on-screen width of tab handle <id>, mirroring refresh_tabs' construction: frame
+# border (bd 1 → 2) + the name label (RioUIFont, -padx 6 → +12) + the × label (-padx 3
+# → +6) + the tab's own pack -padx 1 (→ +2). Kept in one place so a padding change here
+# and in refresh_tabs stay in step.
+proc tab_pixwidth {id} {
+	return [expr {[font measure RioUIFont "[tab_name $id][tab_dot $id]"] \
+		+ [font measure RioUIFont "×"] + 22}]
+}
+
+# The last tab index that still fits when the visible window starts at `off` and has
+# `avail` pixels. The first tab (at `off`) always counts, so at least one tab shows even
+# in a sliver of space — otherwise a very narrow group could strand every tab.
+proc tabstrip_fit_last {ids off avail} {
+	set x 0 ; set last $off
+	for {set i $off} {$i < [llength $ids]} {incr i} {
+		set need [tab_pixwidth [lindex $ids $i]]
+		if {$i > $off && $x + $need > $avail} break
+		incr x $need ; set last $i
+	}
+	return $last
+}
+
+# Create (once) group `g`'s two scroll arrows in its strip and (re)colour them to the
+# theme. refresh_tabs destroys the strip's children each pass, so these are recreated
+# on demand; a <Configure>-only layout finds the ones the last refresh_tabs left.
+proc tabstrip_ensure_arrows {strip g} {
+	set c $::theme_colors
+	foreach {name dir glyph} [list al -1 "◂" ar 1 "▸"] {
+		set w $strip.$name
+		if {![winfo exists $w]} {
+			label $w -text $glyph -font RioUIFont -padx 3 -cursor hand2
+			bind $w <Button-1> [list tab_scroll $g $dir]
+		}
+		catch {$w configure \
+			-background [dict get $c tab.bar.bg] -foreground [dict get $c tab.fg]}
+	}
+}
+
+# Place group `g`'s tab handles. In `multi` mode they wrap across rows (grid); in
+# `scroll` mode they sit on one row (pack), and when they overflow the strip's width the
+# ◂ ▸ arrows appear and only a window of them is shown. `reveal` (default on) pulls that
+# window so the active tab is visible — wanted when the active tab changed, suppressed
+# by tab_scroll so the arrows can page PAST the active tab to reach a hidden one.
+proc tabstrip_layout {g {reveal 1}} {
+	set strip [gget $g tabs]
+	if {$strip eq "" || ![winfo exists $strip]} return
+	tabstrip_ensure_arrows $strip $g
+	set ids {}
+	foreach id [gorder $g] { if {[winfo exists $strip.b$id]} { lappend ids $id } }
+	foreach w [winfo children $strip] { catch {pack forget $w} ; catch {grid forget $w} }
+	if {[llength $ids] == 0} { gset $g taboff 0 ; return }
+	set avail [winfo width $strip]
+
+	if {$::tab_layout eq "multi"} {
+		# Not yet realized (width 1 during boot): one row, and the <Configure> that
+		# arrives with the real width re-flows it. Wrap when the next tab would overrun.
+		set A [expr {$avail <= 1 ? 1000000 : $avail}]
+		set col 0 ; set row 0 ; set x 0
+		foreach id $ids {
+			set need [tab_pixwidth $id]
+			if {$col > 0 && $x + $need > $A} { incr row ; set col 0 ; set x 0 }
+			grid $strip.b$id -row $row -column $col -sticky w -padx 1 -pady 1
+			incr col ; incr x $need
+		}
+		gset $g taboff 0
+		return
+	}
+
+	# scroll mode: everything on one line.
+	set n [llength $ids]
+	set total 0 ; foreach id $ids { incr total [tab_pixwidth $id] }
+	if {$avail <= 1 || $total <= $avail} {
+		# Fits (or not realized yet): show them all, no arrows, window reset to the start.
+		gset $g taboff 0
+		foreach id $ids { pack $strip.b$id -side left -padx 1 -pady 1 }
+		return
+	}
+	# Overflow: reserve room for the two arrows, then show a scrolled window of tabs.
+	set aw [expr {[font measure RioUIFont "▸"] + 8}]
+	set availtabs [expr {$avail - 2*$aw - 4}]
+	if {$availtabs < 1} { set availtabs 1 }
+	set off [gget $g taboff]
+	if {$off < 0} { set off 0 } elseif {$off > $n - 1} { set off [expr {$n - 1}] }
+	if {$reveal} {
+		set ai [lsearch -exact $ids [gcur $g]]
+		if {$ai >= 0 && $ai < $off} { set off $ai }
+		while {$ai >= 0 && $off < $n - 1} {
+			if {$ai <= [tabstrip_fit_last $ids $off $availtabs]} break
+			incr off
 		}
 	}
+	gset $g taboff $off
+	set last [tabstrip_fit_last $ids $off $availtabs]
+	pack $strip.al -side left  -padx 1
+	pack $strip.ar -side right -padx 1
+	for {set i $off} {$i <= $last} {incr i} {
+		pack $strip.b[lindex $ids $i] -side left -padx 1 -pady 1
+	}
+}
+
+# Page the visible tab window of group `g` by `dir` (-1 left, +1 right). Bound to the
+# arrows; suppresses reveal so paging can move past the active tab to a hidden one.
+proc tab_scroll {g dir} {
+	set n [llength [gorder $g]]
+	set off [expr {[gget $g taboff] + $dir}]
+	if {$off < 0} { set off 0 } elseif {$off > $n - 1} { set off [expr {$n - 1}] }
+	gset $g taboff $off
+	tabstrip_layout $g 0
+}
+
+# A group's strip changed size (window resize, dock drag): re-flow, but only on an
+# actual WIDTH change — multi-mode alters the strip's height as rows come and go, and
+# reacting to that would loop. reveal keeps the active tab in view after a resize.
+proc tabstrip_on_configure {g} {
+	set strip [gget $g tabs]
+	if {$strip eq "" || ![winfo exists $strip]} return
+	set w [winfo width $strip]
+	if {[dict exists $::tabstrip_w $g] && [dict get $::tabstrip_w $g] == $w} return
+	dict set ::tabstrip_w $g $w
+	tabstrip_layout $g 1
+}
+
+# Rebuild the Tabs menu (its -postcommand): every open buffer, across all groups, as a
+# radio entry keyed on the focused active tab, so a tab is reachable by name no matter
+# how narrow the window is. A split shows a separator between the two groups. Below sits
+# the multi-line toggle.
+proc tabs_menu_fill {} {
+	.m.tabs delete 0 end
+	set first 1
+	foreach g $::groups {
+		if {![llength [gorder $g]]} continue
+		if {!$first} { .m.tabs add separator }
+		set first 0
+		foreach id [gorder $g] {
+			.m.tabs add radiobutton -label "[tab_name $id][tab_dot $id]" \
+				-variable ::cur -value $id -command [list activate $id $g]
+		}
+	}
+	.m.tabs add separator
+	.m.tabs add checkbutton -label "Multi-Line Tabs" \
+		-onvalue multi -offvalue scroll -variable ::tab_layout -command tab_layout_apply
+}
+
+# The View/Tabs multi-line toggle changed ::tab_layout: re-flow every group and persist.
+proc tab_layout_apply {} {
+	foreach g $::groups { tabstrip_layout $g }
+	prefs_save
 }
 
 # ---------------------------------------------------------------------------
@@ -4507,6 +4674,10 @@ proc prefs_load {} {
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
+	if {[dict exists $d tab_layout]} {
+		set tl [dict get $d tab_layout]
+		if {$tl eq "scroll" || $tl eq "multi"} { set ::tab_layout $tl }
+	}
 	# Editor font override (D56). Applied by the first apply_theme after boot, which
 	# overlays these onto the theme's font. A bad size is ignored, keeping the theme's.
 	if {[dict exists $d font_family]} { set ::editor_font_family [dict get $d font_family] }
@@ -4543,6 +4714,7 @@ proc prefs_save {} {
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
 			column_edit $::col_on \
+			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
 			font_size   $::editor_font_size \
 			editmode   $::edit_mode]]
@@ -6391,6 +6563,7 @@ proc make_editor_group {g} {
 	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
 	scrollbar $f.hsb -orient horizontal -command [list $f.t xview]
 	grid $f.tabs   -row 0 -column 0 -columnspan 3 -sticky ew
+	bind $f.tabs <Configure> [list tabstrip_on_configure $g]  ;# re-flow tabs on resize (D57)
 	grid $f.gutter -row 1 -column 0 -sticky ns
 	grid $f.t      -row 1 -column 1 -sticky nsew
 	grid $f.vsb    -row 1 -column 2 -sticky ns
@@ -6764,6 +6937,11 @@ menu .m.view.theme -tearoff 0
 .m.view add cascade -label "Theme" -menu .m.view.theme
 .m.view add separator
 .m.view add command -label "Extensions…" -command extensions_window
+# The Tabs menu (D57): every open buffer listed by name — the reliable way to reach a
+# tab when the window is too narrow to show its handle — plus the multi-line toggle.
+# Rebuilt each time it opens (-postcommand) so the list tracks what is currently open.
+menu .m.tabs -tearoff 0 -postcommand tabs_menu_fill
+.m add cascade -label Tabs -menu .m.tabs
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
 .m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \

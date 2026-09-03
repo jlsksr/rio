@@ -52,11 +52,15 @@ proc diskbytes {path} {
 proc widget {} { ::rio_real_t get 1.0 end-1c }
 # The text painted on a buffer's tab handle (name + the ● unsaved dot, D27).
 proc tab_label_text {id} { [gget $::focus tabs].b$id.l cget -text }
-# The buffer ids currently backed by tab widgets in the focused group's strip
-# (frames are named .eg<g>.tabs.b$id).
+# The buffer ids currently backed by tab widgets in the focused group's strip. Tab
+# handles are named .eg<g>.tabs.b$id; the strip also holds the D57 scroll arrows
+# (al/ar), so select only the b* handles.
 proc tab_ids {} {
 	set ids {}
-	foreach w [winfo children [gget $::focus tabs]] { lappend ids [string range [winfo name $w] 1 end] }
+	foreach w [winfo children [gget $::focus tabs]] {
+		set nm [winfo name $w]
+		if {[string index $nm 0] eq "b"} { lappend ids [string range $nm 1 end] }
+	}
 	return [lsort $ids]
 }
 

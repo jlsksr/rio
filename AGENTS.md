@@ -3283,6 +3283,45 @@ document view on purpose — the UI and chat fonts stay theme-controlled.
 
 ---
 
+### D57 — When tabs outrun the strip: page them, wrap them, or list them
+
+A narrow window used to strand tabs off the right edge of a group's strip with no way to
+reach them (Notepad++'s long-standing gripe). Three complementary answers, all wanted:
+
+**A always-reachable list.** A top-level **Tabs** menu (`.m.tabs`, rebuilt each open via
+`-postcommand tabs_menu_fill`) lists every open buffer across every group by name, keyed
+on the active tab. It is the reliable escape hatch — a tab is one menu click away no
+matter how little strip there is. This is the safety net; the two visual modes below are
+the in-strip conveniences.
+
+**Two strip modes, a persisted View preference (`::tab_layout`).** `scroll` (default)
+keeps the tabs on **one line** and, when they overflow, shows `◂ ▸` arrows that page a
+visible *window* of tabs (a per-group `taboff` index into `gorder`). `multi` **wraps**
+them onto as many rows as the width needs. The choice rides in `prefs.json` like the
+other view state (D31); a bogus value is rejected back to `scroll`.
+
+**One layout choke point.** `refresh_tabs` builds the tab *handles* (the `b<id>` frames)
+but leaves them unmanaged; **`tabstrip_layout`** places them — `pack` on one row for
+`scroll`, `grid` across rows for `multi` — and runs again on the strip's `<Configure>`
+so a resize re-flows. Widths are measured **analytically** (`tab_pixwidth` via `font
+measure`, mirroring the handle's own padding) rather than from `winfo reqwidth`, so the
+layout is correct *synchronously* — before the handles are mapped — which is also what
+makes it testable without an event loop. The editor pane is a fixed share of the window
+(a stretched panedwindow pane over an 80-column text, toplevel propagation off since
+D35's `sash_drag`), so the strip never grows to swallow its tabs: overflow is real and
+driven by tab count, and `tabstrip_fit_last` always keeps at least the first tab so a
+sliver of space never strands the lot.
+
+**Reveal vs. page.** `tabstrip_layout` pulls the visible window to include the active tab
+by default (`reveal`), so activating a tab — from the strip, the Tabs menu, or a
+keystroke — scrolls it into view. The arrows call it with `reveal` **off**, so paging can
+move *past* the active tab to reach a hidden one and click it (which then activates and
+reveals it). The arrows live in the strip alongside the `b<id>` handles as `al`/`ar`, so
+generic "children of the strip" scans (e.g. the smoke suite's tab enumerator) must select
+`b*` handles, not every child.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
