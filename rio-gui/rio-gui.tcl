@@ -6155,6 +6155,7 @@ set ::keymap_default {
 	toggle-chat    {Control-A            {panel_toggle chat}                                           "Toggle agent pane"}
 	split-editor   {Control-backslash    toggle_split                                                  "Toggle editor split"}
 	move-tab-other {Control-bracketright move_tab_other                                                "Move tab to other group"}
+	preferences    {{}                   preferences_window                                            "Preferences…"}
 }
 set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); keymap_resolve fills it
 set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
@@ -6333,6 +6334,7 @@ proc keymap_refresh_menus {} {
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
 	.m.view entryconfigure "Split Editor" -accelerator [key_accel split-editor]
 	.m.view entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]
+	.m.settings entryconfigure "Preferences…" -accelerator [key_accel preferences]
 }
 
 # One entry point after the keymap changes at runtime: re-read keys.json, then push the
@@ -6397,6 +6399,157 @@ proc keys_save {overrides} {
 		puts -nonewline $f [rio::wire::obj $overrides] ; close $f
 	}]} { return 0 }
 	return 1
+}
+
+# ---------------------------------------------------------------------------
+# Preferences window (AGENTS.md D58). One place to find every stateful setting as the
+# count grows, so the top-level menus don't keep accreting checkbuttons. It does NOT own
+# any state: each control drives the SAME global the menu entry binds (::wrap_lines,
+# ::tab_layout, …) and calls the SAME applier, which persists via prefs_save. So it is
+# live-apply (no Save/Cancel — a toggle takes effect at once, like every view toggle in
+# rio), and the twin menu entry updates with it for free (Tk repaints a checkbutton the
+# instant its -variable changes), and vice-versa. Commands (Zoom, Split, Compare) are
+# actions, not preferences, and stay menu-only; keyboard shortcuts keep their own
+# recorder (its working-copy model suits a half-typed chord), reached from a button here.
+# ---------------------------------------------------------------------------
+# Themed control factories: the menu-matching palette (D31 named fonts, theme_colors) in
+# one place so each control is a single line. `args` passes extras through (e.g. the
+# Multi-Line Tabs checkbutton's -onvalue/-offvalue).
+proc prefs_check {w label var cmd args} {
+	set c $::theme_colors
+	checkbutton $w -text $label -variable $var -command $cmd -font RioUIFont -anchor w \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg] \
+		-selectcolor [dict get $c ui.bg] {*}$args
+	return $w
+}
+proc prefs_radio {w label var val cmd} {
+	set c $::theme_colors
+	radiobutton $w -text $label -variable $var -value $val -command $cmd -font RioUIFont -anchor w \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg] \
+		-selectcolor [dict get $c ui.bg]
+	return $w
+}
+proc prefs_label {w text} {
+	set c $::theme_colors
+	label $w -text $text -anchor w -justify left -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	return $w
+}
+proc prefs_button {w text cmd} { button $w -text $text -font RioUIFont -command $cmd ; return $w }
+
+# View category: the display cluster (the same controls as the View menu), the dock
+# side, the theme radios (enumerated from the core like themes_menu_fill, so installed
+# themes appear), and the Font… dialog button.
+proc prefs_fill_view {f} {
+	set r 0
+	grid [prefs_check $f.wrap    "Wrap Lines"           ::wrap_lines  apply_wrap]        -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.wrapind "Indent Wrapped Lines" ::wrap_indent apply_wrap_indent] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.lnum    "Line Numbers"         ::line_numbers apply_line_numbers] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.mtab    "Multi-Line Tabs"      ::tab_layout  tab_layout_apply \
+		-onvalue multi -offvalue scroll] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
+	grid [prefs_radio $f.dl "Left"  ::dock_side left  {dock_set_side left}]  -row [incr r] -column 0 -sticky w -padx {12 0}
+	grid [prefs_radio $f.dr "Right" ::dock_side right {dock_set_side right}] -row [incr r] -column 0 -sticky w -padx {12 0}
+	grid [prefs_label $f.thl "Theme"] -row [incr r] -column 0 -sticky w -pady {8 0}
+	set names {default solarized-dark solarized-light acme}
+	set resp [rio_call theme.list {}]
+	if {[dict get $resp ok]} { set names [dict get $resp result themes] }
+	set i 0
+	foreach name $names {
+		grid [prefs_radio $f.th[incr i] [theme_label $name] ::theme_choice $name [list do_theme $name]] \
+			-row [incr r] -column 0 -sticky w -padx {12 0}
+	}
+	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -pady {8 2}
+}
+
+# Editor category: the editing mode (enumerated from the registry like modes_menu_fill,
+# so a mode extension shows up), and column editing.
+proc prefs_fill_editor {f} {
+	set r 0
+	grid [prefs_label $f.eml "Editing Mode"] -row [incr r] -column 0 -sticky w
+	if {[info commands rio::modes::names] ne ""} {
+		set i 0
+		foreach name [rio::modes::names] {
+			grid [prefs_radio $f.em[incr i] [rio::modes::label $name] ::edit_mode $name apply_editmode] \
+				-row [incr r] -column 0 -sticky w -padx {12 0}
+		}
+	}
+	grid [prefs_check $f.col "Column Editing (Ctrl+Shift+Drag)" ::col_on apply_column_edit] \
+		-row [incr r] -column 0 -sticky w -pady {8 1}
+}
+
+# Agent category: provider, the two agent-edit toggles, and the API-key dialog button.
+proc prefs_fill_agent {f} {
+	set r 0
+	grid [prefs_label $f.pl "Agent"] -row [incr r] -column 0 -sticky w
+	grid [prefs_radio $f.pe "Echo (offline)"  ::agent_provider echo   apply_provider] -row [incr r] -column 0 -sticky w -padx {12 0}
+	grid [prefs_radio $f.pc "Claude (API key)" ::agent_provider claude apply_provider] -row [incr r] -column 0 -sticky w -padx {12 0}
+	grid [prefs_check $f.aa "Auto-accept edits" ::agent_auto_accept \
+		{rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}] \
+		-row [incr r] -column 0 -sticky w -pady {8 1}
+	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_button $f.key "Claude API Key…" claude_key_dialog] -row [incr r] -column 0 -sticky w -pady {8 2}
+}
+
+# Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
+# reimplemented, from here.
+proc prefs_fill_keyboard {f} {
+	grid [prefs_label $f.blurb "App shortcuts are edited in their own recorder — click a\ncommand, then press the keys. They always win over the editing mode's keys."] \
+		-row 0 -column 0 -sticky w -pady {0 8}
+	grid [prefs_button $f.edit "Edit Keyboard Shortcuts…" keybindings_dialog] -row 1 -column 0 -sticky w
+}
+
+# Raise the body frame for the selected category.
+proc prefs_show_cat {w} {
+	set sel [$w.cats curselection]
+	if {$sel eq ""} return
+	raise $w.body.[string tolower [$w.cats get $sel]]
+}
+
+proc preferences_window {} {
+	set w .prefs
+	if {[winfo exists $w]} { wm deiconify $w ; raise $w ; focus $w.cats ; return }
+	toplevel $w
+	wm title $w "Preferences"
+	wm transient $w .
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+
+	# Left: the category list. Right: one body frame per category, stacked at the same
+	# cell and raised on selection (a tab-like switch without a notebook widget).
+	listbox $w.cats -width 12 -height 8 -exportselection 0 -font RioUIFont \
+		-activestyle none -highlightthickness 0 -borderwidth 1 -relief solid \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg]
+	foreach cat {View Editor Agent Keyboard} { $w.cats insert end $cat }
+	bind $w.cats <<ListboxSelect>> [list prefs_show_cat $w]
+
+	frame $w.body -background [dict get $c ui.bg]
+	foreach cat {view editor agent keyboard} {
+		frame $w.body.$cat -background [dict get $c ui.bg]
+		grid $w.body.$cat -row 0 -column 0 -sticky nsew
+	}
+	prefs_fill_view     $w.body.view
+	prefs_fill_editor   $w.body.editor
+	prefs_fill_agent    $w.body.agent
+	prefs_fill_keyboard $w.body.keyboard
+
+	frame $w.btns -background [dict get $c ui.bg]
+	grid [prefs_button $w.btns.close "Close" [list destroy $w]] -row 0 -column 0 -sticky e
+	grid columnconfigure $w.btns 0 -weight 1
+
+	grid $w.cats -row 0 -column 0 -sticky ns   -padx {8 4} -pady 8
+	grid $w.body -row 0 -column 1 -sticky nsew -padx {4 8} -pady 8
+	grid $w.btns -row 1 -column 0 -columnspan 2 -sticky we -padx 8 -pady {0 8}
+	grid columnconfigure $w 1 -weight 1
+	grid rowconfigure    $w 0 -weight 1
+
+	$w.cats selection set 0
+	prefs_show_cat $w
+	bind $w <Escape> [list destroy $w]
+	focus $w.cats
 }
 
 # ---------------------------------------------------------------------------
@@ -6947,6 +7100,11 @@ menu .m.tabs -tearoff 0 -postcommand tabs_menu_fill
 .m add cascade -label Tabs -menu .m.tabs
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
+# The Preferences window (D58) gathers every stateful setting in one place; the items
+# below stay here too — it is a second door, not a replacement.
+.m.settings add command -label "Preferences…" -accelerator [key_accel preferences] \
+	-command preferences_window
+.m.settings add separator
 .m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \
 	-value echo   -command apply_provider
 .m.settings add radiobutton -label "Agent: Claude (API key)"  -variable ::agent_provider \

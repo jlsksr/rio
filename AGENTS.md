@@ -3326,6 +3326,40 @@ generic "children of the strip" scans (e.g. the smoke suite's tab enumerator) mu
 
 ---
 
+### D58 — A central Preferences window that owns no state
+
+The top-level menus were starting to accrete settings (D57 parked the Multi-Line Tabs
+toggle in the *Tabs* menu, of all places — a persistent view preference grafted onto a
+`-postcommand` navigation list; that mismatch was the tell). As the count grows we want
+one place to find every setting. Two decisions kept it cheap and non-duplicative.
+
+**It owns no state.** Every control drives the **same global** its menu twin binds
+(`::wrap_lines`, `::tab_layout`, `::edit_mode`, `::agent_provider`, …) and calls the
+**same applier** (`apply_wrap`, `tab_layout_apply`, `apply_editmode`, `apply_provider`,
+…), each of which already persists via `prefs_save` (the "single choke point per setting"
+contract). So the window is a **second door** to the settings, not a copy of them: change
+one, and because the menu checkbutton shares the `-variable`, Tk repaints it the instant
+the global changes — and vice-versa — with **no re-sync code**. Theme and editing-mode
+radios are enumerated from the core / the `rio::modes` registry (like `themes_menu_fill` /
+`modes_menu_fill`), so installed themes and mode extensions appear here too.
+
+**Live-apply, not Save/Cancel.** Every view toggle in rio already takes effect the moment
+you flip it; a Preferences window for those must do the same, so there is no working copy
+and no OK/Cancel — a toggle is instant and persisted. This is the deliberate opposite of
+the keyboard-shortcuts recorder (D23), whose working-copy + Save model is right *there*
+because a half-recorded chord must not apply live. Keyboard shortcuts therefore stay their
+own editor, reached from a "Keyboard" category button rather than reimplemented.
+
+**Scope: stateful settings only.** Preferences are *state* (wrap, line numbers, tab
+layout, theme, editing mode, agent options); commands (Zoom, Split, Compare With File) are
+*actions* and stay menu-only. The window is a non-modal toplevel `.prefs` — a category
+listbox on the left, one body frame per category raised on selection (a notebook without
+the widget), themed via the `prefs_check`/`prefs_radio`/`prefs_label`/`prefs_button`
+factories. Opened from **Settings ▸ Preferences…** and a `preferences` keymap command that
+ships **unbound** (empty chord — no collision), so a user can assign one in the recorder.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
