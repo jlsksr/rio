@@ -55,8 +55,8 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a
   tab's right-click menu). Drag the divider to resize; closing a group's last tab
   unsplits. When a window is too narrow to show every tab, **◂ ▸ arrows** page through
-  them, the **Tabs** menu lists them all by name, and **View‑style multi‑line tabs**
-  (Tabs ▸ *Multi‑Line Tabs*) wrap them onto several rows instead.
+  them, the **Tabs** menu lists them all by name, and **View ▸ *Multi‑Line Tabs***
+  wraps them onto several rows instead.
 - **Files & git** — open a project folder and browse it in a side pane; **create,
   rename, and delete** files and folders from the row menu (deletes confirm first);
   and view **git status and diffs** for the open repo with **stage, unstage, and

@@ -137,7 +137,7 @@ already know:
 | Open a logfile | **Ctrl+O**. There's no live tail-follow yet; reopen the file to pull in new lines |
 | Save As | **Ctrl+Shift+S** |
 | Switch tabs | **Ctrl+Tab** / **Ctrl+Shift+Tab** |
-| Reach a tab in a narrow window | The **◂ ▸** arrows page the tab bar; the **Tabs** menu lists them all by name; **Tabs ▸ Multi‑Line Tabs** wraps them onto rows |
+| Reach a tab in a narrow window | The **◂ ▸** arrows page the tab bar; the **Tabs** menu lists them all by name; **View ▸ Multi‑Line Tabs** wraps them onto rows |
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
 | Zoom the text | **Ctrl+scroll**, or **Ctrl++** / **Ctrl+-**; **Ctrl+0** resets. Pick a font in **View ▸ Font…** |
 

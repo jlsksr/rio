@@ -6,7 +6,8 @@
 # The Tabs menu lists every open buffer regardless. Checks the width math, that a wide
 # strip shows every tab with no arrows while a narrow one hides some and shows arrows,
 # that paging and activation move the visible window, that multi mode wraps onto rows,
-# that the menu enumerates the buffers, and that the mode persists through prefs.json.
+# that the Tabs menu enumerates the buffers (navigation only — the Multi-Line Tabs
+# toggle lives in the View menu, D-after-57), and that the mode persists through prefs.json.
 # Needs a DISPLAY (Tk) and maps the window at chosen sizes to drive real strip widths.
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/tabs.tcl
@@ -110,11 +111,15 @@ ok "multi: wraps onto >1 row"    [expr {$maxrow > 0}] 1
 set ::tab_layout scroll ; tab_layout_apply
 ok "back to scroll: uses pack"   [expr {[mgr $far] eq "pack"}] 1   ;# $far is active -> visible
 
-# --- the Tabs menu enumerates every open buffer -----------------------------------
+# --- the Tabs menu enumerates every open buffer (navigation only) ------------------
 tabs_menu_fill
-ok "menu: lists all buffers"     [expr {[.m.tabs index end] >= $n}] 1
+# One group here, so the menu holds exactly $n radiobuttons at indices 0..$n-1 and
+# nothing else — the Multi-Line Tabs toggle moved to the View menu.
+ok "menu: lists all buffers"     [expr {[.m.tabs index end] >= $n - 1}] 1
 ok "menu: first entry is a tab"  [.m.tabs type 0] radiobutton
 ok "menu: first label matches"   [.m.tabs entrycget 0 -label] [tab_name $first]
+ok "menu: last entry is a tab"   [.m.tabs type end] radiobutton
+ok "toggle: lives in View menu"  [.m.view type "Multi-Line Tabs"] checkbutton
 
 # --- the mode persists through prefs.json, and a bogus value is rejected -----------
 set ::tab_layout multi ; prefs_save

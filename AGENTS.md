@@ -3298,7 +3298,11 @@ the in-strip conveniences.
 keeps the tabs on **one line** and, when they overflow, shows `◂ ▸` arrows that page a
 visible *window* of tabs (a per-group `taboff` index into `gorder`). `multi` **wraps**
 them onto as many rows as the width needs. The choice rides in `prefs.json` like the
-other view state (D31); a bogus value is rejected back to `scroll`.
+other view state (D31); a bogus value is rejected back to `scroll`. The **Multi-Line
+Tabs** checkbutton lives in the **View** menu, with its display-toggle neighbors (Wrap,
+Line Numbers) — the Tabs menu is a pure buffer list. (It shipped in the Tabs menu; moved
+to View in the D-after-57 preferences work, where the mismatch — a persistent view
+preference grafted onto a `-postcommand` navigation list — was the tell.)
 
 **One layout choke point.** `refresh_tabs` builds the tab *handles* (the `b<id>` frames)
 but leaves them unmanaged; **`tabstrip_layout`** places them — `pack` on one row for

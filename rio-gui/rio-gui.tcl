@@ -4001,8 +4001,8 @@ proc tabstrip_on_configure {g} {
 
 # Rebuild the Tabs menu (its -postcommand): every open buffer, across all groups, as a
 # radio entry keyed on the focused active tab, so a tab is reachable by name no matter
-# how narrow the window is. A split shows a separator between the two groups. Below sits
-# the multi-line toggle.
+# how narrow the window is. A split shows a separator between the two groups. Purely a
+# navigation list — the Multi-Line Tabs view preference lives in the View menu.
 proc tabs_menu_fill {} {
 	.m.tabs delete 0 end
 	set first 1
@@ -4015,12 +4015,9 @@ proc tabs_menu_fill {} {
 				-variable ::cur -value $id -command [list activate $id $g]
 		}
 	}
-	.m.tabs add separator
-	.m.tabs add checkbutton -label "Multi-Line Tabs" \
-		-onvalue multi -offvalue scroll -variable ::tab_layout -command tab_layout_apply
 }
 
-# The View/Tabs multi-line toggle changed ::tab_layout: re-flow every group and persist.
+# The View menu's multi-line toggle changed ::tab_layout: re-flow every group and persist.
 proc tab_layout_apply {} {
 	foreach g $::groups { tabstrip_layout $g }
 	prefs_save
@@ -6918,6 +6915,11 @@ menu .m.view -tearoff 0
 	-variable ::wrap_indent -command apply_wrap_indent
 .m.view add checkbutton -label "Line Numbers" -accelerator [key_accel toggle-linenums] \
 	-variable ::line_numbers -command apply_line_numbers
+# How the editor tab strip lays out when tabs outrun the width (D57): scroll (one line
+# behind ◂ ▸ arrows) or multi (wrap onto rows). A view preference, so it sits with its
+# display-toggle neighbors above — not in the Tabs menu, which is a buffer list.
+.m.view add checkbutton -label "Multi-Line Tabs" \
+	-onvalue multi -offvalue scroll -variable ::tab_layout -command tab_layout_apply
 .m.view add separator
 .m.view add command -label "Font…"      -command editor_font_dialog
 .m.view add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}
@@ -6938,8 +6940,9 @@ menu .m.view.theme -tearoff 0
 .m.view add separator
 .m.view add command -label "Extensions…" -command extensions_window
 # The Tabs menu (D57): every open buffer listed by name — the reliable way to reach a
-# tab when the window is too narrow to show its handle — plus the multi-line toggle.
-# Rebuilt each time it opens (-postcommand) so the list tracks what is currently open.
+# tab when the window is too narrow to show its handle. A pure navigation list (the
+# Multi-Line Tabs view preference lives in the View menu); rebuilt each time it opens
+# (-postcommand) so the list tracks what is currently open.
 menu .m.tabs -tearoff 0 -postcommand tabs_menu_fill
 .m add cascade -label Tabs -menu .m.tabs
 menu .m.settings -tearoff 0
