@@ -3422,14 +3422,18 @@ Both renderings come from the **same** region model (D13) and layout policy
   closed a real bug: switching to a pruned tab dereferenced a missing `result`).
 
   **`session.hello` — implemented.** A client's first request; the core replies
-  `{protocol, name, ops}` — the wire protocol version (an integer that bumps on a
+  `{protocol, name, ops, fsroot}` — the wire protocol version (an integer that bumps on a
   breaking change; now **2**, see the error taxonomy), the implementation identity
-  (`rio-core`), and the ops it
+  (`rio-core`), the ops it
   actually has registered, read live from the dispatch registry so the list can
-  never go stale (`rio::dispatch::opnames`). The reply is the second non-flat
+  never go stale (`rio::dispatch::opnames`), and the root of the core's own
+  filesystem (**D55**: `/` on POSIX, `C:/` on Windows — the frontend browses the
+  core's disk and must not assume which). The reply is the second non-flat
   shape — `ops` is an array of *strings* — and reuses the result-encoder registry
   from `buffer.list` (a new `rio::wire::strarr` leaf). Client capabilities sent as
   params are accepted but not yet acted on; that negotiation can grow here.
+  *(`fsroot` was added later and did **not** bump the protocol: an added key is
+  additive, a client too old ignores it and a core too old omits it — see D55.)*
   *(Later: the GUI actually performs the handshake — `hello_core` greets every core
   it attaches to, at startup and after an in-place reconnect (D30), and warns
   plainly on a protocol mismatch instead of letting a version skew surface as ops

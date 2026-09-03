@@ -56,12 +56,17 @@ key under *Settings ▸ Claude API Key…* (stored 0600 — see §5).
 
 ## 3. The install scripts
 
-Both are POSIX `sh`, idempotent, and finish by **verifying the toolchain actually
-loads** (the real source of truth). They target Debian/Ubuntu (`apt`), Alpine
+The two POSIX ones are `sh`, idempotent, and finish by **verifying the toolchain
+actually loads** (the real source of truth). They target Debian/Ubuntu (`apt`), Alpine
 (`apk`), and OpenBSD (`pkg_add`), picking `sudo`/`doas` only when not already root.
 
 Shared flags: `--verify-only` (check, don't install), `--dry-run` (print the steps),
 `-h`/`--help`.
+
+There is a **third, for Windows**: `rio-dev-deploy.ps1` (§8, and
+[WINDOWS.md](WINDOWS.md) §1). Same contract — offer to install, then verify by loading
+— with `winget install Magicsplat.TclTk` standing in for `apt`/`apk`, and
+`-VerifyOnly` / `-DryRun` / `-Help` mirroring the flags above.
 
 ### `rio-dev-deploy.sh` — full GUI / dev toolchain
 
@@ -396,8 +401,16 @@ relevant `install_*` function — the script's verifier confirms the result.
 
 ## 8. Platforms
 
-Linux (Debian, Alpine) and the BSDs are the deploy targets the scripts cover; the
-GUI also runs on Windows (Tcl/Tk), though the scripts don't automate that — see
-[WINDOWS.md](WINDOWS.md) for the Windows 11 quick start. The TUI
-(Ck) frontend is **deferred** — present only behind `--with-ck` for development, not
-a supported runtime yet (AGENTS.md O1).
+Linux (Debian, Alpine) and the BSDs are the deploy targets the POSIX scripts cover.
+**Windows 11 is automated too** — `rio-dev-deploy.ps1` is the counterpart to
+`rio-dev-deploy.sh`: it offers to `winget install` the Tcl/Tk toolchain (asking
+first), verifies it loads, and sets up persistence, so setup there is also one
+command. See [WINDOWS.md](WINDOWS.md) for the Windows 11 quick start and, at the end,
+a section on hacking on rio from Windows.
+
+Linux and Windows are **verified** — the full suite passes on both, including a
+Windows GUI driven against a Linux core over an SSH tunnel ([RELEASING.md](RELEASING.md)
+Gate 0). The BSDs remain a design target that nobody has yet run.
+
+The TUI (Ck) frontend is **deferred** — present only behind `--with-ck` for
+development, not a supported runtime yet (AGENTS.md O1).

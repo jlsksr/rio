@@ -23,7 +23,8 @@ Everything below runs today:
     wish rio-gui/rio-gui.tcl [file ...]
 
 (needs `tclsh`/Tk + `tcllib`, plus `tcltls` for the agent's HTTPS — `./rio-dev-deploy.sh`
-sets it up; full install & deployment guide in [INSTALL.md](INSTALL.md).)
+sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide in
+[INSTALL.md](INSTALL.md).)
 
 **What works now (GUI):**
 
@@ -172,7 +173,17 @@ can attach later **without touching the core**.
 
 ## Cross-platform
 
-Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lands.
+Linux (Debian, Alpine) and **Windows 11** — GUI today; the TUI when it lands. Both are
+**run, not assumed**: the full suite passes on each, and a Windows GUI has been driven
+against a Linux core over an SSH tunnel, so the remote path is exercised across
+platforms too ([RELEASING.md](RELEASING.md) Gate 0 records what that took, and the
+handful of things still open). Setup on Windows is one script — see
+[WINDOWS.md](WINDOWS.md).
+
+The **BSDs** are a design target rather than a verified one: nothing in rio is
+Linux-specific, the deploy scripts cover OpenBSD's `pkg_add`, and the code is the same
+portable Tcl — but nobody has yet sat down and run it there, so it is listed honestly
+as untested rather than claimed.
 
 ## Learn more
 

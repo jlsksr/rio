@@ -12,16 +12,26 @@ scoping. That's what this list covers.
 
 ## Gate 0 — Platform reality (do this first)
 
-rio claims Linux, the BSDs, and **Windows** ([README](README.md)), but Windows is
-unverified. You cannot honestly ship a cross-platform claim you haven't run.
+rio claims Linux, the BSDs, and **Windows** ([README](README.md)). You cannot honestly
+ship a cross-platform claim you haven't run — so this gate was about running it.
+
+*(Both boxes are now ticked; the record below is what it found. The BSDs stay an
+untested design target and the README says so.)*
 
 - [x] Launch `wish rio-gui/rio-gui.tcl` on Windows and record what breaks.
       **Done 2026-09-02**, Windows 11 Pro 22631, Magicsplat Tcl/Tk 8.6.16, Git for
       Windows 2.55.0.5. **rio launches, spawns its private core over the pipe, and
       edits.** Findings below.
-- [ ] Then either fix Windows to a usable state, or **narrow the README claim** to
+- [x] Then either fix Windows to a usable state, or **narrow the README claim** to
       the platforms that actually work and mark Windows "in progress." An honest
       smaller claim beats a broken bigger one.
+      **Fixed, so the claim stands** — and now earns it: every suite passes on
+      Windows and the findings below are closed. The README's *Cross-platform*
+      section says which platforms have actually been run, rather than leaving the
+      reader to assume all three were.
+
+**Gate 0 is complete.** The remaining Windows items are listed under *Still open*
+below; none of them blocks the platform claim.
 
 ### Gate 0 findings — first Windows run (2026-09-02/03)
 
