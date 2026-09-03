@@ -90,7 +90,17 @@ ok "B: core B has the text"   [buf_text $::cur] "Z"
 
 # --- cleanup -----------------------------------------------------------------
 catch {close $::core_chan}            ;# drop our socket to B
-catch {exec kill $bpid}               ;# stop the daemon
+# Stop daemon B BEFORE closing its channel. `close` on a command-pipeline channel
+# blocks until the child exits -- and it is a blocking close, so it does not even
+# yield to the event loop. `kill` is not a Windows command, so the catch swallowed a
+# failed kill, B kept listening, and this close hung forever: the suite ran every
+# check green and then never reached its verdict line. That was the whole
+# "reconnect.tcl hangs on Windows" finding -- cleanup, not the reconnect path.
+if {$::tcl_platform(platform) eq "windows"} {
+	catch {exec taskkill /PID $bpid /F}
+} else {
+	catch {exec kill $bpid}
+}
 catch {close $coreB}
 file delete -force $p
 

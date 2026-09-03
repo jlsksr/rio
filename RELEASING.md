@@ -159,12 +159,38 @@ Not affected, and worth knowing: `file dirname` and `file join` *are* safe on PO
 paths from a Windows client (`dirname /` → `/`, so the D54-era root fix holds in
 remote mode too). It is specifically `pathtype` and `normalize` that lie.
 
-### Still open
+#### 7. `reconnect.tcl` hung in its CLEANUP, not the reconnect path — **fixed**
 
-- **`rio-gui/tests/reconnect.tcl` hangs** (>150 s, killed). Not a dialog and not the
-  encoding: it still hangs with errors trapped, after 16 passing checks, the last
-  being `B: core B has the text`. Uninvestigated — and it is the reconnect path, so
-  it wants looking at before remote mode is called done.
+The suite ran all 16 checks green and then never reached its verdict line, which is
+why it read as a hang in the reconnect code. It was the teardown:
+
+```tcl
+catch {exec kill $bpid}     ;# `kill` is not a Windows command -- caught, so B lived
+catch {close $coreB}        ;# blocks until the child exits -- forever
+```
+
+`close` on a command-pipeline channel waits for the child, and it is a *blocking*
+close that does not even yield to the event loop (a probe written to race it with an
+`after` timer hung too). With the kill silently swallowed, daemon B kept listening and
+the close waited on it indefinitely. Now `taskkill /PID $bpid /F` on Windows, `kill`
+elsewhere. **`reconnect.tcl` passes.** Nothing was wrong with reconnect itself.
+
+#### Verified against a real remote core (2026-09-03)
+
+Windows GUI → the live `rio-core` on **vps01.jkdata.de** over an SSH tunnel, i.e. a
+genuine cross-platform pairing rather than a local daemon standing in for one. 21
+checks, all passing: the transport is marked remote and reports the endpoint; the
+core's root is POSIX `/`; the browser lists `/` with no bogus `../` row and `/home`
+with a correct one pointing at `/`; a remote seed opens in its own directory (finding
+6's fix, proven against the real core); a file created under `/tmp` on vps01 opens,
+edits, and **saves back to the core's disk byte-for-byte**; a second remote file opens
+as its own tab and an unedited save is byte-faithful; and `git.status` answers over the
+socket with a branch. Scratch files and buffers were removed afterwards.
+
+This is the cross-platform case the in-repo `remote.tcl` cannot cover (it uses a local
+daemon), so it stays a manual check — but the path is now exercised, not assumed.
+
+### Still open
 - **`rbrowse_start` still falls back to a literal `"/"`** when no project is open.
   Correct against a POSIX core (the remote case, verified), wrong against a Windows
   *local* core, where `/` is not a listable path. The seed handling above is fixed;
