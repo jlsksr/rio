@@ -118,16 +118,23 @@ test wire-strarr-empty {an empty string array} -body {
 
 test wire-result-session-hello {session.hello shapes scalars + an array of op strings} -body {
 	rio::wire::response [dict create id 2 ok true op session.hello \
-		result [dict create protocol 1 name rio-core ops {buffer.text file.open}]]
-} -result {{"id":"2","ok":true,"result":{"protocol":"1","name":"rio-core","ops":["buffer.text","file.open"]}}}
+		result [dict create protocol 1 name rio-core ops {buffer.text file.open} fsroot /]]
+} -result {{"id":"2","ok":true,"result":{"protocol":"1","name":"rio-core","ops":["buffer.text","file.open"],"fsroot":"/"}}}
 
 test wire-roundtrip-session-hello {the encoded hello survives json2dict} -body {
 	set enc [rio::wire::response [dict create id 7 ok true op session.hello \
-		result [dict create protocol 1 name rio-core ops {a b c}]]]
+		result [dict create protocol 1 name rio-core ops {a b c} fsroot /]]]
 	set d [json::json2dict $enc]
 	list [dict get $d result protocol] [dict get $d result name] \
-		[dict get $d result ops]
-} -result {1 rio-core {a b c}}
+		[dict get $d result ops] [dict get $d result fsroot]
+} -result {1 rio-core {a b c} /}
+
+test wire-session-hello-windows-fsroot {a Windows core's drive root survives encoding} -body {
+	# The drive letter and colon must not need escaping, and the trailing slash stays.
+	set enc [rio::wire::response [dict create id 8 ok true op session.hello \
+		result [dict create protocol 2 name rio-core ops {a} fsroot C:/]]]
+	dict get [json::json2dict $enc] result fsroot
+} -result {C:/}
 
 # --- nested objects (theme.get; D25) -----------------------------------------
 

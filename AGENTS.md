@@ -3216,6 +3216,41 @@ default: `rio::fs::read`/`write` open `rb`/`wb` and call `encoding convertfrom`/
 pins `-encoding utf-8`, and so does the wire channel on both ends. The only thing the
 setting changes is how Tcl reads *rio's own source*, which is exactly the bug.
 
+### D55 — The core answers questions about its own host; the frontend never guesses
+
+A frontend is a thin view onto a core that may be running on **another machine, on
+another platform** (D30). So any fact about *where the files are* belongs to the core,
+and a frontend that computes such a fact locally is guessing — correctly by luck on a
+matched pair, and wrongly the moment they differ.
+
+The case that forced this: `rbrowse_start` hardcoded `"/"` as "where the Open/Save
+browser opens when there is no seed and no project". That is right for a POSIX core
+and wrong for a Windows one, whose root is `C:/` — `/` there is not even an absolute
+path (Tcl calls it `volumerelative`), so the browser opened on an unlistable path.
+Substituting the *client's* own root would have been just as wrong in the other
+direction: a Windows GUI on a Linux core would have offered `C:/` for a filesystem
+that has no such thing.
+
+**Decision:** `session.hello` reports **`fsroot`**, the root of the core's filesystem,
+and the GUI records it per attachment (re-read on reconnect, since the new core may be
+a different host). Sibling facts can join it there as they are needed; the greeting is
+already the place a client learns what the core is.
+
+Two consequences worth stating:
+
+- **It does not bump `protocol`.** The field is additive: an older core omits it and
+  the client keeps its default. That is D19's forward-compatibility rule — unknown
+  keys ignored, absent keys defaulted — applied to the protocol itself rather than to
+  extension manifests. A version bump is for changes that *break* a peer.
+- **Shape-based path tests stay.** `core_path_absolute` judges a path by its shape (a
+  leading `/`, or an `X:` drive prefix) rather than by `file pathtype`, which answers
+  with the *client's* rules. `fsroot` tells the GUI where to start; the shape test
+  tells it what an absolute path looks like. Both are needed, and neither is
+  `file normalize`, which on a Windows client rewrites `/home/jka` to `C:/home/jka`.
+
+The general rule, for the next time this comes up: **if the answer depends on the
+core's host, ask the core.**
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

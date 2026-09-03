@@ -165,12 +165,14 @@ proc rio::wire::_result_project_replace {result} {
 }
 rio::wire::result_encoder project.replace rio::wire::_result_project_replace
 
-# session.hello: {protocol, name} are string leaves; `ops` is an array of strings.
+# session.hello: {protocol, name, fsroot} are string leaves; `ops` is an array of
+# strings.
 proc rio::wire::_result_session_hello {result} {
 	set parts {}
 	lappend parts "\"protocol\":[str [dict get $result protocol]]"
 	lappend parts "\"name\":[str [dict get $result name]]"
 	lappend parts "\"ops\":[strarr [dict get $result ops]]"
+	lappend parts "\"fsroot\":[str [dict get $result fsroot]]"
 	return "{[join $parts ,]}"
 }
 rio::wire::result_encoder session.hello rio::wire::_result_session_hello

@@ -190,5 +190,6 @@ Linux (Debian, Alpine), the BSDs, and Windows — GUI today; the TUI when it lan
   itself: toolchain setup, how it's laid out, and how to run the tests.
 - **[RELEASING.md](RELEASING.md)** — going-live checklist: the legal, first-run, and
   platform gates that must be true before rio is handed to people who didn't write it.
-- **[WINDOWS.md](WINDOWS.md)** — running rio on Windows 11: install Tcl/Tk, turn on
-  preference persistence, launch, and the daily notes/scratch/logfile workflow in keys.
+- **[WINDOWS.md](WINDOWS.md)** — running rio on Windows 11: one deploy script that
+  installs the toolchain for you, launch, the daily notes/scratch/logfile workflow in
+  keys, and a section for hacking on rio from Windows.

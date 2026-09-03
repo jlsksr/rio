@@ -6,31 +6,68 @@ rio — it needs nothing beyond Tk + tcllib — and nothing in the code blocks i
 Windows. The heavier features (git, the agent, a remote core) work here too; see
 [§7](#7-beyond-notes-git-the-agent-and-remote-cores).
 
-> **Honest status:** rio's launch and editing paths are cross-platform Tcl/Tk, but
-> rio has not yet been exercised on Windows in anger (see [RELEASING.md](RELEASING.md)
-> Gate 0). Treat your first day of use as the verification, and note anything that
-> breaks — §6 says what the likely culprits are.
+> **Status:** verified. rio has now been run natively on Windows 11 — it launches,
+> spawns its own core, edits and saves, and every test suite passes (see
+> [RELEASING.md](RELEASING.md) Gate 0 for what that took and the few things still
+> open). If something does break, §6 says where to look first.
 
-## 1. Install Tcl/Tk (with tcllib)
+## 1. Get rio and run the deploy script
 
-rio needs **Tk** and **tcllib** (for the `json`/`md5` packages the wire protocol and
-sessions use). `http` ships with Tcl itself. You do **not** need `tcltls` unless you
-later use the Claude agent.
+Copy or clone the repository to a folder, e.g. `C:\rio`. **There is nothing to build,
+and nothing to install first** — the deploy script handles the toolchain. From that
+folder:
 
-The path of least resistance is **[Magicsplat Tcl/Tk](https://www.magicsplat.com/tcl-installer/)**
-— a single distribution that bundles Tk **and** tcllib and puts `wish.exe` and
-`tclsh.exe` on your `PATH`. Install it with **winget** in one line:
+```
+powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1
+```
+
+That one command:
+
+1. **Installs Tcl/Tk if you don't have it.** If `tclsh` isn't found it offers to
+   `winget install Magicsplat.TclTk` — one package carrying Tk *and* tcllib, exactly
+   rio's dependency set. It **asks before installing anything** (answer `y`; pass
+   `-Yes` to skip the prompt, or `-NoInstall` to be told how to do it by hand
+   instead). §2 covers the manual route if you'd rather, or if winget isn't available.
+2. **Verifies the toolchain actually loads** by running `package require` in `tclsh` —
+   Tk and json are required, tls only matters if you'll use the Claude agent — and
+   reports each by name.
+3. **Sets up persistence** (§3) so rio remembers your preferences and last session.
+4. **Prints the launch command**, with the full path to `wish.exe`.
+
+Add `-Shortcut` to also drop a "rio" shortcut on your Desktop, or `-VerifyOnly` to
+check the toolchain and change nothing. It changes nothing it doesn't have to and is
+safe to re-run.
+
+> **Then open a NEW terminal.** The Tcl installer adds `wish`/`tclsh` to your *user*
+> `PATH`, but only processes started **afterwards** inherit it — including the
+> terminal you just ran the script in. A terminal, editor, or VS Code window that was
+> already open keeps the `PATH` it started with, so `wish` stays "not found" there no
+> matter how well the install went. This is the single most common "it didn't work" on
+> Windows and it is not a rio problem. The same applies to `git` after installing Git
+> for Windows.
+
+> The POSIX `rio-dev-deploy.sh` / `rio-server-deploy.sh` scripts are `sh` and do
+> **not** run on Windows — `rio-dev-deploy.ps1` is their Windows counterpart, and its
+> winget step stands in for their `apt`/`apk` toolchain install.
+
+## 2. The toolchain, if you'd rather do it by hand
+
+Skip this if §1 worked. rio needs **Tk** and **tcllib** (for the `json`/`md5` packages
+the wire protocol and sessions use); `http` ships with Tcl itself, and you do **not**
+need `tcltls` unless you later use the Claude agent.
+
+**[Magicsplat Tcl/Tk](https://www.magicsplat.com/tcl-installer/)** is the path of least
+resistance — one distribution bundling Tk *and* tcllib, which puts `wish.exe` and
+`tclsh.exe` on your `PATH`. It is exactly what the script installs for you:
 
 ```
 winget install --exact --id Magicsplat.TclTk --source winget
 ```
 
-(Or download the installer from the link above; ActiveTcl works too — add tcllib
-afterwards with `teacup install tcllib`.) You don't have to run this yourself: if Tcl
-is missing, `rio-dev-deploy.ps1` (§2) offers to run exactly this winget install for
-you, after asking.
+Or download the installer from the link above. ActiveTcl works too — add tcllib
+afterwards with `teacup install tcllib`.
 
-Verify the toolchain in a terminal:
+Either way, check it in a **new** terminal:
 
 ```
 tclsh
@@ -39,35 +76,9 @@ tclsh
 % exit
 ```
 
-Both `package require` lines should print a version, not an error.
-
-> **Open a new terminal first.** The installer adds `wish`/`tclsh` to your *user*
-> `PATH`, but only processes started **afterwards** inherit it. A terminal (or an
-> editor, or a VS Code window) that was already open keeps the `PATH` it started
-> with, so `wish` stays "not found" there no matter how the install went. This is
-> the single most common "it didn't work" on Windows and it is not a rio problem —
-> close the terminal, open a new one, and `where wish` will find it. The same
-> applies to `git` after installing Git for Windows.
-
-## 2. Get rio
-
-Copy or clone the repository to a folder, e.g. `C:\rio`. There is nothing to build.
-
-Then run the Windows deploy script from that folder:
-
-```
-powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1
-```
-
-It **verifies** the toolchain actually loads (Tk + json; tls only if you'll use the
-agent), sets up **persistence** (§3) for you, and prints the launch command. Add
-`-Shortcut` to also drop a "rio" shortcut on your Desktop, or `-VerifyOnly` to just
-check the toolchain. It changes nothing it doesn't have to and is safe to re-run.
-
-> The POSIX `rio-dev-deploy.sh` / `rio-server-deploy.sh` scripts are `sh` and do
-> **not** run on Windows — `rio-dev-deploy.ps1` is their Windows counterpart, and the
-> Magicsplat installer in §1 replaces the `apt`/`apk` toolchain install (Windows has
-> no package manager for Tcl, so that one step stays manual).
+Both lines should print a version, not an error. Then run `rio-dev-deploy.ps1` (§1)
+anyway — it will skip the install and go straight to verifying and setting up
+persistence.
 
 ## 3. (Recommended) Turn on persistence
 
@@ -82,7 +93,7 @@ variables below only **relocates** that state to a tidier place — it does not 
 persistence on. (An earlier version of this section claimed rio "forgets your
 preferences" without them; that was wrong on Windows.)
 
-`rio-dev-deploy.ps1` (§2) sets these up for you — this section is what it does, for
+`rio-dev-deploy.ps1` (§1) sets these up for you — this section is what it does, for
 reference or if you'd rather do it by hand. It sets two **user environment variables**:
 
 | Variable | Value (example) |
@@ -146,9 +157,9 @@ If it doesn't:
   ```
 
   If `...\Apps\Tcl86\bin` is in there, the install is fine — open a **new** terminal
-  (§1). Only if it's absent is the Tcl/Tk install itself the problem.
+  (§1/§2). Only if it's absent is the Tcl/Tk install itself the problem.
 - **A `package require` error** → the Tcl/Tk install is incomplete; re-run
-  `rio-dev-deploy.ps1 -VerifyOnly` (§2), which reports each package by name.
+  `rio-dev-deploy.ps1 -VerifyOnly` (§1), which reports each package by name.
 - **The git pane does nothing** → same stale-`PATH` story for `git` (§7).
 - **A stack trace mentioning `HOME` or a config/session path** → §3, though this
   should not happen: Tcl always provides `HOME` on Windows.

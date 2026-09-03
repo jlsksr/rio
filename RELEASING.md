@@ -191,13 +191,12 @@ This is the cross-platform case the in-repo `remote.tcl` cannot cover (it uses a
 daemon), so it stays a manual check — but the path is now exercised, not assumed.
 
 ### Still open
-- **`rbrowse_start` still falls back to a literal `"/"`** when no project is open.
-  Correct against a POSIX core (the remote case, verified), wrong against a Windows
-  *local* core, where `/` is not a listable path. The seed handling above is fixed;
-  this fallback is not, because the honest answer is not to substitute the client's
-  own root — the browser walks the **core's** filesystem, which may be a different
-  platform — but for the core to report its filesystem root. A small protocol
-  addition, so: a design question, not a patch.
+- ~~**`rbrowse_start` still falls back to a literal `"/"`**~~ — **fixed** (D55).
+  `session.hello` now reports `fsroot`, the root of the core's *own* filesystem, and
+  the GUI records it per attachment instead of guessing. Additive, so it does not bump
+  the protocol: a core too old to send it leaves the client on its `/` default, which
+  is covered by a test. Verified both ways on Windows — a local core reports `C:/` and
+  the browser opens there and lists it.
 - **`smoke.tcl`'s `pane: scrollbar hidden when list fits` is flaky** — one failure in
   seven runs, timing-dependent on the pane having repainted. Not a regression (the
   same build passes the other six); noted so the next person does not chase it as one.

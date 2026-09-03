@@ -629,6 +629,12 @@ proc rio_result {op params} {
 set ::rio_protocol  2
 set ::core_protocol ""   ;# what the attached core reported (for the title of a bug report)
 
+# The root of the CORE's filesystem, from its session.hello (re-read on reconnect).
+# The GUI must not compute this: it browses the core's disk (D30), and the core may be
+# a different platform — "/" is right for a POSIX core and unlistable on a Windows one.
+# "/" is only the pre-greeting default and the fallback for a core too old to say.
+set ::core_fsroot "/"
+
 # Greet the core (session.hello) and warn once if it speaks a different protocol.
 # Runs as the FIRST op on a live channel — at startup and after an in-place reconnect
 # — so it doubles as the liveness gate: socket(2) to a stale `ssh -L` forward succeeds
@@ -652,6 +658,11 @@ proc hello_core {{fatal 0}} {
 		return 0
 	}
 	set ::core_protocol [dict get $resp result protocol]
+	# Additive since protocol 2, so a core that predates it simply omits the key and we
+	# keep the POSIX default rather than treating its absence as an error.
+	if {[dict exists $resp result fsroot] && [dict get $resp result fsroot] ne ""} {
+		set ::core_fsroot [dict get $resp result fsroot]
+	}
 	if {$::core_protocol ne $::rio_protocol} {
 		report_error "This core speaks wire protocol $::core_protocol, but this GUI expects $::rio_protocol — mixed versions may misbehave. Update the older side." protocol_mismatch
 	}
@@ -3203,13 +3214,15 @@ proc core_path_absolute {p} {
 }
 
 # Where the browser opens: the seed's directory if it names an absolute path, else
-# the open project's root, else "/" (the Location bar reaches anywhere from there).
+# the open project's root, else the CORE's filesystem root — which the core told us at
+# session.hello rather than the GUI assuming "/" (right for a POSIX core, unlistable on
+# a Windows one). The Location bar reaches anywhere from there.
 proc rbrowse_start {seed} {
 	if {$seed ne "" && [core_path_absolute $seed]} {
 		return [file dirname $seed]
 	}
 	set root [dict get [rio_call project.get {}] result root]
-	return [expr {$root ne "" ? $root : "/"}]
+	return [expr {$root ne "" ? $root : $::core_fsroot}]
 }
 
 # Re-list $dir into the browser: fill the Location bar and the listbox from

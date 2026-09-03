@@ -89,7 +89,30 @@ ok "rows: root has no parent" [expr {[lindex [lindex [dict get $rootinfo rows] 0
 
 # --- unit: rbrowse_start (where the browser opens) ---------------------------
 ok "start: file seed -> its dir" [rbrowse_start [file join $T a.txt]] $T
-ok "start: no anchor -> /"       [rbrowse_start ""] /
+# With no seed and no project the browser opens at the CORE's filesystem root, which
+# the core reported at session.hello. It must NOT be a hardcoded "/": that is right
+# for a POSIX core and an unlistable path on a Windows one, where the root is "C:/".
+ok "start: fsroot came from the core" $::core_fsroot [file normalize /]
+ok "start: no anchor -> core fsroot"  [rbrowse_start ""] $::core_fsroot
+ok "start: fsroot is listable"        [dict get [rbrowse_rows_for $::core_fsroot] ok] 1
+
+# `fsroot` is additive, so a core older than it simply omits the key. The GUI must keep
+# whatever it had rather than blanking the browser's start directory or erroring — the
+# D19 forward-compatibility rule applied to the protocol. Stub a greeting without it.
+set ::saved_fsroot $::core_fsroot
+set ::core_fsroot "SENTINEL"
+rename rio_call _real_rio_call
+proc rio_call {op params {timeout_ms 0}} {
+	if {$op eq "session.hello"} {
+		return [dict create ok true result \
+			[dict create protocol $::rio_protocol name rio-core ops {}]]
+	}
+	return [_real_rio_call $op $params $timeout_ms]
+}
+hello_core
+rename rio_call {} ; rename _real_rio_call rio_call
+ok "start: old core leaves fsroot alone" $::core_fsroot "SENTINEL"
+set ::core_fsroot $::saved_fsroot
 open_folder $T
 ok "start: project open -> root" [rbrowse_start ""] $T
 
