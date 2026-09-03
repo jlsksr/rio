@@ -3251,6 +3251,36 @@ Two consequences worth stating:
 The general rule, for the next time this comes up: **if the answer depends on the
 core's host, ask the core.**
 
+### D56 — The editor font is a user override layered on the theme's named font
+
+The document view's font has always been `RioEditorFont`, a **named** font the theme
+supplies (D24: fonts are theme data, referenced by name so a change is live). That is
+the right owner for a font's *default*, but the user needs to set family and size for
+themselves — and zoom them on the fly while reading a logfile — without editing a theme
+file.
+
+**Decision:** keep the theme as the source of the default, and add a thin **user
+override** on top of it, owned by the GUI as a preference (D31), not by the core. Two
+prefs — `font_family` (`""` = follow theme) and `font_size` (`0` = follow theme) — are
+overlaid onto the theme's own family/size in one place, `apply_editor_font`, which
+reconfigures the single named font (live everywhere) and repaints the per-group chrome
+whose geometry tracks glyph width (the gutter and the wrap-indent margins). `apply_theme`
+records the theme's editor family/size and then calls `apply_editor_font`, so a **theme
+switch keeps the user's choice** instead of silently discarding it — the explicit
+override outranks the theme until the user resets it.
+
+**Absolute, not a delta.** A zoom step pins an absolute size (clamped 5–72), so the
+choice is stable across theme switches and reloads. `Ctrl+0` (or the picker's *Use Theme
+Font*) drops the override back to `0`/`""` and the view follows the theme again.
+
+**Why the zoom keys bypass the keymap (D23).** `Ctrl+scroll`, `Ctrl +/-` and `Ctrl+0`
+bind directly on the editor widget and its gutter, not through `::keymap` — they are
+fixed accelerators like the compare pane's `Esc`, not user-remappable commands. Both the
+X11 (`Button-4/5`) and Windows/macOS (`MouseWheel` + `%D`) wheel idioms are wired,
+matching the plain-scroll bindings the gutter already carried; `break` stops a
+`Control`-wheel from also plain-scrolling via the Text class binding. Scoped to the
+document view on purpose — the UI and chat fonts stay theme-controlled.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

@@ -157,6 +157,14 @@ set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" 
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
 set ::theme_choice default ;# the View ▸ Theme radio: tracks theme_name, snaps back on a failed switch (D39)
+# Editor-font override (D56). The document view's font is a NAMED font (RioEditorFont)
+# the theme supplies; these are the user's persisted override ON TOP of it — "" / 0
+# means "follow the theme". editor_theme_* records the theme's own values so a reset
+# (or a theme switch) has something to fall back to. See apply_editor_font.
+set ::editor_font_family ""  ;# user family override, "" = use the theme's
+set ::editor_font_size   0   ;# user size override, 0 = use the theme's
+set ::editor_theme_family monospace ;# the active theme's editor family (apply_theme records it)
+set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
@@ -3461,6 +3469,99 @@ proc connect_remote_dialog {} {
 	if {$newwin} { spawn_remote_window $hp } else { reconnect_remote $hp }
 }
 
+# Editor-font picker (D56). A themed modal like the others: a family list (every
+# monospaced-or-not family the system reports, de-duplicated), a size spinner, and a
+# live preview in the chosen font. OK pins the choice as the override; "Use Theme
+# Font" clears it so the document view follows the theme again. Seeded from the
+# current effective font (override if set, else the theme's).
+proc editor_font_preview_update {w} {
+	if {![winfo exists $w]} return
+	set sel [$w.body.fam.list curselection]
+	if {$sel ne ""} { set ::efont_family [$w.body.fam.list get $sel] }
+	set sz $::efont_size
+	if {![string is integer -strict $sz] || $sz < 5 || $sz > 72} { set sz [editor_font_size_now] }
+	catch {$w.preview configure -font [list $::efont_family $sz]}
+}
+
+proc editor_font_dialog {} {
+	set w .efont
+	destroy $w
+	toplevel $w
+	wm title $w "Editor Font"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	set bg [dict get $c ui.bg] ; set fg [dict get $c ui.fg]
+	$w configure -background $bg
+	set ::efont_family [expr {$::editor_font_family ne "" ? $::editor_font_family : $::editor_theme_family}]
+	set ::efont_size   [editor_font_size_now]
+
+	frame $w.body -background $bg
+	frame $w.body.fam -background $bg
+	label $w.body.fam.l -text "Family" -anchor w -font RioUIFont -background $bg -foreground $fg
+	listbox $w.body.fam.list -height 12 -width 30 -font RioUIFont -exportselection 0 \
+		-activestyle none -yscrollcommand [list $w.body.fam.sb set]
+	scrollbar $w.body.fam.sb -orient vertical -command [list $w.body.fam.list yview]
+	grid $w.body.fam.l    -row 0 -column 0 -columnspan 2 -sticky w
+	grid $w.body.fam.list -row 1 -column 0 -sticky nsew
+	grid $w.body.fam.sb   -row 1 -column 1 -sticky ns
+	set fams [lsort -unique [font families]]
+	foreach fam $fams { $w.body.fam.list insert end $fam }
+	set idx [lsearch -exact $fams $::efont_family]
+	if {$idx < 0} { set idx [lsearch -nocase $fams $::efont_family] }
+	if {$idx >= 0} { $w.body.fam.list selection set $idx ; $w.body.fam.list see $idx }
+
+	frame $w.body.sz -background $bg
+	label $w.body.sz.l -text "Size" -anchor w -font RioUIFont -background $bg -foreground $fg
+	spinbox $w.body.sz.v -from 5 -to 72 -width 5 -font RioUIFont -textvariable ::efont_size \
+		-command [list editor_font_preview_update $w]
+	grid $w.body.sz.l -row 0 -column 0 -sticky w
+	grid $w.body.sz.v -row 1 -column 0 -sticky w
+	grid $w.body.fam -row 0 -column 0 -sticky nsew -padx {8 6} -pady 8
+	grid $w.body.sz  -row 0 -column 1 -sticky nw   -padx {0 8} -pady 8
+
+	label $w.preview -text "AaBbCc 0123  — the quick brown fox" -anchor w \
+		-relief sunken -borderwidth 1 -padx 6 -pady 6 \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg]
+	frame $w.btns -background $bg
+	button $w.btns.ok    -text OK     -font RioUIFont -command [list editor_font_apply_dialog $w]
+	button $w.btns.theme -text "Use Theme Font" -font RioUIFont -command [list editor_font_reset_dialog $w]
+	button $w.btns.cancel -text Cancel -font RioUIFont -command [list destroy $w]
+	pack $w.btns.cancel $w.btns.ok -side right -padx 3
+	pack $w.btns.theme -side left -padx 3
+
+	grid $w.body    -row 0 -column 0 -sticky nsew
+	grid $w.preview -row 1 -column 0 -sticky ew -padx 8 -pady {0 6}
+	grid $w.btns    -row 2 -column 0 -sticky ew -padx 5 -pady {0 8}
+
+	bind $w.body.fam.list <<ListboxSelect>> [list editor_font_preview_update $w]
+	bind $w.body.sz.v <KeyRelease> [list editor_font_preview_update $w]
+	bind $w <Escape> [list destroy $w]
+	editor_font_preview_update $w
+	catch {grab $w}
+	focus $w.body.fam.list
+}
+
+# OK: pin the picked family and size as the persisted override, apply live.
+proc editor_font_apply_dialog {w} {
+	set sel [$w.body.fam.list curselection]
+	if {$sel ne ""} { set ::editor_font_family [$w.body.fam.list get $sel] }
+	set sz $::efont_size
+	if {[string is integer -strict $sz] && $sz >= 5 && $sz <= 72} { set ::editor_font_size $sz }
+	destroy $w
+	apply_editor_font
+	prefs_save
+}
+
+# "Use Theme Font": clear both overrides so the document view follows the theme again.
+proc editor_font_reset_dialog {w} {
+	set ::editor_font_family ""
+	set ::editor_font_size 0
+	destroy $w
+	apply_editor_font
+	prefs_save
+}
+
 # Launch a second rio-gui already attached to the remote core (reuses the --connect
 # startup path). This session is left running and untouched.
 proc spawn_remote_window {hp} {
@@ -3768,6 +3869,52 @@ proc refresh_tabs {} {
 # ---------------------------------------------------------------------------
 set ::theme_colors {} ;# active colour roles, consulted by refresh_tabs
 
+# Editor font override (D56). RioEditorFont is the theme's named font; the user may
+# override its family and/or size (a picked font, or a zoom step). We overlay the
+# override onto the theme's own values (editor_theme_*, recorded by apply_theme) and
+# reconfigure the one named font — every editor widget references it by name, so the
+# change is live everywhere at once. Then repaint the per-group chrome whose geometry
+# tracks the font: the gutter width/numbers and the wrap-indent margins both scale
+# with the glyph width. A no-op before the first apply_theme created the font.
+proc apply_editor_font {} {
+	if {[lsearch -exact [font names] RioEditorFont] < 0} return
+	set fam [expr {$::editor_font_family ne "" ? $::editor_font_family : $::editor_theme_family}]
+	set sz  [expr {$::editor_font_size  > 0  ? $::editor_font_size   : $::editor_theme_size}]
+	font configure RioEditorFont -family $fam -size $sz
+	foreach g $::groups {
+		if {![winfo exists [gget $g path]]} continue
+		wrapind_refont [gw $g]
+		gutter_redraw $g
+	}
+}
+
+# The current effective editor size in points — the override if set, else the theme's.
+proc editor_font_size_now {} {
+	return [expr {$::editor_font_size > 0 ? $::editor_font_size : $::editor_theme_size}]
+}
+
+# Zoom the document view by `delta` points (Ctrl+scroll, Ctrl+ +/-). This pins an
+# ABSOLUTE size override, clamped to a sane range, so the choice survives a theme
+# switch — the user's explicit zoom outranks the theme until they reset it (Ctrl+0).
+proc editor_zoom {delta} {
+	set sz [expr {[editor_font_size_now] + $delta}]
+	if {$sz < 5}  { set sz 5 }
+	if {$sz > 72} { set sz 72 }
+	if {$sz == [editor_font_size_now] && $::editor_font_size > 0} return
+	set ::editor_font_size $sz
+	apply_editor_font
+	prefs_save
+}
+
+# Drop the size override and fall back to the active theme's editor size (Ctrl+0). The
+# family override, if any, is left in place — reset zoom means size, not font choice.
+proc editor_zoom_reset {} {
+	if {$::editor_font_size == 0} return
+	set ::editor_font_size 0
+	apply_editor_font
+	prefs_save
+}
+
 proc ensure_fonts {fonts} {
 	dict for {name spec} $fonts {
 		set opts [list -family [dict get $spec family] -size [dict get $spec size]]
@@ -3819,6 +3966,14 @@ proc apply_theme {theme} {
 	set c [dict get $theme colors]
 	set ::theme_colors $c
 	ensure_fonts [dict get $theme fonts]
+	# Record the theme's own editor font, then overlay the user's font override (D56)
+	# back on top of it — otherwise a theme switch would silently discard a picked font
+	# or an active zoom. apply_editor_font reconfigures RioEditorFont before the restyle
+	# loop below measures it for the gutter and wrap-indent geometry.
+	set _ef [dict get $theme fonts RioEditorFont]
+	set ::editor_theme_family [dict get $_ef family]
+	set ::editor_theme_size   [dict get $_ef size]
+	apply_editor_font
 	# Editor surface — every group's widget, frame, tab strip, and syntax tags (D33).
 	# Reconfiguring here recolours existing highlighting live on a theme switch; the
 	# highlight passes raise the sel tag so a selection stays legible over the colours.
@@ -4352,6 +4507,13 @@ proc prefs_load {} {
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
+	# Editor font override (D56). Applied by the first apply_theme after boot, which
+	# overlays these onto the theme's font. A bad size is ignored, keeping the theme's.
+	if {[dict exists $d font_family]} { set ::editor_font_family [dict get $d font_family] }
+	if {[dict exists $d font_size]} {
+		set s [dict get $d font_size]
+		if {[string is integer -strict $s] && $s >= 5 && $s <= 72} { set ::editor_font_size $s }
+	}
 	# The dock layout (D35 step b): adopt a persisted `layout` object, or migrate the
 	# pre-step-(b) flat keys (dock_side/dock_pane/chat_shown) forward. normalize repairs
 	# either into a well-formed layout (and boots the Search strip hidden).
@@ -4381,6 +4543,8 @@ proc prefs_save {} {
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
 			column_edit $::col_on \
+			font_family $::editor_font_family \
+			font_size   $::editor_font_size \
 			editmode   $::edit_mode]]
 		# scalars minus its trailing brace, then the layout member and a final closing
 		# brace (backslash-escaped so this literal brace does not end the catch body).
@@ -5937,6 +6101,26 @@ proc editor_bindings {w} {
 	}
 }
 
+# Document-view zoom (D56): Ctrl+scroll and Ctrl +/- resize the editor font, Ctrl+0
+# resets it. These are fixed accelerators, not remappable keymap entries — like the
+# compare pane's Esc — so they bind directly here rather than through ::keymap. Bound
+# on the editor widget AND its gutter so a zoom works with the pointer over either.
+# `break` stops a Control-wheel from also plain-scrolling via the Text class binding.
+# Both the X11 (Button-4/5) and Windows/macOS (MouseWheel + %D) wheel idioms are wired,
+# matching the plain-scroll bindings the gutter already carries.
+proc editor_zoom_bindings {w} {
+	bind $w <Control-MouseWheel> {editor_zoom [expr {%D > 0 ? 1 : -1}] ; break}
+	bind $w <Control-Button-4>   {editor_zoom 1 ; break}
+	bind $w <Control-Button-5>   {editor_zoom -1 ; break}
+	bind $w <Control-plus>       {editor_zoom 1 ; break}
+	bind $w <Control-equal>      {editor_zoom 1 ; break}   ;# Ctrl+= so no Shift is needed
+	bind $w <Control-KP_Add>     {editor_zoom 1 ; break}
+	bind $w <Control-minus>      {editor_zoom -1 ; break}
+	bind $w <Control-KP_Subtract> {editor_zoom -1 ; break}
+	bind $w <Control-Key-0>      {editor_zoom_reset ; break}
+	bind $w <Control-KP_0>       {editor_zoom_reset ; break}
+}
+
 # The non-empty chords in the resolved keymap.
 proc keymap_chords {} {
 	set out {}
@@ -6202,6 +6386,7 @@ proc make_editor_group {g} {
 	bind $f.gutter <MouseWheel> "$f.t yview scroll \[expr {%D > 0 ? -1 : 1}\] units"
 	bind $f.gutter <Button-4>   [list $f.t yview scroll -1 units]
 	bind $f.gutter <Button-5>   [list $f.t yview scroll  1 units]
+	editor_zoom_bindings $f.gutter   ;# Ctrl+wheel over the numbers zooms too (D56)
 	bind $f.t <Configure> [list gutter_mark $g]   ;# resize / re-wrap → repaint the gutter
 	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
 	scrollbar $f.hsb -orient horizontal -command [list $f.t xview]
@@ -6217,6 +6402,7 @@ proc make_editor_group {g} {
 		[dict create w ::real$g path $f.t frame $f tabs $f.tabs]]
 	proc $f.t {args} "editor_proxy $g {*}\$args"
 	editor_bindings $f.t
+	editor_zoom_bindings $f.t   ;# Ctrl+scroll / Ctrl +/- / Ctrl+0 zoom the font (D56)
 	# Slot the editing-mode tag between the widget (app chords) and the Text class
 	# (Tk defaults) — the D38 precedence order. The tag is SHARED, so whatever mode
 	# is attached covers this group with no per-widget rebinding.
@@ -6559,6 +6745,11 @@ menu .m.view -tearoff 0
 	-variable ::wrap_indent -command apply_wrap_indent
 .m.view add checkbutton -label "Line Numbers" -accelerator [key_accel toggle-linenums] \
 	-variable ::line_numbers -command apply_line_numbers
+.m.view add separator
+.m.view add command -label "Font…"      -command editor_font_dialog
+.m.view add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}
+.m.view add command -label "Zoom Out"   -accelerator "Ctrl+-" -command {editor_zoom -1}
+.m.view add command -label "Reset Zoom" -accelerator "Ctrl+0" -command editor_zoom_reset
 .m.view add separator
 .m.view add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
 .m.view add command -label "Unsplit Editor"        -command unsplit_editor

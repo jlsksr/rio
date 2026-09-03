@@ -83,6 +83,9 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
   in yourself — the menu lists whatever the core can load. Themes are plain
   data files, never executed.
+- **Editor font & zoom** — pick the document-view font family and size in *View ▸
+  Font…*, or zoom on the fly with **Ctrl+scroll** and **Ctrl++**/**Ctrl+-**
+  (**Ctrl+0** resets). Your choice persists and overrides the theme's default.
 - **Editing modes** — the text area edits like **Windows** (Notepad/VSCode:
   Ctrl+A selects all, Ctrl+V pastes) — the mode the core ships with. Two more
   install as **extensions** (below): **Emacs/readline** (Ctrl+A/E line motion,

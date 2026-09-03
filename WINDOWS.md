@@ -138,6 +138,7 @@ already know:
 | Save As | **Ctrl+Shift+S** |
 | Switch tabs | **Ctrl+Tab** / **Ctrl+Shift+Tab** |
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
+| Zoom the text | **Ctrl+scroll**, or **Ctrl++** / **Ctrl+-**; **Ctrl+0** resets. Pick a font in **View ▸ Font…** |
 
 Line endings and text encoding are **preserved** on save — rio won't silently rewrite
 a CRLF file to LF or change its encoding.
