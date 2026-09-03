@@ -467,8 +467,12 @@ proc on_fs_changed {p} {
 	if {![dict exists $p path]} return
 	if {$::dock_pane eq "git"} {
 		refresh_git
+	# Compare the core's paths as strings: both sides came FROM the core, already
+	# normalized there, so a client-side [file normalize] adds nothing — and on a
+	# Windows client against a POSIX core it rewrites "/home/jka" to "C:/home/jka".
+	# It matched only because both operands were mangled identically.
 	} elseif {$::nav_dir ne "" &&
-			[file normalize [file dirname [dict get $p path]]] eq [file normalize $::nav_dir]} {
+			[file dirname [dict get $p path]] eq $::nav_dir} {
 		populate_nav
 	}
 }
@@ -3186,10 +3190,22 @@ proc rbrowse_rows_for {dir} {
 	return [dict create ok 1 dir $abs rows $rows]
 }
 
+# Is $p absolute AS THE CORE SEES IT? `file pathtype` answers with the CLIENT's rules,
+# which is wrong the moment the two platforms differ: a Windows client calls the Linux
+# core's "/home/jka" *volumerelative*, not absolute — so a remote path typed into the
+# browser was treated as relative and joined onto the current directory, and a remote
+# seed never opened in its own folder. Judge by shape instead — a leading "/" (POSIX,
+# and UNC as "//") or an "X:" drive prefix — which reads correctly for either core from
+# either client. Deliberately NOT [file normalize]: on a Windows client that rewrites a
+# core path like "/home/jka" to "C:/home/jka".
+proc core_path_absolute {p} {
+	return [expr {[string match "/*" $p] || [regexp {^[A-Za-z]:[/\\]} $p]}]
+}
+
 # Where the browser opens: the seed's directory if it names an absolute path, else
 # the open project's root, else "/" (the Location bar reaches anywhere from there).
 proc rbrowse_start {seed} {
-	if {$seed ne "" && [file pathtype $seed] eq "absolute"} {
+	if {$seed ne "" && [core_path_absolute $seed]} {
 		return [file dirname $seed]
 	}
 	set root [dict get [rio_call project.get {}] result root]
@@ -3240,7 +3256,7 @@ proc rbrowse_choose {} {
 		save {
 			set name [string trim [.rbrowse.name get]]
 			if {$name eq ""} { bell ; return }
-			set ::rbrowse_result [expr {[file pathtype $name] eq "absolute" \
+			set ::rbrowse_result [expr {[core_path_absolute $name] \
 				? $name : [file join $::rbrowse_dir $name]}]
 		}
 		open {

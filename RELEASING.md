@@ -129,17 +129,52 @@ the browser offered a `../` row there that navigated back to the same directory.
 `[file dirname $abs] ne $abs`, which is platform-neutral and — since `$abs` is the
 **core's** normalized path — stays correct against a remote core on another platform.
 
+#### 6. The client judged the core's paths by its own rules — **fixed**
+
+Found on 2026-09-03 during the first **remote** run (Windows GUI → Linux core on
+vps01, over the SSH tunnel), and confirmed against that live core: `fs.list /`
+returns `/` with `bin boot dev etc home lib`, so browsing works — but the GUI was
+deciding what a *core* path means using **client** rules.
+
+`file pathtype` is the trap. On the Windows client, the Linux core's `/home/jka` is
+**`volumerelative`**, not `absolute`. Two sites asked exactly that:
+
+- the browser's name/Location field treated any typed absolute remote path as
+  *relative* and joined it onto the current directory, so typing `/etc/hosts`
+  silently produced `/home/jka/etc/hosts`;
+- `rbrowse_start` never recognised a remote seed as absolute, so Save-As on a remote
+  file opened at the project root instead of that file's own folder.
+
+Both now use one `core_path_absolute` helper that judges by **shape** — a leading `/`
+(POSIX, and UNC as `//`) or an `X:` drive prefix — which reads correctly for either
+core from either client, and is deliberately not `file normalize`: on a Windows
+client that rewrites `/home/jka` to `C:/home/jka`. Twelve cases checked, including
+the `C:notes.txt` drive-*relative* form that must stay non-absolute.
+
+`on_fs_changed` had the third instance, comparing `[file normalize …]` of two paths
+that both came **from** the core. It matched only because both operands were mangled
+identically; it now compares the core's strings directly.
+
+Not affected, and worth knowing: `file dirname` and `file join` *are* safe on POSIX
+paths from a Windows client (`dirname /` → `/`, so the D54-era root fix holds in
+remote mode too). It is specifically `pathtype` and `normalize` that lie.
+
 ### Still open
 
 - **`rio-gui/tests/reconnect.tcl` hangs** (>150 s, killed). Not a dialog and not the
   encoding: it still hangs with errors trapped, after 16 passing checks, the last
-  being `B: core B has the text`. Uninvestigated.
-- **`rbrowse_start` falls back to a literal `"/"`** when no project is open
-  (`rio-gui.tcl`). On a Windows *local* core that is not a listable path. The honest
-  fix is not to substitute the client's own root — in remote mode the browser walks
-  the **core's** filesystem, which may be a different platform — but for the core to
-  report its filesystem root. That needs a small protocol addition, so it is a design
-  question, not a patch.
+  being `B: core B has the text`. Uninvestigated — and it is the reconnect path, so
+  it wants looking at before remote mode is called done.
+- **`rbrowse_start` still falls back to a literal `"/"`** when no project is open.
+  Correct against a POSIX core (the remote case, verified), wrong against a Windows
+  *local* core, where `/` is not a listable path. The seed handling above is fixed;
+  this fallback is not, because the honest answer is not to substitute the client's
+  own root — the browser walks the **core's** filesystem, which may be a different
+  platform — but for the core to report its filesystem root. A small protocol
+  addition, so: a design question, not a patch.
+- **`smoke.tcl`'s `pane: scrollbar hidden when list fits` is flaky** — one failure in
+  seven runs, timing-dependent on the pane having repainted. Not a regression (the
+  same build passes the other six); noted so the next person does not chase it as one.
 - **`secret.tcl`'s `0600`/`0700` lock-down is a no-op on NTFS.** The calls are
   `catch`-wrapped, so nothing breaks, but the Claude API key file inherits
   user-profile permissions rather than being explicitly restricted (WINDOWS.md §7).
