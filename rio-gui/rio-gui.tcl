@@ -7032,6 +7032,29 @@ pack .status -side bottom -fill x
 # each editor group's tab strip lives inside its own frame (D33), not a global top bar.
 focus [gget 0 path]
 
+# Menu affordance (AGENTS.md D59): Tk activates a dropdown's first entry when it is posted
+# by a mouse-button *release* over a cascade (MenuInvoke -> MenuFirstEntry, menu.tcl), but
+# a hover-slide to an adjacent menu posts with nothing highlighted. Make the two agree on
+# hover's rule — highlight only what the pointer is over — by skipping that one activation
+# on the mouse path. Keyboard traversal (space/Return/arrows -> MenuInvoke %W 0) still
+# activates the first entry, as it must. Focus is still set, so keyboard works after a
+# click. X11 only: on Windows/macOS the menubar is the native OS widget and this is inert.
+if {[tk windowingsystem] eq "x11"} {
+	set ::rio_menu_click 0
+	rename ::tk::MenuFirstEntry ::tk::MenuFirstEntry_rio
+	proc ::tk::MenuFirstEntry {menu} {
+		if {$::rio_menu_click} {
+			if {$menu ne ""} { tk_menuSetFocus $menu }   ;# focus only, no visible activation
+			return
+		}
+		::tk::MenuFirstEntry_rio $menu
+	}
+	bind Menu <ButtonRelease> {
+		set ::rio_menu_click 1
+		try { tk::MenuInvoke %W 1 } finally { set ::rio_menu_click 0 }
+	}
+}
+
 menu .m ; . configure -menu .m
 menu .m.file -tearoff 0
 .m add cascade -label File -menu .m.file
