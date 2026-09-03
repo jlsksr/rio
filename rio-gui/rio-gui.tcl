@@ -3500,7 +3500,12 @@ proc editor_font_dialog {} {
 	set c $::theme_colors
 	set bg [dict get $c ui.bg] ; set fg [dict get $c ui.fg]
 	$w configure -background $bg
-	set ::efont_family [expr {$::editor_font_family ne "" ? $::editor_font_family : $::editor_theme_family}]
+	# The family to pre-select: the user's override if any, else the CONCRETE family the
+	# editor is wearing. The theme records a logical alias (`monospace`) that `font
+	# families` never lists, so matching that against the listbox found nothing and left
+	# the current font unmarked — `font actual` resolves the alias to the real family.
+	set ::efont_family [expr {$::editor_font_family ne "" \
+		? $::editor_font_family : [font actual RioEditorFont -family]}]
 	set ::efont_size   [editor_font_size_now]
 
 	frame $w.body -background $bg
@@ -6452,15 +6457,28 @@ proc prefs_fill_view {f} {
 	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_radio $f.dl "Left"  ::dock_side left  {dock_set_side left}]  -row [incr r] -column 0 -sticky w -padx {12 0}
 	grid [prefs_radio $f.dr "Right" ::dock_side right {dock_set_side right}] -row [incr r] -column 0 -sticky w -padx {12 0}
+	# A dropdown rather than a radio per theme: the list scales (a repository can install
+	# many, D39) and the collapsed button shows the current one by its pretty label
+	# (::theme_choice_label, kept live by a trace). Each entry is a radiobutton keyed on
+	# ::theme_choice — the same global the View ▸ Theme radios use — so the two doors and
+	# the checkmark stay in sync, and do_theme applies + persists the pick.
 	grid [prefs_label $f.thl "Theme"] -row [incr r] -column 0 -sticky w -pady {8 0}
+	set c $::theme_colors
+	menubutton $f.theme -textvariable ::theme_choice_label -menu $f.theme.m -font RioUIFont \
+		-anchor w -relief raised -borderwidth 1 -highlightthickness 0 -padx 6 -pady 1 \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+	menu $f.theme.m -tearoff 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c editor.selection] -activeforeground [dict get $c ui.fg]
 	set names {default solarized-dark solarized-light acme}
 	set resp [rio_call theme.list {}]
 	if {[dict get $resp ok]} { set names [dict get $resp result themes] }
-	set i 0
 	foreach name $names {
-		grid [prefs_radio $f.th[incr i] [theme_label $name] ::theme_choice $name [list do_theme $name]] \
-			-row [incr r] -column 0 -sticky w -padx {12 0}
+		$f.theme.m add radiobutton -label [theme_label $name] -variable ::theme_choice \
+			-value $name -command [list do_theme $name]
 	}
+	grid $f.theme -row [incr r] -column 0 -sticky w -padx {12 0}
 	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -pady {8 2}
 }
 
@@ -7168,6 +7186,13 @@ if {![dict get $_boot_theme ok]} {
 }
 apply_theme [dict get $_boot_theme result]
 set ::theme_choice $::theme_name
+# The Preferences window's Theme dropdown (D58) shows the current theme by its pretty
+# label; keep that display string tracking ::theme_choice so a switch from either door
+# (the View ▸ Theme radios or the dropdown) updates the button text. One trace, live for
+# the app's life — it writes only a variable, so it is harmless whether the window is open.
+set ::theme_choice_label [theme_label $::theme_choice]
+trace add variable ::theme_choice write \
+	{apply {{a b c} {set ::theme_choice_label [theme_label $::theme_choice]}}}
 themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (D39)
 
 # Adopt the core's existing buffer(s), then process the command line. In-process: a

@@ -111,5 +111,18 @@ set nw [gget $g path]
 ok "split: new group has zoom"    [expr {[string match *editor_zoom* [bind $nw <Control-MouseWheel>]]}] 1
 unsplit_editor
 
+# --- the Font dialog pre-selects the current family, even with no override ---------
+# The theme records a logical alias (`monospace`) that `font families` never lists, so
+# the dialog used to open with nothing marked. It now resolves the concrete family via
+# `font actual` and highlights it, so the user sees what is in use before choosing.
+set ::editor_font_family "" ; apply_editor_font   ;# back to the theme font (no override)
+editor_font_dialog
+update idletasks
+set want [font actual RioEditorFont -family]
+set sel  [.efont.body.fam.list curselection]
+ok "font dialog: a family is marked"  [expr {$sel ne ""}] 1
+ok "font dialog: marks current family" [.efont.body.fam.list get $sel] $want
+destroy .efont
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
