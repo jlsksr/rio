@@ -139,6 +139,7 @@ set ::dock_pane files  ;# files | git  — which pane is currently shown
 set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
 set ::line_numbers 1   ;# 1 = show a line-number gutter down each editor group (View menu)
+set ::highlight_current_line 1 ;# 1 = tint the logical line the caret sits on (View menu; per group)
 set ::col_on 0         ;# column/block editing (Ctrl+Shift+drag) enabled? (D40)
 set ::col_active 0     ;# a column selection is currently live
 set ::col_w ""         ;# the editor PROXY path the column selection lives on
@@ -2036,6 +2037,34 @@ proc apply_line_numbers {} {
 }
 
 # ---------------------------------------------------------------------------
+# Current-line highlight (View ▸ Highlight Current Line). A full-width background
+# band on the LOGICAL line the insert caret sits on, one per editor group so a split
+# shows the band under each pane's own caret. Pure display: a `curline` tag, coloured
+# by restyle_group from the editor.currentline role and lowered under selection / find
+# so those paint over it. The range is `insert linestart` … `insert lineend +1c` — the
+# +1c reaches into the newline so the band spans the full width (selrow's trick); a
+# wrapped logical line is covered across all its display rows. Updated wherever the
+# caret can move: cursor_moved (typing / arrows / click), refresh_status (open / switch
+# / jump / reload, which all route through it) and the search-result jump.
+# ---------------------------------------------------------------------------
+
+# Repaint group g's caret-line band to its current insert position (or clear it when
+# the feature is off / the group is gone).
+proc curline_update {g} {
+	if {![dict exists $::grp $g]} return
+	set t [gw $g]
+	$t tag remove curline 1.0 end
+	if {!$::highlight_current_line} return
+	$t tag add curline "insert linestart" "insert lineend +1c"
+}
+
+# View-menu toggle: re-band (or clear) every group, then persist.
+proc apply_curline {} {
+	foreach g $::groups { curline_update $g }
+	prefs_save
+}
+
+# ---------------------------------------------------------------------------
 # Wrap indent (View ▸ Indent Wrapped Lines). With line wrap on, Tk shows a
 # logical line's leading indentation on its FIRST display line only; the wrapped
 # continuation lines fall back to the left margin. With this on, each continuation
@@ -2920,6 +2949,7 @@ proc search_activate {payload} {
 		$t mark set insert "[dict get $payload line].[expr {[dict get $payload col] - 1}]"
 		$t see insert
 	}
+	curline_update $::focus          ;# the jump landed after activate's refresh_status
 	focus [gget $::focus path]       ;# …but focus takes the window PATH (the gutter-bug trap)
 }
 
@@ -3696,6 +3726,9 @@ proc refresh_status {} {
 	.status configure -text [format "%s      %s  %s%s      %s      %s      %d buffer(s)%s" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [cursor_status] [dict size $::buffers] $mode]
+	# The focused group's caret may have moved by a route with no KeyRelease (open /
+	# tab switch / goto / reload all land here via refresh_all) — re-band it too.
+	if {$::focus ne "" && [dict exists $::grp $::focus]} { curline_update $::focus }
 }
 # The compact cursor-position segment for the status bar: "Ln 12, Col 5" for the
 # focused group's insert mark. Tk indexes columns from 0, so Col is char+1 to match
@@ -4127,6 +4160,14 @@ proc restyle_group {g} {
 	# zero-width caret column is drawn as placed blinking bars (col_bars_draw), not a
 	# tag, so it needs no tag config here. Raised above the syntax colours.
 	$t tag configure coltag -background [dict get $c editor.selection]
+	# Caret-line band (D60): the editor.currentline role, or a faint blend of the surface
+	# toward the foreground for a theme predating it. Lowered to the bottom so syntax text
+	# (fg only) reads over it and selection / find bands paint above it.
+	set cl [expr {[dict exists $c editor.currentline] \
+		? [dict get $c editor.currentline] \
+		: [blend_hex [dict get $c editor.bg] [dict get $c editor.fg] 8]}]
+	$t tag configure curline -background $cl
+	$t tag lower curline
 	$t tag raise sel
 	$t tag raise coltag
 }
@@ -4675,6 +4716,7 @@ proc prefs_load {} {
 	if {[dict exists $d wrap]}       { set ::wrap_lines [expr {[dict get $d wrap] ? 1 : 0}] }
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
+	if {[dict exists $d highlight_current_line]} { set ::highlight_current_line [expr {[dict get $d highlight_current_line] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
 		set tl [dict get $d tab_layout]
@@ -4715,6 +4757,7 @@ proc prefs_save {} {
 			wrap        $::wrap_lines \
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
+			highlight_current_line $::highlight_current_line \
 			column_edit $::col_on \
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
@@ -6452,6 +6495,7 @@ proc prefs_fill_view {f} {
 	grid [prefs_check $f.wrap    "Wrap Lines"           ::wrap_lines  apply_wrap]        -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.wrapind "Indent Wrapped Lines" ::wrap_indent apply_wrap_indent] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.lnum    "Line Numbers"         ::line_numbers apply_line_numbers] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.curln   "Highlight Current Line" ::highlight_current_line apply_curline] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.mtab    "Multi-Line Tabs"      ::tab_layout  tab_layout_apply \
 		-onvalue multi -offvalue scroll] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
@@ -6763,6 +6807,7 @@ proc make_editor_group {g} {
 # A cursor-moving event fired in group g; repaint the status only when g is the
 # focused group (a background group never owns the shown Ln/Col).
 proc cursor_moved {g} {
+	curline_update $g   ;# per-group: band follows this group's own caret, focused or not
 	if {$g eq $::focus} refresh_status
 }
 proc focus_group {g} {
@@ -7110,6 +7155,8 @@ menu .m.view -tearoff 0
 	-variable ::wrap_indent -command apply_wrap_indent
 .m.view add checkbutton -label "Line Numbers" -accelerator [key_accel toggle-linenums] \
 	-variable ::line_numbers -command apply_line_numbers
+.m.view add checkbutton -label "Highlight Current Line" \
+	-variable ::highlight_current_line -command apply_curline
 # How the editor tab strip lays out when tabs outrun the width (D57): scroll (one line
 # behind ◂ ▸ arrows) or multi (wrap onto rows). A view preference, so it sits with its
 # display-toggle neighbors above — not in the Tabs menu, which is a buffer list.
@@ -7232,6 +7279,7 @@ rio::panel::refresh $::dock_pane   ;# first populate of the dock's active pane
 apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lines
 apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
 apply_line_numbers         ;# grid each group's gutter to ::line_numbers (default on)
+apply_curline              ;# paint the caret-line band on each group (default on)
 apply_editmode             ;# attach the editing mode (windows default) to the RioMode tag (D38)
 adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {

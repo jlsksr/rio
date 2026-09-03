@@ -3396,6 +3396,32 @@ owns; the Tcl code is inert there, so those platforms are simply unaffected.
 
 ---
 
+### D60 — Current-line highlight
+
+The editor tints the **logical line the insert caret sits on** with a faint full-width
+background band — the near-universal editor affordance (VSCode's "highlightActiveLine").
+**On by default;** a toggle sits with the other display switches in **View ▸ Highlight
+Current Line** and in the Preferences window's View category (the same global,
+`::highlight_current_line`, driven through the same applier — the two-door pattern of D58,
+so menu and window stay in sync for free).
+
+It is a **pure display layer**, like the line-number gutter (D49) and wrap-indent: a
+`curline` text tag, added over `insert linestart … insert lineend +1c`. The `+1c` reaches
+into the newline so the band spans the **full width**, and because the range is the whole
+*logical* line it covers every display row of a wrapped line. Nothing enters the buffer
+text. The band is **per group** — a split shows it under each pane's own caret — and is
+recomputed wherever the caret can move: `cursor_moved` (typing / arrows / click, per
+group), `refresh_status` (open / tab-switch / goto / reload, which all route through it),
+and the search-result jump (which lands after `activate`'s status refresh).
+
+**Colour.** A new theme role, `editor.currentline` (default `#eef2f7`), so a theme owns
+its band the way it owns `editor.findmatch` (D36); `restyle_group` falls back to a faint
+blend of `editor.bg` toward `editor.fg` for a theme predating the role. The tag is
+**lowered** to the bottom of the priority stack, so syntax colours (foreground only) read
+over it and the selection / find-match / column bands paint above it.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

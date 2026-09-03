@@ -30,8 +30,8 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
 
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
   **preservation** (no silent rewrites), range-based editing, undo/redo, several
-  buffers as tabs, scrollbars, a line-number gutter, a cursor-position (line/column)
-  readout in the status bar, and optional line wrap.
+  buffers as tabs, scrollbars, a line-number gutter, current-line highlighting, a
+  cursor-position (line/column) readout in the status bar, and optional line wrap.
 - **Find & Replace** — a find bar (`Ctrl+F`, `Ctrl+H` for the replace row) with
   live match highlighting and a match count, `F3`/`Shift+F3` stepping with
   wrap-around, match-case and whole-word toggles, two-step Replace (see it selected, then
