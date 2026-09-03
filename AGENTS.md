@@ -2059,7 +2059,7 @@ smoke asserts migration, normalize repair, JSON round-trip, and live search/chat
 derivation without a mapped window (27 checks). Step (c) — the site tab strips and
 move-a-panel-between-sites — is the remaining arc, where the Search panel visibly
 re-homes into the bottom site (D52) and heterogeneous panels in one site render as one tab
-strip. **Relocation gesture (settled with jbm): menu first, then drag** — c2 ships a
+strip. **Relocation gesture (settled with jka): menu first, then drag** — c2 ships a
 right-click tab "Move to ▸ Left/Right/Bottom", c3 adds drag-and-drop.
 
 **Step (c1) — built (site containers + host tab strips).** Split to isolate risk. **c1a**
@@ -2074,7 +2074,7 @@ draws one tab per docked panel (active highlighted), `render_site_body` packs th
 body into `.body` via `-in` (raised — a non-parent-master slave is otherwise obscured), then
 the site claims its edge (**bottom first** so it spans full width and the side docks stop
 above it, the old Search-strip behaviour). A tab click (`site_tab_click`) sets the site's
-`active` and re-derives. **Chrome decision (jbm): uniform** — *every* visible site shows its
+`active` and re-derives. **Chrome decision (jka): uniform** — *every* visible site shows its
 tab strip, single-panel ones too (chat gets an `[Agent]` tab, search a `[Search]` tab), the
 Visual-Studio docked-tool-window look. This retired the bespoke Files/Git selector (now just
 the left site's strip) and `style_selector` (→ `render_tabs`/`restyle_tabs`); the sashes
@@ -2114,14 +2114,14 @@ uniform chrome rule.
 **The settled chrome rule (a fold was tried and rejected; then split by control weight).**
 A panel's **controls live in its own body**, never in the tab strip; the **tab strip is tabs
 only** (identity + switch + drag/move). A "search-fold" experiment moved *only* Search's query
-row out of its body and into the site tab strip; on a live look jbm rejected it: the query
+row out of its body and into the site tab strip; on a live look jka rejected it: the query
 controls **mixed visually with the tabs** ("is Git part of the search tools?"), **competed for
 width** with the tabs in a narrow window, and made Search the **lone exception** (Files/Git keep
 their ⟳ in the body; the Agent composer is a multi-line box that *cannot* sit in a one-line strip
 at all). That last point is decisive: since the composer can't fold, "controls in the body" is
 the **only** rule that can be uniform — the strip stays tabs-only, each panel owns its chrome.
 
-*Where in the body* then splits **by control weight** (jbm's refinement), not by pane:
+*Where in the body* then splits **by control weight** (jka's refinement), not by pane:
 - **Browse panes — top caption.** Files/Git carry a *thin* header: a name/context line plus a
   tiny glyph button. `.pfiles.hdr` = `[dirname ┄ ⟳]`, `.pgit.hdr` = `[branch ┄ ⟳]`. A one-glyph
   caption belongs at the top, list beneath.
@@ -2930,7 +2930,7 @@ stale meta path — so `buffer.setpath` is what makes a rename durable. On delet
 file that no longer exists.
 
 **Name input is a modal prompt** (`name_prompt`), not an inline pane bar — a decision
-taken with jbm. The auto-showing D45 commit bar proved the inline-input pattern, but a
+taken with jka. The auto-showing D45 commit bar proved the inline-input pattern, but a
 small centred modal (New file name / New folder name / Rename to) is period-appropriate
 (Windows-2000-era), simplest, and needs no theme wiring; rio's first custom modal input
 (the others are `tk_messageBox`/`tk_chooseDirectory`). The inline in-pane rename stays a
@@ -2951,7 +2951,7 @@ changing nothing.
 ### D49 — Line-number gutter
 
 A VSCode-style **line-number gutter** down the left of each editor group, on by default
-(a decision taken with jbm — it's a code editor), toggled by **View ▸ Line Numbers**
+(a decision taken with jka — it's a code editor), toggled by **View ▸ Line Numbers**
 (`Ctrl+L`) and persisted in `prefs.json` (`line_numbers`) beside `wrap`/`wrap_indent`, so
 the whole thing mirrors `::wrap_lines`/`apply_wrap` — a global view flag applied to every
 group.
@@ -3028,7 +3028,7 @@ the `\m…\M` feel without a regex per line. Each matching line also carries **`
 rather than re-deriving matches from its mirror (the D36 dumb-view discipline). Regex / glob
 filters, Replace-in-Files, and one-row-per-match are left deferred.
 
-**The results surface in a bottom panel**, decided with jbm against a dock tab or a separate
+**The results surface in a bottom panel**, decided with jka against a dock tab or a separate
 window. This is the load-bearing UI choice and it is the **Visual Studio "Find Results" tool
 window** (D35's north star made concrete): documents stay in the center, this is a *tool
 window docked at the bottom* — the first small paving stone toward the deferred dock-site
@@ -3054,9 +3054,9 @@ One trap met again: `fif_activate` (now `search_activate`, D52) uses the group's
 ### D52 — the Search panel: two engines, three scopes, one grown surface
 
 The open question from the D35 refinement (#5) was whether the inline find bar should fold
-into the bottom panel like Notepad++'s one "all things search" dialog. **Decided with jbm:
+into the bottom panel like Notepad++'s one "all things search" dialog. **Decided with jka:
 keep them as two jobs, connected, not one.** The inline bar (D36) stays the quick in-buffer
-path — jbm values its low-fuss immediacy — and the D51 find-in-files panel **grows into a
+path — jka values its low-fuss immediacy — and the D51 find-in-files panel **grows into a
 unified Search panel**: find across three **scopes** in one bottom tool window, with the bar
 gaining an *escalate* handoff into it. Both sit on one core engine, so they can never disagree.
 This *refines* D35 (the panel is the concrete bottom-site tenant; since D35 landed it is a
@@ -3129,7 +3129,7 @@ routes by scope:
 **Phase C — Regex.** A `regex` flag rides every search/replace op (`buffer.find`,
 `buffer.matches`, `buffer.replace_all`, `project.search`, `buffers.search`, `project.replace`)
 and both GUI surfaces (a **Regex** checkbox on the find bar and the Search panel). When on, the
-needle is a **Tcl ARE** pattern. Three decisions, settled with jbm:
+needle is a **Tcl ARE** pattern. Three decisions, settled with jka:
 - **Line-oriented** (`regexp/regsub -line`): `^`/`$` anchor at each line boundary and `.` /
   negated classes do not cross a newline — the predictable editor default, and it matches the
   line-grouped panel naturally. `nocase` maps to `-nocase`.
@@ -3154,7 +3154,7 @@ change (a `lens` array in `_linematch`).
 
 How far should rio's agent go? The agent today reads the project and proposes edits behind a
 diff + approval (D8, D14, D20). The open question was whether the roadmap's run-command tool,
-test-running, and runtime use push rio toward being an **agent harness**. **Decided with jbm:
+test-running, and runtime use push rio toward being an **agent harness**. **Decided with jka:
 the line is drawn at *autonomy*, not *capability*.**
 
 - **In scope — capability is not the limit.** rio's LLM integration MAY do the full in-session
@@ -3388,9 +3388,11 @@ dispatch. Nothing in the system Tk library is edited — the override lives in r
 and, because it rebinds the shared `Menu` class, applies to context and dock menus too, so
 the no-pre-highlight rule is consistent app-wide.
 
-**X11 only.** The guard is `[tk windowingsystem] eq "x11"`: on Windows and macOS the
-menubar is the native OS widget and this Tcl code is inert, so the tweak polishes the Linux
-experience and does not touch the native-menubar platforms.
+**X11 only.** The guard is `[tk windowingsystem] eq "x11"`: X11 is where Tk draws the
+menubar itself, so it is where this override applies — and X11/Linux is a first-class rio
+target (core and GUI alike), so this is a fix to a first-class surface, not a nicety. On
+Windows and macOS the menubar is the native OS widget whose highlight behavior the OS
+owns; the Tcl code is inert there, so those platforms are simply unaffected.
 
 ---
 

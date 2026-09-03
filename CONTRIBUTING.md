@@ -141,9 +141,9 @@ complete repository carrying one theme:
 a repository; a source without a parseable one is refused ("not a rio
 repository"):
 
-    name = jbm's rio extensions
+    name = jka's rio extensions
     description = extensions I use and share
-    maintainer = jbm
+    maintainer = jka
 
 `index` — the extension list: one subdirectory name per line, `#` comments and
 blank lines allowed:
@@ -163,7 +163,7 @@ window shows:
     name = night
     kind = theme
     version = 1.0
-    author = jbm
+    author = jka
     description = a very dark theme
     files = night.theme
 

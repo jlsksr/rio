@@ -4166,7 +4166,7 @@ proc apply_theme {theme} {
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
 	# The rich-list panes (D42/D43): a white content "well" (editor surface) with a
-	# full-width selection band (the editor selection colour jbm already likes) and a
+	# full-width selection band (the editor selection colour jka already likes) and a
 	# subtler hover band blended toward it. selrow raised above hoverrow so the
 	# selection wins under the pointer. The file and git lists share this chrome.
 	set fbg [dict get $c editor.bg]
