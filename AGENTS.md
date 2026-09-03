@@ -3341,11 +3341,13 @@ contract). So the window is a **second door** to the settings, not a copy of the
 one, and because the menu checkbutton shares the `-variable`, Tk repaints it the instant
 the global changes — and vice-versa — with **no re-sync code**. The theme control is a
 **dropdown** (a menu can install arbitrarily many themes, D39; a radio stack does not
-scale) whose collapsed button shows the current theme's pretty label via
-`::theme_choice_label`, a display string a lone lifetime trace keeps tracking
-`::theme_choice`; its entries and the editing-mode radios are enumerated from the core /
-the `rio::modes` registry (like `themes_menu_fill` / `modes_menu_fill`), so installed
-themes and mode extensions appear here too.
+scale) whose collapsed button shows the current theme's pretty label plus a `▾` chevron —
+a bare Tk `menubutton` draws no arrow of its own and reads as a plain button, so the
+glyph (mono-Unicode, per the icon rule) is what signals "opens". The display string lives
+in `::theme_choice_label`, which a lone lifetime trace keeps tracking `::theme_choice`
+(via `theme_choice_display`); the menu entries and the editing-mode radios are enumerated
+from the core / the `rio::modes` registry (like `themes_menu_fill` / `modes_menu_fill`),
+so installed themes and mode extensions appear here too.
 
 **Live-apply, not Save/Cancel.** Every view toggle in rio already takes effect the moment
 you flip it; a Preferences window for those must do the same, so there is no working copy

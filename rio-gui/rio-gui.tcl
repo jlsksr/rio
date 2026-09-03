@@ -7187,12 +7187,14 @@ if {![dict get $_boot_theme ok]} {
 apply_theme [dict get $_boot_theme result]
 set ::theme_choice $::theme_name
 # The Preferences window's Theme dropdown (D58) shows the current theme by its pretty
-# label; keep that display string tracking ::theme_choice so a switch from either door
-# (the View ▸ Theme radios or the dropdown) updates the button text. One trace, live for
-# the app's life — it writes only a variable, so it is harmless whether the window is open.
-set ::theme_choice_label [theme_label $::theme_choice]
+# label with a ▾ chevron so a bare menubutton reads as a dropdown (Tk gives it no arrow
+# of its own). Keep that display string tracking ::theme_choice so a switch from either
+# door (the View ▸ Theme radios or the dropdown) updates the button text. One trace, live
+# for the app's life — it writes only a variable, harmless whether the window is open.
+proc theme_choice_display {} { return "[theme_label $::theme_choice]  ▾" }
+set ::theme_choice_label [theme_choice_display]
 trace add variable ::theme_choice write \
-	{apply {{a b c} {set ::theme_choice_label [theme_label $::theme_choice]}}}
+	{apply {{a b c} {set ::theme_choice_label [theme_choice_display]}}}
 themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (D39)
 
 # Adopt the core's existing buffer(s), then process the command line. In-process: a

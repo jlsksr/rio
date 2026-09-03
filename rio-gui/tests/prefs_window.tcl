@@ -85,12 +85,15 @@ ok "category: selects editor"    [.prefs.cats get [.prefs.cats curselection]] Ed
 # --- the theme dropdown is enumerated from the core and shows the current label ----
 ok "view: theme is a dropdown"   [winfo class .prefs.body.view.theme]  Menubutton
 ok "view: theme menu enumerated" [expr {[.prefs.body.view.theme.m index end] >= 0}] 1
-ok "view: label tracks choice"   $::theme_choice_label [theme_label $::theme_choice]
+# The button text is the pretty label plus a ▾ chevron (so a bare menubutton reads as a
+# dropdown); it tracks ::theme_choice.
+ok "view: chevron on the label"  [string match "*▾" $::theme_choice_label] 1
+ok "view: label tracks choice"   [string match "[theme_label $::theme_choice]*" $::theme_choice_label] 1
 # Picking from the dropdown drives ::theme_choice (same global the View menu binds) and
 # the tracked label follows — the two-door sync, dropdown edition.
 set _lbl [.prefs.body.view.theme.m entrycget 0 -label]
 .prefs.body.view.theme.m invoke 0
-ok "view: pick sets label"       $::theme_choice_label $_lbl
+ok "view: pick sets label"       [string match "$_lbl*" $::theme_choice_label] 1
 
 # --- editing-mode radios are enumerated (not hard-coded) ---------------------------
 ok "editor: mode radios built"   [winfo exists .prefs.body.editor.em1] 1
