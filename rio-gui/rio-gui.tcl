@@ -6479,7 +6479,8 @@ proc prefs_fill_view {f} {
 			-value $name -command [list do_theme $name]
 	}
 	grid $f.theme -row [incr r] -column 0 -sticky w -padx {12 0}
-	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -pady {8 2}
+	grid [prefs_label $f.fontl "Font"] -row [incr r] -column 0 -sticky w -pady {8 0}
+	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -padx {12 0} -pady {0 2}
 }
 
 # Editor category: the editing mode (enumerated from the registry like modes_menu_fill,

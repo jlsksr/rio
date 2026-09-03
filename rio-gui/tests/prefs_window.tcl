@@ -94,6 +94,7 @@ ok "view: label tracks choice"   [string match "[theme_label $::theme_choice]*" 
 set _lbl [.prefs.body.view.theme.m entrycget 0 -label]
 .prefs.body.view.theme.m invoke 0
 ok "view: pick sets label"       [string match "$_lbl*" $::theme_choice_label] 1
+ok "view: Font has a heading"    [winfo exists .prefs.body.view.fontl]  1
 
 # --- editing-mode radios are enumerated (not hard-coded) ---------------------------
 ok "editor: mode radios built"   [winfo exists .prefs.body.editor.em1] 1
