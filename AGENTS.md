@@ -3502,7 +3502,8 @@ Coupling from the move: `refresh_accelerators` retargets Split Editor / Move Tab
 `smoke.tcl` guard asserts `.m.view index end` stays small and the three submenus exist, so a
 future addition can't silently re-inflate the top level past a screen again. **General rule:
 a rio menu is kept within screen height by grouping, since Tk's off-screen menu posting is
-not something we patch.**
+not something we patch.** The underlying X11-only quirk (and the at-scale plan for the
+unbounded Theme/Tabs menus) is logged in [CAVEATS.md](CAVEATS.md).
 
 ---
 

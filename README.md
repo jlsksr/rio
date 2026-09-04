@@ -204,6 +204,8 @@ as untested rather than claimed.
   every choice). Start here if you want the full picture.
 - **[ROADMAP.md](ROADMAP.md)** — possible next steps: planned features, known gaps,
   and deliberately deferred refinements.
+- **[CAVEATS.md](CAVEATS.md)** — known cross-platform behaviour differences (works on one
+  OS/WM, not another) and their mitigations.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — for programmers who want to hack on rio
   itself: toolchain setup, how it's laid out, and how to run the tests.
 - **[RELEASING.md](RELEASING.md)** — going-live checklist: the legal, first-run, and

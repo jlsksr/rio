@@ -38,6 +38,16 @@ Each entry notes its state:
   line** then landed as D61). Consciously left: **relative line numbers** and gutter
   numbers in the side-by-side **compare panes**. Each rides the same `gutter_redraw` seam —
   an alternate number source or a second call site — not a structural change.
+- **Menu overflow at scale** — *deferred.* The fixed menus (File/Edit/View/Settings) are
+  kept within screen height by grouping into submenus (AGENTS.md D64). Still open: the
+  **data-driven, unbounded** menus — the **Theme** cascade (grows with installed themes,
+  D39) and the **Tabs** list (one entry per open buffer) — can exceed screen height no
+  matter how they're grouped, and Tk's native tall-menu scroll is unreliable on X11 (see
+  [CAVEATS.md](CAVEATS.md)). The fix when wanted: render those two with the scrollable
+  `rl_*` rich-list component (same pattern as the Files/Git/Extensions panes and the
+  Preferences theme dropdown) — a bounded height + scrollbar, never a screen-tall posted
+  menu. Not taking the Tk-native-scroll path (X11 menu internals are fragile — the D59
+  lesson).
 - **Window / taskbar icon** — *deferred.* rio sets no `_NET_WM_ICON`, so the xfwm4 title
   bar and the xfce4-panel taskbar each fall back to their own default (hence the mismatch).
   jka has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image
