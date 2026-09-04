@@ -5765,7 +5765,7 @@ proc extw_sources_dialog {} {
 	$w configure -background [dict get $c ui.bg]
 	# Hint text is muted (gutter.fg), so static help never reads as an interactive
 	# element; the list below carries a solid border for the same reason — the
-	# selectable repository URLs must look distinct from this sentence (see AGENTS D67).
+	# selectable repository URLs must look distinct from this sentence (AGENTS D68).
 	label $w.hint -anchor w -justify left -font RioUIFont \
 		-text "Each repository is a plain http:// directory (see CONTRIBUTING.md to host one)." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]

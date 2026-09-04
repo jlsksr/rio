@@ -3619,6 +3619,23 @@ install machinery, and the D66 provider path are unchanged — only the entry po
 
 ---
 
+### D68 — Static help must look different from interactive controls
+
+A standing UI rule, made explicit after the Repositories dialog tripped it: a window's inline
+help/description text and its interactive elements (list rows, entries, buttons) must be
+distinguishable at a glance — the user should never guess what is clickable/editable/selectable vs.
+what is just explanation. The Repositories dialog had a hint sentence in the normal `ui.fg` sitting
+directly above a **borderless** listbox whose one repository URL rendered in the *same* `ui.fg`, so
+the selectable/removable entry read as another line of help. Two levers, used together:
+**(1) help/description/hint text in a muted secondary role** (`gutter.fg`), never the `ui.fg`
+interactive text uses; **(2) interactive containers carry a visible boundary** (`-relief solid
+-borderwidth 1`, as the Preferences category list already does), not a borderless widget on the
+window's own background. The general bar — a control that does nothing when clicked, or static text
+a user tries to click, both erode trust — so every new dialog is scanned for help sharing a look
+with controls before it ships.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
