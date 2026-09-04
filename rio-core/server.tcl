@@ -44,13 +44,12 @@ apply {{} {
 	# with core.tcl above; together they are the surface `provider-api = 1` freezes.
 	source [file join $dir .. plugins lib json.tcl]
 	source [file join $dir .. plugins lib transport.tcl]
-	# The built-in providers register themselves (agent.provider.set echo | claude).
-	# Claude ships IN-TREE (the sanctioned, stable path); OpenAI/ChatGPT is now an
-	# INSTALLABLE provider extension (D66) — it lands in the core's provider store and
-	# is sourced by load_all below, not from the tree.
-	source [file join $dir .. plugins claude claude.tcl]
+	# `echo` (registered in agent.tcl) is now the ONLY built-in provider (D69): both
+	# Claude and OpenAI/ChatGPT are INSTALLABLE provider extensions (D66/D69) — each
+	# lands in the core's provider store and is sourced by load_all below, not from the
+	# tree. The tree carries no provider payload, only the shared runtime (plugins/lib).
 	# Now source every installed, version-supported provider from the store (D66),
-	# AFTER the built-ins and the runtime — restart-to-activate: a provider installed
+	# AFTER the built-in and the runtime — restart-to-activate: a provider installed
 	# this session becomes live on the NEXT start, never sourced into a running core.
 	rio::provider::load_all
 }}

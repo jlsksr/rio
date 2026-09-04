@@ -891,6 +891,26 @@ proc pump_until {cond {ms 3000}} {
 	while {[clock milliseconds] < $deadline} { update ; if {[uplevel 1 $cond]} return }
 }
 
+# Claude ships as an installable provider (D69), not a built-in — echo is the only
+# built-in now. Install the real extension into THIS in-process core's store and
+# load it exactly as the core does at startup, so the provider-selection and key-store
+# checks below have a real keyed provider to drive. (The GUI install *path* itself is
+# exercised with openai further down; here we only need Claude live in the core.)
+apply {{dir} {
+	set mf [open [file join $dir rio-extension.conf] r] ; fconfigure $mf -encoding utf-8
+	set manifest [::read $mf] ; close $mf
+	set top [dict get [rio::conf::parse $manifest] ""]
+	set files {}
+	foreach f [split [dict get $top files]] {
+		if {$f eq ""} continue
+		set fh [open [file join $dir $f] r] ; fconfigure $fh -encoding utf-8
+		dict set files $f [::read $fh] ; close $fh
+	}
+	rio::provider::put claude $manifest $files
+}} [file join [file dirname [info script]] .. .. extensions claude]
+rio::provider::load_all
+adopt_agent_status
+
 ok "provider: default is echo"        $::agent_provider echo
 apply_provider
 ok "provider: echo selected in core"  [rio::agent::provider_name] echo

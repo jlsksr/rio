@@ -3636,6 +3636,35 @@ with controls before it ships.
 
 ---
 
+### D69 — Claude too becomes an installable provider; `echo` is the only built-in
+
+D66 extracted OpenAI but kept **Claude in-tree** as "the sanctioned, always-present path." That
+asymmetry is now gone: Claude installs as a `kind = provider` extension
+([extensions/claude/](extensions/claude/)) exactly like OpenAI, and the core ships **only `echo`**
+built-in. A fresh core boots with the offline echo stub and nothing else; a real agent — Claude,
+OpenAI/ChatGPT, or a later one — is **installed** from the D39 repositories like any extension
+(restart-to-activate, D66). This includes rio's own dogfooding core: a clean checkout installs
+Claude once from the repo.
+
+**Why reverse D66's choice.** The seam D65/D66 hardened (`provider-api = 1`) exists precisely so a
+provider needn't live in the tree; keeping one provider in and one out only muddied that. Providers
+track fast-moving vendor APIs — they are exactly the thing that should **not** be welded into the
+core. rio-core and rio-gui own the *interface* to plug a provider in; the providers are peers on the
+far side of it. One infrastructure now serves all of them: install, version-gate, key-entry, and the
+`{conversation tools system post}` contract are identical whether the backend is Claude or ChatGPT.
+
+**What moved, mechanically.** `git mv plugins/claude → extensions/claude`; the loader
+([claude.tcl](extensions/claude/claude.tcl)) now sources only its two payload files
+(`inference.tcl` + `api-face.tcl`), the runtime coming from the core (as OpenAI's does); a
+`kind = provider` manifest ([rio-extension.conf](extensions/claude/rio-extension.conf)) and an
+`extensions/index` entry were added; the unit tests source the shared lib at the extension depth
+(`.. .. .. plugins lib json.tcl`). [server.tcl](rio-core/server.tcl) no longer sources any provider
+from the tree — `rio::provider::load_all` sources every installed one after the runtime.
+**`plugins/lib/` stays put**: it is the frozen `provider-api = 1` runtime home that server.tcl and
+every provider's tests reference, not a provider payload.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

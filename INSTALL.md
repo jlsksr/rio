@@ -49,8 +49,11 @@ wish rio-gui/rio-gui.tcl [file-or-folder ...]
 A directory argument opens as the project folder; a file opens in a tab. With no
 argument you get an empty scratch buffer.
 
-To use **Claude** locally, pick *Settings ▸ Agent: Claude (API key)* and enter your
-key under *Settings ▸ Claude API Key…* (stored 0600 — see §5).
+Out of the box the only agent provider is the offline **echo** stub. To use a real
+agent, **install a provider** from *Settings ▸ Extensions…* (e.g. **Claude** over the
+Anthropic API, or **ChatGPT** over the OpenAI API), restart rio, then pick it under
+*Settings ▸ Agent Provider* and enter its key under *Settings ▸ Agent API Key* (stored
+0600 — see §5).
 
 ---
 
@@ -173,24 +176,26 @@ intended remote story is loopback + SSH (mode B), not a public socket.
 
 ---
 
-## 5. The agent (Claude) — where the key and HTTPS live
+## 5. The agent — where the key and HTTPS live
 
-Since D30 the **agent runs inside the core**, so its Claude HTTPS happens **wherever
-the core runs** — locally in mode A, on the server in mode B. Consequences:
+Since D30 the **agent runs inside the core**, so a hosted provider's HTTPS (Claude,
+ChatGPT) happens **wherever the core runs** — locally in mode A, on the server in mode B.
+Consequences:
 
-- **`tcltls` must be installed on the core's host.** A core without it fails the
-  first Claude turn with *"can't find package tls"* (the message names the fix).
+- **`tcltls` must be installed on the core's host.** A core without it fails the first
+  hosted-provider turn with *"can't find package tls"* (the message names the fix).
 - **The API key is stored by the core**, in a 0600 file under
-  `$XDG_DATA_HOME/rio/secrets/claude-api.secret` (default
-  `~/.local/share/rio/secrets/`) **on the core's host** — never in the GUI, never in
-  synced config. In mode B the key lives on the **server**. Enter/clear it from
-  *Settings ▸ Claude API Key…* (it crosses the channel once via `agent.key.set`; the
-  GUI never retains it).
+  `$XDG_DATA_HOME/rio/secrets/` (default `~/.local/share/rio/secrets/`) **on the core's
+  host** — one file per provider (Claude's is `claude-api.secret`) — never in the GUI,
+  never in synced config. In mode B the key lives on the **server**. Enter/clear it from
+  *Settings ▸ Agent API Key* (it crosses the channel once via `agent.key.set`; the GUI
+  never retains it).
 - **Don't want the key on a given box?** Run the core locally (mode A) and edit
   remote files some other way — the GUI is identical. The choice of *where the agent
   runs* is just *where you point the GUI*.
-- **Provider** is chosen at runtime (*Settings ▸ Agent: Echo / Claude*). `echo` is an
-  offline stub needing no key or network; `claude` needs a stored key + `tcltls`.
+- **Provider** is chosen at runtime (*Settings ▸ Agent Provider*). The only built-in is
+  `echo`, an offline stub needing no key or network; a real provider (Claude, ChatGPT, …)
+  is **installed** from *Settings ▸ Extensions…* and needs a stored key + `tcltls`.
 
 The provider/key/policy are core ops (`agent.provider.set`, `agent.key.set` /
 `clear`, `agent.autoaccept.set`, `agent.status`), so they behave the same against a
