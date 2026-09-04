@@ -1022,6 +1022,25 @@ provider_key_dialog openai
 provider_key_clear .providerkey openai
 ok "keydlg: openai key cleared"        [rio::openai::api::configured] 0
 
+# The Extensions window's detail must WORD-WRAP a long description, not stretch the
+# auto-sized window. No repository is configured in the sandbox, so the window opens
+# on an empty scan; drive extw_select with a synthetic long-description row and check
+# the description label is wrap-bounded to the list's width.
+extensions_window
+set ::longdesc [string repeat "verylongword " 40]
+set ::extw_rows [list [dict create name openai kind provider desc $::longdesc \
+	key provider/openai variants [list [dict create source http://h/repo dir openai \
+		name openai kind provider version 1.0 author jlsksr description $::longdesc \
+		files openai.tcl manifest "" api 1 entry openai.tcl too_new 0]]]]
+.extw.body.list delete 0 end
+.extw.body.list insert end "openai   provider"
+.extw.body.list selection set 0
+extw_select
+ok "extw: description label wraps"        [expr {[.extw.det.head cget -wraplength] > 0}] 1
+ok "extw: long desc doesn't stretch window" \
+	[expr {[winfo reqwidth .extw.det.head] <= [winfo reqwidth .extw.body.list]}] 1
+destroy .extw
+
 # Back to the offline echo provider for the rest of the run.
 set ::agent_provider echo ; apply_provider
 chat_clear

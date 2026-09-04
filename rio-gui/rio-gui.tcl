@@ -5660,8 +5660,14 @@ proc extw_select {} {
 	set sel [.extw.body.list curselection]
 	if {$sel eq "" || $sel >= [llength $::extw_rows]} return
 	set row [lindex $::extw_rows $sel]
+	# Bound long text to the list's width so a wordy description word-wraps rather
+	# than stretching this auto-sized window. reqwidth is the list's requested pixel
+	# width (from -width 72), stable even before the window is mapped; `wrapb` leaves
+	# room for a variant row's Install/Remove button.
+	set wrap  [expr {[winfo reqwidth .extw.body.list] - 12}]
+	set wrapb [expr {$wrap - 90}]
 	if {[dict exists $row dead]} {
-		label $det.err -anchor w -justify left -font RioUIFont \
+		label $det.err -anchor w -justify left -font RioUIFont -wraplength $wrap \
 			-text "[dict get $row url]\n[dict get $row error]" \
 			-background [dict get $c ui.bg] -foreground [dict get $c error]
 		pack $det.err -fill x
@@ -5669,7 +5675,7 @@ proc extw_select {} {
 	}
 	set head "[dict get $row name] — [dict get $row kind]"
 	if {[dict get $row desc] ne ""} { append head " — [dict get $row desc]" }
-	label $det.head -anchor w -font RioUIFont -text $head \
+	label $det.head -anchor w -justify left -wraplength $wrap -font RioUIFont -text $head \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	pack $det.head -fill x -pady {0 2}
 	set entry ""
@@ -5684,7 +5690,7 @@ proc extw_select {} {
 		set line "  [dict get $v version]"
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
 		append line " — [host_of [dict get $v source]]"
-		label $f.l -anchor w -font RioUIFont -text $line \
+		label $f.l -anchor w -justify left -wraplength $wrapb -font RioUIFont -text $line \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		set this_installed [expr {$entry ne "" \
 			&& [dict get $v source]  eq [dict get $entry source] \
@@ -5711,7 +5717,7 @@ proc extw_select {} {
 	}
 	if {$entry ne "" && !$matched && ![dict exists [lindex [dict get $row variants] 0] offline]} {
 		set f [frame $det.inst -background [dict get $c ui.bg]]
-		label $f.l -anchor w -font RioUIFont \
+		label $f.l -anchor w -justify left -wraplength $wrapb -font RioUIFont \
 			-text "  installed: [dict get $entry version] — [host_of [dict get $entry source]] (no longer listed there)" \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		button $f.rm -text Remove -font RioUIFont -state $st \
