@@ -241,6 +241,15 @@ proc rio::wire::_result_agent_providers {result} {
 }
 rio::wire::result_encoder agent.providers rio::wire::_result_agent_providers
 
+# provider.list: `providers` is an array of flat {name,version,source,api,loadable}
+# objects (installed-on-disk providers, D66); `api_max` is a string leaf.
+proc rio::wire::_result_provider_list {result} {
+	set items {}
+	foreach p [dict get $result providers] { lappend items [obj $p] }
+	return "{\"providers\":[arr $items],\"api_max\":[str [dict get $result api_max]]}"
+}
+rio::wire::result_encoder provider.list rio::wire::_result_provider_list
+
 # workspace.get: `open` is an array of path strings; `active` is a string leaf.
 proc rio::wire::_result_workspace_get {result} {
 	return "{\"open\":[strarr [dict get $result open]],\"active\":[str [dict get $result active]]}"

@@ -1,0 +1,167 @@
+# Tests for the installable-provider store + loader (rio::provider, AGENTS.md D66)
+# and the provider.* ops. A `provider` is executable Tcl the core SOURCES, so the
+# store's job is to decide WHETHER to source (kind=provider, a supported
+# provider-api, a safe entry file) and to activate only on the next start
+# (restart-to-activate). Everything here is offline: fixtures are written to a
+# sandboxed store dir, never fetched.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+
+# Sandbox the store so tests never touch the real ~/.local/share/rio/providers.
+set ::store [file join [::tcltest::temporaryDirectory] rioprov-[clock clicks]]
+set rio::provider::override_dir $::store
+
+proc reset_store {} {
+	catch {file delete -force $::store}
+	# Forget any provider a previous test loaded, so agent.providers is clean.
+	set rio::agent::providers [dict create]
+	rio::agent::register_provider echo ::rio::agent::echo_provider -label Echo
+}
+
+# A minimal in-store provider manifest (kind=provider) as text.
+proc manifest {args} {
+	set d [dict merge [dict create \
+		name dummy kind provider provider-api 1 version 1.0 \
+		author tester entry entry.tcl files entry.tcl] $args]
+	set out ""
+	dict for {k v} $d { append out "$k = $v\n" }
+	return $out
+}
+
+# A payload entry file that registers a trivial provider under `name`.
+proc entry_src {name} {
+	return "rio::agent::register_provider $name ::prov_$name -label {Dummy $name}
+proc ::prov_$name {conversation tools system post} { {*}\$post delta hi ; {*}\$post done }
+"
+}
+
+# --- put / list / delete round-trip -------------------------------------------
+
+test provider-put-list {put stores a provider; list reports it loadable} -setup {
+	reset_store
+} -body {
+	rio::provider::put dummy [manifest] [dict create entry.tcl [entry_src dummy]] \
+		http://repo.example/mods
+	set ps [rio::provider::installed]
+	set p [lindex $ps 0]
+	list [llength $ps] [dict get $p name] [dict get $p version] \
+		[dict get $p api] [dict get $p loadable] [dict get $p source]
+} -result {1 dummy 1.0 1 1 http://repo.example/mods}
+
+test provider-list-op {provider.list op returns the store as data} -setup {
+	reset_store
+	rio::provider::put dummy [manifest] [dict create entry.tcl [entry_src dummy]]
+} -body {
+	set r [rio::core::call provider.list {}]
+	set res [dict get $r response result]
+	set p [lindex [dict get $res providers] 0]
+	list [dict get $p name] [dict get $p loadable] [dict get $res api_max]
+} -result {dummy 1 1}
+
+test provider-list-wire {provider.list has a flat-array wire shape (D25)} -setup {
+	reset_store
+	rio::provider::put dummy [manifest] [dict create entry.tcl [entry_src dummy]]
+} -body {
+	set result [dict get [dict get [rio::core::call provider.list {}] response] result]
+	set line [rio::wire::response [dict create id 7 ok true op provider.list result $result]]
+	expr {[string match {*"providers":*"name":"dummy"*"loadable":"1"*} $line] ? 1 : 0}
+} -result 1
+
+test provider-delete {delete removes an installed provider} -setup {
+	reset_store
+	rio::provider::put dummy [manifest] [dict create entry.tcl [entry_src dummy]]
+} -body {
+	set before [llength [rio::provider::installed]]
+	rio::core::call provider.delete {name dummy}
+	list $before [llength [rio::provider::installed]]
+} -result {1 0}
+
+# --- load_all: install -> source -> register (the whole path, no network) ------
+
+test provider-load-all-registers {load_all sources an installed provider so it registers} -setup {
+	reset_store
+	rio::provider::put openish [manifest name openish files entry.tcl] \
+		[dict create entry.tcl [entry_src openish]]
+} -body {
+	set before [lsearch -exact [rio::agent::provider_names] openish]
+	rio::provider::load_all
+	set after [lsearch -exact [rio::agent::provider_names] openish]
+	# selectable through the registry, like any built-in
+	rio::agent::use_provider openish
+	set nm [rio::agent::provider_name]
+	rio::agent::use_provider echo
+	list [expr {$before < 0}] [expr {$after >= 0}] $nm
+} -result {1 1 openish}
+
+# --- the version gate ----------------------------------------------------------
+
+test provider-put-rejects-too-new {put refuses a provider-api past this core} -setup {
+	reset_store
+} -body {
+	catch {rio::provider::put dummy [manifest provider-api 99] \
+		[dict create entry.tcl [entry_src dummy]]} err
+	list [llength [rio::provider::installed]] [string match {*newer rio*} $err]
+} -result {0 1}
+
+test provider-load-skips-too-new {a too-new provider on disk lists but never loads} -setup {
+	reset_store
+	# Plant it directly (put would refuse it) — the forward-compat case: a store
+	# populated by a newer rio, then read by this older one.
+	file mkdir [file join $::store futuristic]
+	set mf [open [file join $::store futuristic rio-extension.conf] w]
+	puts -nonewline $mf [manifest name futuristic provider-api 99]
+	close $mf
+	set e [open [file join $::store futuristic entry.tcl] w]
+	puts -nonewline $e [entry_src futuristic] ; close $e
+} -body {
+	set p [lindex [rio::provider::installed] 0]
+	rio::provider::load_all
+	list [dict get $p name] [dict get $p loadable] \
+		[expr {[lsearch -exact [rio::agent::provider_names] futuristic] < 0}]
+} -result {futuristic 0 1}
+
+# --- safe-name + manifest validation ------------------------------------------
+
+test provider-put-bad-name {put refuses an unsafe provider name} -setup {
+	reset_store
+} -body {
+	catch {rio::provider::put ../evil [manifest name ../evil] \
+		[dict create entry.tcl [entry_src x]]} err
+	string match {*bad provider name*} $err
+} -result 1
+
+test provider-put-bad-payload {put refuses an unsafe payload filename} -setup {
+	reset_store
+} -body {
+	catch {rio::provider::put dummy [manifest] \
+		[dict create ../evil.tcl x entry.tcl [entry_src dummy]]} err
+	string match {*unsafe payload*} $err
+} -result 1
+
+test provider-put-not-provider {put refuses a manifest whose kind isn't provider} -setup {
+	reset_store
+} -body {
+	catch {rio::provider::put dummy [manifest kind mode] \
+		[dict create entry.tcl [entry_src dummy]]} err
+	list [llength [rio::provider::installed]] [string match {*not 'provider'*} $err]
+} -result {0 1}
+
+test provider-put-entry-missing {put refuses when entry isn't among the payloads} -setup {
+	reset_store
+} -body {
+	catch {rio::provider::put dummy [manifest entry other.tcl files other.tcl] \
+		[dict create wrong.tcl x]} err
+	string match {*not among the payloads*} $err
+} -result 1
+
+# provider.* ops are registered.
+test provider-ops-registered {the provider.* ops exist in the dispatch table} -body {
+	set ops [rio::dispatch::opnames]
+	expr {"provider.list" in $ops && "provider.put" in $ops && "provider.delete" in $ops}
+} -result 1
+
+file delete -force $::store
+cleanupTests

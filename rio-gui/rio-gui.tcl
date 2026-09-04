@@ -4953,6 +4953,7 @@ proc session_restore {} {
 # ---------------------------------------------------------------------------
 
 set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed} (ledger_load)
+set ::provider_api_max 1 ;# highest provider-api the core loads (provider.list; D66)
 set ::repo_variants {}  ;# every installable variant found by the last scan
 set ::repo_dead {}      ;# {url error} per unreachable/non-repository source
 set ::repo_srcinfo {}   ;# source url -> {name description} from its manifest
@@ -5137,12 +5138,23 @@ proc repo_source_scan {base} {
 			lappend files $f
 		}
 		if {!$ok || ![llength $files]} continue
-		lappend exts [dict create \
+		set variant [dict create \
 			source $base dir $d name $name kind $kind \
 			version [dict get $top version] \
 			author [expr {[dict exists $top author] ? [dict get $top author] : "unknown"}] \
 			description [expr {[dict exists $top description] ? [dict get $top description] : ""}] \
-			files $files]
+			files $files manifest [dict get $mr text]]
+		# A provider (D66) installs CORE-side and is sourced into the core, so it
+		# carries its versioned contract (provider-api) and its entry file, and is
+		# greyed when it needs a newer rio than this core loads.
+		if {$kind eq "provider"} {
+			set api [expr {[dict exists $top provider-api] ? [dict get $top provider-api] : ""}]
+			dict set variant api $api
+			dict set variant entry [expr {[dict exists $top entry] ? [dict get $top entry] : ""}]
+			dict set variant too_new [expr {
+				![string is integer -strict $api] || $api > $::provider_api_max}]
+		}
+		lappend exts $variant
 	}
 	return [dict create ok 1 name $srcname description $srcdesc exts $exts]
 }
@@ -5177,7 +5189,7 @@ proc repo_scan_all {{progress ""}} {
 # format (D39's forward-compatibility contract). A kind not listed here still
 # LISTS in the window — greyed "(needs a newer rio)" — it just can't install.
 proc ext_kind_known {kind} {
-	return [expr {$kind in {syntax mode theme}}]
+	return [expr {$kind in {syntax mode theme provider}}]
 }
 
 proc ext_kind_dir {kind} {
@@ -5186,6 +5198,26 @@ proc ext_kind_dir {kind} {
 		mode   { return [modes_user_dir] }
 	}
 	return ""
+}
+
+# Whether THIS rio can install a given variant. A kind it doesn't know can't be
+# installed (forward-compat); a provider (D66) additionally can't if it needs a
+# newer provider-api than the core loads (`too_new`, set at scan time).
+proc ext_variant_installable {v} {
+	if {![ext_kind_known [dict get $v kind]]} { return 0 }
+	if {[dict get $v kind] eq "provider" && [dict exists $v too_new] && [dict get $v too_new]} {
+		return 0
+	}
+	return 1
+}
+
+# A row is greyed ("needs a newer rio") when none of its variants can be installed
+# here — an unknown kind, or a provider every variant of which is too new.
+proc ext_row_installable {row} {
+	foreach v [dict get $row variants] {
+		if {[ext_variant_installable $v]} { return 1 }
+	}
+	return 0
 }
 
 # Does any OTHER ledger entry of this kind own one of these payload filenames?
@@ -5217,6 +5249,11 @@ proc ext_install {variant} {
 	# is the provenance the user is trusting.
 	if {$kind eq "theme"} {
 		set what "'$name' is a THEME: colour/font data, parsed and never executed."
+	} elseif {$kind eq "provider"} {
+		set what "'$name' is an agent PROVIDER: Tcl code that runs inside the rio CORE\
+			(which may be a remote or shared host), can receive the API key you enter for\
+			it, and makes network requests with it. Install only from a source you trust\
+			with your model credentials."
 	} else {
 		set what "'$name' is Tcl CODE that will run inside your editor with your permissions."
 	}
@@ -5227,10 +5264,16 @@ proc ext_install {variant} {
 	}
 	if {[tk_messageBox -icon warning -type yesno -title "rio — install extension" \
 			-message $msg] ne "yes"} { return 0 }
-	set owner [ext_file_owner $kind $name $files]
-	if {$owner ne ""} {
-		report_error "Cannot install '$name': its payload would overwrite files owned by the installed $kind '$owner'."
-		return 0
+	# Payloads of one kind share a flat drop-in dir (syntax/mode) — a name owned by
+	# another installed extension would be silently overwritten, so refuse. A
+	# provider (D66) lives in its OWN core-side dir, so filenames never collide
+	# across providers; the check does not apply to it.
+	if {$kind ne "provider"} {
+		set owner [ext_file_owner $kind $name $files]
+		if {$owner ne ""} {
+			report_error "Cannot install '$name': its payload would overwrite files owned by the installed $kind '$owner'."
+			return 0
+		}
 	}
 	# Fetch everything first; only then touch disk.
 	set payload {}
@@ -5245,6 +5288,8 @@ proc ext_install {variant} {
 	}
 	if {$kind eq "theme"} {
 		if {![ext_install_theme $name $payload]} { return 0 }
+	} elseif {$kind eq "provider"} {
+		if {![ext_install_provider $name $manifest $payload $source]} { return 0 }
 	} else {
 		if {![ext_install_files $kind $name $payload]} { return 0 }
 	}
@@ -5314,6 +5359,25 @@ proc ext_install_theme {name payload} {
 	return 1
 }
 
+# Install a provider CORE-side through provider.put (D66) — like a theme, its code
+# is the CORE's (a remote core stores on its own disk), so it lands there, not in
+# the frontend's dirs. The core validates the manifest (kind, provider-api, entry,
+# every name) before writing. It is NOT sourced now: a provider activates on the
+# core's next start (restart-to-activate), so on success we say so plainly.
+proc ext_install_provider {name manifest payload source} {
+	set resp [rio_call provider.put [dict create \
+		name $name manifest $manifest files $payload source $source]]
+	if {![dict get $resp ok]} {
+		report_error "Install of provider '$name' failed: [dict get $resp error message]" \
+			[dict get $resp error code]
+		return 0
+	}
+	tk_messageBox -icon info -type ok -title "rio — provider installed" \
+		-message "Installed the agent provider '$name'.\n\nIt becomes available the next\
+			time the rio core starts — restart rio to use it."
+	return 1
+}
+
 # Remove an installed extension by ledger key parts. Files (or core-side
 # themes) go first, the ledger entry last — a failed delete leaves the entry,
 # so Remove can be retried; a vanished file is already what delete wanted.
@@ -5325,6 +5389,8 @@ proc ext_remove {kind name} {
 		foreach f [dict get $e files] {
 			catch {rio_call theme.delete [dict create name [file rootname $f]]}
 		}
+	} elseif {$kind eq "provider"} {
+		catch {rio_call provider.delete [dict create name $name]}
 	} else {
 		set dstdir [ext_kind_dir $kind]
 		foreach f [dict get $e files] {
@@ -5364,6 +5430,11 @@ proc ext_reload {kind} {
 					do_theme default
 				}
 			}
+		}
+		provider {
+			# Nothing to re-arm live: a provider is sourced by the CORE at startup
+			# (restart-to-activate, D66). An install/remove changes the store on disk;
+			# it takes effect on the core's next start, so there is no reload here.
 		}
 	}
 }
@@ -5474,6 +5545,14 @@ proc extw_busy {on} {
 proc extw_refresh {} {
 	if {$::repo_busy} return
 	extw_busy 1
+	# The core's provider-api ceiling (D66) — so a repo provider that needs a newer
+	# rio greys before an install even reaches the core. Best-effort: an old core
+	# with no provider.list leaves the default, and every provider then lists as
+	# api 1 (what such a core could load anyway).
+	set pr [rio_call provider.list {}]
+	if {[dict get $pr ok] && [dict exists $pr result api_max]} {
+		set ::provider_api_max [dict get $pr result api_max]
+	}
 	repo_scan_all {apply {{src n total} {
 		extw_status "fetching [host_of $src] ($n/$total)…"
 		update idletasks
@@ -5550,10 +5629,10 @@ proc extw_fill {} {
 		}
 		set marks ""
 		if {[dict exists $::ext_ledger [dict get $row key]]} { append marks " \[installed\]" }
-		if {![ext_kind_known [dict get $row kind]]} { append marks " (needs a newer rio)" }
+		if {![ext_row_installable $row]} { append marks " (needs a newer rio)" }
 		.extw.body.list insert end \
-			[format "%-16s %-7s %s%s" [dict get $row name] [dict get $row kind] $from $marks]
-		if {![ext_kind_known [dict get $row kind]]} {
+			[format "%-16s %-8s %s%s" [dict get $row name] [dict get $row kind] $from $marks]
+		if {![ext_row_installable $row]} {
 			.extw.body.list itemconfigure end -foreground [dict get $c gutter.fg]
 		}
 	}
@@ -5621,7 +5700,7 @@ proc extw_select {} {
 			button $f.rm -text Remove -font RioUIFont -state $st \
 				-command [list extw_remove [dict get $row kind] [dict get $row name]]
 			pack $f.rm -side right -padx 2
-		} elseif {[ext_kind_known [dict get $row kind]]} {
+		} elseif {[ext_variant_installable $v]} {
 			button $f.in -text Install -font RioUIFont -state $st \
 				-command [list extw_install $sel $i]
 			pack $f.in -side right -padx 2

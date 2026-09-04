@@ -3548,7 +3548,54 @@ core) — OpenAI streams `content:null` on tool/role chunks.
 to a manifest — loaded core-side behind a versioned `provider-api` and a consent/trust gate.
 C was sequenced first precisely so the contract above is proven by a second in-tree
 implementation before it is frozen for outsiders. This keeps the promise that people contribute
-providers through one repo, with no second infrastructure.
+providers through one repo, with no second infrastructure. *(Since realized — D66.)*
+
+---
+
+### D66 — `provider` becomes an installable D39 kind; OpenAI ships as the first one
+
+D65's milestone B, delivered. A `provider` is now an installable `kind` in the *same* D39
+repositories (D39) — a publisher adds `kind = provider` to a `rio-extension.conf` and ships the
+Tcl beside it; no second distribution infrastructure. To dogfood the path rather than only
+speccing it, the in-tree OpenAI provider was **extracted** out of the core and now installs as
+that first `kind = provider` extension ([extensions/openai/](extensions/openai/)); the built-in
+set is back to **echo + Claude** (Claude stays in-tree as the sanctioned, always-present path).
+
+**Why a provider is the highest-trust kind, and how that shaped every choice.** The D39 kinds
+that shipped before load into the *GUI* (syntax/mode are drop-in Tcl, D32/D38) or are pure data
+(theme, D24). A provider is executable Tcl that loads into the **core** (which may be a remote or
+shared host, D30) and can be handed the user's **API key** (D21) to make **network calls** with
+it. So, unlike the others:
+
+- **It installs CORE-side**, through new `provider.*` ops ([ops-provider.tcl](rio-core/ops-provider.tcl),
+  [provider.tcl](rio-core/provider.tcl)) that mirror `theme.put/list/delete` (D39): the code is
+  the core's, so it lands on the core's disk (`$XDG_DATA_HOME/rio/providers/<name>/`), and a
+  remote core stores on its own. The GUI's Extensions window routes a `provider` install to
+  `provider.put` exactly as it routes a `theme` to `theme.put`.
+- **It activates on restart, never live.** `provider.put` writes the store but does **not**
+  `source` the code; the core sources every installed, version-supported provider once at startup
+  (`rio::provider::load_all` in [server.tcl](rio-core/server.tcl)). This was a deliberate choice
+  over live-loading (which syntax/mode do GUI-side): sourcing freshly-fetched remote Tcl into a
+  long-lived, possibly shared, already-running core is a bigger trust surface than a deliberate
+  restart. The GUI says so on install.
+- **It is gated by a VERSIONED contract, `provider-api`.** This is the point of doing C first —
+  the seam C hardened (register_provider with `-label`/`-signup`/`-key`, the
+  `{conversation tools system post}` proc + the `delta/tool/done/error` post vocab, and the
+  runtime helpers `rio::llm::*` + `rio::secret::*`) is now **`provider-api = 1`**, loaded before
+  any provider is sourced so an installed one ships no copy of it. A manifest declares the version
+  it targets; the core refuses to install one past what it implements and lists-but-skips a
+  too-new one already on disk (a store populated by a newer rio, then read by an older) — D39's
+  "too-new lists, doesn't install", now for executable code. `provider.list` reports the core's
+  `api_max` so the GUI greys such a row before an install is even attempted.
+- **Its consent is bespoke.** The D39 install dialog names code-vs-data; a `provider` adds the
+  real escalation in plain words — runs in the core (maybe remote/shared), can receive the key you
+  enter for it, makes network calls with it; install only from a source you trust with your model
+  credentials.
+
+No provider registry, index, or account is added — a provider is one more line in a
+`sources.list` repo, chosen and installed like any extension, with the credential trust made
+explicit at the one moment it matters. Local OpenAI-compatible servers (Ollama, llama-server) ride
+the same installed extension by pointing its `messages_url` at localhost (D8/D65).
 
 ---
 
