@@ -191,11 +191,13 @@ All three files use rio's conf format (AGENTS.md D21): `key = value` lines,
 | key           | required | meaning                                                        |
 | ------------- | -------- | -------------------------------------------------------------- |
 | `name`        | yes      | the extension's name — users see it as *kind/name*             |
-| `kind`        | yes      | what it is: `syntax`, `mode`, or `theme` today (open — below)  |
+| `kind`        | yes      | what it is: `syntax`, `mode`, `theme`, or `provider` today (open — below) |
 | `version`     | yes      | an **opaque string** shown to users (`1.0`, `2026-07-17`, …) — rio displays it, never compares it |
 | `files`       | yes      | the payload filename(s), space-separated, beside the manifest  |
 | `author`      | shown    | your name or handle — displayed with every variant             |
 | `description` | shown    | one line about the extension                                   |
+| `provider-api`| provider | (`kind = provider` only) the integer contract version your provider targets — see below |
+| `entry`       | provider | (`kind = provider` only) which payload file the core sources to load it |
 
 Rules of the tree:
 
@@ -220,6 +222,34 @@ What each kind installs as:
 - `mode` — an editing mode (the modes contract above) → `~/.config/rio/modes/`.
 - `theme` — a theme file → the **core's** user themes dir, via the protocol
   (`theme.put`) — themes are read by the core, which may be a remote box.
+- `provider` — an agent provider (a second LLM service for the chat/agent) →
+  the **core's** provider store, via the protocol (`provider.put`). See below.
+
+### Publishing an agent provider (`kind = provider`)
+
+A provider is the highest-trust kind, so it works a little differently — worth
+understanding before you publish one:
+
+- **It runs in the core, and activates on restart.** A provider is Tcl the core
+  *sources* (not GUI drop-in code, not data). Installing it writes your files into
+  the core's provider store; it becomes live the next time the core starts — the
+  Extensions window tells the user to restart. A provider is one directory with the
+  manifest and your `.tcl` payloads (no subdirectories, v1); the core sources the
+  file named by `entry`, which should register the provider.
+- **Write against `provider-api`.** Declare the contract version you built for
+  (`provider-api = 1` today). The core loads the API surface — `rio::agent::register_provider`
+  (with `-label`, `-signup`, and a `-key` capability), the provider proc contract
+  `{conversation tools system post}` with its `delta` / `tool` / `done` / `error`
+  callbacks, and the runtime helpers `rio::llm::http::stream`,
+  `rio::llm::jstr` / `rio::llm::obj_json`, and `rio::secret::*` — *before* your code,
+  so you ship no copy of it. A rio that implements an older `provider-api` than you
+  declare lists your provider greyed ("needs a newer rio") and won't install it.
+  ([extensions/openai/](extensions/openai/) is a complete worked example — the
+  OpenAI-compatible provider ships exactly this way.)
+- **The user is warned, specifically.** Because your code runs in the core (which
+  may be a shared or remote host), can be handed the API key the user enters for it,
+  and makes network calls with it, the install dialog says so and names your source.
+  Publish from a source people can trust with their model credentials.
 
 ### The forward-compatibility contract
 

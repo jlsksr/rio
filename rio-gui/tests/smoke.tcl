@@ -951,10 +951,63 @@ ok "keydlg: clear enabled with key"   [.providerkey.btns.clear cget -state] norm
 provider_key_clear .providerkey claude
 ok "keydlg: key cleared"              [rio::claude::api::configured] 0
 
-# A SECOND keyed provider (openai / ChatGPT) coexists: it has its own label, its
-# own 0600 store, and selecting it names it in the status strip (the picker + key
-# dialog are enumerated from the core, so a second provider needs no GUI change).
-ok "provider: openai in the picker cache" \
+# --- installable providers (D66): openai is no longer built-in, it INSTALLS -----
+# A provider is a `kind = provider` extension the core SOURCES at startup. The
+# installable-kind gate: provider is a known kind, but one needing a newer
+# provider-api than the core loads is greyed (never installable).
+ok "prov-kind: provider is a known kind"      [ext_kind_known provider] 1
+ok "prov-gate: current provider installable"  [ext_variant_installable {kind provider too_new 0}] 1
+ok "prov-gate: too-new provider not installable" [ext_variant_installable {kind provider too_new 1}] 0
+ok "prov-gate: row greys when every variant too new" \
+	[ext_row_installable [dict create variants [list {kind provider too_new 1}]]] 0
+
+# Prove the GUI install path end to end, offline: build the variant the scanner
+# would, stub the fetch seam to serve the shipped openai extension from disk, run
+# ext_install (consent stubbed to yes), then load_all — exactly what the core does
+# at startup — to activate it in-process (no restart in a test).
+set ::oai_srcdir [file join [file dirname [info script]] .. .. extensions openai]
+proc _prov_variant {dir source} {
+	set mf [open [file join $dir rio-extension.conf] r] ; fconfigure $mf -encoding utf-8
+	set manifest [::read $mf] ; close $mf
+	set top [dict get [rio::conf::parse $manifest] ""]
+	set files {}
+	foreach f [split [dict get $top files]] { if {$f ne ""} { lappend files $f } }
+	return [dict create source $source dir [file tail $dir] name [dict get $top name] \
+		kind provider version [dict get $top version] author [dict get $top author] \
+		description "" files $files manifest $manifest \
+		api [dict get $top provider-api] entry [dict get $top entry] too_new 0]
+}
+rename repo_fetch _real_repo_fetch
+proc repo_fetch {url} {
+	if {[regexp {/([^/]+)$} $url -> f] && [file isfile [file join $::oai_srcdir $f]]} {
+		set fh [open [file join $::oai_srcdir $f] r] ; fconfigure $fh -encoding utf-8
+		set t [::read $fh] ; close $fh
+		return [dict create ok 1 status 200 text $t]
+	}
+	return [dict create ok 1 status 404 text ""]
+}
+rename tk_messageBox _real_mb ; proc tk_messageBox {args} { return yes }
+set ::prov_installed [ext_install [_prov_variant $::oai_srcdir http://smoke.example/repo]]
+rename tk_messageBox {} ; rename _real_mb tk_messageBox
+rename repo_fetch {} ; rename _real_repo_fetch repo_fetch
+
+ok "prov-install: ext_install succeeds"   $::prov_installed 1
+ok "prov-install: ledger records it"      [dict exists $::ext_ledger provider/openai] 1
+set ::prov_names {}
+foreach p [dict get [rio_result provider.list {}] providers] {
+	lappend ::prov_names [dict get $p name]
+}
+ok "prov-install: on the core's disk"     [expr {"openai" in $::prov_names}] 1
+ok "prov-install: not live before restart" [expr {[lsearch [rio::agent::provider_names] openai] < 0}] 1
+
+# Activate exactly as the core does at its next start, then refresh the picker cache.
+rio::provider::load_all
+adopt_agent_status
+
+# Now the installed provider (openai / ChatGPT) coexists like any built-in: its own
+# label, its own 0600 store, and selecting it names it in the status strip (the
+# picker + key dialog are enumerated from the core, so it needed no GUI change).
+ok "provider: openai now in the picker cache" \
 	[expr {[agent_provider_entry openai] ne ""}] 1
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai

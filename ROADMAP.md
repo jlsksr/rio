@@ -183,15 +183,17 @@ for later:
   (your sources list is your trust list, provenance shown, code named as
   code). Anything stronger — signatures, pinning — needs a design that works
   without a central authority.
-- **Provider as an installable `kind`** — *next milestone* (D65's "milestone B";
-  successor to D19). Make `provider` a `kind` in the **same** repositories — one
-  infrastructure, a publisher adds `kind: provider` to a manifest — loaded
-  core-side behind a versioned `provider-api` and a consent/trust gate. The
-  provider contract was hardened in-tree first (D65: per-provider keys, provider
-  metadata in the registry, `agent.providers`, the shared `plugins/lib`), so a
-  second implementation proved the seam before it is frozen for outside
-  contributors. The `kind` vocabulary is open and the manifest grows unknown keys
-  compatibly, so this needs no repo-format change.
+- **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
+  B", successor to D19). `provider` is a `kind` in the **same** repositories — one
+  infrastructure, a publisher adds `kind = provider` (plus `provider-api` and
+  `entry`) to a manifest. It installs **core-side** (`provider.put`, mirroring
+  `theme.put`), behind the versioned `provider-api = 1` surface and a bespoke
+  consent that names the credential/network trust; it activates on the core's next
+  start (restart-to-activate — no sourcing remote Tcl into a running, possibly
+  shared, core). The contract was hardened in-tree first (D65) so a second
+  implementation proved the seam before it was frozen. OpenAI/ChatGPT was extracted
+  from the tree to become the first such extension ([extensions/openai/](extensions/openai/)),
+  dogfooding the path. Still open here: `provider-api 2` and a core-side ledger (below).
 - **Update checking** — *deferred.* rio never auto-updates; an update is
   installing the newer-listed variant by hand. A "newer version available"
   marker on installed rows would be a cheap, honest middle ground.
@@ -210,14 +212,15 @@ for later:
 
 ## Agent
 
-- **Providers** — *landed* (AGENTS.md D26, D65). Two first-party providers ship
-  in-tree: **Claude** (Anthropic API) and an **OpenAI-compatible** one (**ChatGPT**
-  by default; point its base URL at a local server — Ollama / llama-server / LM
-  Studio / vLLM — to run a **local model**). Each keeps its own 0600 key; the GUI's
-  provider picker + key dialog enumerate from the core (`agent.providers`). Adding a
-  third first-party provider is now a plugin mirroring `plugins/openai/`; letting
-  *others* add one is milestone B (see Extensions ▸ "Provider as an installable
-  `kind`").
+- **Providers** — *landed* (AGENTS.md D26, D65, D66). **Claude** (Anthropic API)
+  ships in-tree as the always-present sanctioned path; the **OpenAI-compatible**
+  provider (**ChatGPT** by default; point its base URL at a local server — Ollama /
+  llama-server / LM Studio / vLLM — to run a **local model**) now ships as an
+  **installable** `provider` extension ([extensions/openai/](extensions/openai/), D66),
+  not built in. Each keeps its own 0600 key; the GUI's provider picker + key dialog
+  enumerate from the core (`agent.providers`). A first-party provider is a plugin
+  mirroring the OpenAI one; **anyone** can now publish one to a repository (see
+  Extensions ▸ "Provider as an installable `kind`").
 - **Run-command tool (with guardrails)** — *planned.* Let the agent run shell
   commands under explicit approval/confinement, alongside its existing read and
   propose-edit tools.

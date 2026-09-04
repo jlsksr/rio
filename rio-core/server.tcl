@@ -37,12 +37,22 @@ apply {{} {
 	set dir [file dirname [file normalize [info script]]]
 	source [file join $dir core.tcl]   ;# loads doc/dispatch/ops + default buffer
 	source [file join $dir wire.tcl]
-	# The spawned core carries the agent (D30): load the provider plugins so they
-	# register themselves (agent.provider.set claude | openai) with their own key
-	# stores. In-process for now (D26's phasing); real out-of-process / installable
-	# plugins are a later increment (milestone B).
+	# The spawned core carries the agent (D30). The PROVIDER-API RUNTIME (D66) is
+	# loaded first — the shared rio::llm::* helpers (transport + JSON, plugins/lib)
+	# every provider builds on — so both the in-tree providers and any INSTALLED one
+	# find it already present. rio::agent::register_provider and rio::secret::* came
+	# with core.tcl above; together they are the surface `provider-api = 1` freezes.
+	source [file join $dir .. plugins lib json.tcl]
+	source [file join $dir .. plugins lib transport.tcl]
+	# The built-in providers register themselves (agent.provider.set echo | claude).
+	# Claude ships IN-TREE (the sanctioned, stable path); OpenAI/ChatGPT is now an
+	# INSTALLABLE provider extension (D66) — it lands in the core's provider store and
+	# is sourced by load_all below, not from the tree.
 	source [file join $dir .. plugins claude claude.tcl]
-	source [file join $dir .. plugins openai openai.tcl]
+	# Now source every installed, version-supported provider from the store (D66),
+	# AFTER the built-ins and the runtime — restart-to-activate: a provider installed
+	# this session becomes live on the NEXT start, never sourced into a running core.
+	rio::provider::load_all
 }}
 
 namespace eval rio::server {
