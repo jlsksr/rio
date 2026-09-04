@@ -39,13 +39,15 @@ namespace eval rio::agent {
 
 	# The named-provider registry (D26/D30). A provider is known by NAME so a
 	# frontend can pick one over the channel (agent.provider.set) without ever
-	# naming a Tcl command: `echo` is built in; a plugin (claude-api) registers
-	# itself when the core loads it. An entry is {provider <cmd> ?key <caps>?},
-	# where caps = {set <cmd> clear <cmd> status <cmd>} for a provider that holds a
-	# durable credential (the Claude API key; D21).
+	# naming a Tcl command: `echo` is built in; a plugin (claude-api, openai)
+	# registers itself when the core loads it. An entry is
+	# {provider <cmd> label <text> signup <text> ?key <caps>?}, where caps =
+	# {set <cmd> clear <cmd> status <cmd>} for a provider that holds a durable
+	# credential (an API key; D21). Key state is PER PROVIDER — several keyed
+	# providers coexist (claude AND openai), each with its own store — so there is
+	# no single key-holder slot; agent.key.* names its target.
 	variable providers       {}                     ;# name -> entry
 	variable active_provider echo                   ;# the registered provider now live
-	variable keyed_provider  ""                     ;# name of the key-holding provider (claude)
 }
 
 # The write-apply policy (read by rio::agent::tools::apply_write) and its toggles —
@@ -65,17 +67,22 @@ proc rio::agent::set_provider {cmd} {
 
 # --- named-provider registry (D26/D30) ---------------------------------------
 #
-# register_provider name cmd ?-key {set .. clear .. status ..}?
-#   Record a provider under `name`. `-key` declares the provider holds a durable
-#   credential and wires the three commands the agent.key.* ops drive (the claude
-#   face uses this for the API key); the agent layer itself stays credential-blind.
+# register_provider name cmd ?-label <text>? ?-signup <text>? ?-key {set .. clear .. status ..}?
+#   Record a provider under `name`. `-label` is its display name (a frontend's
+#   menus/badge; defaults to the name) and `-signup` a where-to-get-a-key hint —
+#   both DATA the provider owns, so the GUI's picker and key dialog are generic
+#   (they render whatever a provider declares; an installed provider ships its own,
+#   milestone B). `-key` declares the provider holds a durable credential and wires
+#   the three commands the agent.key.* ops drive; the agent layer stays
+#   credential-blind and each keyed provider keeps its own store.
 proc rio::agent::register_provider {name cmd args} {
 	variable providers
-	variable keyed_provider
-	set entry [dict create provider $cmd]
+	set entry [dict create provider $cmd label $name signup ""]
 	foreach {opt val} $args {
 		switch -- $opt {
-			-key { dict set entry key $val ; set keyed_provider $name }
+			-key    { dict set entry key $val }
+			-label  { dict set entry label $val }
+			-signup { dict set entry signup $val }
 			default { error "register_provider: unknown option $opt" }
 		}
 	}
@@ -99,23 +106,55 @@ proc rio::agent::use_provider {name} {
 proc rio::agent::provider_name  {} { variable active_provider ; return $active_provider }
 proc rio::agent::provider_names {} { variable providers ; return [lsort [dict keys $providers]] }
 
-# The key capability of the key-holding provider (claude), or raise if this core
-# carries none. key_status answers softly (0) so a frontend can render "no key".
-proc rio::agent::_key_caps {} {
+# A rendering of every registered provider for a frontend's picker + key UI
+# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup}. Sorted by
+# name for a stable menu order. All leaves are strings (the wire's flat-object
+# encoder applies).
+proc rio::agent::providers_info {} {
 	variable providers
-	variable keyed_provider
-	if {$keyed_provider eq "" || ![dict exists $providers $keyed_provider key]} {
-		rio::error::raise bad_request "this core has no key-based agent provider"
+	set out {}
+	foreach name [lsort [dict keys $providers]] {
+		set e [dict get $providers $name]
+		set keyed [dict exists $e key]
+		lappend out [dict create \
+			name    $name \
+			label   [dict get $e label] \
+			keyed   [expr {$keyed ? 1 : 0}] \
+			key_set [expr {$keyed ? [key_status $name] : 0}] \
+			signup  [dict get $e signup]]
 	}
-	return [dict get $providers $keyed_provider key]
+	return $out
 }
-proc rio::agent::key_set {key} { {*}[dict get [_key_caps] set] $key ; return }
-proc rio::agent::key_clear {}   { {*}[dict get [_key_caps] clear] ; return }
-proc rio::agent::key_status {} {
+
+# The provider a key op targets: the given name, or the active provider when none
+# is named (the common case — configure the key for the provider you just picked).
+proc rio::agent::_key_target {name} {
+	variable active_provider
+	return [expr {$name eq "" ? $active_provider : $name}]
+}
+
+# The key capability of a named provider, or raise if it has none. (A frontend
+# should only offer the key dialog for a provider whose agent.providers entry has
+# keyed=1, so this raises only on a misuse.) key_status answers softly (0) so a
+# frontend can render "no key" for any provider, keyed or not.
+proc rio::agent::_key_caps {name} {
 	variable providers
-	variable keyed_provider
-	if {$keyed_provider eq "" || ![dict exists $providers $keyed_provider key]} { return 0 }
-	return [{*}[dict get $providers $keyed_provider key status]]
+	if {![dict exists $providers $name] || ![dict exists $providers $name key]} {
+		rio::error::raise bad_request "agent provider '$name' has no key store"
+	}
+	return [dict get $providers $name key]
+}
+proc rio::agent::key_set {key {name ""}} {
+	{*}[dict get [_key_caps [_key_target $name]] set] $key ; return
+}
+proc rio::agent::key_clear {{name ""}} {
+	{*}[dict get [_key_caps [_key_target $name]] clear] ; return
+}
+proc rio::agent::key_status {{name ""}} {
+	variable providers
+	set name [_key_target $name]
+	if {![dict exists $providers $name] || ![dict exists $providers $name key]} { return 0 }
+	return [{*}[dict get $providers $name key status]]
 }
 
 # Clear the conversation (agent.reset). Also abort any turn suspended awaiting an
@@ -436,6 +475,6 @@ proc rio::agent::_echo_stream {post chunks} {
 	after 0 [list [namespace current]::_echo_stream $post $chunks]
 }
 
-# The built-in, always-available provider. A keyed provider (claude) registers
-# itself from its plugin when the core loads it (server.tcl).
-rio::agent::register_provider echo ::rio::agent::echo_provider
+# The built-in, always-available provider. Keyed providers (claude, openai)
+# register themselves from their plugins when the core loads them (server.tcl).
+rio::agent::register_provider echo ::rio::agent::echo_provider -label Echo

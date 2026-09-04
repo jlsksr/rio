@@ -922,15 +922,19 @@ chat_clear
 chat_send
 pump_until {string match {*not_configured*} [.chat.log get 1.0 end]}
 ok "provider: claude w/o key errors actionably" \
-	[string match {*Settings*Claude API key*(not_configured)*} [.chat.log get 1.0 end]] 1
+	[string match {*Settings*Agent API Key*(not_configured)*} [.chat.log get 1.0 end]] 1
 
-# The key dialog stores / clears through the agent.key.* ops (the core's 0600 store).
-claude_key_dialog
-ok "keydlg: opens"                    [winfo exists .claudekey] 1
-ok "keydlg: clear disabled w/o key"   [.claudekey.btns.clear cget -state] disabled
-.claudekey.e insert end "sk-ant-smoke-123"
-claude_key_save .claudekey
-ok "keydlg: closed after save"        [winfo exists .claudekey] 0
+# The generic key dialog stores / clears through the agent.key.* ops (the core's
+# 0600 store), targeting the named provider. Its title/prompt come from the
+# provider's declared metadata (agent.providers), so one dialog serves every keyed
+# provider.
+provider_key_dialog claude
+ok "keydlg: opens"                    [winfo exists .providerkey] 1
+ok "keydlg: titled for the provider"  [wm title .providerkey] "Claude API key"
+ok "keydlg: clear disabled w/o key"   [.providerkey.btns.clear cget -state] disabled
+.providerkey.e insert end "sk-ant-smoke-123"
+provider_key_save .providerkey claude
+ok "keydlg: closed after save"        [winfo exists .providerkey] 0
 ok "keydlg: key now stored"           [rio::claude::api::configured] 1
 # POSIX-only: `file attributes -permissions` does not exist on Windows (it raises
 # "bad option -permissions"), which aborted this whole suite there rather than failing
@@ -942,10 +946,28 @@ if {$::tcl_platform(platform) eq "unix"} {
 }
 
 # Re-open: Clear is enabled now, and clearing removes the secret.
-claude_key_dialog
-ok "keydlg: clear enabled with key"   [.claudekey.btns.clear cget -state] normal
-claude_key_clear .claudekey
+provider_key_dialog claude
+ok "keydlg: clear enabled with key"   [.providerkey.btns.clear cget -state] normal
+provider_key_clear .providerkey claude
 ok "keydlg: key cleared"              [rio::claude::api::configured] 0
+
+# A SECOND keyed provider (openai / ChatGPT) coexists: it has its own label, its
+# own 0600 store, and selecting it names it in the status strip (the picker + key
+# dialog are enumerated from the core, so a second provider needs no GUI change).
+ok "provider: openai in the picker cache" \
+	[expr {[agent_provider_entry openai] ne ""}] 1
+set ::agent_provider openai ; apply_provider
+ok "provider: openai selected in core" [rio::agent::provider_name] openai
+ok "status: names ChatGPT agent"       [.chat.status cget -text] "ChatGPT   ·   review edits"
+provider_key_dialog openai
+ok "keydlg: titled for openai"         [wm title .providerkey] "ChatGPT API key"
+.providerkey.e insert end "sk-oai-smoke-123"
+provider_key_save .providerkey openai
+ok "keydlg: openai key stored"         [rio::openai::api::configured] 1
+ok "keydlg: claude key still absent"   [rio::claude::api::configured] 0
+provider_key_dialog openai
+provider_key_clear .providerkey openai
+ok "keydlg: openai key cleared"        [rio::openai::api::configured] 0
 
 # Back to the offline echo provider for the rest of the run.
 set ::agent_provider echo ; apply_provider

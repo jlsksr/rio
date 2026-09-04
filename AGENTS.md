@@ -3507,6 +3507,51 @@ unbounded Theme/Tabs menus) is logged in [CAVEATS.md](CAVEATS.md).
 
 ---
 
+### D65 — A second agent provider (OpenAI-compatible), and hardening the provider contract
+
+The agent had exactly one real provider (Claude, D26) besides the echo stub. Adding a second
+is the point where a provider *contract* is either proven or found wanting — so it was done
+now, in-tree, deliberately, both to ship the provider users asked for and to harden the seam
+**before** it is ever frozen for outside contributors (milestone B, below).
+
+**The provider is OpenAI-*compatible*, not ChatGPT-locked** ([plugins/openai/](plugins/openai/)).
+Hosted ChatGPT (`api.openai.com`) is the default endpoint, but the endpoint is config-as-data,
+so the *same* code drives a local OpenAI-compatible server (Ollama / llama-server / LM Studio /
+vLLM) by pointing `messages_url` at it — exactly the in-box **local-LLM** provider D8 always
+named. Sanctioned path only: the OpenAI **API** with the user's own key (0600, D21), never the
+ChatGPT web UI. The plugin mirrors the Claude one — a loader, a thin auth face (Bearer, vs
+Claude's `x-api-key`), and an inference core mapping rio's block conversation ⇄ OpenAI Chat
+Completions (system-as-a-message, `tool_calls` with **string** `arguments`, `role:"tool"`
+results, index-accumulated streaming tool calls, `finish_reason`). tcllib's json decodes a JSON
+`null` to the string `"null"`, so the SSE reader treats `"null"` as absent (documented in the
+core) — OpenAI streams `content:null` on tool/role chunks.
+
+**Three contract-hardening changes the second provider forced:**
+1. **Per-provider keys.** `rio::agent` held a single `keyed_provider` slot — a second keyed
+   provider could not coexist. Replaced with per-provider key state: `agent.key.set/clear`
+   take a provider name (the GUI always sends it), and Claude's and ChatGPT's keys are
+   independent 0600 stores. This was *required*, not optional — two keyed providers is the
+   whole point.
+2. **Provider metadata in the registry.** `register_provider` gained `-label` and `-signup`, so
+   a provider *declares* its display name and where-to-get-a-key hint. A new shaped op
+   **`agent.providers`** → `[{name,label,keyed,key_set,signup}]` lets the GUI render its picker
+   and a **generic** key dialog from data rather than hardcoding "Claude". The GUI's provider
+   radios + key items are now cascades filled from the core (like `.m.view.theme`), so a new
+   provider appears with no GUI change.
+3. **Shared plugin lib** ([plugins/lib/](plugins/lib/), `rio::llm::*`). The HTTPS streaming
+   transport and the ASCII-safe JSON serialisers were provider-agnostic and were duplicated the
+   moment a second plugin existed; extracted to one copy both plugins source (guarded against a
+   double load, since the core sources each plugin).
+
+**Milestone B (explicit successor to D19), NOT built here:** make `provider` an installable
+`kind` in the **same** D39 repositories — one infrastructure, a publisher adds `kind: provider`
+to a manifest — loaded core-side behind a versioned `provider-api` and a consent/trust gate.
+C was sequenced first precisely so the contract above is proven by a second in-tree
+implementation before it is frozen for outsiders. This keeps the promise that people contribute
+providers through one repo, with no second infrastructure.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

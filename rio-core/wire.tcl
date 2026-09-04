@@ -232,6 +232,15 @@ proc rio::wire::_result_agent_history {result} {
 }
 rio::wire::result_encoder agent.history rio::wire::_result_agent_history
 
+# agent.providers: `providers` is an array of flat {name,label,keyed,key_set,signup}
+# objects.
+proc rio::wire::_result_agent_providers {result} {
+	set items {}
+	foreach p [dict get $result providers] { lappend items [obj $p] }
+	return "{\"providers\":[arr $items]}"
+}
+rio::wire::result_encoder agent.providers rio::wire::_result_agent_providers
+
 # workspace.get: `open` is an array of path strings; `active` is a string leaf.
 proc rio::wire::_result_workspace_get {result} {
 	return "{\"open\":[strarr [dict get $result open]],\"active\":[str [dict get $result active]]}"

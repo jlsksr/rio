@@ -2528,8 +2528,38 @@ proc compare_with_file_dialog {} {
 # credential, kept by the face as a 0600 secret (D21). The chat header names the
 # active provider so the choice is never invisible.
 # ---------------------------------------------------------------------------
-set ::agent_provider echo   ;# echo | claude
-set ::claude_key_show 0     ;# the key dialog's reveal toggle
+set ::agent_provider echo   ;# echo | claude | openai | …
+set ::provider_key_show 0   ;# the key dialog's reveal toggle
+# The providers the core carries, each {name,label,keyed,key_set,signup} — the core
+# owns the list (D30), so the picker and key dialog render from it rather than
+# hardcoding names. Refreshed from agent.providers; an installed provider (milestone
+# B) then appears with no GUI change. Seeded so the menus have labels before connect.
+set ::agent_providers {{name echo label Echo keyed 0 key_set 0 signup {}}}
+
+# Pull the core's provider list into the cache (agent.providers, D30).
+proc agent_providers_refresh {} {
+	set resp [rio_call agent.providers {}]
+	if {[dict get $resp ok]} { set ::agent_providers [dict get $resp result providers] }
+}
+
+# A provider's cache entry by name, or "" if unknown.
+proc agent_provider_entry {name} {
+	foreach p $::agent_providers { if {[dict get $p name] eq $name} { return $p } }
+	return ""
+}
+
+# A provider's display label (the chat badge / status strip); falls back to a
+# title-cased name if the cache hasn't been populated yet.
+proc agent_provider_label {name} {
+	set p [agent_provider_entry $name]
+	return [expr {$p ne "" ? [dict get $p label] : [string totitle $name]}]
+}
+
+# A picker label: the provider's name plus how it authenticates — "(API key)" for a
+# keyed provider, "(offline)" for a keyless one (echo).
+proc provider_radio_label {p} {
+	return "[dict get $p label] ([expr {[dict get $p keyed] ? {API key} : {offline}}])"
+}
 
 # Tell the core which provider to run (agent.provider.set, D30). The agent lives in
 # the core wherever it runs, so this is an op, not an in-process swap; the chat
@@ -2553,48 +2583,82 @@ proc adopt_agent_status {} {
 	if {$st eq ""} return   ;# error already surfaced; keep the current menu state
 	set ::agent_provider    [dict get $st provider]
 	set ::agent_auto_accept [dict get $st auto_accept]
+	providers_menu_fill     ;# refresh the cache + the provider/key menus from the core
 	chat_status_update
 }
 
 # The chat status strip (under the Send button): which agent is live and whether
 # proposed edits auto-apply or wait for review. A spot for context-window usage
 # later. Called on provider change and on the auto-accept toggle.
+# Fill the Settings ▸ Agent Provider picker and the Settings ▸ Agent API Key menu
+# from the core's provider list (mirrors themes_menu_fill). Rebuilt on connect and
+# reconnect (adopt_agent_status) so an installed provider (milestone B) shows up
+# with no code change. The provider radios share ::agent_provider with the
+# Preferences pane; each keyed provider gets a key-dialog entry.
+proc providers_menu_fill {} {
+	agent_providers_refresh
+	if {[winfo exists .m.settings.provider]} {
+		.m.settings.provider delete 0 end
+		foreach p $::agent_providers {
+			.m.settings.provider add radiobutton -label [provider_radio_label $p] \
+				-variable ::agent_provider -value [dict get $p name] -command apply_provider
+		}
+	}
+	if {[winfo exists .m.settings.keys]} {
+		.m.settings.keys delete 0 end
+		foreach p $::agent_providers {
+			if {![dict get $p keyed]} continue
+			.m.settings.keys add command -label "[dict get $p label] API Key…" \
+				-command [list provider_key_dialog [dict get $p name]]
+		}
+	}
+}
+
 proc chat_status_update {} {
-	set agent [expr {$::agent_provider eq "claude" ? "Claude" : "Echo"}]
+	set agent [agent_provider_label $::agent_provider]
 	set mode  [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
 	catch {.chat.status configure -text "$agent   ·   $mode"}
 }
 
-# The Claude API key dialog (Settings ▸ Claude API Key…). A small modal that is a
-# dumb view of the claude-api face's key store: it never holds the key itself, it
-# just hands what the user types to set_key / removes it with clear_key. Selecting
-# the Claude provider with no key stored isn't blocked here — the first turn then
-# surfaces the face's actionable not_configured error (D26), pointing right back.
-proc claude_key_dialog {} {
-	set w .claudekey
+# The provider API-key dialog (Settings ▸ Agent API Key ▸ <provider>…). A small
+# modal that is a dumb view of one provider's key store: it never holds the key, it
+# hands what the user types to agent.key.set for THAT provider / removes it with
+# agent.key.clear. Title, prompt and signup hint come from the provider's declared
+# metadata (agent.providers), so one dialog serves Claude, ChatGPT, and any future
+# provider. Selecting a provider with no key stored isn't blocked here — the first
+# turn then surfaces the face's actionable not_configured error (D26).
+proc provider_key_dialog {name} {
+	agent_providers_refresh
+	set p [agent_provider_entry $name]
+	if {$p eq "" || ![dict get $p keyed]} return
+	set label  [dict get $p label]
+	set signup [dict get $p signup]
+	set stored [dict get $p key_set]
+	set w .providerkey
 	destroy $w
 	toplevel $w
-	wm title $w "Claude API key"
+	wm title $w "$label API key"
 	wm transient $w .
 	wm resizable $w 0 0
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
-	set stored [dict get [rio_result agent.status {}] key_set]
+	set prompt "$label API key"
+	if {$signup ne ""} { append prompt " — create one at $signup" }
+	append prompt "."
 	label $w.prompt -anchor w -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-text "Anthropic API key — create one at console.anthropic.com."
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] -text $prompt
 	entry $w.e -show • -width 52 -font RioUIFont
 	checkbutton $w.show -text "Show key" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg] \
-		-variable ::claude_key_show -command [list claude_key_reveal $w]
-	set ::claude_key_show 0
+		-variable ::provider_key_show -command [list provider_key_reveal $w]
+	set ::provider_key_show 0
 	label $w.status -anchor w -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-text [expr {$stored ? "A key is stored; saving one replaces it." : "No key stored yet."}]
 	frame $w.btns -background [dict get $c ui.bg]
-	button $w.btns.save   -text "Save"   -font RioUIFont -command [list claude_key_save $w]
-	button $w.btns.clear  -text "Clear"  -font RioUIFont -command [list claude_key_clear $w] \
+	button $w.btns.save   -text "Save"   -font RioUIFont -command [list provider_key_save $w $name]
+	button $w.btns.clear  -text "Clear"  -font RioUIFont -command [list provider_key_clear $w $name] \
 		-state [expr {$stored ? "normal" : "disabled"}]
 	button $w.btns.cancel -text "Cancel" -font RioUIFont -command [list destroy $w]
 	pack $w.btns.cancel $w.btns.clear $w.btns.save -side right -padx 3
@@ -2608,20 +2672,22 @@ proc claude_key_dialog {} {
 	catch {grab $w}
 	focus $w.e
 }
-proc claude_key_reveal {w} {
-	$w.e configure -show [expr {$::claude_key_show ? "" : "•"}]
+proc provider_key_reveal {w} {
+	$w.e configure -show [expr {$::provider_key_show ? "" : "•"}]
 }
-proc claude_key_save {w} {
+proc provider_key_save {w name} {
 	set key [string trim [$w.e get]]
 	if {$key eq ""} {
 		report_error "Enter an API key, or use Clear to remove the stored one."
 		return
 	}
-	rio_result agent.key.set [dict create key $key]
+	rio_result agent.key.set [dict create key $key name $name]
+	providers_menu_fill   ;# the provider's key_set state changed
 	destroy $w
 }
-proc claude_key_clear {w} {
-	rio_result agent.key.clear {}
+proc provider_key_clear {w name} {
+	rio_result agent.key.clear [dict create name $name]
+	providers_menu_fill
 	destroy $w
 }
 
@@ -6661,17 +6727,30 @@ proc prefs_fill_editor {f} {
 		-row [incr r] -column 0 -sticky w -pady {8 1}
 }
 
-# Agent category: provider, the two agent-edit toggles, and the API-key dialog button.
+# Agent category: the provider picker (enumerated from the core like the theme
+# radios, so an installed provider appears), the two agent-edit toggles, and an
+# API-key button per keyed provider.
 proc prefs_fill_agent {f} {
+	agent_providers_refresh
 	set r 0
 	grid [prefs_label $f.pl "Agent"] -row [incr r] -column 0 -sticky w
-	grid [prefs_radio $f.pe "Echo (offline)"  ::agent_provider echo   apply_provider] -row [incr r] -column 0 -sticky w -padx {12 0}
-	grid [prefs_radio $f.pc "Claude (API key)" ::agent_provider claude apply_provider] -row [incr r] -column 0 -sticky w -padx {12 0}
+	set i 0
+	foreach p $::agent_providers {
+		grid [prefs_radio $f.p[incr i] [provider_radio_label $p] \
+			::agent_provider [dict get $p name] apply_provider] \
+			-row [incr r] -column 0 -sticky w -padx {12 0}
+	}
 	grid [prefs_check $f.aa "Auto-accept edits" ::agent_auto_accept \
 		{rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
-	grid [prefs_button $f.key "Claude API Key…" claude_key_dialog] -row [incr r] -column 0 -sticky w -pady {8 2}
+	set i 0
+	foreach p $::agent_providers {
+		if {![dict get $p keyed]} continue
+		grid [prefs_button $f.key[incr i] "[dict get $p label] API Key…" \
+			[list provider_key_dialog [dict get $p name]]] \
+			-row [incr r] -column 0 -sticky w -pady {4 2}
+	}
 }
 
 # Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
@@ -7308,12 +7387,13 @@ menu .m.settings -tearoff 0
 .m.settings add command -label "Preferences…" -accelerator [key_accel preferences] \
 	-command preferences_window
 .m.settings add separator
-.m.settings add radiobutton -label "Agent: Echo (offline)"    -variable ::agent_provider \
-	-value echo   -command apply_provider
-.m.settings add radiobutton -label "Agent: Claude (API key)"  -variable ::agent_provider \
-	-value claude -command apply_provider
-.m.settings add separator
-.m.settings add command -label "Claude API Key…" -command claude_key_dialog
+# The agent provider and its per-provider key live in cascades filled from the core
+# (providers_menu_fill, mirroring View ▸ Theme): the list scales as providers are
+# added (D39/milestone B), and the collapsed menu stays short.
+menu .m.settings.provider -tearoff 0
+.m.settings add cascade -label "Agent Provider" -menu .m.settings.provider
+menu .m.settings.keys -tearoff 0
+.m.settings add cascade -label "Agent API Key" -menu .m.settings.keys
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}

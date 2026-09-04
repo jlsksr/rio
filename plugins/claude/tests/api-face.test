@@ -7,8 +7,9 @@ namespace import ::tcltest::*
 package require json
 
 source [file join [file dirname [info script]] .. .. .. rio-core core.tcl]
+source [file join [file dirname [info script]] .. .. lib json.tcl]
+source [file join [file dirname [info script]] .. .. lib transport.tcl]
 source [file join [file dirname [info script]] .. inference.tcl]
-source [file join [file dirname [info script]] .. transport.tcl]
 source [file join [file dirname [info script]] .. api-face.tcl]
 
 # Keep secrets in a throwaway dir.
@@ -58,12 +59,14 @@ test claude-api-selectable {agent.provider.set claude makes this face the live p
 test claude-api-key-ops-route {agent.key.set/clear/status reach this face's 0600 store} -setup {
 	rio::claude::api::clear_key
 } -body {
-	set a [rio::agent::key_status]
-	rio::agent::key_set sk-ant-route
-	set b [rio::agent::key_status]
+	# Target the claude provider by name (the key ops address a provider by name;
+	# the GUI always names it). Independent of which provider is currently active.
+	set a [rio::agent::key_status claude]
+	rio::agent::key_set sk-ant-route claude
+	set b [rio::agent::key_status claude]
 	set stored [rio::claude::api::configured]
-	rio::agent::key_clear
-	list $a $b $stored [rio::agent::key_status]
+	rio::agent::key_clear claude
+	list $a $b $stored [rio::agent::key_status claude]
 } -result {0 1 1 0}
 
 # --- the request: x-api-key, and none of the OAuth baggage -------------------
@@ -81,7 +84,7 @@ test claude-api-request {the request carries x-api-key and no oauth beta / no fo
 		[dict exists $hdrs anthropic-beta] \
 		[dict exists $body system]
 } -cleanup {
-	set ::rio::claude::api::transport rio::claude::http::stream
+	set ::rio::claude::api::transport rio::llm::http::stream
 	rio::claude::api::clear_key
 } -result {sk-ant-XYZ 0 0}
 
@@ -107,7 +110,7 @@ test claude-api-provider-streams {a configured provider streams a Claude reply v
 	list $::fin $reply
 } -cleanup {
 	rio::agent::set_provider ::rio::agent::echo_provider
-	set ::rio::claude::api::transport rio::claude::http::stream
+	set ::rio::claude::api::transport rio::llm::http::stream
 	rio::claude::api::clear_key
 } -result {done {Hi there}}
 

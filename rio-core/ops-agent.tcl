@@ -68,24 +68,38 @@ proc rio::ops::agent_provider_set {params} {
 }
 rio::dispatch::register agent.provider.set rio::ops::agent_provider_set
 
-# agent.key.set {key} -> {} ; store the key-holding provider's credential (the
-# Claude API key) in the core's 0600 secret store (D21). The frontend hands the key
-# across once and never keeps it.
+# agent.key.set {key ?name?} -> {} ; store a keyed provider's credential (an API
+# key) in the core's 0600 secret store (D21). `name` picks which provider's store
+# (claude | openai | …); omitted, it targets the active provider. The frontend
+# hands the key across once and never keeps it.
 proc rio::ops::agent_key_set {params} {
 	if {![dict exists $params key]} {
 		rio::error::raise bad_request "agent.key.set requires key"
 	}
-	rio::agent::key_set [dict get $params key]
+	set name [expr {[dict exists $params name] ? [dict get $params name] : ""}]
+	rio::agent::key_set [dict get $params key] $name
 	return [dict create result {}]
 }
 rio::dispatch::register agent.key.set rio::ops::agent_key_set
 
-# agent.key.clear -> {} ; forget the stored credential.
+# agent.key.clear {?name?} -> {} ; forget a keyed provider's stored credential
+# (defaults to the active provider, as agent.key.set does).
 proc rio::ops::agent_key_clear {params} {
-	rio::agent::key_clear
+	set name [expr {[dict exists $params name] ? [dict get $params name] : ""}]
+	rio::agent::key_clear $name
 	return [dict create result {}]
 }
 rio::dispatch::register agent.key.clear rio::ops::agent_key_clear
+
+# agent.providers -> {providers:[{name, label, keyed, key_set, signup}]} ; every
+# registered provider, so a frontend renders its picker and per-provider key dialog
+# from data the provider declares rather than hardcoding names (D30; serves the
+# installable-provider milestone). A non-flat result — the wire layer registers a
+# shape encoder (D25).
+proc rio::ops::agent_providers {params} {
+	return [dict create result [dict create providers [rio::agent::providers_info]]]
+}
+rio::dispatch::register agent.providers rio::ops::agent_providers
 
 # agent.autoaccept.set {on} -> {on} ; toggle the approval gate (D26 s5). When on,
 # a proposed edit applies without waiting for the user's Approve/Reject.
@@ -101,7 +115,9 @@ rio::dispatch::register agent.autoaccept.set rio::ops::agent_autoaccept_set
 
 # agent.status -> {provider, auto_accept, key_set} ; the agent's current settings,
 # so a frontend renders its menus/dialogs without holding the state itself (D3).
-# All leaves are strings — the default wire encoder applies.
+# `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless one
+# like echo); per-provider key state is in agent.providers. All leaves are
+# strings — the default wire encoder applies.
 proc rio::ops::agent_status {params} {
 	return [dict create result [dict create \
 		provider    [rio::agent::provider_name] \

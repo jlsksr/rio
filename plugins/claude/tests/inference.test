@@ -6,6 +6,7 @@ package require tcltest
 namespace import ::tcltest::*
 package require json
 
+source [file join [file dirname [info script]] .. .. lib json.tcl]
 source [file join [file dirname [info script]] .. inference.tcl]
 
 set ::conf [dict create \
@@ -107,24 +108,9 @@ test claude-request-tool-roundtrip {tool_use/tool_result content blocks serializ
 } -result {tool_use tu_1 fs_list src tool_result tu_1 {a.tcl
 b.tcl}}
 
-test claude-jstr-escapes {the JSON string escaper handles quotes, backslashes, controls} -body {
-	rio::claude::_jstr "a\"b\\c\nd\te"
-} -result {"a\"b\\c\nd\te"}
-
-test claude-jstr-nonascii {non-ASCII is escaped: the literal is ASCII-only and round-trips} -body {
-	set j [rio::claude::_jstr "a→b…"]
-	list [string is ascii $j] [json::json2dict $j]
-} -result {1 a→b…}
-
-test claude-jstr-astral {an astral codepoint escapes to a UTF-16 surrogate pair} -body {
-	# U+1F600 the way a file read delivers it (4 UTF-8 bytes F0 9F 98 80) — on a
-	# narrow Tcl build a surrogate pair, on a wide build one codepoint; both must
-	# spell 😀 in the body.
-	set ch [encoding convertfrom utf-8 "\xF0\x9F\x98\x80"]
-	set j [rio::claude::_jstr "x$ch"]
-	list [string is ascii $j] [string match {*\\ud83d\\ude00*} $j]
-} -result {1 1}
-
+# The JSON string/object escapers themselves are exercised in the shared plugin
+# lib's suite (plugins/lib/tests/json.test); here we only assert they compose into
+# a valid, ASCII request body through _request_json.
 test claude-request-ascii-body {a tool_result with non-ASCII text yields a pure-ASCII body} -body {
 	set convo [list [dict create role user content [list \
 		[dict create type tool_result tool_use_id t1 content "arrow → and 日本 text" is_error 0]]]]

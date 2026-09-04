@@ -8,7 +8,11 @@
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]
+	# The transport and JSON serialisers are provider-agnostic and shared from the
+	# plugin lib (rio::llm::*); both guard against a double source (server.tcl loads
+	# every plugin, each pulling the lib).
+	source [file join $dir .. lib json.tcl]
+	source [file join $dir .. lib transport.tcl]
 	source [file join $dir inference.tcl]
-	source [file join $dir transport.tcl]
 	source [file join $dir api-face.tcl]
 }}

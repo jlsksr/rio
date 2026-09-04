@@ -1,0 +1,234 @@
+# Tests for the OpenAI inference core (rio::openai, AGENTS.md D8/D26): request
+# shaping (system-as-message, tool_calls with string arguments, role:tool results,
+# the config-as-data token-cap key), the streaming SSE -> agent-event mapping
+# (deltas, index-accumulated tool calls, finish_reason), and HTTP-status error
+# classification. The network is faked — a transport replays canned bytes — so this
+# is deterministic and offline.
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. .. lib json.tcl]
+source [file join [file dirname [info script]] .. inference.tcl]
+
+set ::conf [dict create \
+	messages_url https://api.test/v1/chat/completions \
+	model        gpt-test \
+	token_param  max_tokens \
+	max_tokens   1024]
+
+# A fake transport: replay the body chunks to on_chunk (in whatever pieces given,
+# to exercise line buffering), then call on_done with the status. Synchronous.
+proc fake_transport {chunks status err req on_chunk on_done} {
+	foreach c $chunks { {*}$on_chunk $c }
+	{*}$on_done $status $err
+}
+proc collect_post {args} { lappend ::posts $args }
+proc run_infer {chunks status {err ""} {auth {Authorization {Bearer T}}} {tools {}}} {
+	set ::posts {}
+	rio::openai::infer $::conf {{role user text hi}} $tools $auth \
+		[list fake_transport $chunks $status $err] collect_post
+}
+proc posts_of {kind} {
+	set out {}
+	foreach p $::posts { if {[lindex $p 0] eq $kind} { lappend out [lrange $p 1 end] } }
+	return $out
+}
+proc deltas {} {
+	set t ""
+	foreach p $::posts { if {[lindex $p 0] eq "delta"} { append t [lindex $p 1] } }
+	return $t
+}
+proc terminal {} { lindex $::posts end }
+
+# A normal streamed text completion (built with append; no backslash-newline
+# continuations, which would collapse the data lines).
+set ::sse ""
+append ::sse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}\]}\n\n"
+append ::sse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}\]}\n\n"
+append ::sse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}\]}\n\n"
+append ::sse "data: {\"choices\":\[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}\]}\n\n"
+append ::sse "data: \[DONE\]\n\n"
+
+# --- request shaping ---------------------------------------------------------
+
+test openai-request-shape {the request carries model, the token cap, stream, and messages} -body {
+	set body [rio::openai::_request_json $::conf \
+		[list [dict create role user text {hi "there"}] [dict create role assistant text ok]] {}]
+	set d [json::json2dict $body]
+	list [dict get $d model] [dict get $d max_tokens] [dict get $d stream] \
+		[llength [dict get $d messages]] \
+		[dict get [lindex [dict get $d messages] 0] role] \
+		[dict get [lindex [dict get $d messages] 0] content] \
+		[dict exists $d tools]
+} -result {gpt-test 1024 true 2 user {hi "there"} 0}
+
+test openai-request-token-param {token_param renames the output-cap key (max_completion_tokens)} -body {
+	set c [dict merge $::conf {token_param max_completion_tokens}]
+	set d [json::json2dict [rio::openai::_request_json $c {{role user text hi}} {}]]
+	list [dict exists $d max_completion_tokens] [dict exists $d max_tokens]
+} -result {1 0}
+
+test openai-request-system {a system prompt is a leading system message (not a top-level field)} -body {
+	set c [dict merge $::conf {system {You are terse.}}]
+	set d [json::json2dict [rio::openai::_request_json $c {{role user text hi}} {}]]
+	set m0 [lindex [dict get $d messages] 0]
+	list [dict exists $d system] [dict get $m0 role] [dict get $m0 content]
+} -result {0 system {You are terse.}}
+
+test openai-request-tools {tool specs become type:function tools with the schema as parameters} -body {
+	set tools [list [dict create name fs_read description "read a file" \
+		input_schema {{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}]]
+	set d [json::json2dict [rio::openai::_request_json $::conf {{role user text hi}} $tools]]
+	set t [lindex [dict get $d tools] 0]
+	list [llength [dict get $d tools]] [dict get $t type] \
+		[dict get $t function name] [dict get $t function description] \
+		[dict get $t function parameters type]
+} -result {1 function fs_read {read a file} object}
+
+test openai-request-tool-roundtrip {tool_use -> assistant tool_calls (string arguments); tool_result -> role:tool} -body {
+	set convo [list \
+		[dict create role user content [list [dict create type text text "list it"]]] \
+		[dict create role assistant content [list \
+			[dict create type tool_use id call_1 name fs_list input {path src} raw {{"path":"src"}}]]] \
+		[dict create role user content [list \
+			[dict create type tool_result tool_use_id call_1 content "a.tcl\nb.tcl" is_error 0]]]]
+	set d [json::json2dict [rio::openai::_request_json $::conf $convo {}]]
+	# messages: user, assistant(tool_calls, content null), tool(result)
+	set asst [lindex [dict get $d messages] 1]
+	set tool [lindex [dict get $d messages] 2]
+	set tc   [lindex [dict get $asst tool_calls] 0]
+	list [dict get $asst role] [dict get $asst content] \
+		[dict get $tc id] [dict get $tc type] [dict get $tc function name] \
+		[dict get $tc function arguments] \
+		[dict get $tool role] [dict get $tool tool_call_id] [dict get $tool content]
+} -result {assistant null call_1 function fs_list {{"path":"src"}} tool call_1 {a.tcl
+b.tcl}}
+
+test openai-request-ascii-body {a tool_result with non-ASCII text yields a pure-ASCII body} -body {
+	set convo [list [dict create role user content [list \
+		[dict create type tool_result tool_use_id t1 content "arrow → and 日本 text" is_error 0]]]]
+	string is ascii [rio::openai::_request_json $::conf $convo {}]
+} -result 1
+
+# --- streaming SSE -> events -------------------------------------------------
+
+test openai-stream-text {text deltas accumulate, ending with done} -body {
+	run_infer [list $::sse] 200
+	list [deltas] [terminal]
+} -result {{Hello world} done}
+
+test openai-stream-chunk-split {the same stream split mid-line parses identically} -body {
+	set chunks {}
+	for {set i 0} {$i < [string length $::sse]} {incr i 7} {
+		lappend chunks [string range $::sse $i [expr {$i + 6}]]
+	}
+	run_infer $chunks 200
+	list [deltas] [terminal]
+} -result {{Hello world} done}
+
+test openai-stream-clean-close {a 200 that ends without [DONE] still finishes the turn} -body {
+	run_infer [list "data: {\"choices\":\[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}\]}\n\n"] 200
+	list [deltas] [terminal]
+} -result {hi done}
+
+# A tool-call stream: id+name in the first fragment, arguments across fragments,
+# ending with finish_reason "tool_calls".
+set ::tsse ""
+append ::tsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":\[{\"index\":0,\"id\":\"call_9\",\"type\":\"function\",\"function\":{\"name\":\"fs_list\",\"arguments\":\"\"}}\]},\"finish_reason\":null}\]}\n\n"
+append ::tsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\"}}\]},\"finish_reason\":null}\]}\n\n"
+append ::tsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":0,\"function\":{\"arguments\":\"\\\"src\\\"}\"}}\]},\"finish_reason\":null}\]}\n\n"
+append ::tsse "data: {\"choices\":\[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}\]}\n\n"
+append ::tsse "data: \[DONE\]\n\n"
+
+test openai-stream-tool-use {a tool call surfaces as a tool post with parsed + raw input, then done tool_use} -body {
+	run_infer [list $::tsse] 200
+	set tool [lindex [posts_of tool] 0]
+	list [lindex $tool 0] [lindex $tool 1] [dict get [lindex $tool 2] path] [lindex $tool 3] \
+		[terminal]
+} -result {call_9 fs_list src {{"path":"src"}} {done tool_use}}
+
+test openai-stream-tool-then-text {a text preamble before the tool both stream, in order} -body {
+	set s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"content\":\"let me look\"},\"finish_reason\":null}\]}\n\n"
+	append s $::tsse
+	run_infer [list $s] 200
+	list [deltas] [llength [posts_of tool]] [terminal]
+} -result {{let me look} 1 {done tool_use}}
+
+# Two parallel tool calls (distinct .index) both surface, in index order.
+set ::tsse2 ""
+append ::tsse2 "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":0,\"id\":\"c0\",\"type\":\"function\",\"function\":{\"name\":\"fs_list\",\"arguments\":\"{}\"}}\]},\"finish_reason\":null}\]}\n\n"
+append ::tsse2 "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":1,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"fs_read\",\"arguments\":\"{}\"}}\]},\"finish_reason\":null}\]}\n\n"
+append ::tsse2 "data: {\"choices\":\[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}\]}\n\n"
+append ::tsse2 "data: \[DONE\]\n\n"
+
+test openai-stream-parallel-tools {two tool calls on distinct indices both surface, in order} -body {
+	run_infer [list $::tsse2] 200
+	set tools [posts_of tool]
+	list [llength $tools] [lindex [lindex $tools 0] 0] [lindex [lindex $tools 0] 1] \
+		[lindex [lindex $tools 1] 0] [lindex [lindex $tools 1] 1] [terminal]
+} -result {2 c0 fs_list c1 fs_read {done tool_use}}
+
+# --- error classification (D26 resilience) -----------------------------------
+
+test openai-http-401 {a 401 is an actionable auth error, with the API's detail} -body {
+	set body {{"error":{"message":"invalid api key","type":"invalid_request_error"}}}
+	run_infer [list $body] 401
+	set t [terminal]
+	list [lindex $t 0] [lindex $t 1] \
+		[string match {*HTTP 401*API key*invalid api key*} [lindex $t 2]]
+} -result {error auth 1}
+
+test openai-http-429 {a 429 is a rate-limit error} -body {
+	run_infer [list ""] 429
+	lindex [terminal] 1
+} -result rate_limit
+
+test openai-http-500 {a 5xx is a server error} -body {
+	run_infer [list ""] 503
+	lindex [terminal] 1
+} -result server
+
+test openai-http-unexpected {an unmapped status is the break-without-notice case} -body {
+	run_infer [list ""] 418
+	set t [terminal]
+	list [lindex $t 1] [string match {*integration may need an update*} [lindex $t 2]]
+} -result {unexpected 1}
+
+test openai-network-fail {a failure to connect (status 0) is a network error naming the server URL} -body {
+	run_infer [list ""] 0 "connection refused"
+	set t [terminal]
+	list [lindex $t 1] [string match {*connection refused*} [lindex $t 2]] \
+		[string match {*local model*} [lindex $t 2]]
+} -result {network 1 1}
+
+test openai-tls-missing {status 0 from a missing tcltls is a distinct, actionable error} -body {
+	run_infer [list ""] 0 "can't find package tls"
+	set t [terminal]
+	list [lindex $t 1] [string match {*install tcltls*} [lindex $t 2]]
+} -result {tls_unavailable 1}
+
+test openai-inband-error {an in-band {error} object becomes a classified post error} -body {
+	run_infer [list "data: {\"error\":{\"message\":\"context length exceeded\",\"type\":\"context_length\"}}\n\n"] 200
+	terminal
+} -result {error context_length {context length exceeded}}
+
+# --- auth header passthrough -------------------------------------------------
+
+test openai-auth-header {the face's Bearer auth pair rides as a request header} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen [dict get $req headers] ; {*}$on_done 200 "" }
+	rio::openai::infer $::conf {{role user text hi}} {} {Authorization {Bearer SEKRET}} capture_tp collect_post
+	list [expr {[lsearch -exact $::seen Authorization] >= 0}] \
+		[expr {[lsearch -exact $::seen {Bearer SEKRET}] >= 0}]
+} -result {1 1}
+
+test openai-timeout-forwarded {a configured request_timeout rides in the transport request} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set c [dict merge $::conf {request_timeout 987000}]
+	rio::openai::infer $c {{role user text hi}} {} {Authorization {Bearer K}} capture_tp collect_post
+	dict get $::seen timeout
+} -result 987000
+
+cleanupTests

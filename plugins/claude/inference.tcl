@@ -72,20 +72,20 @@ proc rio::claude::infer {conf conversation tools auth transport post} {
 proc rio::claude::_request_json {conf conversation tools} {
 	set msgs {}
 	foreach m $conversation {
-		lappend msgs "{\"role\":[_jstr [dict get $m role]],\"content\":[_content_json $m]}"
+		lappend msgs "{\"role\":[rio::llm::jstr [dict get $m role]],\"content\":[_content_json $m]}"
 	}
 	set parts {}
-	lappend parts "\"model\":[_jstr [dict get $conf model]]"
+	lappend parts "\"model\":[rio::llm::jstr [dict get $conf model]]"
 	lappend parts "\"max_tokens\":[dict get $conf max_tokens]"
 	lappend parts "\"stream\":true"
 	lappend parts "\"messages\":\[[join $msgs ,]\]"
 	if {[dict exists $conf system] && [dict get $conf system] ne ""} {
-		lappend parts "\"system\":[_jstr [dict get $conf system]]"
+		lappend parts "\"system\":[rio::llm::jstr [dict get $conf system]]"
 	}
 	if {[llength $tools]} {
 		set tj {}
 		foreach t $tools {
-			lappend tj "{\"name\":[_jstr [dict get $t name]],\"description\":[_jstr [dict get $t description]],\"input_schema\":[dict get $t input_schema]}"
+			lappend tj "{\"name\":[rio::llm::jstr [dict get $t name]],\"description\":[rio::llm::jstr [dict get $t description]],\"input_schema\":[dict get $t input_schema]}"
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
@@ -98,24 +98,24 @@ proc rio::claude::_request_json {conf conversation tools} {
 # tool_result carries our captured output and an optional is_error flag.
 proc rio::claude::_content_json {m} {
 	if {![dict exists $m content]} {
-		return "\[{\"type\":\"text\",\"text\":[_jstr [dict get $m text]]}\]"
+		return "\[{\"type\":\"text\",\"text\":[rio::llm::jstr [dict get $m text]]}\]"
 	}
 	set blocks {}
 	foreach b [dict get $m content] {
 		switch -- [dict get $b type] {
 			text {
-				lappend blocks "{\"type\":\"text\",\"text\":[_jstr [dict get $b text]]}"
+				lappend blocks "{\"type\":\"text\",\"text\":[rio::llm::jstr [dict get $b text]]}"
 			}
 			tool_use {
-				# Re-serialize the PARSED input through _jstr rather than splicing the
+				# Re-serialize the PARSED input through jstr rather than splicing the
 				# raw streamed JSON: the raw fragments carry already-unescaped string
 				# values (json2dict decoded them during SSE parsing), so echoing them
 				# verbatim would put literal control characters (a file's newlines)
-				# into the body and the API rejects it. _obj_json escapes every value.
-				lappend blocks "{\"type\":\"tool_use\",\"id\":[_jstr [dict get $b id]],\"name\":[_jstr [dict get $b name]],\"input\":[_obj_json [dict get $b input]]}"
+				# into the body and the API rejects it. obj_json escapes every value.
+				lappend blocks "{\"type\":\"tool_use\",\"id\":[rio::llm::jstr [dict get $b id]],\"name\":[rio::llm::jstr [dict get $b name]],\"input\":[rio::llm::obj_json [dict get $b input]]}"
 			}
 			tool_result {
-				set tr "\"type\":\"tool_result\",\"tool_use_id\":[_jstr [dict get $b tool_use_id]],\"content\":[_jstr [dict get $b content]]"
+				set tr "\"type\":\"tool_result\",\"tool_use_id\":[rio::llm::jstr [dict get $b tool_use_id]],\"content\":[rio::llm::jstr [dict get $b content]]"
 				if {[dict exists $b is_error] && [dict get $b is_error]} {
 					append tr ",\"is_error\":true"
 				}
@@ -126,54 +126,9 @@ proc rio::claude::_content_json {m} {
 	return "\[[join $blocks ,]\]"
 }
 
-# A flat {k v ...} dict -> a JSON object, every key and value escaped via _jstr (so
-# control characters and non-ASCII are \u-escaped — the body stays valid + ASCII).
-# Tool inputs here are flat string maps; a future typed input would re-serialize
-# its values as strings, which is fine for the current tool set.
-proc rio::claude::_obj_json {d} {
-	set parts {}
-	dict for {k v} $d { lappend parts "[_jstr $k]:[_jstr $v]" }
-	return "{[join $parts ,]}"
-}
-
-# A JSON string literal: escape ", \, and the control characters (RFC 8259), and
-# \u-escape every NON-ASCII character so the whole request body is pure ASCII.
-# That sidesteps request-body transcoding entirely — ASCII bytes are invariant
-# under whatever encoding the HTTP layer applies — which is what a tool_result
-# carrying a file's non-ASCII text (arrows, box-drawing, an emoji) needs to make
-# it to the API intact. Astral codepoints (> U+FFFF) become a UTF-16 surrogate
-# pair, the only way JSON can spell them; a Tcl build that already hands us
-# surrogate halves (TCL_UTF_MAX=3) falls through the BMP branch and pairs up the
-# same way.
-proc rio::claude::_jstr {s} {
-	set out ""
-	foreach ch [split $s ""] {
-		scan $ch %c code
-		if {$ch eq "\""} {
-			append out {\"}
-		} elseif {$ch eq "\\"} {
-			append out {\\}
-		} elseif {$code < 0x20} {
-			switch -- $code {
-				8  { append out {\b} }
-				9  { append out {\t} }
-				10 { append out {\n} }
-				12 { append out {\f} }
-				13 { append out {\r} }
-				default { append out [format {\u%04x} $code] }
-			}
-		} elseif {$code > 0xffff} {
-			set c [expr {$code - 0x10000}]
-			append out [format {\u%04x\u%04x} \
-				[expr {0xd800 + ($c >> 10)}] [expr {0xdc00 + ($c & 0x3ff)}]]
-		} elseif {$code > 0x7e} {
-			append out [format {\u%04x} $code]
-		} else {
-			append out $ch
-		}
-	}
-	return "\"$out\""
-}
+# Request-body string/object serialisation (jstr / obj_json) is provider-agnostic
+# and now lives in the shared plugin lib (plugins/lib/json.tcl, rio::llm::*), so
+# the Claude and OpenAI cores share one copy.
 
 # --- streaming SSE -> agent events -------------------------------------------
 # Each response chunk: buffer it (and the raw body), split into complete lines,
@@ -299,7 +254,7 @@ proc rio::claude::_classify {status raw} {
 		if {[dict exists $d error message]} { set detail ": [dict get $d error message]" }
 	}
 	if {$status == 401 || $status == 403} {
-		return [list auth "Claude rejected the credentials (HTTP $status) — check your API key (Settings ▸ Claude API key)$detail"]
+		return [list auth "Claude rejected the credentials (HTTP $status) — check your API key (Settings ▸ Agent API Key)$detail"]
 	} elseif {$status == 429} {
 		return [list rate_limit "Rate limited by Claude (HTTP $status) — wait a moment and retry$detail"]
 	} elseif {$status >= 500} {

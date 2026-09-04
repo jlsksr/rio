@@ -183,10 +183,15 @@ for later:
   (your sources list is your trust list, provenance shown, code named as
   code). Anything stronger — signatures, pinning — needs a design that works
   without a central authority.
-- **Plugin-kind installs** — *deferred* (D19). The `kind` vocabulary is open
-  and the manifest grows unknown keys compatibly, so protocol-participant
-  plugins (with declared permissions) can become installable kinds once the
-  plugin interface stabilises.
+- **Provider as an installable `kind`** — *next milestone* (D65's "milestone B";
+  successor to D19). Make `provider` a `kind` in the **same** repositories — one
+  infrastructure, a publisher adds `kind: provider` to a manifest — loaded
+  core-side behind a versioned `provider-api` and a consent/trust gate. The
+  provider contract was hardened in-tree first (D65: per-provider keys, provider
+  metadata in the registry, `agent.providers`, the shared `plugins/lib`), so a
+  second implementation proved the seam before it is frozen for outside
+  contributors. The `kind` vocabulary is open and the manifest grows unknown keys
+  compatibly, so this needs no repo-format change.
 - **Update checking** — *deferred.* rio never auto-updates; an update is
   installing the newer-listed variant by hand. A "newer version available"
   marker on installed rows would be a cheap, honest middle ground.
@@ -205,6 +210,14 @@ for later:
 
 ## Agent
 
+- **Providers** — *landed* (AGENTS.md D26, D65). Two first-party providers ship
+  in-tree: **Claude** (Anthropic API) and an **OpenAI-compatible** one (**ChatGPT**
+  by default; point its base URL at a local server — Ollama / llama-server / LM
+  Studio / vLLM — to run a **local model**). Each keeps its own 0600 key; the GUI's
+  provider picker + key dialog enumerate from the core (`agent.providers`). Adding a
+  third first-party provider is now a plugin mirroring `plugins/openai/`; letting
+  *others* add one is milestone B (see Extensions ▸ "Provider as an installable
+  `kind`").
 - **Run-command tool (with guardrails)** — *planned.* Let the agent run shell
   commands under explicit approval/confinement, alongside its existing read and
   propose-edit tools.
