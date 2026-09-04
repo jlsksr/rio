@@ -6497,8 +6497,8 @@ proc keymap_refresh_menus {} {
 	.m.view entryconfigure "Git"          -accelerator [key_accel show-git]
 	.m.view entryconfigure "Agent"        -accelerator [key_accel toggle-chat]
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
-	.m.view entryconfigure "Split Editor" -accelerator [key_accel split-editor]
-	.m.view entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]
+	.m.view.layout entryconfigure "Split Editor" -accelerator [key_accel split-editor]
+	.m.view.layout entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]
 	.m.settings entryconfigure "Preferences…" -accelerator [key_accel preferences]
 }
 
@@ -7249,9 +7249,6 @@ menu .m.view -tearoff 0
 .m.view add checkbutton -label "Search" \
 	-variable ::shown_search -command {panel_toggle search}
 .m.view add separator
-.m.view add radiobutton -label "Dock Left"  -variable ::dock_side -value left  -command {dock_set_side left}
-.m.view add radiobutton -label "Dock Right" -variable ::dock_side -value right -command {dock_set_side right}
-.m.view add separator
 .m.view add checkbutton -label "Wrap Lines" -accelerator [key_accel toggle-wrap] \
 	-variable ::wrap_lines -command apply_wrap
 .m.view add checkbutton -label "Indent Wrapped Lines" \
@@ -7268,18 +7265,30 @@ menu .m.view -tearoff 0
 .m.view add checkbutton -label "Show Hidden Files" \
 	-variable ::show_hidden -command apply_show_hidden
 .m.view add separator
-.m.view add command -label "Font…"      -command editor_font_dialog
-.m.view add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}
-.m.view add command -label "Zoom Out"   -accelerator "Ctrl+-" -command {editor_zoom -1}
-.m.view add command -label "Reset Zoom" -accelerator "Ctrl+0" -command editor_zoom_reset
-.m.view add separator
-.m.view add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
-.m.view add command -label "Unsplit Editor"        -command unsplit_editor
-.m.view add command -label "Move Tab to Other Group" -accelerator [key_accel move-tab-other] -command move_tab_other
-.m.view add separator
-.m.view add command -label "Compare With File…" -command compare_with_file_dialog
-.m.view add command -label "Close Compare" -accelerator Esc -command compare_close
-.m.view add separator
+# Less-frequent items live in topical submenus so the View menu stays short enough to fit
+# on screen (D64). A Tk menu posted taller than the space below it misbehaves on X11 (it can
+# unpost on a mid-list hover); we keep it in check by grouping, not by patching Tk's menu
+# machinery (the D59 lesson). The display toggles above stay top-level — they are the ones
+# flicked often. Each cascade is built like the .m.view.theme one below.
+menu .m.view.dock -tearoff 0
+.m.view add cascade -label "Dock Side" -menu .m.view.dock
+.m.view.dock add radiobutton -label "Left"  -variable ::dock_side -value left  -command {dock_set_side left}
+.m.view.dock add radiobutton -label "Right" -variable ::dock_side -value right -command {dock_set_side right}
+menu .m.view.zoom -tearoff 0
+.m.view add cascade -label "Font & Zoom" -menu .m.view.zoom
+.m.view.zoom add command -label "Font…"      -command editor_font_dialog
+.m.view.zoom add separator
+.m.view.zoom add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}
+.m.view.zoom add command -label "Zoom Out"   -accelerator "Ctrl+-" -command {editor_zoom -1}
+.m.view.zoom add command -label "Reset Zoom" -accelerator "Ctrl+0" -command editor_zoom_reset
+menu .m.view.layout -tearoff 0
+.m.view add cascade -label "Editor Layout" -menu .m.view.layout
+.m.view.layout add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
+.m.view.layout add command -label "Unsplit Editor"        -command unsplit_editor
+.m.view.layout add command -label "Move Tab to Other Group" -accelerator [key_accel move-tab-other] -command move_tab_other
+.m.view.layout add separator
+.m.view.layout add command -label "Compare With File…" -command compare_with_file_dialog
+.m.view.layout add command -label "Close Compare" -accelerator Esc -command compare_close
 # The Theme cascade is filled from the core (themes_menu_fill) once the channel
 # is up — installed themes (D39) appear here like shipped ones.
 menu .m.view.theme -tearoff 0

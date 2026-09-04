@@ -3480,6 +3480,30 @@ plus a best-effort `<ButtonPress>` (shadowed on controls that already bind `<But
 where `<Leave>` covers it). Attached to the files/git Refresh glyphs and the hidden toggle;
 the same one-liner extends to any future bare-glyph control.
 
+### D64 — Keep the View menu within screen height (grouped, not tall)
+
+A stock-Tk symptom on X11: a menu posted **taller than the screen space below it** unposts
+when the pointer hovers an item mid-list. The **View menu** was the offender — it had grown
+into a junk drawer (~23 items + 7 separators ≈ 30 rows; D60's Highlight Current Line and
+D62's Show Hidden Files were the latest additions), while File/Edit/Settings (~11–15 rows)
+fit and behave.
+
+The fix is to keep the menu **short enough to fit**, not to touch Tk's menu machinery — the
+D59 revert is the standing lesson that patching Tk's post/grab/scroll internals is too
+fragile. Less-frequent items fold into three topical cascades — **Dock Side** (Left/Right),
+**Font & Zoom** (Font…, Zoom In/Out/Reset), **Editor Layout** (Split / Unsplit / Move Tab,
+and Compare) — built like the existing `.m.view.theme` cascade. The often-flicked **display
+toggles** (Wrap, Indent, Line Numbers, Highlight Current Line, Multi-Line Tabs, Show Hidden
+Files) and the four panel toggles stay at the top level. Result: ~15 items + 3 separators ≈
+18 rows, comparable to Edit, so it posts and hovers as stock Tk.
+
+Coupling from the move: `refresh_accelerators` retargets Split Editor / Move Tab to
+`.m.view.layout`; a couple of tests address the moved items by their submenu path. A
+`smoke.tcl` guard asserts `.m.view index end` stays small and the three submenus exist, so a
+future addition can't silently re-inflate the top level past a screen again. **General rule:
+a rio menu is kept within screen height by grouping, since Tk's off-screen menu posting is
+not something we patch.**
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

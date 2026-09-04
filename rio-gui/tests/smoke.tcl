@@ -988,9 +988,16 @@ set ::wrap_lines 0 ; apply_wrap
 set ::cmp_syncing 0
 cmp_yview moveto 0.5
 ok "compare: scroll synced"         [expr {abs([lindex [.cmp.l.t yview] 0] - [lindex [.cmp.r.t yview] 0]) < 0.001}] 1
-# The View menu exposes the entry points.
-ok "compare: View menu has open"    [expr {![catch {.m.view index "Compare With File…"}]}] 1
-ok "compare: View menu has close"   [expr {![catch {.m.view index "Close Compare"}]}] 1
+# The View ▸ Editor Layout submenu exposes the entry points.
+ok "compare: View menu has open"    [expr {![catch {.m.view.layout index "Compare With File…"}]}] 1
+ok "compare: View menu has close"   [expr {![catch {.m.view.layout index "Close Compare"}]}] 1
+# The View menu is kept short enough to fit on screen by grouping less-used items into
+# topical submenus (D64): a Tk menu taller than the space below it misbehaves on X11. Guard
+# the top-level length and the submenus so a future addition can't quietly re-inflate it.
+ok "view: top level stays short"    [expr {[.m.view index end] <= 20}] 1
+ok "view: Dock Side submenu"        [expr {[winfo exists .m.view.dock] && [.m.view.dock index "Left"] ne ""}] 1
+ok "view: Font & Zoom submenu"      [expr {[winfo exists .m.view.zoom] && [.m.view.zoom index "Zoom In"] ne ""}] 1
+ok "view: Editor Layout submenu"    [expr {[winfo exists .m.view.layout] && [.m.view.layout index "Split Editor"] ne ""}] 1
 compare_close
 ok "compare: close restores editor" [list [center_shows .groups] [center_shows .cmp]] {1 0}
 ok "compare: close clears flag"     $::compare_shown 0
