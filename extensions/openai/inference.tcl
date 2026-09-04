@@ -1,4 +1,4 @@
-# plugins/openai — the OpenAI Chat Completions inference core (AGENTS.md D8, D26).
+# extensions/openai — the OpenAI Chat Completions inference core (AGENTS.md D8, D26).
 #
 # The provider-specific half of an OpenAI-compatible provider: shaping the
 # /v1/chat/completions request, parsing its streaming SSE response, and mapping it

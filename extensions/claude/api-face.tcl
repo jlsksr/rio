@@ -1,4 +1,4 @@
-# plugins/claude — the claude-api face (AGENTS.md D26).
+# extensions/claude — the claude-api face (AGENTS.md D26).
 #
 # The official, supported Claude provider: it authenticates with an Anthropic
 # API key (pay-per-token) and drives the shared inference core (rio::claude::infer).

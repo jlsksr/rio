@@ -1,4 +1,4 @@
-# plugins/openai — the OpenAI-compatible API face (AGENTS.md D8, D26).
+# extensions/openai — the OpenAI-compatible API face (AGENTS.md D8, D26).
 #
 # An OpenAI-compatible agent provider: it authenticates with a Bearer API key and
 # drives the shared inference core (rio::openai::infer). Hosted ChatGPT is the

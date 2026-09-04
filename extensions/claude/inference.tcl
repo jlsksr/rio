@@ -1,4 +1,4 @@
-# plugins/claude — the shared Claude inference core (AGENTS.md D8, D26).
+# extensions/claude — the shared Claude inference core (AGENTS.md D8, D26).
 #
 # The ~80% of a Claude provider that is identical whichever way you authenticate:
 # shaping the Messages-API request, parsing the streaming SSE response, mapping
