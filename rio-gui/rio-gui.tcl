@@ -140,6 +140,7 @@ set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
 set ::line_numbers 1   ;# 1 = show a line-number gutter down each editor group (View menu)
 set ::highlight_current_line 1 ;# 1 = tint the logical line the caret sits on (View menu; per group)
+set ::show_hidden 0    ;# 1 = show dotfile / hidden entries in the Files pane (View menu; default hides, like ls)
 set ::col_on 0         ;# column/block editing (Ctrl+Shift+drag) enabled? (D40)
 set ::col_active 0     ;# a column selection is currently live
 set ::col_w ""         ;# the editor PROXY path the column selection lives on
@@ -1082,6 +1083,7 @@ proc populate_nav {} {
 		foreach e $entries {
 			if {[dict get $e type] ne $grp} continue
 			set name [dict get $e name]
+			if {!$::show_hidden && [string index $name 0] eq "."} continue  ;# hide dotfiles (View ▸ Show Hidden Files)
 			set path [file join $::nav_dir $name]
 			if {$grp eq "dir"} {
 				nav_render_row dir $path "$name/" "▸" [nav_dir_status $git $path]
@@ -1091,6 +1093,15 @@ proc populate_nav {} {
 		}
 	}
 	rl_end $b
+}
+
+# View-menu toggle: show or hide dotfile / hidden entries in the Files pane, then repaint
+# and persist. Off by default, so a fresh pane hides `.git/` and other dotfiles the way
+# `ls` does; on reveals them. populate_nav does the filtering (a name-starts-with-"." skip),
+# so this just re-lists the shown directory. The two-door applier (View menu + Preferences).
+proc apply_show_hidden {} {
+	populate_nav
+	prefs_save
 }
 
 # The git status for the open project, as an abspath -> XY-status dict (the two
@@ -4747,6 +4758,7 @@ proc prefs_load {} {
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d highlight_current_line]} { set ::highlight_current_line [expr {[dict get $d highlight_current_line] ? 1 : 0}] }
+	if {[dict exists $d show_hidden]} { set ::show_hidden [expr {[dict get $d show_hidden] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
 		set tl [dict get $d tab_layout]
@@ -4788,6 +4800,7 @@ proc prefs_save {} {
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
 			highlight_current_line $::highlight_current_line \
+			show_hidden $::show_hidden \
 			column_edit $::col_on \
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
@@ -6528,6 +6541,7 @@ proc prefs_fill_view {f} {
 	grid [prefs_check $f.curln   "Highlight Current Line" ::highlight_current_line apply_curline] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.mtab    "Multi-Line Tabs"      ::tab_layout  tab_layout_apply \
 		-onvalue multi -offvalue scroll] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.hidden  "Show Hidden Files"    ::show_hidden apply_show_hidden] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_radio $f.dl "Left"  ::dock_side left  {dock_set_side left}]  -row [incr r] -column 0 -sticky w -padx {12 0}
 	grid [prefs_radio $f.dr "Right" ::dock_side right {dock_set_side right}] -row [incr r] -column 0 -sticky w -padx {12 0}
@@ -7194,6 +7208,8 @@ menu .m.view -tearoff 0
 # display-toggle neighbors above — not in the Tabs menu, which is a buffer list.
 .m.view add checkbutton -label "Multi-Line Tabs" \
 	-onvalue multi -offvalue scroll -variable ::tab_layout -command tab_layout_apply
+.m.view add checkbutton -label "Show Hidden Files" \
+	-variable ::show_hidden -command apply_show_hidden
 .m.view add separator
 .m.view add command -label "Font…"      -command editor_font_dialog
 .m.view add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}

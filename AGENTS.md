@@ -3438,6 +3438,23 @@ gutter is `-takefocus 0`, so the press moves keyboard focus to the text itself
 (`focus_group` + an explicit `focus`); `cursor_moved` then refreshes the status Ln/Col and
 the D60 current-line band (which follows the caret to the next line's start, as in VSCode).
 
+### D62 — Hide dotfiles in the Files pane
+
+The Files navigator **hides dotfile / hidden entries by default** — `.git/`, `.gitignore`,
+and friends — the way `ls` does, with a **View ▸ Show Hidden Files** toggle (mirrored in the
+Preferences window's View category) to reveal them. Default off suits the Unix mental model
+and de-clutters the flat one-directory navigator; the classic Windows Explorer "Hidden
+items" checkbox is the same affordance, so a View-menu home reads as intuitive.
+
+The filter is one line in `populate_nav`: skip an entry whose name starts with `.` unless
+`::show_hidden`. It lives at the render loop, so the `..` parent row (rendered explicitly,
+not from `fs.list`) is never filtered, and the core's `fs.list` is untouched — this is
+GUI-local chrome, consistent with the pane being GUI-local (not a core "view buffer"). The
+toggle rides the **two-door pattern** (D58): the View checkbutton and the Preferences check
+drive the same `::show_hidden` global through `apply_show_hidden`, which repaints the pane
+(`populate_nav`) and persists (`prefs_save`); it round-trips through `prefs.json` like the
+other view flags.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

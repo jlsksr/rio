@@ -47,8 +47,8 @@ Each entry notes its state:
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). Candidates:
   an expandable Explorer-style tree (structural change to the flat navigator);
-  drawn-bitmap icons if glyphs prove too plain; hiding `.git/` (and other dotfiles)
-  from the navigator, or a show-hidden toggle. The larger fork — **core-backed
+  drawn-bitmap icons if glyphs prove too plain. (Hiding dotfiles from the navigator, with
+  a show-hidden toggle, landed as D62.) The larger fork — **core-backed
   read-only "view buffers"** (emacs-like modes for dired/git/log, re-backing the
   rich-list widget with the core) — is noted but *not taken*; today the pane is
   deliberately GUI-local chrome, not a buffer.
