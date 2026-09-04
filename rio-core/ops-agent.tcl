@@ -101,6 +101,33 @@ proc rio::ops::agent_providers {params} {
 }
 rio::dispatch::register agent.providers rio::ops::agent_providers
 
+# agent.prompt.edit {which} -> {path, created} ; resolve a user-editable system-prompt
+# file (D70) and ensure it exists so a frontend can open it in the editor. `which` is
+# `system` (the user's standing prompt for all projects, in the XDG agent dir) or
+# `project` (`.rio/agent.md` at the open project root). The core owns the path — a
+# remote core resolves it on its OWN disk (D30) — and creates an empty file if absent
+# (`created` says which). `project` with no open project is a bad_request. Flat result,
+# so the default wire encoder applies.
+proc rio::ops::agent_prompt_edit {params} {
+	if {![dict exists $params which]} {
+		rio::error::raise bad_request "agent.prompt.edit requires which"
+	}
+	set which [dict get $params which]
+	if {$which ni {system project}} {
+		rio::error::raise bad_request "agent.prompt.edit: unknown prompt '$which'"
+	}
+	if {$which eq "project" && [rio::project::root] eq ""} {
+		rio::error::raise bad_request "no project is open"
+	}
+	set r [rio::agent::prompt::ensure $which]
+	if {$r eq ""} {
+		rio::error::raise bad_request "cannot resolve the $which prompt path"
+	}
+	return [dict create result [dict create \
+		path [dict get $r path] created [dict get $r created]]]
+}
+rio::dispatch::register agent.prompt.edit rio::ops::agent_prompt_edit
+
 # agent.autoaccept.set {on} -> {on} ; toggle the approval gate (D26 s5). When on,
 # a proposed edit applies without waiting for the user's Approve/Reject.
 proc rio::ops::agent_autoaccept_set {params} {

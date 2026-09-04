@@ -1,6 +1,8 @@
-# Tests for the agent system-prompt composer (rio::agent::prompt, AGENTS.md D34):
-# the three layers (shipped base, XDG override, per-project `.rio/agent.md`) and
-# how compose() joins them. Pure filesystem — no network, no event loop.
+# Tests for the agent system-prompt composer (rio::agent::prompt, AGENTS.md D34/D70):
+# the three layers (shipped base + XDG override, the user's `system.md`, and the
+# per-project `.rio/agent.md`), how compose() joins them in order, and the path/ensure
+# helpers + the agent.prompt.edit op behind Settings ▸ Agent Prompts…. Pure filesystem
+# — no network, no event loop.
 package require tcltest
 namespace import ::tcltest::*
 
@@ -101,5 +103,125 @@ test none {no base file and no project composes to the empty string} -setup {
 } -body {
 	rio::agent::prompt::compose
 } -cleanup { reset_prompt ; file delete -force $::b } -result {}
+
+# --- the user system layer (D70): system.md, between base and project ---------
+
+test system-layer {system.md is composed on top of the base} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d system.md] "MY RULES"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d } -result "BASE
+
+MY RULES"
+
+test compose-order {base, then system, then project — in that order} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d system.md] "SYSTEM"
+	rio::agent::prompt::override_dirs [list $::d]
+	set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "PROJECT"
+	rio::project::open $::proj
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d $::proj } -result "BASE
+
+SYSTEM
+
+PROJECT"
+
+test system-optional {no system.md leaves the base alone} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
+test system-only {system.md alone (no base, no project) composes to just it} -setup {
+	reset_prompt
+	set ::d [mkdir]   ;# no prompt.md
+	writefile [file join $::d system.md] "ONLY SYSTEM"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d } -result {ONLY SYSTEM}
+
+# --- path / ensure: locate and create the user-editable files -----------------
+
+test path-system {path system points at system.md in the user dir} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	string equal [rio::agent::prompt::path system] [file join $::d system.md]
+} -cleanup { reset_prompt ; file delete -force $::d } -result 1
+
+test path-project-none {path project is "" with no open project} -setup {
+	reset_prompt
+} -body {
+	rio::agent::prompt::path project
+} -cleanup { reset_prompt } -result {}
+
+test ensure-creates-empty {ensure system creates an empty file and reports created} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	set r [rio::agent::prompt::ensure system]
+	list [dict get $r created] [file isfile [dict get $r path]] [file size [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {1 1 0}
+
+test ensure-idempotent {ensure on an existing file keeps content and reports created 0} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d system.md] "KEEP ME"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	set r [rio::agent::prompt::ensure system]
+	list [dict get $r created] [rio::agent::prompt::_read [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {0 {KEEP ME}}
+
+test ensure-project {ensure project creates .rio/agent.md under the open root} -setup {
+	reset_prompt
+	set ::proj [mkdir]
+	rio::project::open $::proj
+} -body {
+	set r [rio::agent::prompt::ensure project]
+	list [dict get $r created] \
+		[string equal [dict get $r path] [file join $::proj .rio agent.md]] \
+		[file isfile [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::proj } -result {1 1 1}
+
+# --- the agent.prompt.edit op --------------------------------------------------
+
+test op-system {agent.prompt.edit system returns path + created} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	set res [dict get [rio::ops::agent_prompt_edit {which system}] result]
+	list [dict get $res created] [string equal [dict get $res path] [file join $::d system.md]]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {1 1}
+
+test op-project-none {agent.prompt.edit project with no project is a bad_request} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_edit {which project}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*no project*}
+
+test op-bad-which {agent.prompt.edit rejects an unknown prompt} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_edit {which bogus}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*unknown prompt*}
 
 cleanupTests

@@ -82,11 +82,14 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   a new file, you review the **diff** and **Approve or Reject**, and on approval
   it applies (and, by default, saves). A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
-  every write waits for you (or opt into *Settings ▸ Auto-accept edits*). The
-  agent's **instructions are a plain, editable data file** (`agent/prompt.md`,
-  never your personal workflow baked in) — override it wholesale by dropping one in
-  `~/.config/rio/agent/`, and add project-specific guidance in a `.rio/agent.md` at
-  your project root.
+  every write waits for you (or opt into *Settings ▸ Auto-accept edits*). You can
+  **shape how it works** from *Settings ▸ Agent Prompts…*: a **system prompt** (your
+  standing instructions for every project) and, for the open folder, a **project
+  prompt**. Both open in rio's own editor and are plain Markdown *added on top of*
+  rio's built-in instructions — never replacing them, and either can be left empty. The
+  system prompt lives with your rio settings; the project prompt in a `.rio/agent.md`
+  at the project root, so it travels with the code. (The same instructions shape every
+  provider — Claude, ChatGPT, or a local model — since they live in rio, not the provider.)
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
   in yourself — the menu lists whatever the core can load. Themes are plain

@@ -1042,6 +1042,24 @@ provider_key_dialog openai
 provider_key_clear .providerkey openai
 ok "keydlg: openai key cleared"        [rio::openai::api::configured] 0
 
+# --- Agent Prompts dialog (Settings ▸ Agent Prompts…, D70) --------------------
+# The dialog opens the two user-editable system-prompt files in rio's editor; the core
+# owns and creates them (agent.prompt.edit). Menu entry present, dialog builds, its
+# project button tracks whether a project is open, and editing the system prompt
+# resolves+creates system.md (in the sandbox XDG) and opens it as a tab.
+ok "menu: Settings has Agent Prompts…"  [expr {[.m.settings index "Agent Prompts…"] ne ""}] 1
+agent_prompts_dialog
+ok "prompts: dialog opens"               [winfo exists .agentprompts] 1
+ok "prompts: system button enabled"      [.agentprompts.sys cget -state] normal
+set ::pr_root [dict get [rio_result project.get {}] root]
+ok "prompts: project button tracks state" [.agentprompts.proj cget -state] \
+	[expr {$::pr_root ne "" ? "normal" : "disabled"}]
+set ::nbuf_before [dict size $::buffers]
+agent_prompt_open system
+ok "prompts: dialog closed after open"   [winfo exists .agentprompts] 0
+ok "prompts: system.md opened in a tab"  [expr {[dict size $::buffers] > $::nbuf_before}] 1
+ok "prompts: opened buffer is system.md" [string match {*system.md} [bufget $::cur path]] 1
+
 # The Extensions window's detail must WORD-WRAP a long description, not stretch the
 # auto-sized window. No repository is configured in the sandbox, so the window opens
 # on an empty scan; drive extw_select with a synthetic long-description row and check

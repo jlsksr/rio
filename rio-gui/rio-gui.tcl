@@ -2691,6 +2691,70 @@ proc provider_key_clear {w name} {
 	destroy $w
 }
 
+# The agent-prompts dialog (Settings ▸ Agent Prompts…, D70). A small modal that opens
+# the two USER-editable system-prompt files in rio's OWN editor: `system.md` (your
+# standing instructions for every project) and the open project's `.rio/agent.md`. The
+# CORE owns and creates the files (agent.prompt.edit) — a remote core resolves them on
+# its own disk (D30), and the opened tab's title shows the real path — so this dialog
+# only asks for the path and calls do_open. rio's shipped instructions always apply
+# underneath; these two files ADD to them. The static help is muted (gutter.fg); the
+# buttons are the only interactive elements, so help never reads as a control (D68).
+proc agent_prompts_dialog {} {
+	set w .agentprompts
+	destroy $w
+	toplevel $w
+	wm title $w "Agent Prompts"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set pr [rio_result project.get {}]
+	set have_project [expr {$pr ne "" && [dict get $pr root] ne ""}]
+
+	label $w.intro -anchor w -justify left -font RioUIFont -wraplength 400 \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+		-text "The agent's instructions are plain Markdown, loaded as data — never run. rio's own instructions always apply; these two files add to them, and either may be left empty."
+	button $w.sys -text "Edit system prompt…" -font RioUIFont \
+		-command [list agent_prompt_open system]
+	label $w.sysh -anchor w -justify left -font RioUIFont -wraplength 250 \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+		-text "For every project — kept with your rio settings."
+	button $w.proj -text "Edit project prompt…" -font RioUIFont \
+		-command [list agent_prompt_open project] \
+		-state [expr {$have_project ? "normal" : "disabled"}]
+	label $w.projh -anchor w -justify left -font RioUIFont -wraplength 250 \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+		-text [expr {$have_project ?
+			"For the open project — kept in its .rio/ folder." :
+			"Open a project folder to add one for it."}]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.close -text "Close" -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right -padx 3
+
+	grid $w.intro -row 0 -column 0 -columnspan 2 -sticky we -padx 8 -pady {8 6}
+	grid $w.sys   -row 1 -column 0 -sticky w -padx {8 6} -pady 3
+	grid $w.sysh  -row 1 -column 1 -sticky w -padx {0 8}
+	grid $w.proj  -row 2 -column 0 -sticky w -padx {8 6} -pady 3
+	grid $w.projh -row 2 -column 1 -sticky w -padx {0 8}
+	grid $w.btns  -row 3 -column 0 -columnspan 2 -sticky e -padx 5 -pady {6 8}
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.sys
+}
+# Ask the core to resolve+create the prompt file, then open it as a normal tab. The
+# core raises bad_request for `project` with no open project — but the button for that
+# is disabled, so this is a safety net, surfaced through the usual error path.
+proc agent_prompt_open {which} {
+	set resp [rio_call agent.prompt.edit [dict create which $which]]
+	if {![dict get $resp ok]} {
+		report_error "Could not open the $which prompt:\n[dict get $resp error message]" \
+			[dict get $resp error code]
+		return
+	}
+	destroy .agentprompts
+	do_open [dict get $resp result path]
+}
+
 proc do_save_as {path} {
 	set resp [rio_call file.save [dict create buffer $::cur path $path]]
 	if {![dict get $resp ok]} {
@@ -7491,6 +7555,10 @@ menu .m.settings.provider -tearoff 0
 .m.settings add cascade -label "Agent Provider" -menu .m.settings.provider
 menu .m.settings.keys -tearoff 0
 .m.settings add cascade -label "Agent API Key" -menu .m.settings.keys
+# Agent Prompts… completes the agent config trio (provider, its key, its instructions):
+# it opens the user's system prompt (all projects) and the project prompt (this folder)
+# in the editor — a well-defined home for the "soul" the core composes (D70).
+.m.settings add command -label "Agent Prompts…" -command agent_prompts_dialog
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}

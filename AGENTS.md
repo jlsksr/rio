@@ -3665,6 +3665,45 @@ every provider's tests reference, not a provider payload.
 
 ---
 
+### D70 — A well-defined place for the user's system and project prompts
+
+D34 gave the core a provider-agnostic system prompt (a shipped base + an optional
+per-project `.rio/agent.md`) but no way to *reach* it: the files were undocumented and
+had no UI, and there was no home for a user's own standing instructions that wasn't
+"replace rio's shipped tool contract." D70 closes that, staying deliberately small — two
+user prompts, obvious places, clear in both the UI and the docs, and **provider-agnostic**:
+the same instructions shape a turn whether the backend is Claude, ChatGPT, or a later one
+(the composed string is the provider contract's `system` argument, D26/D65).
+
+**Three layers, composed base → system → project** ([agent-prompt.tcl](rio-core/agent-prompt.tcl)):
+
+- **base** — rio's shipped `agent/prompt.md` (its tool contract + coding craft): rio's own
+  machinery, not a user knob. Advanced users may still swap it wholesale via an XDG copy.
+- **system** *(new)* — the user's `system.md` in the XDG agent dir: their standing
+  instructions for **every** project, **ADDED on top of** the base, never replacing it.
+  jka chose the additive layer over reusing the base override precisely so a user can't
+  accidentally delete rio's contract while writing their own prompt.
+- **project** — the existing `.rio/agent.md` at the open project root: instructions for
+  **this** codebase, appended last.
+
+Each layer is plain Markdown **loaded as data, never executed**; any may be empty, and an
+empty file contributes nothing.
+
+**Surfaced without welding UI to paths.** A new core op **`agent.prompt.edit {which}`**
+([ops-agent.tcl](rio-core/ops-agent.tcl)) resolves the `system`/`project` file, **creates
+it empty if absent** (`ensure`), and returns its path; `project` with no open project is a
+`bad_request`. The GUI's **Settings ▸ Agent Prompts…** dialog
+([rio-gui.tcl](rio-gui/rio-gui.tcl)) calls it and opens the file in **rio's own editor**
+(`do_open`) rather than building a bespoke text widget — so editing is the normal edit
+path, and because the **core** owns and creates the file, a **remote** core resolves it on
+its own disk (D30) and the tab title shows the real location. The dialog's static help is
+muted (`gutter.fg`) with the buttons the only controls (D68); the project button is
+disabled with a hint when no project is open. The starter file is **empty on purpose** —
+the teaching lives in the dialog and the docs (jka: "the docs and UI should make clear
+where is what"), not in seeded template text that would otherwise leak into the prompt.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
