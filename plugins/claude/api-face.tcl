@@ -30,9 +30,9 @@ namespace eval rio::claude::api {
 		request_timeout   600000 \
 		secret_name       claude-api]
 
-	# Network seam: the real tcltls streaming transport (transport.tcl); tests
-	# inject a fake.
-	variable transport rio::claude::http::stream
+	# Network seam: the shared tcltls streaming transport (plugins/lib/transport.tcl);
+	# tests inject a fake.
+	variable transport rio::llm::http::stream
 }
 
 # Override one config key (a user setting, a test, or a model choice).
@@ -52,7 +52,7 @@ proc rio::claude::api::provider {conversation tools system post} {
 	set key [_api_key]
 	if {$key eq ""} {
 		{*}$post error not_configured \
-			"No Claude API key — add one in Settings ▸ Claude API key"
+			"No Claude API key — add one in Settings ▸ Agent API Key"
 		return
 	}
 	set auth [list x-api-key $key]
@@ -92,6 +92,8 @@ proc rio::claude::api::_api_key {} {
 # capability routes agent.key.set/clear/status here — the API key is this face's to
 # keep (D21), the agent layer stays credential-blind.
 rio::agent::register_provider claude rio::claude::api::provider \
+	-label  Claude \
+	-signup console.anthropic.com \
 	-key [dict create \
 		set    rio::claude::api::set_key \
 		clear  rio::claude::api::clear_key \

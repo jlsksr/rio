@@ -68,9 +68,12 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
 - **Compare view** — a **side-by-side diff** of two documents, original beside
   proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
   the active buffer against any file from the View menu.
-- **Agent chat** — a right-hand chat column wired to two providers: a
-  built-in offline **echo** provider, and **Claude** over the official Anthropic API
-  (bring your own API key, entered under *Settings*). The agent lives in the core
+- **Agent chat** — a right-hand chat column wired to several providers: a
+  built-in offline **echo** provider, **Claude** over the official Anthropic API,
+  and **ChatGPT** over the OpenAI API — the last is OpenAI-*compatible*, so pointing
+  its base URL at a **local** server (Ollama, llama-server, LM Studio, vLLM) runs a
+  local model through the same path. Each provider brings its own API key, entered
+  under *Settings ▸ Agent API Key* (a local server may need none). The agent lives in the core
   and runs wherever it does — so over a remote core the turn and your key stay
   server-side, with the same GUI either way (see D30). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and

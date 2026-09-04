@@ -1,0 +1,131 @@
+# Tests for the OpenAI-compatible face (rio::openai::api, AGENTS.md D8/D26): Bearer
+# auth, config-as-data (endpoint/model/token param), key storage, registration with
+# the agent registry (with label + signup), and end-to-end streaming through the
+# real agent loop. Network stays a seam (a fake SSE transport), so it runs offline.
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. .. .. rio-core core.tcl]
+source [file join [file dirname [info script]] .. .. lib json.tcl]
+source [file join [file dirname [info script]] .. .. lib transport.tcl]
+source [file join [file dirname [info script]] .. inference.tcl]
+source [file join [file dirname [info script]] .. api-face.tcl]
+
+# Keep secrets in a throwaway dir.
+set rio::secret::override_dir [file join [::tcltest::temporaryDirectory] rioopenai-[clock clicks]]
+
+proc collect_post {args} { lappend ::posts $args }
+proc collect_ev {ev} {
+	lappend ::evs $ev
+	switch -- [dict get $ev event] { agent.message - agent.error { set ::fin done } }
+}
+
+# --- key storage + the not-configured guard ----------------------------------
+
+test openai-api-not-configured {with no key the provider posts not_configured} -setup {
+	rio::openai::api::clear_key
+} -body {
+	set ::posts {}
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	lindex [lindex $::posts 0] 1
+} -result not_configured
+
+test openai-api-set-clear {set_key stores the key; clear_key forgets it} -setup {
+	rio::openai::api::clear_key
+} -body {
+	set a [rio::openai::api::configured]
+	rio::openai::api::set_key sk-oai-XYZ
+	set b [rio::openai::api::configured]
+	rio::openai::api::clear_key
+	list $a $b [rio::openai::api::configured]
+} -result {0 1 0}
+
+# --- registration with the agent's provider registry (D30) -------------------
+
+test openai-api-registered {sourcing the face registers `openai` with label + signup} -body {
+	set ps {}
+	foreach p [rio::agent::providers_info] { dict set ps [dict get $p name] $p }
+	set o [dict get $ps openai]
+	list [dict get $o name] [dict get $o label] [dict get $o keyed] [dict get $o signup]
+} -result {openai ChatGPT 1 platform.openai.com/api-keys}
+
+test openai-api-selectable {agent.provider.set openai makes this face the live provider} -setup {
+	rio::agent::use_provider echo
+} -body {
+	rio::agent::use_provider openai
+	list [rio::agent::provider_name] [expr {[set rio::agent::provider] eq "rio::openai::api::provider"}]
+} -cleanup { rio::agent::use_provider echo } -result {openai 1}
+
+test openai-api-key-ops-route {agent.key.set/clear/status reach this face's 0600 store, by name} -setup {
+	rio::openai::api::clear_key
+} -body {
+	set a [rio::agent::key_status openai]
+	rio::agent::key_set sk-oai-route openai
+	set b [rio::agent::key_status openai]
+	set stored [rio::openai::api::configured]
+	rio::agent::key_clear openai
+	list $a $b $stored [rio::agent::key_status openai]
+} -result {0 1 1 0}
+
+# --- the request: Authorization: Bearer, endpoint from config -----------------
+
+test openai-api-request {the request carries the Bearer header and hits the configured endpoint} -setup {
+	rio::openai::api::set_key sk-oai-XYZ
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set ::rio::openai::api::transport capture_tp
+} -body {
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	set hdrs [dict get $::seen headers]
+	list [dict get $hdrs Authorization] [dict get $::seen url]
+} -cleanup {
+	set ::rio::openai::api::transport rio::llm::http::stream
+	rio::openai::api::clear_key
+} -result {{Bearer sk-oai-XYZ} https://api.openai.com/v1/chat/completions}
+
+test openai-api-endpoint-configurable {configure points the face at a local server} -setup {
+	rio::openai::api::set_key placeholder
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set ::rio::openai::api::transport capture_tp
+	set ::saved_url [rio::openai::api::cget messages_url]
+	rio::openai::api::configure messages_url http://localhost:11434/v1/chat/completions
+} -body {
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	dict get $::seen url
+} -cleanup {
+	rio::openai::api::configure messages_url $::saved_url
+	set ::rio::openai::api::transport rio::llm::http::stream
+	rio::openai::api::clear_key
+} -result http://localhost:11434/v1/chat/completions
+
+# --- end to end: a configured provider streams through the real agent loop ----
+
+set ::api_sse ""
+append ::api_sse "data: {\"choices\":\[{\"delta\":{\"content\":\"Hi there\"},\"finish_reason\":null}\]}\n\n"
+append ::api_sse "data: {\"choices\":\[{\"delta\":{},\"finish_reason\":\"stop\"}\]}\n\n"
+append ::api_sse "data: \[DONE\]\n\n"
+
+proc fake_sse {sse status req on_chunk on_done} { {*}$on_chunk $sse ; {*}$on_done $status "" }
+
+test openai-api-provider-streams {a configured provider streams a reply via agent.send} -setup {
+	rio::openai::api::set_key sk-oai-XYZ
+	set ::rio::openai::api::transport [list fake_sse $::api_sse 200]
+	rio::agent::set_provider rio::openai::api::provider
+	rio::core::call agent.reset {}
+} -body {
+	set ::evs {} ; set ::fin {}
+	rio::core::call_stream agent.send {text {say hi}} collect_ev
+	set t [after 3000 {set ::fin timeout}] ; vwait ::fin ; after cancel $t
+	set reply ""
+	foreach ev $::evs { if {[dict get $ev event] eq "agent.message"} { set reply [dict get $ev params text] } }
+	list $::fin $reply
+} -cleanup {
+	rio::agent::set_provider ::rio::agent::echo_provider
+	set ::rio::openai::api::transport rio::llm::http::stream
+	rio::openai::api::clear_key
+} -result {done {Hi there}}
+
+file delete -force $rio::secret::override_dir
+cleanupTests

@@ -1,5 +1,5 @@
-# Tests for the real HTTPS transports (rio::claude::http, AGENTS.md D26). TLS and
-# Anthropic are not involved: the transports are driven over plain HTTP against a
+# Tests for the shared HTTPS transport (rio::llm::http, AGENTS.md D8/D26). TLS and
+# any real LLM are not involved: the transport is driven over plain HTTP against a
 # local one-shot server, which is enough to exercise the http plumbing — the
 # streaming handler, the buffered POST, the request body, and the status mapping.
 package require tcltest
@@ -39,7 +39,7 @@ proc tchunk {c} { append ::tchunks $c }
 proc tdone {status err} { set ::tdone [list $status $err] }
 proc run_stream {url body} {
 	set ::tchunks "" ; set ::tdone ""
-	rio::claude::http::stream \
+	rio::llm::http::stream \
 		[dict create url $url headers {Content-Type application/json} body $body] tchunk tdone
 	set t [after 5000 {set ::tdone TIMEOUT}] ; vwait ::tdone ; after cancel $t
 }
@@ -47,7 +47,7 @@ proc run_stream {url body} {
 set ::sse "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
 
 test transport-headers-split {Content-Type is split out; other headers pass through} -body {
-	set rest [rio::claude::http::_headers {Content-Type application/json x-api-key K} ct]
+	set rest [rio::llm::http::_headers {Content-Type application/json x-api-key K} ct]
 	list $ct $rest
 } -result {application/json {x-api-key K}}
 

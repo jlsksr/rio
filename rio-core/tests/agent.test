@@ -579,11 +579,14 @@ test agent-autoaccept-op {agent.autoaccept.set toggles the approval gate} -setup
 	list $on $v1 $off $v0
 } -cleanup { rio::agent::set_auto_accept 0 } -result {1 1 0 0}
 
-test agent-key-ops {agent.key.set/clear route to the key-holding provider; status reflects them} -setup {
+test agent-key-ops {agent.key.set/clear route to the named provider's store; status reflects them} -setup {
 	unset -nocomplain ::fakekey
 	rio::agent::register_provider fkeyed fake_provider \
 		-key {set fakekey_set clear fakekey_clear status fakekey_status}
+	rio::agent::use_provider fkeyed
 } -body {
+	# No name given -> targets the active provider (fkeyed), the common case; the
+	# active provider's key presence is what agent.status.key_set reports.
 	set s0 [dict get [rio::core::call agent.status {}] response result key_set]
 	rio::core::call agent.key.set {key sk-test-123}
 	set s1 [dict get [rio::core::call agent.status {}] response result key_set]
@@ -591,12 +594,62 @@ test agent-key-ops {agent.key.set/clear route to the key-holding provider; statu
 	rio::core::call agent.key.clear {}
 	set s2 [dict get [rio::core::call agent.status {}] response result key_set]
 	list $s0 $s1 $stored $s2
-} -result {0 1 sk-test-123 0}
+} -cleanup { rio::agent::use_provider echo } -result {0 1 sk-test-123 0}
 
 test agent-key-set-requires-key {agent.key.set without a key is bad_request} -body {
 	set r [dict get [rio::core::call agent.key.set {}] response]
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
+
+# The contract-hardening this milestone forced: two keyed providers coexist, each
+# with its OWN key store, addressed by name (there is no single key-holder slot).
+proc gkey_set {k} { set ::gkey $k }
+proc gkey_clear {} { set ::gkey "" }
+proc gkey_status {} { expr {[info exists ::gkey] && $::gkey ne ""} }
+
+test agent-key-per-provider {two keyed providers keep independent keys, set by name} -setup {
+	unset -nocomplain ::fakekey ::gkey
+	rio::agent::register_provider fkeyed fake_provider \
+		-key {set fakekey_set clear fakekey_clear status fakekey_status}
+	rio::agent::register_provider gkeyed fake_provider \
+		-key {set gkey_set clear gkey_clear status gkey_status}
+} -body {
+	rio::core::call agent.key.set {key aaa name fkeyed}
+	rio::core::call agent.key.set {key bbb name gkeyed}
+	# each store holds its own key; clearing one leaves the other
+	set both [list [rio::agent::key_status fkeyed] [rio::agent::key_status gkeyed]]
+	rio::core::call agent.key.clear {name fkeyed}
+	set after [list [rio::agent::key_status fkeyed] [rio::agent::key_status gkeyed]]
+	list $both [list $::fakekey $::gkey] $after
+} -result {{1 1} {{} bbb} {0 1}}
+
+test agent-providers-shape {agent.providers lists every provider with label/keyed/key_set/signup} -setup {
+	unset -nocomplain ::fakekey
+	rio::agent::register_provider fkeyed fake_provider -label "Fake Keyed" \
+		-signup keys.example \
+		-key {set fakekey_set clear fakekey_clear status fakekey_status}
+	rio::core::call agent.key.set {key kkk name fkeyed}
+} -body {
+	set ps [dict get [rio::core::call agent.providers {}] response result providers]
+	# find the two we care about
+	set byname {}
+	foreach p $ps { dict set byname [dict get $p name] $p }
+	set echo [dict get $byname echo]
+	set fk   [dict get $byname fkeyed]
+	list [dict get $echo keyed] [dict get $fk label] [dict get $fk keyed] \
+		[dict get $fk key_set] [dict get $fk signup]
+} -cleanup { rio::core::call agent.key.clear {name fkeyed} } \
+  -result {0 {Fake Keyed} 1 1 keys.example}
+
+test agent-providers-wire {agent.providers encodes providers as an array of flat objects} -body {
+	set result [dict create providers [list \
+		[dict create name echo label Echo keyed 0 key_set 0 signup ""]]]
+	set json [rio::wire::response [dict create id 4 ok true op agent.providers result $result]]
+	set d [json::json2dict $json]
+	set p0 [lindex [dict get $d result providers] 0]
+	list [dict get $p0 name] [dict get $p0 label] [dict get $p0 keyed] \
+		[dict get $p0 key_set] [dict get $p0 signup]
+} -result {echo Echo 0 0 {}}
 
 test agent-status-shape {agent.status reports provider, auto_accept and key_set} -setup {
 	rio::agent::use_provider echo
@@ -610,7 +663,7 @@ test agent-control-ops-registered {the new control ops are in the live registry}
 	set ops [rio::dispatch::opnames]
 	expr {"agent.provider.set" in $ops && "agent.key.set" in $ops \
 		&& "agent.key.clear" in $ops && "agent.autoaccept.set" in $ops \
-		&& "agent.status" in $ops}
+		&& "agent.status" in $ops && "agent.providers" in $ops}
 } -result 1
 
 # --- wire encoding (D11/D25) -------------------------------------------------

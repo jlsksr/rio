@@ -1,0 +1,35 @@
+# Tests for the shared JSON serialisers (rio::llm::jstr / obj_json, AGENTS.md
+# D8/D26): quote/backslash/control escaping, the ASCII-only guarantee for
+# non-ASCII and astral codepoints, and the flat-dict -> object helper. Pure string
+# work, offline.
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. json.tcl]
+
+test jstr-escapes {quotes, backslashes and control chars escape} -body {
+	rio::llm::jstr "a\"b\\c\nd\te"
+} -result {"a\"b\\c\nd\te"}
+
+test jstr-nonascii {non-ASCII is \u-escaped: the literal is ASCII-only and round-trips} -body {
+	set j [rio::llm::jstr "a→b…"]
+	list [string is ascii $j] [json::json2dict $j]
+} -result {1 a→b…}
+
+test jstr-astral {an astral codepoint escapes to a UTF-16 surrogate pair} -body {
+	# U+1F600 the way a file read delivers it (4 UTF-8 bytes F0 9F 98 80) — on a
+	# narrow Tcl build a surrogate pair, on a wide build one codepoint; both must
+	# spell 😀 in the body.
+	set ch [encoding convertfrom utf-8 "\xF0\x9F\x98\x80"]
+	set j [rio::llm::jstr "x$ch"]
+	list [string is ascii $j] [string match {*\\ud83d\\ude00*} $j]
+} -result {1 1}
+
+test obj-json-flat {a flat dict becomes an object with every key and value escaped} -body {
+	set o [rio::llm::obj_json [dict create path f.txt new_string "a\nb→c"]]
+	set d [json::json2dict $o]
+	list [string is ascii $o] [dict get $d path] [dict get $d new_string]
+} -result "1 f.txt {a\nb→c}"
+
+cleanupTests

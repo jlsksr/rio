@@ -37,10 +37,12 @@ apply {{} {
 	set dir [file dirname [file normalize [info script]]]
 	source [file join $dir core.tcl]   ;# loads doc/dispatch/ops + default buffer
 	source [file join $dir wire.tcl]
-	# The spawned core carries the agent (D30): load the Claude plugin so it
-	# registers its provider (agent.provider.set claude) and key store. In-process
-	# for now (D26's phasing); a real out-of-process plugin is a later increment.
+	# The spawned core carries the agent (D30): load the provider plugins so they
+	# register themselves (agent.provider.set claude | openai) with their own key
+	# stores. In-process for now (D26's phasing); real out-of-process / installable
+	# plugins are a later increment (milestone B).
 	source [file join $dir .. plugins claude claude.tcl]
+	source [file join $dir .. plugins openai openai.tcl]
 }}
 
 namespace eval rio::server {

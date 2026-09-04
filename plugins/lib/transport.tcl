@@ -1,29 +1,34 @@
-# plugins/claude — the real HTTPS transports (AGENTS.md D26, D10).
+# plugins/lib — the shared HTTPS streaming transport (AGENTS.md D8/D26, D10).
 #
-# The network layer the face plugs into: a STREAMING POST for the SSE Messages
-# API, delivering body chunks live. A command prefix matching the seam the
-# inference core expects:
+# The network layer every LLM provider plugs into: a STREAMING POST for an SSE
+# completions API, delivering body chunks live. A command prefix matching the
+# seam the inference cores expect:
 #   stream req on_chunk on_done   — on_chunk <text> per chunk; on_done <status> <err>
-# where req = {url, headers (flat {k v ...}), body} and status is the HTTP code
-# (0 = couldn't connect). Async via the http package + tcltls (event loop, D10).
+# where req = {url, headers (flat {k v ...}), body, ?timeout?} and status is the
+# HTTP code (0 = couldn't connect). Async via the http package + tcltls (event
+# loop, D10). TLS verifies the server cert against the system CA bundle when
+# present. Nothing here is provider-specific — Claude and OpenAI share this copy.
 #
-# TLS verifies the server certificate against the system CA bundle when present.
+# Sourced by more than one plugin loader (server.tcl loads each), so it is guarded
+# to define its procs exactly once.
+
+if {[llength [info commands rio::llm::http::stream]]} { return }
 
 package require http
 
-namespace eval rio::claude::http {
+namespace eval rio::llm::http {
 	variable tls_ready 0
 }
 
 # Register https with tcltls once, verifying the peer cert where we can.
-proc rio::claude::http::_ensure_tls {} {
+proc rio::llm::http::_ensure_tls {} {
 	variable tls_ready
 	if {$tls_ready} return
 	package require tls
-	::http::register https 443 [list rio::claude::http::_tls_socket]
+	::http::register https 443 [list rio::llm::http::_tls_socket]
 	set tls_ready 1
 }
-proc rio::claude::http::_tls_socket {args} {
+proc rio::llm::http::_tls_socket {args} {
 	set opts [list -autoservername 1 -require 1]
 	# The system CA bundle, wherever this platform keeps it: Debian/Alpine,
 	# RHEL-family, then OpenBSD (also macOS) — rio's supported hosts (D4).
@@ -34,7 +39,7 @@ proc rio::claude::http::_tls_socket {args} {
 }
 
 # Split a flat header list into the Content-Type (-> ctypeVar) and the rest.
-proc rio::claude::http::_headers {headers ctypeVar} {
+proc rio::llm::http::_headers {headers ctypeVar} {
 	upvar 1 $ctypeVar ctype
 	set ctype application/json
 	set out {}
@@ -44,8 +49,8 @@ proc rio::claude::http::_headers {headers ctypeVar} {
 	return $out
 }
 
-# --- streaming POST (the SSE Messages API) -----------------------------------
-proc rio::claude::http::stream {req on_chunk on_done} {
+# --- streaming POST (the SSE completions API) --------------------------------
+proc rio::llm::http::stream {req on_chunk on_done} {
 	if {[catch {_ensure_tls} e]} { {*}$on_done 0 $e ; return }
 	set hlist [_headers [dict get $req headers] ctype]
 	# -timeout is the WHOLE-request budget, and a streaming turn (a long
@@ -56,8 +61,8 @@ proc rio::claude::http::stream {req on_chunk on_done} {
 	if {[catch {
 		::http::geturl [dict get $req url] -method POST \
 			-query [dict get $req body] -type $ctype -headers $hlist \
-			-handler [list rio::claude::http::_on_data $on_chunk] \
-			-command [list rio::claude::http::_on_end $on_done] \
+			-handler [list rio::llm::http::_on_data $on_chunk] \
+			-command [list rio::llm::http::_on_end $on_done] \
 			-timeout $timeout
 	} err]} {
 		{*}$on_done 0 $err
@@ -67,14 +72,14 @@ proc rio::claude::http::stream {req on_chunk on_done} {
 # Per-chunk: hand the decoded text to on_chunk. Decoding at the socket (utf-8)
 # means partial multibyte sequences at a chunk boundary are held by Tcl until
 # complete, so on_chunk only ever sees whole characters.
-proc rio::claude::http::_on_data {on_chunk sock token} {
+proc rio::llm::http::_on_data {on_chunk sock token} {
 	fconfigure $sock -encoding utf-8 -translation lf
 	set chunk [read $sock]
 	{*}$on_chunk $chunk
 	return [string length $chunk]
 }
 
-proc rio::claude::http::_on_end {on_done token} {
+proc rio::llm::http::_on_end {on_done token} {
 	lassign [_status $token] status err
 	::http::cleanup $token
 	{*}$on_done $status $err
@@ -82,7 +87,7 @@ proc rio::claude::http::_on_end {on_done token} {
 
 # Map an http token to {status err}: a completed HTTP exchange (even a 4xx/5xx)
 # is {<ncode> ""}; a connection failure/timeout/reset is {0 <reason>}.
-proc rio::claude::http::_status {token} {
+proc rio::llm::http::_status {token} {
 	if {[::http::status $token] eq "ok"} {
 		return [list [::http::ncode $token] ""]
 	}
