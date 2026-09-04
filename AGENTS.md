@@ -3420,6 +3420,24 @@ blend of `editor.bg` toward `editor.fg` for a theme predating the role. The tag 
 **lowered** to the bottom of the priority stack, so syntax colours (foreground only) read
 over it and the selection / find-match / column bands paint above it.
 
+### D61 — Click a gutter number to select its line
+
+The line-number gutter (D49) becomes interactive: **click a number to select that whole
+logical line, drag to extend** the selection line-by-line, up or down — the familiar
+VSCode / editor gesture. An added binding on the gutter canvas, riding the existing seam;
+no structural change, GUI-only, core untouched.
+
+The gutter is a canvas whose y-space **equals** the text widget's — `gutter_redraw` draws
+each number at the text's own `dlineinfo` y — so a click y inverts straight back to a
+logical line with **`index @0,$y`**, exactly reversing how the numbers are placed.
+`gutter_press` anchors at the pressed line; `gutter_motion` extends the inclusive span
+`anchor..current` (min/max swapped, so both drag directions work). The selection runs
+`$a.0 … "$b.0 lineend +1c"` — the same `lineend +1c` newline-reaching trick as D60's band,
+for a full-width line select that **clamps to `end`** on the last, newline-less line. The
+gutter is `-takefocus 0`, so the press moves keyboard focus to the text itself
+(`focus_group` + an explicit `focus`); `cursor_moved` then refreshes the status Ln/Col and
+the D60 current-line band (which follows the caret to the next line's start, as in VSCode).
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

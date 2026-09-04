@@ -34,10 +34,10 @@ Each entry notes its state:
   prompt (v1 validates a single path component). None are structural — each is an added
   verb or an alternative input on the same `fs.*` ops.
 - **Line-number gutter extras** — *deferred* (builds on AGENTS.md D49, which shipped the
-  VSCode-style gutter, on by default, per editor group). Consciously left: **click a
-  number to select the line**, **relative line numbers**, and gutter numbers in the
-  side-by-side **compare panes**. Each rides the same `gutter_redraw` seam — an added
-  binding, an alternate number source, or a second call site — not a structural change.
+  VSCode-style gutter, on by default, per editor group; **click a number to select its
+  line** then landed as D61). Consciously left: **relative line numbers** and gutter
+  numbers in the side-by-side **compare panes**. Each rides the same `gutter_redraw` seam —
+  an alternate number source or a second call site — not a structural change.
 - **Window / taskbar icon** — *deferred.* rio sets no `_NET_WM_ICON`, so the xfwm4 title
   bar and the xfce4-panel taskbar each fall back to their own default (hence the mismatch).
   jka has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image

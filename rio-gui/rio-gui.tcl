@@ -2036,6 +2036,36 @@ proc apply_line_numbers {} {
 	prefs_save
 }
 
+# Click a gutter number to select its whole logical line; drag to extend the selection
+# line-by-line, up or down (D61). The gutter shares the text's vertical extent and scroll
+# position (both grid row 1) and gutter_redraw draws each number at the text widget's own
+# dlineinfo y, so a canvas y inverts back through `index @0,$y`. We anchor at the pressed
+# line and select the inclusive span anchor..current; the `$b.0 lineend +1c` end reaches
+# past the newline for a full-width line select (the D60 curline trick) and clamps to `end`
+# on the last, newline-less line. The gutter is -takefocus 0, so we move keyboard focus to
+# the text ourselves; cursor_moved refreshes the status Ln/Col and the D60 current-line band.
+proc gutter_press {g y} {
+	if {![dict exists $::grp $g]} return
+	focus_group $g
+	focus [gget $g path]
+	set ln [expr {int([[gw $g] index @0,$y])}]
+	set ::gutter_anchor $ln            ;# scalar — only one drag at a time
+	gutter_select $g $ln $ln
+}
+proc gutter_motion {g y} {
+	if {![dict exists $::grp $g] || ![info exists ::gutter_anchor]} return
+	gutter_select $g $::gutter_anchor [expr {int([[gw $g] index @0,$y])}]
+}
+proc gutter_select {g a b} {
+	if {$a > $b} { lassign [list $b $a] a b }
+	set t [gw $g]
+	$t tag remove sel 1.0 end
+	$t tag add sel $a.0 "$b.0 lineend +1c"
+	$t mark set insert "$b.0 lineend +1c"
+	$t see insert
+	cursor_moved $g
+}
+
 # ---------------------------------------------------------------------------
 # Current-line highlight (View ▸ Highlight Current Line). A full-width background
 # band on the LOGICAL line the insert caret sits on, one per editor group so a split
@@ -6771,6 +6801,8 @@ proc make_editor_group {g} {
 	bind $f.gutter <MouseWheel> "$f.t yview scroll \[expr {%D > 0 ? -1 : 1}\] units"
 	bind $f.gutter <Button-4>   [list $f.t yview scroll -1 units]
 	bind $f.gutter <Button-5>   [list $f.t yview scroll  1 units]
+	bind $f.gutter <Button-1>   [list gutter_press  $g %y]  ;# click a number selects its line (D61)
+	bind $f.gutter <B1-Motion>  [list gutter_motion $g %y]  ;# drag to extend, line-by-line
 	editor_zoom_bindings $f.gutter   ;# Ctrl+wheel over the numbers zooms too (D56)
 	bind $f.t <Configure> [list gutter_mark $g]   ;# resize / re-wrap → repaint the gutter
 	scrollbar $f.vsb -orient vertical   -command [list $f.t yview]
