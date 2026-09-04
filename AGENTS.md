@@ -3607,12 +3607,15 @@ window, to be re-hosted into a dock when D35 lands" — forward-looking, but D35
 the item is a **management modal**, not a pane toggle. Its View neighbours are pane toggles
 (Files/Git/Agent/Search) and view preferences (Wrap, Line Numbers); it fit none of them. *Settings*
 already holds the **choosers Extensions feeds** — Agent Provider (D65) and Editing Mode (D38) — and
-its two peer management dialogs, **Preferences…** (D58) and **Keyboard Shortcuts…** (D23). So
-Extensions… now sits in Settings beside Keyboard Shortcuts…, and View ends on its Theme cascade.
-The move also shortens View, serving D64 (keep the View menu within screen height). A `smoke.tcl`
-guard asserts Extensions… is in Settings and gone from View so the placement can't silently drift
-back. (The window, the D39 install machinery, and the D66 provider path are unchanged — only the
-menu entry moved.)
+its two peer management dialogs, **Preferences…** (D58) and **Keyboard Shortcuts…** (D23).
+Extensions… sits **directly under Preferences…**: the two read as the pair of "customize rio"
+windows — Preferences the built-in settings, Extensions the installer for the providers / modes /
+themes / syntax those settings pick from. The Preferences window **mirrors** this with its own
+*Extensions…* button (bottom-left, beside Close), so the pairing holds whichever door you came in
+by. View ends on its Theme cascade; the move also shortens View, serving D64 (keep the View menu
+within screen height). `smoke.tcl` guards assert Extensions… is in Settings (not View) and that the
+Preferences window carries the button, so neither can silently drift. (The window itself, the D39
+install machinery, and the D66 provider path are unchanged — only the entry points moved.)
 
 ---
 

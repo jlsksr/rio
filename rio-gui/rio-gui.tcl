@@ -6881,9 +6881,13 @@ proc preferences_window {} {
 	prefs_fill_agent    $w.body.agent
 	prefs_fill_keyboard $w.body.keyboard
 
+	# Extensions… mirrors the Settings menu, where it sits right under Preferences…
+	# (D67): from here you jump to the installer for the providers/modes/themes/syntax
+	# the categories above pick from. Left of Close; a spacer column keeps them apart.
 	frame $w.btns -background [dict get $c ui.bg]
-	grid [prefs_button $w.btns.close "Close" [list destroy $w]] -row 0 -column 0 -sticky e
-	grid columnconfigure $w.btns 0 -weight 1
+	grid [prefs_button $w.btns.ext   "Extensions…" [list extensions_window]] -row 0 -column 0 -sticky w
+	grid [prefs_button $w.btns.close "Close"       [list destroy $w]]         -row 0 -column 2 -sticky e
+	grid columnconfigure $w.btns 1 -weight 1
 
 	grid $w.cats -row 0 -column 0 -sticky ns   -padx {8 4} -pady 8
 	grid $w.body -row 0 -column 1 -sticky nsew -padx {4 8} -pady 8
@@ -7471,6 +7475,11 @@ menu .m.settings -tearoff 0
 # below stay here too — it is a second door, not a replacement.
 .m.settings add command -label "Preferences…" -accelerator [key_accel preferences] \
 	-command preferences_window
+# Extensions… sits right under Preferences… (D67): both open a management window for
+# customizing rio — Preferences the built-in settings, Extensions the installer for
+# the providers/modes/themes/syntax the choosers below pick from. The Preferences
+# window mirrors this with its own Extensions… button.
+.m.settings add command -label "Extensions…" -command extensions_window
 .m.settings add separator
 # The agent provider and its per-provider key live in cascades filled from the core
 # (providers_menu_fill, mirroring View ▸ Theme): the list scales as providers are
@@ -7492,11 +7501,6 @@ menu .m.settings.editmode -tearoff 0
 .m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
-.m.settings add separator
-# Extensions… opens the installer for the providers, editing modes, themes and syntax
-# the choosers above pick from — a management dialog, a peer of Preferences… and
-# Keyboard Shortcuts…, so it lives here rather than under View's pane toggles (D67).
-.m.settings add command -label "Extensions…" -command extensions_window
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by
 # make_editor_group (editor_bindings + editor_proxy). Only the window-manager close

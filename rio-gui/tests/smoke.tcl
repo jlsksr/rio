@@ -1102,6 +1102,11 @@ proc _menu_has_label {m label} {
 }
 ok "menu: Extensions… under Settings"  [_menu_has_label .m.settings "Extensions…"] 1
 ok "menu: Extensions… gone from View"  [_menu_has_label .m.view "Extensions…"] 0
+# The Preferences window mirrors that with its own Extensions… button (D67).
+preferences_window
+ok "prefs: has an Extensions… button"  [expr {[winfo exists .prefs.btns.ext] \
+	&& [.prefs.btns.ext cget -text] eq "Extensions…"}] 1
+destroy .prefs
 compare_close
 ok "compare: close restores editor" [list [center_shows .groups] [center_shows .cmp]] {1 0}
 ok "compare: close clears flag"     $::compare_shown 0
