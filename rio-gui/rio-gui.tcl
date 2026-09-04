@@ -1095,13 +1095,29 @@ proc populate_nav {} {
 	rl_end $b
 }
 
-# View-menu toggle: show or hide dotfile / hidden entries in the Files pane, then repaint
-# and persist. Off by default, so a fresh pane hides `.git/` and other dotfiles the way
-# `ls` does; on reveals them. populate_nav does the filtering (a name-starts-with-"." skip),
-# so this just re-lists the shown directory. The two-door applier (View menu + Preferences).
+# Toggle: show or hide dotfile / hidden entries in the Files pane, then repaint and persist.
+# Off by default, so a fresh pane hides `.git/` and other dotfiles the way `ls` does; on
+# reveals them. populate_nav does the filtering (a name-starts-with-"." skip), so this just
+# re-lists the shown directory. Three doors drive the same ::show_hidden global through this
+# one applier — the View menu, the Preferences window, and the pane-header glyph button — so
+# all three (and the header glyph) stay in sync for free.
 proc apply_show_hidden {} {
+	nav_hidden_glyph
 	populate_nav
 	prefs_save
+}
+# The pane-header glyph reflects the current state (a filled ◉ dot when hidden files show,
+# a faint dotted ◌ when they are hidden) — a bare glyph, no tooltip, like the ⟳ refresh
+# beside it. Kept in sync by apply_show_hidden, so every door updates it. No-op before the
+# header exists (called from the boot applier once the pane is built).
+proc nav_hidden_glyph {} {
+	if {![winfo exists .pfiles.hdr.hidden]} return
+	.pfiles.hdr.hidden configure -text [expr {$::show_hidden ? "◉" : "◌"}]
+}
+# The header button's action: flip the global and run the shared applier.
+proc nav_toggle_hidden {} {
+	set ::show_hidden [expr {!$::show_hidden}]
+	apply_show_hidden
 }
 
 # The git status for the open project, as an abspath -> XY-status dict (the two
@@ -4243,7 +4259,7 @@ proc apply_theme {theme} {
 	           .pfiles .pfiles.hdr .pgit .pgit.hdr} {
 		$w configure -background [dict get $c ui.bg]
 	}
-	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pgit.hdr.branch .pgit.hdr.refresh} {
+	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pfiles.hdr.hidden .pgit.hdr.branch .pgit.hdr.refresh} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
@@ -5713,10 +5729,14 @@ label .pfiles.hdr.head -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
 label .pfiles.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
 	-background "#dddddd" -foreground black
+label .pfiles.hdr.hidden -text "◌" -font {monospace 9} -padx 6 \
+	-background "#dddddd" -foreground black
 pack .pfiles.hdr.refresh -side right
+pack .pfiles.hdr.hidden  -side right   ;# ◉/◌ toggle for hidden files, left of ⟳ (D62)
 pack .pfiles.hdr.head    -side left -fill x -expand 1
 pack .pfiles.hdr -side top -fill x
 bind .pfiles.hdr.refresh <Button-1> populate_nav
+bind .pfiles.hdr.hidden  <Button-1> nav_toggle_hidden
 frame .pfiles.well -borderwidth 2 -relief sunken -background white
 scrollbar .pfiles.well.sb -command {.pfiles.well.body yview}
 text .pfiles.well.body -width 26 -height 10 -wrap none -state disabled \
@@ -7328,6 +7348,7 @@ apply_wrap                 ;# sync wrap + the horizontal scrollbar to ::wrap_lin
 apply_wrap_indent          ;# size the wrapped-line indents to each buffer (if enabled)
 apply_line_numbers         ;# grid each group's gutter to ::line_numbers (default on)
 apply_curline              ;# paint the caret-line band on each group (default on)
+nav_hidden_glyph           ;# sync the Files-pane ◉/◌ toggle to ::show_hidden (D62)
 apply_editmode             ;# attach the editing mode (windows default) to the RioMode tag (D38)
 adopt_agent_status         ;# mirror the core's live provider/auto-accept; don't overwrite it (D30)
 foreach f $argv {

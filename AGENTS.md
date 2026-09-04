@@ -3449,11 +3449,20 @@ items" checkbox is the same affordance, so a View-menu home reads as intuitive.
 The filter is one line in `populate_nav`: skip an entry whose name starts with `.` unless
 `::show_hidden`. It lives at the render loop, so the `..` parent row (rendered explicitly,
 not from `fs.list`) is never filtered, and the core's `fs.list` is untouched — this is
-GUI-local chrome, consistent with the pane being GUI-local (not a core "view buffer"). The
-toggle rides the **two-door pattern** (D58): the View checkbutton and the Preferences check
-drive the same `::show_hidden` global through `apply_show_hidden`, which repaints the pane
-(`populate_nav`) and persists (`prefs_save`); it round-trips through `prefs.json` like the
-other view flags.
+GUI-local chrome, consistent with the pane being GUI-local (not a core "view buffer").
+
+The toggle extends the two-door pattern (D58) to a **third door**: the View menu
+checkbutton, the Preferences window check, **and a glyph button in the Files-pane header**
+(next to the ⟳ refresh) all drive the same `::show_hidden` global through the one applier,
+`apply_show_hidden`, which repaints the pane (`populate_nav`), persists (`prefs_save`), and
+re-syncs the header glyph. The header button is the odd one out — a bare `label` +
+`<Button-1>` (rio's header-control idiom, no tooltip system), so it must **reflect state in
+the glyph itself**: `nav_hidden_glyph` shows a filled **◉** when hidden files are visible
+and a faint dotted **◌** when they are hidden — the dotfile "dot" present vs. ghosted, both
+monochrome U+25xx (the iconography rule). The menu/prefs checkbuttons repaint their own
+checkmark from the `-variable`; the label can't, so every door funnels through
+`apply_show_hidden` and the boot applier calls `nav_hidden_glyph` once so a persisted
+on-state shows on startup. Round-trips through `prefs.json` like the other view flags.
 
 ---
 

@@ -91,5 +91,18 @@ ok "prefs: same var as menu"     [.prefs.body.view.hidden cget -variable] \
                                  [.m.view entrycget "Show Hidden Files" -variable]
 destroy .prefs
 
+# --- third door: the pane-header glyph button ----------------------------------------
+ok "button: exists in files header" [winfo exists .pfiles.hdr.hidden] 1
+ok "button: click wired to toggle"  [bind .pfiles.hdr.hidden <Button-1>] nav_toggle_hidden
+set ::show_hidden 0 ; nav_hidden_glyph
+ok "button: hollow glyph when off"  [.pfiles.hdr.hidden cget -text] ◌
+nav_toggle_hidden                    ;# a real click flips the global + repaints + reglyphs
+ok "button: toggles the global on"  $::show_hidden 1
+ok "button: filled glyph when on"   [.pfiles.hdr.hidden cget -text] ◉
+has "button: reveals .hidden"       .hidden 1
+nav_toggle_hidden
+ok "button: toggles back off"       $::show_hidden 0
+has "button: hides .hidden again"   .hidden 0
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
