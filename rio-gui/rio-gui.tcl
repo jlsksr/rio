@@ -1113,6 +1113,7 @@ proc apply_show_hidden {} {
 proc nav_hidden_glyph {} {
 	if {![winfo exists .pfiles.hdr.hidden]} return
 	.pfiles.hdr.hidden configure -text [expr {$::show_hidden ? "◉" : "◌"}]
+	tooltip .pfiles.hdr.hidden [expr {$::show_hidden ? "Hide hidden files" : "Show hidden files"}]
 }
 # The header button's action: flip the global and run the shared applier.
 proc nav_toggle_hidden {} {
@@ -5713,6 +5714,57 @@ frame .sitebottom.body -background "#dddddd"
 pack .sitebottom.tabs -side top -fill x
 pack .sitebottom.body -side top -fill both -expand 1
 
+# ---------------------------------------------------------------------------
+# Hover tooltips (D63). rio's little header controls are bare glyphs (⟳ refresh, ◉/◌
+# hidden toggle, …) with no text label to say what they do; a tooltip names them on hover.
+# One shared borderless toplevel (.tt), shown after a short delay below the widget and
+# hidden on leave. The classic Windows info-tip look — pale yellow, thin dark border, black
+# text — theme-independent momentary chrome (it never has to match the pane behind it).
+# `tooltip $w $text` attaches the behaviour; re-calling it just updates the text (so a
+# stateful control like the hidden toggle can re-label itself). The text is stashed per
+# widget in ::tt_text so an update needs no re-bind churn.
+# ---------------------------------------------------------------------------
+set ::tt_after ""
+proc tooltip {w text} {
+	set ::tt_text($w) $text
+	bind $w <Enter>      [list tooltip_schedule $w]
+	bind $w <Leave>      tooltip_hide
+	bind $w <ButtonPress> tooltip_hide   ;# ignored where a more-specific <Button-1> exists; <Leave> covers those
+}
+proc tooltip_schedule {w} {
+	tooltip_cancel
+	set ::tt_after [after 600 [list tooltip_show $w]]
+}
+proc tooltip_cancel {} {
+	if {$::tt_after ne ""} { after cancel $::tt_after ; set ::tt_after "" }
+}
+proc tooltip_hide {} {
+	tooltip_cancel
+	catch {wm withdraw .tt}
+}
+proc tooltip_show {w} {
+	set ::tt_after ""
+	if {![winfo exists $w] || ![info exists ::tt_text($w)]} return
+	if {![winfo exists .tt]} {
+		toplevel .tt -background black          ;# the 1px border is this bg showing past the label
+		wm overrideredirect .tt 1
+		wm withdraw .tt
+		label .tt.l -background "#ffffe1" -foreground black -font RioUIFont \
+			-padx 4 -pady 1 -justify left
+		pack .tt.l -padx 1 -pady 1
+	}
+	.tt.l configure -text $::tt_text($w)
+	# Sit just below the control's left edge; nudge left if it would run off the screen.
+	update idletasks
+	set x [winfo rootx $w]
+	set y [expr {[winfo rooty $w] + [winfo height $w] + 2}]
+	set over [expr {$x + [winfo reqwidth .tt] - [winfo screenwidth .tt]}]
+	if {$over > 0} { set x [expr {$x - $over - 4}] }
+	wm geometry .tt +$x+$y
+	wm deiconify .tt
+	raise .tt
+}
+
 # File pane body (D42): a header above a sunken "well" holding the rich-list view —
 # a read-only text widget the navigator fills. It is GUI-local CHROME, not a core
 # buffer: -state disabled, never renamed/proxied like the editor, never editable.
@@ -5737,6 +5789,7 @@ pack .pfiles.hdr.head    -side left -fill x -expand 1
 pack .pfiles.hdr -side top -fill x
 bind .pfiles.hdr.refresh <Button-1> populate_nav
 bind .pfiles.hdr.hidden  <Button-1> nav_toggle_hidden
+tooltip .pfiles.hdr.refresh "Refresh"   ;# the hidden toggle's tooltip is set (per state) by nav_hidden_glyph
 frame .pfiles.well -borderwidth 2 -relief sunken -background white
 scrollbar .pfiles.well.sb -command {.pfiles.well.body yview}
 text .pfiles.well.body -width 26 -height 10 -wrap none -state disabled \
@@ -5763,6 +5816,7 @@ pack .pgit.hdr.refresh -side right
 pack .pgit.hdr.branch  -side left -fill x -expand 1
 pack .pgit.hdr -side top -fill x
 bind .pgit.hdr.refresh <Button-1> refresh_git
+tooltip .pgit.hdr.refresh "Refresh"
 frame .pgit.well -borderwidth 2 -relief sunken -background white
 scrollbar .pgit.well.sb -command {.pgit.well.body yview}
 text .pgit.well.body -width 26 -height 8 -wrap none -state disabled \

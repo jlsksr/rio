@@ -3456,13 +3456,36 @@ checkbutton, the Preferences window check, **and a glyph button in the Files-pan
 (next to the ⟳ refresh) all drive the same `::show_hidden` global through the one applier,
 `apply_show_hidden`, which repaints the pane (`populate_nav`), persists (`prefs_save`), and
 re-syncs the header glyph. The header button is the odd one out — a bare `label` +
-`<Button-1>` (rio's header-control idiom, no tooltip system), so it must **reflect state in
-the glyph itself**: `nav_hidden_glyph` shows a filled **◉** when hidden files are visible
+`<Button-1>` (rio's header-control idiom; a hover tooltip names it, D63), so it also
+**reflects state in the glyph itself** for at-a-glance reading:
+`nav_hidden_glyph` shows a filled **◉** when hidden files are visible
 and a faint dotted **◌** when they are hidden — the dotfile "dot" present vs. ghosted, both
 monochrome U+25xx (the iconography rule). The menu/prefs checkbuttons repaint their own
 checkmark from the `-variable`; the label can't, so every door funnels through
 `apply_show_hidden` and the boot applier calls `nav_hidden_glyph` once so a persisted
 on-state shows on startup. Round-trips through `prefs.json` like the other view flags.
+
+### D63 — Hover tooltips for glyph controls
+
+rio's little header controls are **bare glyphs** — the ⟳ refreshes, the D62 ◉/◌ hidden
+toggle — with no text label to say what they do. A small **hover tooltip** names them.
+`tooltip $w $text` is the whole public surface: it stashes the text (in `::tt_text($w)`)
+and binds `<Enter>`/`<Leave>`; a single shared borderless toplevel `.tt` is built lazily
+and reused, shown ~600 ms after the pointer settles (one `after` timer in `::tt_after`,
+cancelled on leave) just below the control, nudged left if it would run off-screen.
+
+**Look:** the classic Windows info-tip — pale yellow `#ffffe1`, black text, a 1 px dark
+border (the toplevel's black background showing past a 1 px-padded label). Deliberately
+**theme-independent**: a tooltip is momentary chrome that never has to match the pane
+behind it, and the Win98/2000 info-tip is instantly legible in any theme (black on yellow).
+This is the one spot that opts out of the theme roles by design.
+
+**Stateful labels:** re-calling `tooltip $w $text` just overwrites the stash (no re-bind
+churn), so a control whose meaning flips can re-label itself — `nav_hidden_glyph` sets
+"Show hidden files" / "Hide hidden files" alongside the ◉/◌ swap. Hiding is on `<Leave>`
+plus a best-effort `<ButtonPress>` (shadowed on controls that already bind `<Button-1>`,
+where `<Leave>` covers it). Attached to the files/git Refresh glyphs and the hidden toggle;
+the same one-liner extends to any future bare-glyph control.
 
 ---
 
