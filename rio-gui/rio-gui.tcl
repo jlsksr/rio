@@ -3473,8 +3473,8 @@ proc remote_browse_dialog {title mode {seed ""}} {
 	listbox $w.body.list -height 16 -width 54 -activestyle none -exportselection 0 \
 		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-selectbackground [dict get $c editor.selection] \
-		-selectforeground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] \
+		-selectforeground [dict get $c ui.bg] \
 		-yscrollcommand {autoscroll .rbrowse.body.sb .rbrowse.body.list}
 	pack $w.body.list -side left -fill both -expand 1
 
@@ -5494,8 +5494,8 @@ proc extensions_window {} {
 	listbox $w.body.list -height 12 -width 72 -activestyle none -exportselection 0 \
 		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-selectbackground [dict get $c editor.selection] \
-		-selectforeground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] \
+		-selectforeground [dict get $c ui.bg] \
 		-yscrollcommand {autoscroll .extw.body.sb .extw.body.list}
 	pack $w.body.list -side left -fill both -expand 1
 	bind $w.body.list <<ListboxSelect>> extw_select
@@ -5765,8 +5765,8 @@ proc extw_sources_dialog {} {
 	listbox $w.body.list -height 8 -width 60 -activestyle none -exportselection 0 \
 		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-selectbackground [dict get $c editor.selection] \
-		-selectforeground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] \
+		-selectforeground [dict get $c ui.bg] \
 		-yscrollcommand {autoscroll .extsrc.body.sb .extsrc.body.list}
 	pack $w.body.list -side left -fill both -expand 1
 	frame $w.add -background [dict get $c ui.bg]
