@@ -3366,33 +3366,26 @@ ships **unbound** (empty chord — no collision), so a user can assign one in th
 
 ---
 
-### D59 — Menus highlight on hover, not on the click that opens them
+### D59 — Menus highlight on hover, not on the click that opens them *(reverted)*
 
-A click/hover inconsistency in Tk's default menus: **clicking** a menubar item posts its
-dropdown and highlights the **first entry** (Tk's `MenuInvoke`, on a mouse-button release
-over a cascade, calls `MenuFirstEntry` — `menu.tcl`), but **sliding** the pointer to an
-adjacent menu posts it with nothing highlighted (that path, `MenuMotion`, only activates
-what's under the pointer). So a click pre-selects a row a hover would not. We take hover's
-rule everywhere — **highlight only what the pointer is over** — by suppressing that one
-activation on the mouse path.
+**Reverted.** The intent was to fix a click/hover inconsistency in Tk's default menus:
+**clicking** a menubar item posts its dropdown and highlights the **first entry** (Tk's
+`MenuInvoke`, on a mouse-button release over a cascade, calls `MenuFirstEntry` —
+`menu.tcl`), while **sliding** the pointer to an adjacent menu posts it with nothing
+highlighted. The shipped fix (X11 only) set a `::rio_menu_click` flag around a *replaced*
+`Menu <ButtonRelease>` class binding and renamed/wrapped `tk::MenuFirstEntry` to skip the
+first-entry activation on the mouse path.
 
-The mechanism is deliberately narrow: a `::rio_menu_click` flag is set around a replaced
-`Menu <ButtonRelease>` binding (which is the *only* mouse route into `MenuInvoke`), and
-`tk::MenuFirstEntry` is wrapped to honor it — when the flag is set it sets **focus only**
-(so keyboard navigation still works right after a click) and skips the visible activation.
-Every **keyboard** route (`<space>`/`<Return>`/arrows) calls `MenuInvoke %W 0` with the
-flag clear and reaches the original (renamed `…_rio`), so keyboard traversal still lands on
-the first entry, as it must. `MenuInvoke` calls `MenuFirstEntry` synchronously, so a
-`try … finally` reset around the one binding scopes the suppression to exactly that
-dispatch. Nothing in the system Tk library is edited — the override lives in rio's source
-and, because it rebinds the shared `Menu` class, applies to context and dock menus too, so
-the no-pre-highlight rule is consistent app-wide.
-
-**X11 only.** The guard is `[tk windowingsystem] eq "x11"`: X11 is where Tk draws the
-menubar itself, so it is where this override applies — and X11/Linux is a first-class rio
-target (core and GUI alike), so this is a fix to a first-class surface, not a nicety. On
-Windows and macOS the menubar is the native OS widget whose highlight behavior the OS
-owns; the Tcl code is inert there, so those platforms are simply unaffected.
+That mechanism reached into Tk's own menu **grab/post/invoke state machine** — the one it
+patched to read as narrow — and in real use produced **intermittent misfires**: a click
+that immediately invoked the dropdown's first item, and clicks that stuck (a post that
+didn't settle). Rebinding the shared `Menu` class's release and interposing on
+`MenuFirstEntry` is too coupled to Tk's internal event/grab ordering to be reliable, so it
+was removed and menus are back to **stock Tk behaviour**. The cosmetic click-vs-hover
+first-entry difference is accepted. The `rio-gui.tcl` site carries a "don't re-add"
+breadcrumb; the guard test (`tests/menubar.tcl`) was deleted with the code. If the polish
+is wanted again, it needs a mechanism that does **not** rebind `Menu <ButtonRelease>` or
+override the `MenuFirstEntry`/`MenuInvoke` machinery.
 
 ---
 
