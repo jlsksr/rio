@@ -71,7 +71,7 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
 - **Agent chat** — a right-hand chat column wired to several providers: a
   built-in offline **echo** provider and **Claude** over the official Anthropic API
   ship in the box, and **ChatGPT** over the OpenAI API installs from a repository as
-  an agent-provider extension (*View ▸ Extensions…*) — it is OpenAI-*compatible*, so
+  an agent-provider extension (*Settings ▸ Extensions…*) — it is OpenAI-*compatible*, so
   pointing its base URL at a **local** server (Ollama, llama-server, LM Studio, vLLM)
   runs a local model through the same path. Each provider brings its own API key,
   entered under *Settings ▸ Agent API Key* (a local server may need none). The agent lives in the core
@@ -109,7 +109,7 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
 - **Extensions & repositories** — install syntax highlighters, editing modes,
   and themes from **repositories you choose**: plain http-served directories,
   apt-sources style, no marketplace and no central index (see below). Browse,
-  install, and remove in *View ▸ Extensions…*; every installed extension shows
+  install, and remove in *Settings ▸ Extensions…*; every installed extension shows
   which repository it came from, same-name extensions from different authors
   coexist and you pick, and it all works over a remote core too.
 - **Custom keybindings** — every shortcut is one data table. Remap them in
@@ -155,7 +155,7 @@ is **no marketplace, no store, no central index**: extensions are distributed
 the way Debian distributes packages and OpenBSD serves its mirrors — you keep
 a short list of **repositories**, and a repository is nothing more than a
 **plain http-served directory** anyone can host with a couple of text files in
-it. Add a URL under *View ▸ Extensions… ▸ Repositories…* and everything it
+it. Add a URL under *Settings ▸ Extensions… ▸ Repositories…* and everything it
 carries is yours to browse and install; publishing means copying files into
 your webdir, and it will still work when today's hosting fashions are gone.
 
@@ -166,7 +166,7 @@ same name, both are listed with author and source and **you choose**; and
 installing code (a highlighter, a mode) says plainly that it is code, next to
 the URL you're trusting. Themes are data, parsed and never executed.
 
-*Installing:* View ▸ Extensions…. *Publishing your own repository:* the
+*Installing:* Settings ▸ Extensions…. *Publishing your own repository:* the
 complete spec — three small text files — is in
 [CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).
 

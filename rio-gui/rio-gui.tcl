@@ -5440,7 +5440,7 @@ proc ext_reload {kind} {
 }
 
 # ---------------------------------------------------------------------------
-# The Extensions window (AGENTS.md D39): View ▸ Extensions… — where the user
+# The Extensions window (AGENTS.md D39; moved to Settings in D67): Settings ▸ Extensions… — where the user
 # browses every configured repository, chooses BETWEEN same-name extensions
 # (different authors, different versions — each variant its own line with its
 # provenance), installs, and removes. Naming: the WINDOW is "Extensions" (what
@@ -7457,8 +7457,8 @@ menu .m.view.layout -tearoff 0
 # is up — installed themes (D39) appear here like shipped ones.
 menu .m.view.theme -tearoff 0
 .m.view add cascade -label "Theme" -menu .m.view.theme
-.m.view add separator
-.m.view add command -label "Extensions…" -command extensions_window
+# Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
+# installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
 # The Tabs menu (D57): every open buffer listed by name — the reliable way to reach a
 # tab when the window is too narrow to show its handle. A pure navigation list (the
 # Multi-Line Tabs view preference lives in the View menu); rebuilt each time it opens
@@ -7492,6 +7492,11 @@ menu .m.settings.editmode -tearoff 0
 .m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
+.m.settings add separator
+# Extensions… opens the installer for the providers, editing modes, themes and syntax
+# the choosers above pick from — a management dialog, a peer of Preferences… and
+# Keyboard Shortcuts…, so it lives here rather than under View's pane toggles (D67).
+.m.settings add command -label "Extensions…" -command extensions_window
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by
 # make_editor_group (editor_bindings + editor_proxy). Only the window-manager close

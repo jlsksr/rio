@@ -2539,7 +2539,8 @@ of vouched repository paths — the operator confirming "these are mine") but
 consumed by no v1 code: it's the later basis for "host-validated" badges and
 official approval, costing publishers one static file today.
 
-**The UI is the Extensions window** (*View ▸ Extensions…*) — deliberated as a
+**The UI is the Extensions window** (*Settings ▸ Extensions…* — under View until
+D67) — deliberated as a
 side-dock pane vs a window with the user: the dock's narrow fixed-width panes
 (files/git) can't carry a browse-and-compare surface, and VSCode's own
 answer (detail opens in an editor tab) needs D35 machinery that doesn't exist
@@ -3599,6 +3600,22 @@ the same installed extension by pointing its `messages_url` at localhost (D8/D65
 
 ---
 
+### D67 — "Extensions…" moves from the View menu to Settings
+
+A small placement fix. D39 put the Extensions window under *View* as "rio's first D35-style tool
+window, to be re-hosted into a dock when D35 lands" — forward-looking, but D35 hasn't landed and
+the item is a **management modal**, not a pane toggle. Its View neighbours are pane toggles
+(Files/Git/Agent/Search) and view preferences (Wrap, Line Numbers); it fit none of them. *Settings*
+already holds the **choosers Extensions feeds** — Agent Provider (D65) and Editing Mode (D38) — and
+its two peer management dialogs, **Preferences…** (D58) and **Keyboard Shortcuts…** (D23). So
+Extensions… now sits in Settings beside Keyboard Shortcuts…, and View ends on its Theme cascade.
+The move also shortens View, serving D64 (keep the View menu within screen height). A `smoke.tcl`
+guard asserts Extensions… is in Settings and gone from View so the placement can't silently drift
+back. (The window, the D39 install machinery, and the D66 provider path are unchanged — only the
+menu entry moved.)
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
@@ -4136,7 +4153,7 @@ Don't let the same fact live in two docs where it can drift.
 - **provenance ledger** — the GUI-side record of installed extensions
   (`extensions.json`): which source URL and version each `kind/name` came
   from, and its payload files (D39).
-- **Extensions window** — the non-modal *View ▸ Extensions…* browser: one row
+- **Extensions window** — the non-modal *Settings ▸ Extensions…* browser: one row
   per (kind, name), every variant with its provenance in the detail section;
   rio's first D35-style tool window (D39).
 - **safe-name rule** — `^[A-Za-z0-9][A-Za-z0-9._-]*$`, required of every

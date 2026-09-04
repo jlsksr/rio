@@ -250,15 +250,15 @@ saved the moment you change it:
 
 **Editing modes beyond Windows.** The core ships the **Windows** editing mode only.
 The **emacs** and **vi** modes install as **extensions** (`kind = mode`): add a
-repository that carries them under *View ▸ Extensions… ▸ Repositories…* and install
-from *View ▸ Extensions…*, or drop the module by hand into `~/.config/rio/modes/`
+repository that carries them under *Settings ▸ Extensions… ▸ Repositories…* and install
+from *Settings ▸ Extensions…*, or drop the module by hand into `~/.config/rio/modes/`
 (a `mode` extension installs there — exactly a hand-dropped `modes/*.tcl`). Once
 installed, the mode appears in *Settings ▸ Editing Mode*. If a saved `editmode` is
 no longer installed, rio falls back to Windows rather than failing. The source tree
 carries a ready-to-serve repository of both under `extensions/` — rsync it to a
 plain-HTTP webdir and it *is* the repository.
 
-**Your repository list, by hand.** The URLs you add under *View ▸ Extensions… ▸
+**Your repository list, by hand.** The URLs you add under *Settings ▸ Extensions… ▸
 Repositories…* are just an apt-style sources file you can edit yourself:
 `$XDG_CONFIG_HOME/rio/sources.list` (default `~/.config/rio/sources.list`), **one
 `http://` base URL per line**, `#` comments and blank lines allowed. The dialog reads

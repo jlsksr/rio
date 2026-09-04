@@ -1092,6 +1092,16 @@ ok "view: top level stays short"    [expr {[.m.view index end] <= 20}] 1
 ok "view: Dock Side submenu"        [expr {[winfo exists .m.view.dock] && [.m.view.dock index "Left"] ne ""}] 1
 ok "view: Font & Zoom submenu"      [expr {[winfo exists .m.view.zoom] && [.m.view.zoom index "Zoom In"] ne ""}] 1
 ok "view: Editor Layout submenu"    [expr {[winfo exists .m.view.layout] && [.m.view.layout index "Split Editor"] ne ""}] 1
+# Extensions… is a management dialog (installs providers/modes/themes), so it lives in
+# Settings beside Preferences… / Keyboard Shortcuts…, not under View's pane toggles (D67).
+proc _menu_has_label {m label} {
+	for {set i 0} {$i <= [$m index end]} {incr i} {
+		if {![catch {$m entrycget $i -label} l] && $l eq $label} { return 1 }
+	}
+	return 0
+}
+ok "menu: Extensions… under Settings"  [_menu_has_label .m.settings "Extensions…"] 1
+ok "menu: Extensions… gone from View"  [_menu_has_label .m.view "Extensions…"] 0
 compare_close
 ok "compare: close restores editor" [list [center_shows .groups] [center_shows .cmp]] {1 0}
 ok "compare: close clears flag"     $::compare_shown 0
