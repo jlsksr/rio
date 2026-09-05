@@ -35,9 +35,9 @@ Each entry notes its state:
   verb or an alternative input on the same `fs.*` ops.
 - **Line-number gutter extras** — *deferred* (builds on AGENTS.md D49, which shipped the
   VSCode-style gutter, on by default, per editor group; **click a number to select its
-  line** then landed as D61). Consciously left: **relative line numbers** and gutter
-  numbers in the side-by-side **compare panes**. Each rides the same `gutter_redraw` seam —
-  an alternate number source or a second call site — not a structural change.
+  line** landed as D61, and **relative line numbers** — vim's hybrid — as D71).
+  Consciously left: gutter numbers in the side-by-side **compare panes** — the same
+  `gutter_redraw` seam at a second call site, not a structural change.
 - **Menu overflow at scale** — *deferred.* The fixed menus (File/Edit/View/Settings) are
   kept within screen height by grouping into submenus (AGENTS.md D64). Still open: the
   **data-driven, unbounded** menus — the **Theme** cascade (grows with installed themes,

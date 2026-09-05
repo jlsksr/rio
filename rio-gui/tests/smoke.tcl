@@ -409,6 +409,23 @@ ok "gutter: re-gridded when on"  [expr {[llength [grid info .eg0.gutter]] > 0}] 
 set ::line_numbers 0 ; prefs_save ; set ::line_numbers 1 ; prefs_load
 ok "gutter: pref round-trips"    $::line_numbers                      0
 set ::line_numbers 1 ; apply_line_numbers ; prefs_save   ;# restore the default for later tests
+
+# --- relative line numbers (gutter modifier) ---------------------------------
+# Painted glyphs can't be asserted headless (dlineinfo needs a mapped window, as above),
+# so the number FORMULA lives in the pure gutter_label helper and is tested directly:
+# absolute when off; with it on, the caret line keeps its absolute number and every other
+# line shows its unsigned distance (vim's hybrid number+relativenumber).
+ok "relnum: default off"          $::relative_line_numbers        0
+ok "relnum: off is absolute"      [gutter_label 7 20 0]           7
+ok "relnum: caret line absolute"  [gutter_label 20 20 1]          20
+ok "relnum: above caret distance" [gutter_label 17 20 1]          3
+ok "relnum: below caret distance" [gutter_label 26 20 1]          6
+ok "relnum: distance unsigned"    [gutter_label 1 4 1]            3
+# Persisted like the other view toggles (prefs_load reads back what prefs_save wrote).
+set ::relative_line_numbers 1 ; prefs_save ; set ::relative_line_numbers 0 ; prefs_load
+ok "relnum: pref round-trips"     $::relative_line_numbers        1
+set ::relative_line_numbers 0 ; apply_relnum ; prefs_save   ;# restore default for later tests
+
 do_close ; do_close                                      ;# close the two temp buffers
 
 # --- cursor position in the status bar ---------------------------------------

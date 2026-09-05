@@ -3702,6 +3702,29 @@ disabled with a hint when no project is open. The starter file is **empty on pur
 the teaching lives in the dialog and the docs (jka: "the docs and UI should make clear
 where is what"), not in seeded template text that would otherwise leak into the prompt.
 
+### D71 — Relative line numbers (gutter modifier)
+
+The line-number gutter (D49) gains an optional **relative** mode: every line but the
+caret's shows its **distance** from the caret line rather than its absolute number, so a
+`3j` / `5k` motion count is read straight off the gutter. **Off by default;** a toggle
+sits with the other display switches in **View ▸ Relative Line Numbers** and the
+Preferences View category (one global `::relative_line_numbers`, one applier
+`apply_relnum` — the two-door pattern of D58/D60, so menu and window stay in sync).
+
+It is a **hybrid** (vim's `number` + `relativenumber`): the caret's own line keeps its
+**absolute** number as a where-am-I anchor, every other line its unsigned distance. It is
+a **modifier on the shown gutter** — `gutter_redraw` returns early when the gutter is
+hidden — not a third gutter state, so it composes with the on/off of D49 and needs no new
+width logic: the gutter stays sized to the absolute last-line digit count, so toggling
+relative (or moving the caret) never reflows it.
+
+Relative numbers must **follow the caret**, so the repaint rides the same caret-move seam
+D60 built: `curline_update` (called from `cursor_moved`, `refresh_status`, and the
+search-jump) schedules an idle-coalesced `gutter_redraw` whenever the mode is on. The one
+piece of real logic — the number a row shows — is factored into a **pure** `gutter_label
+{ln caret relative}` helper so it unit-tests headless, where the *painted* glyphs cannot
+(`dlineinfo` needs a mapped window — the D49 gutter-smoke limitation).
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

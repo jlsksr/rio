@@ -140,6 +140,7 @@ set ::wrap_lines 0     ;# 0 = no wrap (horizontal scrollbar) | 1 = word wrap
 set ::wrap_indent 0    ;# with wrap on: 0 = only line 1 indented | 1 = align wrapped lines
 set ::line_numbers 1   ;# 1 = show a line-number gutter down each editor group (View menu)
 set ::highlight_current_line 1 ;# 1 = tint the logical line the caret sits on (View menu; per group)
+set ::relative_line_numbers 0 ;# 1 = gutter shows each line's distance from the caret line (hybrid: absolute on the caret line); a modifier on ::line_numbers (View menu)
 set ::show_hidden 0    ;# 1 = show dotfile / hidden entries in the Files pane (View menu; default hides, like ls)
 set ::col_on 0         ;# column/block editing (Ctrl+Shift+drag) enabled? (D40)
 set ::col_active 0     ;# a column selection is currently live
@@ -2016,6 +2017,15 @@ proc gutter_mark {g} {
 	after idle   [list gutter_redraw $g]
 }
 
+# The number a gutter row paints for logical line `ln` when the caret sits on line
+# `caret`. Absolute normally; with relative numbering on, every line BUT the caret's
+# shows its DISTANCE from the caret (vim's hybrid number+relativenumber — the caret line
+# keeps its absolute number as a where-am-I anchor). Pure (no Tk) so it unit-tests, where
+# the painted glyphs can't (dlineinfo needs a mapped window — see the D49 gutter smoke).
+proc gutter_label {ln caret relative} {
+	return [expr {$relative && $ln != $caret ? abs($ln - $caret) : $ln}]
+}
+
 # Repaint group g's line-number canvas to match its visible lines. The width (sized
 # to the last line's digit count, min two) is set even off-screen so it is stable
 # without a render; the numbers themselves are drawn only once the canvas is mapped —
@@ -2039,12 +2049,13 @@ proc gutter_redraw {g} {
 	set top [expr {int([$t index @0,0])}]
 	set bot [expr {int([$t index @0,[winfo height $win]])}]
 	if {$bot > $last} { set bot $last }
+	set caret [expr {int([$t index insert])}]   ;# anchor for relative numbering
 	for {set ln $top} {$ln <= $bot} {incr ln} {
 		set dl [$t dlineinfo $ln.0]
 		if {$dl eq ""} continue
 		set y [expr {[lindex $dl 1] + [lindex $dl 3] / 2}]
-		$gut create text [expr {$w - 6}] $y -text $ln -anchor e \
-			-fill $fg -font RioEditorFont
+		$gut create text [expr {$w - 6}] $y -anchor e -fill $fg -font RioEditorFont \
+			-text [gutter_label $ln $caret $::relative_line_numbers]
 	}
 }
 
@@ -2111,6 +2122,7 @@ proc gutter_select {g a b} {
 proc curline_update {g} {
 	if {![dict exists $::grp $g]} return
 	set t [gw $g]
+	if {$::relative_line_numbers} { gutter_mark $g }  ;# relative gutter is caret-anchored — repaint as the caret moves (idle-coalesced; gutter_redraw no-ops when the gutter is hidden)
 	$t tag remove curline 1.0 end
 	if {!$::highlight_current_line} return
 	$t tag add curline "insert linestart" "insert lineend +1c"
@@ -2119,6 +2131,15 @@ proc curline_update {g} {
 # View-menu toggle: re-band (or clear) every group, then persist.
 proc apply_curline {} {
 	foreach g $::groups { curline_update $g }
+	prefs_save
+}
+
+# View-menu toggle: relative numbering is a modifier on the shown gutter, so just repaint
+# every group's gutter (gutter_redraw no-ops when the gutter is hidden), then persist. The
+# gutter's width stays sized to the absolute last-line digits, so toggling relative — or
+# moving the caret — never reflows it.
+proc apply_relnum {} {
+	foreach g $::groups { gutter_redraw $g }
 	prefs_save
 }
 
@@ -4905,6 +4926,7 @@ proc prefs_load {} {
 	if {[dict exists $d wrap_indent]} { set ::wrap_indent [expr {[dict get $d wrap_indent] ? 1 : 0}] }
 	if {[dict exists $d line_numbers]} { set ::line_numbers [expr {[dict get $d line_numbers] ? 1 : 0}] }
 	if {[dict exists $d highlight_current_line]} { set ::highlight_current_line [expr {[dict get $d highlight_current_line] ? 1 : 0}] }
+	if {[dict exists $d relative_line_numbers]} { set ::relative_line_numbers [expr {[dict get $d relative_line_numbers] ? 1 : 0}] }
 	if {[dict exists $d show_hidden]} { set ::show_hidden [expr {[dict get $d show_hidden] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
@@ -4947,6 +4969,7 @@ proc prefs_save {} {
 			wrap_indent $::wrap_indent \
 			line_numbers $::line_numbers \
 			highlight_current_line $::highlight_current_line \
+			relative_line_numbers $::relative_line_numbers \
 			show_hidden $::show_hidden \
 			column_edit $::col_on \
 			tab_layout  $::tab_layout \
@@ -6831,6 +6854,7 @@ proc prefs_fill_view {f} {
 	grid [prefs_check $f.wrapind "Indent Wrapped Lines" ::wrap_indent apply_wrap_indent] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.lnum    "Line Numbers"         ::line_numbers apply_line_numbers] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.curln   "Highlight Current Line" ::highlight_current_line apply_curline] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_check $f.relnum  "Relative Line Numbers"  ::relative_line_numbers apply_relnum] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.mtab    "Multi-Line Tabs"      ::tab_layout  tab_layout_apply \
 		-onvalue multi -offvalue scroll] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.hidden  "Show Hidden Files"    ::show_hidden apply_show_hidden] -row [incr r] -column 0 -sticky w -pady 1
@@ -7492,6 +7516,8 @@ menu .m.view -tearoff 0
 	-variable ::line_numbers -command apply_line_numbers
 .m.view add checkbutton -label "Highlight Current Line" \
 	-variable ::highlight_current_line -command apply_curline
+.m.view add checkbutton -label "Relative Line Numbers" \
+	-variable ::relative_line_numbers -command apply_relnum
 # How the editor tab strip lays out when tabs outrun the width (D57): scroll (one line
 # behind ◂ ▸ arrows) or multi (wrap onto rows). A view preference, so it sits with its
 # display-toggle neighbors above — not in the Tabs menu, which is a buffer list.
