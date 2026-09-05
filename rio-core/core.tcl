@@ -1,9 +1,11 @@
 # rio-core — package entry point.
 #
-# Loads the document model, dispatch, and op namespaces, and exposes the
-# in-process transport (AGENTS.md D2's default path): rio::core::call runs a
-# request synchronously and returns both the response and any events it emitted.
-# A socket transport (server mode, same dispatch) is a later increment.
+# Sources the transport-independent core — the document model, dispatch, and op
+# namespaces — shared by every transport. It also exposes rio::core::call /
+# call_stream: an IN-CORE op-invocation path used by the agent (which runs in the
+# core, D26/D30) and by tests. This is NOT a GUI transport — since D29/D30 the GUI
+# is always a client over a channel (a pipe or socket), and those out-of-process
+# transports live in server.tcl, not here.
 
 namespace eval rio {}
 namespace eval rio::core {
