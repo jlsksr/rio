@@ -72,7 +72,7 @@ refresh_tabs ; update idletasks
 set ::tab_layout scroll ; tab_layout_apply
 .prefs.body.view.mtab invoke          ;# -> multi
 ok "tabs: window set multi"      $::tab_layout                         multi
-ok "tabs: strip re-flowed grid"  [winfo manager [gget 0 tabs].b$a]     grid
+ok "tabs: strip re-flowed packed" [winfo manager [gget 0 tabs].b$a]    pack
 .prefs.body.view.mtab invoke          ;# -> back to scroll
 ok "tabs: window set scroll"     $::tab_layout                         scroll
 
