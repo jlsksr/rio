@@ -7127,6 +7127,14 @@ proc prefs_label {w text} {
 	return $w
 }
 proc prefs_button {w text cmd} { button $w -text $text -font RioUIFont -command $cmd ; return $w }
+# A muted, greyed-out hint line (gutter.fg) — orientation text, styled apart from the
+# interactive controls so it never reads as one (D68). Wraps within the pane width.
+proc prefs_hint {w text} {
+	set c $::theme_colors
+	label $w -text $text -anchor w -justify left -font RioUIFont -wraplength 300 \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	return $w
+}
 
 # View category: the display cluster (the same controls as the View menu), the dock
 # side, the theme radios (enumerated from the core like themes_menu_fill, so installed
@@ -7187,17 +7195,27 @@ proc prefs_fill_editor {f} {
 }
 
 # Agent category: the provider picker (enumerated from the core like the theme
-# radios, so an installed provider appears), the two agent-edit toggles, and an
-# API-key button per keyed provider.
+# radios, so an installed provider appears), a muted hint when only the echo stub is
+# present, the two agent-edit toggles, an API-key button per keyed provider, and the
+# door to the agent's instructions (Agent Prompts…, D70/D79).
 proc prefs_fill_agent {f} {
 	agent_providers_refresh
 	set r 0
 	grid [prefs_label $f.pl "Agent"] -row [incr r] -column 0 -sticky w
-	set i 0
+	set i 0 ; set have_real 0
 	foreach p $::agent_providers {
+		if {[dict get $p name] ne "echo"} { set have_real 1 }
 		grid [prefs_radio $f.p[incr i] [provider_radio_label $p] \
 			::agent_provider [dict get $p name] apply_provider] \
 			-row [incr r] -column 0 -sticky w -padx {12 0}
+	}
+	# Echo is only a stub: with no real provider installed the picker is a single
+	# offline option, so point the way to one — Extensions… is a button in this very
+	# window. Guidance, not a control, so it's muted (prefs_hint / D68); once a real
+	# provider is installed the pane is self-explanatory and the hint drops away.
+	if {!$have_real} {
+		grid [prefs_hint $f.hint "Echo is a built-in stub. Install Claude or an OpenAI-compatible provider from Extensions… to use a real model."] \
+			-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	}
 	grid [prefs_check $f.aa "Auto-accept edits" ::agent_auto_accept \
 		{rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}] \
@@ -7210,6 +7228,13 @@ proc prefs_fill_agent {f} {
 			[list provider_key_dialog [dict get $p name]]] \
 			-row [incr r] -column 0 -sticky w -pady {4 2}
 	}
+	# The agent's instructions (system / project / per-provider prompts, D70/D79) are
+	# the third leg of its config alongside provider + key. The Settings menu already
+	# has this door; Preferences is the "second door", so mirror it here rather than
+	# leave the user hunting the menu — the same reach-not-reimplement pattern as the
+	# Keyboard pane's shortcuts button.
+	grid [prefs_button $f.prompts "Agent Prompts…" agent_prompts_dialog] \
+		-row [incr r] -column 0 -sticky w -pady {8 2}
 }
 
 # Keyboard category: app shortcuts keep their own recorder (D23) — reached, not

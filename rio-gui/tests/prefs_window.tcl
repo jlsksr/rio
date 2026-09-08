@@ -100,6 +100,17 @@ ok "view: Font has a heading"    [winfo exists .prefs.body.view.fontl]  1
 ok "editor: mode radios built"   [winfo exists .prefs.body.editor.em1] 1
 ok "editor: windows is a mode"   [expr {"windows" in [rio::modes::names]}] 1
 
+# --- Agent pane: the prompts door + the echo-only hint (D79 UI follow-up) -----------
+# Preferences is the "second door", so the Agent pane carries an Agent Prompts… button
+# (the same reach-not-reimplement pattern as the Keyboard shortcuts button), and — with
+# only the echo stub registered (this test's core installs no provider) — a muted hint
+# pointing at Extensions… for a real model.
+ok "agent: prompts button present" [winfo exists .prefs.body.agent.prompts] 1
+ok "agent: echo-only hint present" [winfo exists .prefs.body.agent.hint]    1
+.prefs.body.agent.prompts invoke
+ok "agent: prompts button opens it" [winfo exists .agentprompts]            1
+destroy .agentprompts
+
 # --- opening twice reuses the window rather than erroring --------------------------
 ok "reopen: no second toplevel"  [catch {preferences_window}]          0
 ok "reopen: window still there"  [winfo exists .prefs]                 1

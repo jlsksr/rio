@@ -3965,6 +3965,15 @@ the auto-accept / compare-complex toggles stay where they are in Preferences ▸
 `echo` is present the row is disabled with a hint (a provider prompt needs a provider to attach
 to). Static help stays muted (D68); the chooser and buttons are the only controls.
 
+*Follow-up (same feature):* the **Preferences ▸ Agent pane** was reading as a stub — with no
+provider installed it was just the `echo` radio and two toggles, and it had no door to the
+prompt work at all. Two additions, both by existing patterns: an **Agent Prompts…** button
+(the reach-not-reimplement pattern of the Keyboard pane's shortcuts button, so the "second
+door" reaches the same dialog the Settings menu does), and a **muted `echo`-only hint**
+(`prefs_hint`, gutter.fg) pointing at Extensions… — shown only while no real provider is
+installed, since the pane is self-explanatory once one is. The provider radios / keys / toggles
+are unchanged.
+
 **Scope.** User-global per provider (all projects). A project×provider layer
 (`.rio/agent/providers/<name>.md`) is deliberately **not** built — a later axis if it's ever
 wanted. rio without the agent is untouched: this is one more opt-in file that defaults to empty.
