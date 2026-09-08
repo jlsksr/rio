@@ -1179,13 +1179,15 @@ ok "tabs: Switch to Tab… in View"   [expr {![catch {.m.view index "Switch to T
 ok "find: menu has Find…"           [expr {![catch {.m.find index "Find…"}]}] 1
 ok "find: menu has Search…"         [expr {![catch {.m.find index "Search…"}]}] 1
 ok "find: Find… gone from Edit"     [expr {[catch {.m.edit index "Find…"}]}] 1
-# Help ▸ About rio shows the build id (D76): the menu exists, the build id resolves to a
-# non-empty string, and the modal builds with that id on screen, then dismisses.
+# Help ▸ About rio shows the build id + its commit date (D76): the menu exists, both resolve
+# to non-empty strings, and the modal builds with the id and date on screen, then dismisses.
 ok "help: About rio in Help menu"   [expr {![catch {.m.help index "About rio"}]}] 1
 ok "help: build id non-empty"       [expr {[string length [rio_build_id]] > 0}] 1
+ok "help: build date non-empty"     [expr {[string length [rio_build_date]] > 0}] 1
 about_dialog
 ok "help: About modal built"        [winfo exists .about] 1
 ok "help: About shows the build id" [expr {[string first [rio_build_id] [.about.facts.v0 cget -text]] >= 0}] 1
+ok "help: About shows the date"     [expr {[string first [rio_build_date] [.about.facts.v1 cget -text]] >= 0}] 1
 destroy .about
 # Compare With Another Tab… diffs the active buffer against another open buffer, both sides
 # live buffer text (D74). Drive compare_with_tab directly (the modal picker's row-building is

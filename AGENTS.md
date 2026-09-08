@@ -3850,12 +3850,16 @@ commit** of the checkout.
   the *tag* shows instead — About upgrades itself for free. A git-less install falls back to
   `"unknown"`. Computed once and cached (`::rio_build`): About is rare, so nothing shells out
   at startup. This is the GUI shelling out to git directly — the one place that's right, since
-  it's a fact about the local install, unlike the core-owned `git.*` project ops (D7).
+  it's a fact about the local install, unlike the core-owned `git.*` project ops (D7). A
+  companion `rio_build_date` reads that commit's **committer date** (`git show -s --format=%cd
+  --date=format:…`, local zone → `YYYY-MM-DD HH:MM`) the same way — same source dir, same
+  `"unknown"` fallback and caching — so a tester can name *when* the build was cut, not just
+  which commit.
 - **The modal.** A small themed toplevel: the name, a one-line description, and a dim
-  two-column facts block — **Build** (the id) and **Protocol** (`::rio_protocol`, handy in a
-  bug report). Static text is muted labels (blended fg→bg, since the theme has no `ui.mute`
-  role); the lone control is Close; Esc/Return dismiss. Non-blocking (grab, no `tkwait`) — it
-  only informs.
+  two-column facts block — **Build** (the id), **Date** (its commit date), and **Protocol**
+  (`::rio_protocol`, handy in a bug report). Static text is muted labels (blended fg→bg, since
+  the theme has no `ui.mute` role); the lone control is Close; Esc/Return dismiss. Non-blocking
+  (grab, no `tkwait`) — it only informs.
 
 Menubar is now **File · Edit · View · Find · Compare · Settings · Help**. Pure GUI change; no
 core op, no new theme role.

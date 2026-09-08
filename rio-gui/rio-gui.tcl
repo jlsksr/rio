@@ -2665,8 +2665,24 @@ proc rio_build_id {} {
 	return $::rio_build
 }
 
+# The date/time of that build's commit (committer date, local zone), so About can say not
+# just which rio but when it was cut. Same source dir and same "unknown" fallback + caching
+# as rio_build_id. --date=format gives a compact "YYYY-MM-DD HH:MM"; %cd honours it.
+proc rio_build_date {} {
+	if {![info exists ::rio_build_date]} {
+		if {[catch {exec git -C [file dirname $::rio_self] show -s --format=%cd \
+			{--date=format:%Y-%m-%d %H:%M} HEAD} d]} {
+			set ::rio_build_date "unknown"
+		} else {
+			set ::rio_build_date [string trim $d]
+		}
+	}
+	return $::rio_build_date
+}
+
 # Help ▸ About rio (D76): a small themed modal with rio's name, one-line description, and the
-# build id + wire-protocol version (both handy in a bug report — see ::rio_protocol). Info is
+# build id, its commit date, and the wire-protocol version (all handy in a bug report — see
+# ::rio_protocol). Info is
 # static labels (muted), the lone control is Close; Esc/Return dismiss. Non-blocking (grab but
 # no tkwait) — it just informs, it returns nothing.
 proc about_dialog {} {
@@ -2691,7 +2707,7 @@ proc about_dialog {} {
 	# The static facts, as a dim two-column block so they read as info, not controls.
 	frame $w.facts -background [dict get $c ui.bg]
 	set r 0
-	foreach {k v} [list Build [rio_build_id] Protocol $::rio_protocol] {
+	foreach {k v} [list Build [rio_build_id] Date [rio_build_date] Protocol $::rio_protocol] {
 		label $w.facts.k$r -text $k -font RioUIFont -anchor e \
 			-background [dict get $c ui.bg] -foreground $mute
 		label $w.facts.v$r -text $v -font RioUIFont -anchor w \
