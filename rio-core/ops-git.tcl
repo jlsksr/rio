@@ -40,6 +40,16 @@ proc rio::ops::git_commit {params} {
 }
 rio::dispatch::register git.commit rio::ops::git_commit
 
+# git.discard {path, ?cwd?} -> {action revert|remove} ; discard a path's local changes
+# (D80). A tracked file reverts to its last committed version (staged AND worktree changes
+# dropped); a new file (untracked, or a staged addition) is removed. The GUI gates this
+# behind a confirm and words its outcome from `action`.
+proc rio::ops::git_discard {params} {
+	set action [rio::git::discard [_git_cwd $params] [dict get $params path]]
+	return [dict create result [dict create action $action]]
+}
+rio::dispatch::register git.discard rio::ops::git_discard
+
 # git.diff {?cwd?, ?path?, ?staged?} -> {diff <unified-diff text>}
 proc rio::ops::git_diff {params} {
 	set path   [expr {[dict exists $params path]   ? [dict get $params path]   : ""}]

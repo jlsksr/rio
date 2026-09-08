@@ -1563,6 +1563,16 @@ proc git_menu_build {m payload} {
 	if {$x ne " " && $x ne "?"} {
 		$m add command -label "Unstage" -command [list do_git unstage $path]
 	}
+	# Discard is destructive, so it's confirm-gated (like file Delete, D48) and set apart
+	# by a separator. A NEW file — untracked ("?") or a staged addition ("A") — has no
+	# committed version, so discarding DELETES it; a tracked change reverts to the last
+	# commit. Word each for what it actually does (D80).
+	$m add separator
+	if {$x eq "?" || $x eq "A"} {
+		$m add command -label "Delete…"          -command [list git_discard_confirm $path 1]
+	} else {
+		$m add command -label "Discard Changes…" -command [list git_discard_confirm $path 0]
+	}
 }
 
 # Run a git write op (add | unstage) on a path, then repaint the shown pane so the
@@ -1575,6 +1585,29 @@ proc do_git {op path} {
 		return
 	}
 	refresh_dock
+}
+
+# Confirm, then discard a change row's local changes (git.discard, D80). `isnew` picks the
+# wording — a new file is DELETED (nothing committed to fall back to); a tracked file
+# REVERTS to the last commit. Both are irreversible, so the default button is No (mirrors
+# the file Delete confirm, D48). On success the pane repaints and the header flashes the
+# outcome.
+proc git_discard_confirm {path isnew} {
+	if {$isnew} {
+		set q "Delete “$path”?\n\nThis is a new file, not in the last commit — deleting it can't be undone."
+	} else {
+		set q "Discard changes to “$path”?\n\nIt will return to the last committed version. This can't be undone."
+	}
+	if {[tk_messageBox -icon warning -type yesno -default no -title "rio — discard" -message $q] ne "yes"} {
+		return
+	}
+	set resp [rio_call git.discard [dict create path $path]]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	refresh_dock
+	git_flash [expr {[dict get $resp result action] eq "remove" ? "✓ deleted" : "✓ discarded changes"}]
 }
 
 # Show or hide the commit bar (D45). refresh_git calls this with 1 when the index has a

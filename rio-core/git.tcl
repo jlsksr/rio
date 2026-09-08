@@ -83,6 +83,36 @@ proc rio::git::unstage {cwd path} {
 	return ""
 }
 
+# git.discard: throw away a path's local changes (D80) — the destructive counterpart to
+# add/unstage/commit, for the everyday "undo my edits to this file". Behaviour is keyed
+# on the path's own porcelain staged char X:
+#   ?  (untracked)       -> remove the new file:   `git clean -fd -- <path>`
+#   A  (staged addition) -> unstage, then remove:  `git reset` then `git clean -fd`
+#   else (tracked M/D/…) -> revert to the last commit, dropping BOTH the staged and the
+#                           worktree change:  `git restore --staged --worktree -- <path>`
+# The restore branch only runs for a file with a committed baseline, so HEAD always
+# exists there — the unborn-HEAD case (no commits) is only ?/A, handled above — so unlike
+# unstage this can safely use `restore`. Returns "remove" or "revert" (what it did), for
+# the frontend's confirmation wording. A path with no changes is a bad_request.
+proc rio::git::discard {cwd path} {
+	set out [_run $cwd status --porcelain=v1 -z -- $path]
+	set rec [lindex [split $out \0] 0]
+	if {$rec eq ""} {
+		rio::error::raise bad_request "nothing to discard for $path"
+	}
+	set x [string index $rec 0]
+	if {$x eq "?"} {
+		_run $cwd clean -fd -- $path
+		return remove
+	} elseif {$x eq "A"} {
+		_run $cwd reset -q -- $path
+		_run $cwd clean -fd -- $path
+		return remove
+	}
+	_run $cwd restore --staged --worktree -- $path
+	return revert
+}
+
 # git.commit: record the staged index as a commit — `git commit -m <msg>`. The second
 # git write family after D44's add/unstage. We lean on git's own guards, surfaced as
 # bad_request by _run: an empty message (`commit -m ""` aborts) and nothing staged

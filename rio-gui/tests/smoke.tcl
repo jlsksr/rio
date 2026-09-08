@@ -551,9 +551,17 @@ if {![catch {exec git --version}]} {
 	.tm delete 0 end ; nav_menu_build .tm [list dir [file join $gdir sub]]
 	ok "menu: dir with changes offers Stage folder" [menu_labels .tm] [list Open --- {*}$fsv --- {Stage folder}]
 	.tm delete 0 end ; git_menu_build .tm [dict create x { } y M path a.txt]
-	ok "menu: git unstaged offers Stage" [menu_labels .tm] {Open {Copy Path} --- Stage}
+	ok "menu: git unstaged offers Stage + Discard" [menu_labels .tm] \
+		{Open {Copy Path} --- Stage --- {Discard Changes…}}
 	.tm delete 0 end ; git_menu_build .tm [dict create x A y { } path c.txt]
-	ok "menu: git staged offers Unstage" [menu_labels .tm] {Open {Copy Path} --- Unstage}
+	ok "menu: git staged-add offers Unstage + Delete" [menu_labels .tm] \
+		{Open {Copy Path} --- Unstage --- Delete…}
+	.tm delete 0 end ; git_menu_build .tm [dict create x M y M path a.txt]
+	ok "menu: git tracked change offers Discard" [menu_labels .tm] \
+		{Open {Copy Path} --- Stage Unstage --- {Discard Changes…}}
+	.tm delete 0 end ; git_menu_build .tm [dict create x ? y ? path b.txt]
+	ok "menu: git untracked offers Delete" [menu_labels .tm] \
+		{Open {Copy Path} --- Stage --- Delete…}
 	destroy .tm
 
 	# The action proc: stage/unstage a path through the core, then the pane repaints.

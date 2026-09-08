@@ -3980,6 +3980,45 @@ wanted. rio without the agent is untouched: this is one more opt-in file that de
 
 ---
 
+### D80 — Git: discard changes (everyday "undo my edits" for normal people)
+
+rio's git write-ops were stage / unstage / commit (D44/D45). The missing everyday verb was
+**discard** — "throw away my changes to this file." jka asked to aim it at *basic-to-mediocre git
+for normal people*: one safe, obvious, confirm-gated action per changed file, worded so a
+non-expert isn't surprised.
+
+**One concept:** *make this file match the last commit; if it isn't in the last commit, remove it.*
+Realised in `rio::git::discard {cwd path}` (git.tcl), keyed off the path's own porcelain staged
+char X:
+
+- **tracked change** (M/D/…): `git restore --staged --worktree -- <path>` — revert to HEAD,
+  dropping **both** the staged and the worktree edit. This is the intuitive "undo everything I did
+  to this file," not just the unstaged half.
+- **new file** — untracked (`?`) or a staged addition (`A`): **remove** it (`git clean -fd`; for a
+  staged add, `git reset` first so it's untracked, then clean). A never-committed file has nothing
+  to revert *to*, so discarding it means it's gone.
+- no changes → `bad_request`.
+
+**Why `restore` is safe here when D44's unstage deliberately used `reset`:** the restore branch only
+runs for a file with a committed baseline, so HEAD always exists there; the unborn-HEAD case (no
+commits) is only `?`/`A`, handled by the remove branch. So the `restore --staged` HEAD-resolution
+problem that pushed unstage to `reset` can't arise.
+
+**Op + GUI.** `git.discard {path ?cwd?} -> {action revert|remove}` (ops-git.tcl), mirroring
+add/unstage/commit. The git-pane row menu (`git_menu_build`) gains a separated, destructive entry
+worded for the state — **"Discard Changes…"** for a tracked change, **"Delete…"** for a new file —
+behind a No-defaulted `tk_messageBox` confirm (`git_discard_confirm`, mirroring the D48 file-delete
+gate); on success the pane repaints and the header flashes the outcome. The core decides the actual
+action and returns it, so the GUI's wording and the real effect can't drift.
+
+**Scope.** Git-pane menu only for now; the file-tree row menu is an easy follow-on (tracked rows —
+its fs "Delete…" already removes untracked files). Rename-aware discard and a "Discard all" bulk
+action are noted, not built. Tests: git.test drives real-git discard for every state
+(revert/remove/unstage+revert/clean-path bad_request); smoke asserts the menu offers the right entry
+per state.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

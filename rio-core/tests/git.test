@@ -232,10 +232,58 @@ test git-op-commit {git.commit op commits through the core and returns the hash}
 		[xy_of $d c.txt]
 } -cleanup {file delete -force $d} -result {true 1 {}}
 
-test git-write-ops-registered {git.add, git.unstage, git.commit are in the live registry} -body {
+# --- write layer: discard (D80) ---------------------------------------------
+# Discard throws away a path's local changes: a tracked file reverts to its last commit
+# (both staged and worktree edits dropped); a new file (untracked or staged-add) is
+# removed. Same makerepo states (a.txt " M", c.txt "A ", b.txt "??"); a.txt's committed
+# baseline is "one\n".
+proc slurp {path} { set fh [open $path] ; set c [read $fh] ; close $fh ; return $c }
+
+test git-discard-modified {discard reverts a modified tracked file to HEAD (returns revert)} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set act [rio::git::discard $d a.txt]
+	list $act [string trim [slurp [file join $d a.txt]]] [xy_of $d a.txt]
+} -cleanup {file delete -force $d} -result {revert one {}}
+
+test git-discard-staged-modification {discard reverts AND unstages a staged modification} \
+		-constraints hasgit -setup {set d [makerepo] ; rio::git::add $d a.txt} -body {
+	set act [rio::git::discard $d a.txt]
+	list $act [string trim [slurp [file join $d a.txt]]] [xy_of $d a.txt]
+} -cleanup {file delete -force $d} -result {revert one {}}
+
+test git-discard-untracked {discard removes an untracked new file (returns remove)} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set act [rio::git::discard $d b.txt]
+	list $act [file exists [file join $d b.txt]] [xy_of $d b.txt]
+} -cleanup {file delete -force $d} -result {remove 0 {}}
+
+test git-discard-staged-add {discard removes a staged-add file (returns remove)} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set act [rio::git::discard $d c.txt]
+	list $act [file exists [file join $d c.txt]] [xy_of $d c.txt]
+} -cleanup {file delete -force $d} -result {remove 0 {}}
+
+test git-discard-nothing {discard on a path with no changes is a bad_request} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-clean-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	writefile [file join $d f.txt] "hi\n" ; git_in $d add f.txt ; git_in $d commit -q -m first
+} -body {
+	catch {rio::git::discard $d f.txt} err opts
+	rio::error::code_of $opts
+} -cleanup {file delete -force $d} -result bad_request
+
+test git-op-discard {git.discard op discards through the core and returns the action} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set resp [dict get [rio::core::call git.discard [dict create cwd $d path b.txt]] response]
+	list [dict get $resp ok] [dict get $resp result action] [file exists [file join $d b.txt]]
+} -cleanup {file delete -force $d} -result {true remove 0}
+
+test git-write-ops-registered {git.add, git.unstage, git.commit, git.discard are in the live registry} -body {
 	expr {"git.add" in [rio::dispatch::opnames] \
 		&& "git.unstage" in [rio::dispatch::opnames] \
-		&& "git.commit" in [rio::dispatch::opnames]}
+		&& "git.commit" in [rio::dispatch::opnames] \
+		&& "git.discard" in [rio::dispatch::opnames]}
 } -result 1
 
 if {[testConstraint hasgit] && [info exists ::repo]} {
