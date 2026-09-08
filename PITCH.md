@@ -174,6 +174,10 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **Discard your changes** — right-click a changed file in the Git pane to throw your edits
+  away: **Discard Changes…** returns a tracked file to its last committed version, **Delete…**
+  removes a brand-new file — each behind a one-click confirm. — *feature · D80 · `0a82d64` ·
+  2026-09-08*
 - **Per-provider agent instructions** — alongside your all-projects and per-project prompts,
   you can now write instructions that apply *only* while a particular provider is running —
   Claude-specific quirks, or house rules for a local OpenAI-compatible model. Editable from
