@@ -2645,6 +2645,75 @@ proc switch_tab_dialog {} {
 	if {$id ne ""} { activate $id }
 }
 
+# rio's own build identity for Help ▸ About rio (D76). rio has no release version yet
+# (RELEASING.md Gate 2 will git-tag one); until then the short commit of the checkout this
+# GUI runs from is the identity — "so a tester can say exactly which rio they're running".
+# `git describe --tags --always` gives the *tag* once one exists and the abbreviated commit
+# otherwise, so About upgrades itself for free at release. Run against rio's OWN source dir
+# ([file dirname $::rio_self], the normalized script path) — not the user's project, and not
+# the core, which may be a different build on another machine. An installed copy with no git
+# metadata (or no git) falls back to "unknown". Computed once and cached; About is rare, so
+# there's no reason to shell out at startup.
+proc rio_build_id {} {
+	if {![info exists ::rio_build]} {
+		if {[catch {exec git -C [file dirname $::rio_self] describe --tags --always} id]} {
+			set ::rio_build "unknown"
+		} else {
+			set ::rio_build [string trim $id]
+		}
+	}
+	return $::rio_build
+}
+
+# Help ▸ About rio (D76): a small themed modal with rio's name, one-line description, and the
+# build id + wire-protocol version (both handy in a bug report — see ::rio_protocol). Info is
+# static labels (muted), the lone control is Close; Esc/Return dismiss. Non-blocking (grab but
+# no tkwait) — it just informs, it returns nothing.
+proc about_dialog {} {
+	set w .about
+	destroy $w
+	toplevel $w
+	wm title $w "About rio"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set fam [font actual RioUIFont -family]
+	# No dedicated "muted" UI role in the theme vocabulary — blend the fg halfway toward the
+	# bg for a dim label tone that reads on any theme (the restyle_group currentline pattern).
+	set mute [blend_hex [dict get $c ui.fg] [dict get $c ui.bg] 45]
+
+	label $w.name -text "rio" -font [list $fam 20 bold] \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	label $w.tag -font RioUIFont -justify left -wraplength 340 \
+		-text "A small, cross-platform IDE, written from scratch in Tcl/Tk." \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	# The static facts, as a dim two-column block so they read as info, not controls.
+	frame $w.facts -background [dict get $c ui.bg]
+	set r 0
+	foreach {k v} [list Build [rio_build_id] Protocol $::rio_protocol] {
+		label $w.facts.k$r -text $k -font RioUIFont -anchor e \
+			-background [dict get $c ui.bg] -foreground $mute
+		label $w.facts.v$r -text $v -font RioUIFont -anchor w \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		grid $w.facts.k$r -row $r -column 0 -sticky e -padx {0 8}
+		grid $w.facts.v$r -row $r -column 1 -sticky w
+		incr r
+	}
+	button $w.ok -text "Close" -font RioUIFont -command {destroy .about}
+
+	grid $w.name  -row 0 -column 0 -sticky w  -padx 16 -pady {14 0}
+	grid $w.tag   -row 1 -column 0 -sticky w  -padx 16 -pady {4 8}
+	grid $w.facts -row 2 -column 0 -sticky w  -padx 16
+	grid $w.ok    -row 3 -column 0 -sticky e  -padx 16 -pady {10 12}
+	grid columnconfigure $w 0 -weight 1
+
+	bind $w <Escape> {destroy .about}
+	bind $w <Return> {destroy .about}
+	catch {grab $w}
+	focus $w.ok
+}
+
 
 # ---------------------------------------------------------------------------
 # Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
@@ -7716,6 +7785,12 @@ menu .m.settings.editmode -tearoff 0
 .m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
+# Help is the last (rightmost) menu, the Windows/VSCode convention (D76). Just About rio for
+# now — the modal names the build so a tester can say which rio they're running (there is no
+# release version yet; RELEASING.md Gate 2 will git-tag one, which About then shows instead).
+menu .m.help -tearoff 0
+.m add cascade -label Help -menu .m.help
+.m.help add command -label "About rio" -command about_dialog
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by
 # make_editor_group (editor_bindings + editor_proxy). Only the window-manager close

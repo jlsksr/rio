@@ -244,7 +244,9 @@ though the interactive behaviour is right.
 - [ ] Commit a `CHANGELOG.md`. The content is already drafted in PITCH.md — give it
       a real home outside the playground.
 - [ ] Choose a version (`v0.1.0-alpha`) and git-tag the release, so a tester can say
-      exactly which rio they're running.
+      exactly which rio they're running. *(Interim: **Help ▸ About rio** already shows the
+      build id via `git describe --tags --always` — the short commit today, the tag
+      automatically once this is done. AGENTS.md D76.)*
 
 ## Gate 3 — First run & intake
 

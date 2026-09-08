@@ -3833,6 +3833,31 @@ Menubar is now **File · Edit · View · Find · Compare · Settings**. Items ke
 commands, and accelerators; the keymap-refresh block's `entryconfigure` paths move from
 `.m.edit` to `.m.find`. Pure GUI/menu change; the find engine (core, D36) is untouched.
 
+### D76 — A Help menu with About rio (build identity)
+
+rio has no release version yet — **RELEASING.md Gate 2** is where a `v0.1.0-alpha` git tag
+will come from, "so a tester can say exactly which rio they're running". Until then a tester
+still needs to name their build, so a **Help** menu (last/rightmost, the Windows/VSCode
+convention) gets an **About rio** modal that shows the identity we *do* have: the **short
+commit** of the checkout.
+
+- **Where the id comes from.** `git describe --tags --always`, run against rio's **own**
+  source dir (`[file dirname $::rio_self]`, the normalized script path) — deliberately not the
+  user's project, and not the core (which may be a different build on another machine, or
+  remote). `--always` yields the abbreviated commit today; the moment Gate 2 tags a release,
+  the *tag* shows instead — About upgrades itself for free. A git-less install falls back to
+  `"unknown"`. Computed once and cached (`::rio_build`): About is rare, so nothing shells out
+  at startup. This is the GUI shelling out to git directly — the one place that's right, since
+  it's a fact about the local install, unlike the core-owned `git.*` project ops (D7).
+- **The modal.** A small themed toplevel: the name, a one-line description, and a dim
+  two-column facts block — **Build** (the id) and **Protocol** (`::rio_protocol`, handy in a
+  bug report). Static text is muted labels (blended fg→bg, since the theme has no `ui.mute`
+  role); the lone control is Close; Esc/Return dismiss. Non-blocking (grab, no `tkwait`) — it
+  only informs.
+
+Menubar is now **File · Edit · View · Find · Compare · Settings · Help**. Pure GUI change; no
+core op, no new theme role.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
