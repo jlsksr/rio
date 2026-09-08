@@ -4381,18 +4381,33 @@ proc tabstrip_layout {g {reveal 1}} {
 	set avail [winfo width $strip]
 
 	if {$::tab_layout eq "multi"} {
-		# Flow the handles into one packed row-frame per visual row: pack honours each
-		# tab's natural width (tight per-row huddling, no column stretching) and we open a
-		# new row BEFORE a tab would overrun `avail`, so a row never clips off the edge.
-		# Not yet realized (width 1 during boot): one row; the <Configure> that arrives with
-		# the real width re-flows it. `$x > 0` keeps at least one tab per row.
+		# Flow the handles into one packed row-frame per visual row. Pass 1 assigns tabs to
+		# rows, wrapping BEFORE a tab would overrun `avail` (so a row never clips) and keeping
+		# at least one tab per row. Not yet realized (width 1 during boot): one row; the
+		# <Configure> that arrives with the real width re-flows it.
 		set A [expr {$avail <= 1 ? 1000000 : $avail}]
-		set row 0 ; set x 0 ; set rf [tabstrip_row $strip 0]
+		set rows {} ; set cur {} ; set x 0
 		foreach id $ids {
 			set need [tab_pixwidth $id]
-			if {$x > 0 && $x + $need > $A} { incr row ; set x 0 ; set rf [tabstrip_row $strip $row] }
-			pack $strip.b$id -in $rf -side left -padx 1 -pady 1
-			incr x $need
+			if {[llength $cur] && $x + $need > $A} { lappend rows $cur ; set cur {} ; set x 0 }
+			lappend cur $id ; incr x $need
+		}
+		if {[llength $cur]} { lappend rows $cur }
+		# Pass 2 places them, JUSTIFIED like a paragraph: every row but the last expands its
+		# tabs to fill the strip width (closing the ragged right gap); the last row stays
+		# natural/left-aligned (a justified paragraph's last line isn't stretched). pack
+		# divides the leftover pixels equally among a row's tabs, and -fill x grows each.
+		set nrows [llength $rows]
+		for {set r 0} {$r < $nrows} {incr r} {
+			set rf [tabstrip_row $strip $r]
+			set justify [expr {$r < $nrows - 1}]
+			foreach id [lindex $rows $r] {
+				if {$justify} {
+					pack $strip.b$id -in $rf -side left -padx 1 -pady 1 -expand 1 -fill x
+				} else {
+					pack $strip.b$id -in $rf -side left -padx 1 -pady 1
+				}
+			}
 		}
 		gset $g taboff 0
 		return

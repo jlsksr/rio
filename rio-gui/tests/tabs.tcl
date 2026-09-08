@@ -120,6 +120,12 @@ foreach w $kids {
 	incr i
 }
 ok "multi: rows stack below tabs" [expr {$lastrow < $firsttab}] 1
+# Justified like a paragraph: every row but the last expands its tabs to fill the width;
+# the last row stays natural. The first tab sits on row 0 (non-last, since >1 row), the
+# last tab on the last row.
+ok "multi: non-last row expands"  [dict get [pack info $strip.b[lindex $ids 0]]   -expand] 1
+ok "multi: non-last row fills x"  [dict get [pack info $strip.b[lindex $ids 0]]   -fill]   x
+ok "multi: last row is natural"   [dict get [pack info $strip.b[lindex $ids end]] -expand] 0
 set ::tab_layout scroll ; tab_layout_apply
 ok "back to scroll: uses pack"   [mgr $far] pack   ;# $far is active -> visible
 ok "back to scroll: rows gone"   [llength [lsearch -all -inline [winfo children $strip] $strip.r*]] 0

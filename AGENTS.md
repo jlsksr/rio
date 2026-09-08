@@ -3910,6 +3910,15 @@ therefore `lower`s each frame beneath the handles. Guarded in tabs.tcl: `winfo c
 lists siblings bottom-of-stack first, so every `r<n>` frame must sort before every `b<id>`
 handle — an assertion that fails on the un-lowered version.
 
+**Justified rows.** Natural-width tabs left a ragged gap on the right of each row (jka
+asked for it filled). The layout is now two passes: pass 1 assigns tabs to rows, pass 2
+places them **justified like a paragraph** — every row *but the last* packs its tabs
+`-expand 1 -fill x`, so pack spreads the leftover pixels equally and the row fills the
+strip width; the last row stays natural/left-aligned (a justified paragraph's last line
+isn't stretched). A single-row layout is therefore just that ragged last line. Within a
+widened tab the name stays left and the `×` right. tabs.tcl asserts a non-last row's tab
+carries `-expand 1 -fill x` and the last row's does not.
+
 `scroll` mode, the `◂ ▸` overflow arrows, `tab_pixwidth` (still analytic, so the layout
 stays synchronous and headless-testable), and `refresh_tabs` are unchanged. Pure GUI
 change; no core op. tabs.tcl now asserts the row-frame structure instead of grid rows.
