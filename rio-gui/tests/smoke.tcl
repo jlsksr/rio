@@ -168,6 +168,25 @@ do_close
 ok "tabs: closed tab gone"      [lsearch -exact [gorder $::focus] $victim] -1
 ok "tabs: buffer freed in core" [rio::doc::exists $victim] 0
 
+# --- open dialog: multi-select opens every chosen file (D77) ------------------
+# tk_getOpenFile -multiple 1 returns a LIST of paths; open_dialog must open each,
+# not just the first. Stub the native chooser (headless can't drive it) to hand
+# back two files and confirm both land as buffers, the last one active.
+set m1 [tmpbytes "MULTI ONE\n"]
+set m2 [tmpbytes "MULTI TWO\n"]
+rename ::tk_getOpenFile ::_saved_getOpenFile
+proc ::tk_getOpenFile {args} { return [list $::_stub_open_a $::_stub_open_b] }
+set ::_stub_open_a $m1 ; set ::_stub_open_b $m2
+set _was_remote $::core_remote ; set ::core_remote 0   ;# force the native-chooser branch
+set before [llength [gorder $::focus]]
+open_dialog
+set ::core_remote $_was_remote
+rename ::tk_getOpenFile {}
+rename ::_saved_getOpenFile ::tk_getOpenFile
+ok "open: both files opened"    [llength [gorder $::focus]] [expr {$before + 2}]
+ok "open: last one active"      [bufget $::cur path]        $m2
+ok "open: first one present"    [expr {[lsearch -exact [lmap id [gorder $::focus] {bufget $id path}] $m1] >= 0}] 1
+
 # --- error surfacing ---------------------------------------------------------
 # A failed op must reach the user through report_error, never crash a caller
 # that read `result` blindly (regression: an op on a vanished buffer threw

@@ -3860,6 +3860,30 @@ core op, no new theme role.
 
 ---
 
+### D77 — Open several files at once (native chooser multi-select)
+
+The **Open file** dialog (`open_dialog`) picked exactly one file: `tk_getOpenFile` defaults to
+single-select, so Ctrl/Shift-clicking extra files in the native chooser did nothing on Linux
+and Windows (reported by jka). The fix is one flag: **`-multiple 1`**, which lets the native
+chooser select several files and turns the result into a **list** of paths (empty on cancel).
+`open_dialog` now loops it, `do_open`-ing each — and since `do_open` already dedups against
+open buffers and activates, opening N files leaves the last one focused, exactly as opening
+them one by one would.
+
+- **Local branch only.** Multi-select applies to the native chooser, i.e. the **non-remote**
+  branch. The remote path stays `remote_browse_dialog` (a single-select `fs.list` tree, D29) —
+  one pick at a time; extending it to multi-select is a separate, later concern. The two
+  branches are now split cleanly (each opens its own picks) instead of sharing a tail.
+- **Test.** smoke.tcl stubs `tk_getOpenFile` to hand back two paths and asserts both open with
+  the last active. The stub must force `::core_remote 0`: the test core is reached over a
+  socket, so it's *remote* by default, and the remote branch is a modal `tkwait` that hangs
+  headless — the multi-select code lives on the native-chooser branch, which is what we mean
+  to cover.
+
+Pure GUI change; no core op.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

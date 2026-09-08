@@ -3787,11 +3787,17 @@ proc remote_browse_dialog {title mode {seed ""}} {
 # browser (remote_browse_dialog), which walks the server's tree over fs.list.
 proc open_dialog {} {
 	if {$::core_remote} {
+		# The remote browser is a single-select tree (fs.list, one pick); open just it.
 		set p [remote_browse_dialog "Open file (remote)" open]
-	} else {
-		set p [tk_getOpenFile -title "Open file"]
+		if {$p ne ""} { do_open $p }
+		return
 	}
-	if {$p ne ""} { do_open $p }
+	# -multiple 1 lets the native chooser Ctrl/Shift-select several files; the result
+	# is then a LIST of paths (empty on cancel). Open each in order — do_open dedups
+	# and activates, so the last selected file ends up focused.
+	foreach p [tk_getOpenFile -title "Open file" -multiple 1] {
+		if {$p ne ""} { do_open $p }
+	}
 }
 proc save_as_dialog {} {
 	if {$::core_remote} {
