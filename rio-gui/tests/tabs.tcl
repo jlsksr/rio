@@ -3,11 +3,12 @@
 # Headless tab-strip overflow test for rio-gui (AGENTS.md D57). When a group has more
 # tabs than fit its width, `scroll` mode (default) keeps them on one line behind ◂ ▸
 # arrows that page the visible window, and `multi` mode wraps them onto several rows.
-# The Tabs menu lists every open buffer regardless. Checks the width math, that a wide
+# The buffer picker lists every open buffer regardless. Checks the width math, that a wide
 # strip shows every tab with no arrows while a narrow one hides some and shows arrows,
 # that paging and activation move the visible window, that multi mode wraps onto rows,
-# that the Tabs menu enumerates the buffers (navigation only — the Multi-Line Tabs
-# toggle lives in the View menu, D-after-57), and that the mode persists through prefs.json.
+# that buffer_pick_rows enumerates the buffers (the picker behind View ▸ Switch to Tab… and
+# Compare ▸ Compare With Another Tab…, D74 — navigation only; the Multi-Line Tabs toggle
+# lives in the View menu, D-after-57), and that the mode persists through prefs.json.
 # Needs a DISPLAY (Tk) and maps the window at chosen sizes to drive real strip widths.
 #
 # Run:  RIO_GUI_HEADLESS=1 wish rio-gui/tests/tabs.tcl
@@ -111,14 +112,18 @@ ok "multi: wraps onto >1 row"    [expr {$maxrow > 0}] 1
 set ::tab_layout scroll ; tab_layout_apply
 ok "back to scroll: uses pack"   [expr {[mgr $far] eq "pack"}] 1   ;# $far is active -> visible
 
-# --- the Tabs menu enumerates every open buffer (navigation only) ------------------
-tabs_menu_fill
-# One group here, so the menu holds exactly $n radiobuttons at indices 0..$n-1 and
-# nothing else — the Multi-Line Tabs toggle moved to the View menu.
-ok "menu: lists all buffers"     [expr {[.m.tabs index end] >= $n - 1}] 1
-ok "menu: first entry is a tab"  [.m.tabs type 0] radiobutton
-ok "menu: first label matches"   [.m.tabs entrycget 0 -label] [tab_name $first]
-ok "menu: last entry is a tab"   [.m.tabs type end] radiobutton
+# --- the buffer picker enumerates every open buffer (navigation only) --------------
+# View ▸ Switch to Tab… and Compare ▸ Compare With Another Tab… share buffer_pick_rows,
+# which replaced the old top-level .m.tabs cascade (D74). One group here, so it lists all
+# $n open buffers; each row is {id label} and the label starts with the tab name.
+set rows [buffer_pick_rows]
+ok "picker: lists all buffers"   [llength $rows]                    $n
+ok "picker: row is {id label}"   [llength [lindex $rows 0]]         2
+ok "picker: label starts w/name" [string match "[tab_name [lindex [lindex $rows 0] 0]]*" \
+                                     [lindex [lindex $rows 0] 1]]   1
+ok "picker: exclude drops one"   [llength [buffer_pick_rows $far]]  [expr {$n - 1}]
+ok "picker: exclude omits it" \
+	[expr {[lsearch -exact [lmap r [buffer_pick_rows $far] {lindex $r 0}] $far] < 0}] 1
 ok "toggle: lives in View menu"  [.m.view type "Multi-Line Tabs"] checkbutton
 
 # --- the mode persists through prefs.json, and a bogus value is rejected -----------

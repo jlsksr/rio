@@ -3289,11 +3289,14 @@ document view on purpose — the UI and chat fonts stay theme-controlled.
 A narrow window used to strand tabs off the right edge of a group's strip with no way to
 reach them (Notepad++'s long-standing gripe). Three complementary answers, all wanted:
 
-**A always-reachable list.** A top-level **Tabs** menu (`.m.tabs`, rebuilt each open via
-`-postcommand tabs_menu_fill`) lists every open buffer across every group by name, keyed
-on the active tab. It is the reliable escape hatch — a tab is one menu click away no
-matter how little strip there is. This is the safety net; the two visual modes below are
-the in-strip conveniences.
+**A always-reachable list.** Originally a top-level **Tabs** menu (`.m.tabs`, rebuilt each
+open via `-postcommand tabs_menu_fill`) listed every open buffer across every group by name.
+It is the reliable escape hatch — a tab is a couple of clicks away no matter how little strip
+there is. This is the safety net; the two visual modes below are the in-strip conveniences.
+(**Retired into a bounded dialog in D74**: that cascade was the one unbounded menu that could
+grow screen-tall on X11, so it became **View ▸ Switch to Tab…**, a listbox picker — which
+also shows a path hint to tell same-named tabs apart. The picker is shared with Compare ▸
+Compare With Another Tab…; see D74.)
 
 **Two strip modes, a persisted View preference (`::tab_layout`).** `scroll` (default)
 keeps the tabs on **one line** and, when they overflow, shows `◂ ▸` arrows that page a
@@ -3318,7 +3321,7 @@ driven by tab count, and `tabstrip_fit_last` always keeps at least the first tab
 sliver of space never strands the lot.
 
 **Reveal vs. page.** `tabstrip_layout` pulls the visible window to include the active tab
-by default (`reveal`), so activating a tab — from the strip, the Tabs menu, or a
+by default (`reveal`), so activating a tab — from the strip, the Switch to Tab… dialog, or a
 keystroke — scrolls it into view. The arrows call it with `reveal` **off**, so paging can
 move *past* the active tab to reach a hidden one and click it (which then activates and
 reveals it). The arrows live in the strip alongside the `b<id>` handles as `al`/`ar`, so
@@ -3771,6 +3774,39 @@ top-level door makes it discoverable and gives that flow a home the user can poi
 keeps **Editor Layout** honestly about group layout, and doesn't lengthen **View** (the D64
 height budget is unaffected — Compare left the submenu, it didn't join the top level of
 View). Pure GUI/menu change; the `compare_*` procs and the `Esc` accelerator are untouched.
+
+### D74 — Compare against an open tab; a shared buffer picker; the Tabs menu retired
+
+Two gaps closed by one small component. **(1)** Compare could only diff the active buffer
+against a **file on disk** (D28's `compare_with_file_dialog`), but the more frequent case is
+comparing it against **another already-open tab** (two notes, a file and its variant). **(2)**
+The top-level **Tabs** menu (D57) was a `-postcommand` cascade of every open buffer — the one
+menu with no size bound, able to grow screen-tall on X11 (the standing menu-overflow caveat),
+and it showed only basenames, so two same-named tabs were indistinguishable.
+
+Both are "**pick an open buffer from a list**", so both use one **modal picker dialog**
+(`buffer_pick_dialog`, modelled on `remote_browse_dialog`: themed toplevel, listbox +
+auto-hiding scrollbar, Double-click/Return choose, Escape/Cancel, `grab` + `tkwait`). The
+row list is built by a separate `buffer_pick_rows {exclude}` — walking `$::groups`/`gorder`
+(the same source the old `tabs_menu_fill` used), each row `{id label}` with the tab name, the
+unsaved ●, and the **parent directory as a hint** so duplicates are told apart. Splitting the
+list-build from the modal keeps it headless-testable, exactly as the cascade's `-postcommand`
+was directly callable.
+
+- **Compare menu** now leads with **Compare With Another Tab…** (`compare_with_tab_dialog` →
+  `buffer_pick_dialog` excluding `$::cur` → `compare_with_tab`, both sides live `buffer.text`
+  so unsaved edits show), then **Compare With A File…**, then Close Compare. Tab first: it is
+  the more frequent case.
+- **Tabs menu retired.** The top-level cascade and `tabs_menu_fill` are gone; reaching a tab
+  by name is now **View ▸ Switch to Tab…** (`switch_tab_dialog` → `buffer_pick_dialog` →
+  `activate`), a **bounded** dialog that can't outgrow the screen and shows paths. The menubar
+  trims to File · Edit · View · Compare · Settings.
+
+**Caveat retired, partly.** The bounded dialog removes **Tabs** from the pair of unbounded
+data-driven menus in [CAVEATS.md](CAVEATS.md); only the **Theme** cascade remains there. No
+new keyboard shortcut for Switch to Tab… (menu + dialog only) — a `goto-tab` chord is a
+possible later add. Pure GUI change; no core op touched. The **Multi-Line Tabs** view
+preference (D57) stays in the View menu — it was never part of the navigation list.
 
 ---
 

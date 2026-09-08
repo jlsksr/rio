@@ -56,7 +56,7 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a
   tab's right-click menu). Drag the divider to resize; closing a group's last tab
   unsplits. When a window is too narrow to show every tab, **◂ ▸ arrows** page through
-  them, the **Tabs** menu lists them all by name, and **View ▸ *Multi‑Line Tabs***
+  them, **View ▸ *Switch to Tab…*** lists them all by name in a picker (with a path hint, so same‑named files are easy to tell apart), and **View ▸ *Multi‑Line Tabs***
   wraps them onto several rows instead.
 - **Files & git** — open a project folder and browse it in a side pane (dotfiles are
   hidden by default, like `ls`; a ◉/◌ button in the pane header — or *View ▸ Show Hidden

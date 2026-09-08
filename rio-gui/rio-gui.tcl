@@ -2520,7 +2520,7 @@ proc compare_proposal {turn} {
 	return 1
 }
 
-# Compare the active buffer against a file the user picks (View menu). The other
+# Compare the active buffer against a file the user picks (Compare menu). The other
 # side is read-only via fs.read (D28) (an absolute path is taken as-is, D11), so it
 # need not be open or even inside the project.
 proc compare_with_file_dialog {} {
@@ -2537,6 +2537,112 @@ proc compare_with_file_dialog {} {
 	}
 	compare_open [buf_text $::cur] [dict get $resp result text] \
 		"[tab_name $::cur] (buffer)" "[file tail $path] (file)"
+}
+
+# The open-buffer picker (D74). One modal dialog serves both "Compare With Another
+# Tab…" and View ▸ "Switch to Tab…" — each is just "pick an open buffer from a list".
+# It replaces the old unbounded .m.tabs cascade (a menu could grow screen-tall on X11;
+# a dialog is bounded and scrolls), and unlike the cascade it can show a path hint so
+# two same-named tabs are told apart.
+#
+# The row list is built by a separate proc so it stays headless-testable the way
+# tabs_menu_fill was directly callable: walk every group's tab order (the same source),
+# skipping `exclude` (the current buffer, for compare). Each row is {id label}; the
+# label is the tab name + unsaved dot, plus the parent directory as a dim hint when the
+# buffer has a path.
+proc buffer_pick_rows {{exclude ""}} {
+	set rows {}
+	foreach g $::groups {
+		foreach id [gorder $g] {
+			if {$id eq $exclude} continue
+			set label "[tab_name $id][tab_dot $id]"
+			set p [bufget $id path]
+			if {$p ne ""} { append label "    [file dirname $p]" }
+			lappend rows [list $id $label]
+		}
+	}
+	return $rows
+}
+
+# Show the picker modally and return the chosen buffer id (or "" on cancel / nothing to
+# pick). Modelled on remote_browse_dialog: themed toplevel, listbox + auto-hiding
+# scrollbar, Double-click/Return choose, Escape/Cancel abort, grab + tkwait.
+proc buffer_pick_dialog {title {exclude ""}} {
+	set rows [buffer_pick_rows $exclude]
+	if {![llength $rows]} { bell ; return "" }   ;# nothing to pick — don't open an empty dialog
+
+	set w .bufpick
+	destroy $w
+	toplevel $w
+	wm title $w $title
+	wm transient $w .
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.bufpick.body.list yview}
+	listbox $w.body.list -height 14 -width 54 -activestyle none -exportselection 0 \
+		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] \
+		-selectforeground [dict get $c ui.bg] \
+		-yscrollcommand {autoscroll .bufpick.body.sb .bufpick.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+
+	set ::bufpick_ids {}
+	foreach r $rows {
+		lappend ::bufpick_ids [lindex $r 0]
+		$w.body.list insert end [lindex $r 1]
+	}
+	$w.body.list selection set 0
+	$w.body.list activate 0
+
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.ok     -text OK     -font RioUIFont -command bufpick_choose
+	button $w.btns.cancel -text Cancel -font RioUIFont \
+		-command {set ::bufpick_result "" ; destroy .bufpick}
+	pack $w.btns.cancel $w.btns.ok -side right -padx 3
+
+	grid $w.body -row 0 -column 0 -sticky nsew -padx 8 -pady {8 4}
+	grid $w.btns -row 1 -column 0 -sticky e    -padx 5 -pady {2 8}
+	grid rowconfigure $w 0 -weight 1
+	grid columnconfigure $w 0 -weight 1
+
+	bind $w.body.list <Double-Button-1> bufpick_choose
+	bind $w.body.list <Return>          bufpick_choose
+	bind $w <Escape> {set ::bufpick_result "" ; destroy .bufpick}
+
+	set ::bufpick_result ""
+	catch {grab $w}
+	focus $w.body.list
+	tkwait window $w
+	return $::bufpick_result
+}
+# Resolve the listbox selection to its buffer id and close the dialog.
+proc bufpick_choose {} {
+	set sel [.bufpick.body.list curselection]
+	if {$sel eq ""} return
+	set ::bufpick_result [lindex $::bufpick_ids $sel]
+	destroy .bufpick
+}
+
+# Compare the active buffer against another open buffer `id` — both sides are live
+# buffer text (buffer.text), so unsaved edits on either tab are what you see (D74).
+# Split from the picker so the compare itself is testable without opening the dialog.
+proc compare_with_tab {id} {
+	compare_open [buf_text $::cur] [buf_text $id] \
+		"[tab_name $::cur] (current)" "[tab_name $id]"
+}
+proc compare_with_tab_dialog {} {
+	set id [buffer_pick_dialog "Compare with another tab" $::cur]
+	if {$id ne ""} { compare_with_tab $id }
+}
+
+# View ▸ Switch to Tab… (D74): the bounded replacement for the old top-level Tabs menu —
+# pick any open buffer and activate it (activate focuses the group that holds it).
+proc switch_tab_dialog {} {
+	set id [buffer_pick_dialog "Switch to tab"]
+	if {$id ne ""} { activate $id }
 }
 
 
@@ -4246,23 +4352,11 @@ proc tabstrip_on_configure {g} {
 	tabstrip_layout $g 1
 }
 
-# Rebuild the Tabs menu (its -postcommand): every open buffer, across all groups, as a
-# radio entry keyed on the focused active tab, so a tab is reachable by name no matter
-# how narrow the window is. A split shows a separator between the two groups. Purely a
-# navigation list — the Multi-Line Tabs view preference lives in the View menu.
-proc tabs_menu_fill {} {
-	.m.tabs delete 0 end
-	set first 1
-	foreach g $::groups {
-		if {![llength [gorder $g]]} continue
-		if {!$first} { .m.tabs add separator }
-		set first 0
-		foreach id [gorder $g] {
-			.m.tabs add radiobutton -label "[tab_name $id][tab_dot $id]" \
-				-variable ::cur -value $id -command [list activate $id $g]
-		}
-	}
-}
+# The former top-level Tabs menu (a -postcommand cascade listing every open buffer) was
+# retired in D74: reaching a buffer by name is now View ▸ Switch to Tab…, which opens the
+# bounded buffer-picker dialog (buffer_pick_rows / buffer_pick_dialog, near compare_open).
+# A dialog can't outgrow the screen the way that cascade could on X11, and it shows a path
+# hint so same-named tabs are distinguishable.
 
 # The View menu's multi-line toggle changed ::tab_layout: re-flow every group and persist.
 proc tab_layout_apply {} {
@@ -7520,12 +7614,19 @@ menu .m.view -tearoff 0
 	-variable ::relative_line_numbers -command apply_relnum
 # How the editor tab strip lays out when tabs outrun the width (D57): scroll (one line
 # behind ◂ ▸ arrows) or multi (wrap onto rows). A view preference, so it sits with its
-# display-toggle neighbors above — not in the Tabs menu, which is a buffer list.
+# display-toggle neighbors above — a view preference, not a navigation action like the
+# Switch to Tab… picker below.
 .m.view add checkbutton -label "Multi-Line Tabs" \
 	-onvalue multi -offvalue scroll -variable ::tab_layout -command tab_layout_apply
 .m.view add checkbutton -label "Show Hidden Files" \
 	-variable ::show_hidden -command apply_show_hidden
 .m.view add separator
+# Switch to Tab… replaces the old top-level Tabs menu (D74): the reliable way to reach a
+# buffer when the window is too narrow to show its tab handle. It opens the bounded
+# buffer-picker dialog (which also backs Compare ▸ Compare With Another Tab…) instead of an
+# unbounded cascade that could grow screen-tall on X11 — and the dialog shows a path hint so
+# two same-named tabs are told apart. A navigation command, so it heads the lower group.
+.m.view add command -label "Switch to Tab…" -command switch_tab_dialog
 # Less-frequent items live in topical submenus so the View menu stays short enough to fit
 # on screen (D64). A Tk menu posted taller than the space below it misbehaves on X11 (it can
 # unpost on a mid-list hover); we keep it in check by grouping, not by patching Tk's menu
@@ -7561,14 +7662,13 @@ menu .m.view.theme -tearoff 0
 # agent's own "opened in compare view" flow a named home the user can reach directly.
 menu .m.compare -tearoff 0
 .m add cascade -label Compare -menu .m.compare
-.m.compare add command -label "Compare With File…" -command compare_with_file_dialog
+# Another Tab comes first — comparing the active buffer against another open tab is the
+# more frequent case than against a file on disk (D74); both open the same modal picker /
+# file chooser respectively.
+.m.compare add command -label "Compare With Another Tab…" -command compare_with_tab_dialog
+.m.compare add command -label "Compare With A File…" -command compare_with_file_dialog
+.m.compare add separator
 .m.compare add command -label "Close Compare" -accelerator Esc -command compare_close
-# The Tabs menu (D57): every open buffer listed by name — the reliable way to reach a
-# tab when the window is too narrow to show its handle. A pure navigation list (the
-# Multi-Line Tabs view preference lives in the View menu); rebuilt each time it opens
-# (-postcommand) so the list tracks what is currently open.
-menu .m.tabs -tearoff 0 -postcommand tabs_menu_fill
-.m add cascade -label Tabs -menu .m.tabs
 menu .m.settings -tearoff 0
 .m add cascade -label Settings -menu .m.settings
 # The Preferences window (D58) gathers every stateful setting in one place; the items

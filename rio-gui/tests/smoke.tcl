@@ -1147,10 +1147,26 @@ set ::wrap_lines 0 ; apply_wrap
 set ::cmp_syncing 0
 cmp_yview moveto 0.5
 ok "compare: scroll synced"         [expr {abs([lindex [.cmp.l.t yview] 0] - [lindex [.cmp.r.t yview] 0]) < 0.001}] 1
-# The View ▸ Editor Layout submenu exposes the entry points.
-ok "compare: top-level menu has open"  [expr {![catch {.m.compare index "Compare With File…"}]}] 1
-ok "compare: top-level menu has close" [expr {![catch {.m.compare index "Close Compare"}]}] 1
-ok "compare: not in Editor Layout"     [expr {[catch {.m.view.layout index "Compare With File…"}]}] 1
+# The Compare top-level menu (D73) exposes both entry points (D74): Another Tab and A File.
+# Compare left the View ▸ Editor Layout submenu, and the old top-level Tabs menu is retired —
+# reaching a tab by name is now View ▸ Switch to Tab… (D74).
+ok "compare: menu has tab entry"    [expr {![catch {.m.compare index "Compare With Another Tab…"}]}] 1
+ok "compare: menu has file entry"   [expr {![catch {.m.compare index "Compare With A File…"}]}] 1
+ok "compare: menu has close"        [expr {![catch {.m.compare index "Close Compare"}]}] 1
+ok "compare: not in Editor Layout"  [expr {[catch {.m.view.layout index "Compare With A File…"}]}] 1
+ok "tabs: top-level menu retired"   [winfo exists .m.tabs] 0
+ok "tabs: Switch to Tab… in View"   [expr {![catch {.m.view index "Switch to Tab…"}]}] 1
+# Compare With Another Tab… diffs the active buffer against another open buffer, both sides
+# live buffer text (D74). Drive compare_with_tab directly (the modal picker's row-building is
+# covered by buffer_pick_rows in tabs.tcl); open two buffers so there's another tab to pick.
+set _fa [tmpbytes "one\ntwo\n"] ; do_open $_fa ; set _ta $::cur
+set _fb [tmpbytes "one\nTWO\n"] ; do_open $_fb ; set _tb $::cur   ;# _tb is now active
+compare_with_tab $_ta
+ok "compare tab: shown flag set"    $::compare_shown 1
+ok "compare tab: left is current"   [.cmp.l.hdr cget -text] "[tab_name $_tb] (current)"
+ok "compare tab: right is picked"   [.cmp.r.hdr cget -text] "[tab_name $_ta]"
+ok "compare tab: a change tagged"   [expr {[llength [.cmp.r.t tag ranges add]] > 0}] 1
+compare_close
 # The View menu is kept short enough to fit on screen by grouping less-used items into
 # topical submenus (D64): a Tk menu taller than the space below it misbehaves on X11. Guard
 # the top-level length and the submenus so a future addition can't quietly re-inflate it.
