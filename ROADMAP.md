@@ -194,7 +194,9 @@ for later:
   shared, core). The contract was hardened in-tree first (D65) so a second
   implementation proved the seam before it was frozen. OpenAI/ChatGPT was extracted
   from the tree to become the first such extension ([extensions/openai/](extensions/openai/)),
-  dogfooding the path. Still open here: `provider-api 2` and a core-side ledger (below).
+  and **Claude followed (D69)** — the core now carries **no** provider payload, only the
+  `echo` stub, with every real provider installed. Still open here: `provider-api 2` and a
+  core-side ledger (below).
 - **Update checking** — *deferred.* rio never auto-updates; an update is
   installing the newer-listed variant by hand. A "newer version available"
   marker on installed rows would be a cheap, honest middle ground.
@@ -213,15 +215,16 @@ for later:
 
 ## Agent
 
-- **Providers** — *landed* (AGENTS.md D26, D65, D66). **Claude** (Anthropic API)
-  ships in-tree as the always-present sanctioned path; the **OpenAI-compatible**
-  provider (**ChatGPT** by default; point its base URL at a local server — Ollama /
-  llama-server / LM Studio / vLLM — to run a **local model**) now ships as an
-  **installable** `provider` extension ([extensions/openai/](extensions/openai/), D66),
-  not built in. Each keeps its own 0600 key; the GUI's provider picker + key dialog
-  enumerate from the core (`agent.providers`). A first-party provider is a plugin
-  mirroring the OpenAI one; **anyone** can now publish one to a repository (see
-  Extensions ▸ "Provider as an installable `kind`").
+- **Providers** — *landed* (AGENTS.md D26, D65, D66, D69). The core now ships **only** the
+  offline **`echo`** stub built in (D69); every real provider is an **installable**
+  `provider` extension. **Claude** (Anthropic API, [extensions/claude/](extensions/claude/))
+  and the **OpenAI-compatible** provider (**ChatGPT** by default; point its base URL at a
+  local server — Ollama / llama-server / LM Studio / vLLM — to run a **local model**;
+  [extensions/openai/](extensions/openai/)) both install from a repository like any other
+  extension. Each keeps its own 0600 key; the GUI's provider picker + key dialog enumerate
+  from the core (`agent.providers`). A first-party provider is a plugin mirroring these two;
+  **anyone** can now publish one to a repository (see Extensions ▸ "Provider as an
+  installable `kind`").
 - **Run-command tool (with guardrails)** — *planned.* Let the agent run shell
   commands under explicit approval/confinement, alongside its existing read and
   propose-edit tools.
