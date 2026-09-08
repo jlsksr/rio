@@ -85,12 +85,14 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
   every write waits for you (or opt into *Settings ▸ Auto-accept edits*). You can
   **shape how it works** from *Settings ▸ Agent Prompts…*: a **system prompt** (your
-  standing instructions for every project) and, for the open folder, a **project
-  prompt**. Both open in rio's own editor and are plain Markdown *added on top of*
-  rio's built-in instructions — never replacing them, and either can be left empty. The
-  system prompt lives with your rio settings; the project prompt in a `.rio/agent.md`
-  at the project root, so it travels with the code. (The same instructions shape every
-  provider — Claude, ChatGPT, or a local model — since they live in rio, not the provider.)
+  standing instructions for every project), a **project prompt** for the open folder, and
+  a **per-provider prompt** applied only while a chosen provider (Claude, or an
+  OpenAI-compatible model) is the one running. All open in rio's own editor and are plain
+  Markdown *added on top of* rio's built-in instructions — never replacing them, and any
+  may be left empty. The system and per-provider prompts live with your rio settings; the
+  project prompt in a `.rio/agent.md` at the project root, so it travels with the code. The
+  instructions live in rio, not the provider — so your general ones shape whichever model
+  runs (Claude, ChatGPT, a local model), while the per-provider layer tunes just one.
 - **Theming** — live-switchable colour themes from the View menu: the plain
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
   in yourself — the menu lists whatever the core can load. Themes are plain

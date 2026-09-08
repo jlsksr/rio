@@ -228,13 +228,6 @@ for later:
 - **Run-command tool (with guardrails)** — *planned.* Let the agent run shell
   commands under explicit approval/confinement, alongside its existing read and
   propose-edit tools.
-- **Agent instructions in the GUI** — *planned* (AGENTS.md D34). The agent's system
-  prompt now ships as an editable data file (`agent/prompt.md`) with a per-project
-  `.rio/agent.md` layer; still wanted is a Settings view to read/edit the active
-  instructions (like the keybindings editor, D23) and a `.rio/agent.md` scaffold.
-- **Per-provider prompt coda** — *deferred* (AGENTS.md D34). The provider contract
-  can carry a short model-specific tail appended to the shared base; unneeded so
-  far, the seam is in place for when a provider wants one.
 
 ## Remote / transport
 
