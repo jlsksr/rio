@@ -1,18 +1,24 @@
-# rio — cross-platform caveats
+# rio — caveats & limitations
 
-A running list of **behaviour differences across platforms**: cases where the *same*
-rio code behaves differently on one OS / window manager / toolkit than on another.
-These are usually traits of Tk or the surrounding environment rather than bugs in
-rio's own code — but they are real, and worth tracking so we remember the mitigation
-and don't re-discover them the hard way.
+A running list of rio's **rough edges worth remembering** — split into two kinds:
+
+1. **Cross-platform behaviour differences** — the *same* rio code behaving differently on
+   one OS / window manager / toolkit than on another. These are usually traits of Tk or the
+   surrounding environment rather than bugs in rio's own code.
+2. **Behavioural limitations** — deliberate simplifications in rio's *own* design that hold
+   the same on every platform: a documented trade-off where a fuller behaviour was
+   consciously deferred, not a bug.
 
 Each entry records the **symptom**, the **cause**, **where it's fine**, rio's current
 **mitigation**, and any **planned** work (with a pointer to [ROADMAP.md](ROADMAP.md) /
-[AGENTS.md](AGENTS.md)). When you hit a new "works here, not there" quirk, append it here.
+[AGENTS.md](AGENTS.md)). When you hit a new "works here, not there" quirk, or notice a
+design limit that surprises, append it to the matching section.
 
 ---
 
-## Over-tall menus close on hover (X11)
+## Cross-platform behaviour differences
+
+### Over-tall menus close on hover (X11)
 
 - **Symptom.** A menu posted **taller than the screen space below it** can **unpost the
   moment the pointer hovers an item in the middle** of the list. Seen on X11 under xfwm4;
@@ -35,3 +41,27 @@ Each entry records the **symptom**, the **cause**, **where it's fine**, rio's cu
   picker (the same component the Files / Git / Extensions panes use), which has a bounded
   height and a scrollbar and never posts a screen-tall menu. Tracked under *Menu overflow
   at scale* in [ROADMAP.md](ROADMAP.md).
+
+---
+
+## Behavioural limitations
+
+### Two no-project windows share one anonymous session
+
+- **Symptom.** Run **two rio instances that both have no folder open** (the loose "daily
+  workspace" case) and their open-tab sets **overwrite each other**: whichever saves last
+  wins, so a later launch resumes only one of the two sets rather than both.
+- **Cause.** The resume session for the **no-project** state is a *single* file
+  (`sessions/anonymous.json`, AGENTS.md **D72**): with no project root there is nothing to
+  key it by, so every no-project instance shares the one file, and `session_save` (fired on
+  each tab change and on quit) rewrites it.
+- **Where it's fine.** The intended **one-daily-instance** workflow — a single always-open
+  no-project window resumes perfectly. And **any window with a folder open is unaffected**:
+  project sessions are keyed by their root (D31), so multiple *project* windows stay
+  isolated from each other and from the anonymous one.
+- **Mitigation in rio.** None automatic today. If you want two independent loose sessions,
+  **open a folder** in one of the windows (even a throwaway root) so it gets its own
+  per-root session instead of the shared anonymous one.
+- **Planned.** A per-instance or last-folder resume pointer would let several no-project
+  windows resume independently; noted as the deferred follow-up in AGENTS.md **D72**, not
+  yet scheduled.

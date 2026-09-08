@@ -3749,7 +3749,7 @@ filesystem (local or remote), so it follows a remote core exactly as a project s
 does — a no-project session resumes over the wire too. **Honest caveat:** there is a
 *single* anonymous session, so two simultaneous no-project instances clobber each other's
 (fine for the one-daily-instance workflow this serves; project sessions stay isolated by
-root). A separable future complement — **remember the last project *folder* and reopen it
+root) — logged in [CAVEATS.md](CAVEATS.md). A separable future complement — **remember the last project *folder* and reopen it
 on launch** (a `last_project` pointer in `prefs.json` + a boot-time reopen) — would cover
 the project-folder workflow; deliberately left out here to keep this to the loose-files
 case.
