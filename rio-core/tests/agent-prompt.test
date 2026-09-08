@@ -153,6 +153,97 @@ test system-only {system.md alone (no base, no project) composes to just it} -se
 	rio::agent::prompt::compose
 } -cleanup { reset_prompt ; file delete -force $::d } -result {ONLY SYSTEM}
 
+# --- the per-provider layer (D79): providers/<name>.md, for the active provider --
+
+test provider-layer {providers/<name>.md is composed for the active provider} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d providers claude.md] "CLAUDE RULES"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose claude
+} -cleanup { reset_prompt ; file delete -force $::d } -result "BASE
+
+CLAUDE RULES"
+
+test compose-order-four {base, then system, then provider, then project — in order} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d system.md] "SYSTEM"
+	writefile [file join $::d providers claude.md] "PROVIDER"
+	rio::agent::prompt::override_dirs [list $::d]
+	set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "PROJECT"
+	rio::project::open $::proj
+} -body {
+	rio::agent::prompt::compose claude
+} -cleanup { reset_prompt ; file delete -force $::d $::proj } -result "BASE
+
+SYSTEM
+
+PROVIDER
+
+PROJECT"
+
+test provider-optional {no providers/<name>.md leaves the other layers alone} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose claude
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
+test provider-only {a provider file alone composes to just it} -setup {
+	reset_prompt
+	set ::d [mkdir]   ;# no prompt.md
+	writefile [file join $::d providers claude.md] "ONLY CLAUDE"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose claude
+} -cleanup { reset_prompt ; file delete -force $::d } -result {ONLY CLAUDE}
+
+test provider-inactive {only the ACTIVE provider's file is added} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d providers openai.md] "OPENAI RULES"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose claude
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
+test provider-echo-none {echo contributes no provider layer even if the file exists} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d providers echo.md] "SHOULD NOT LOAD"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose echo
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
+test provider-none-named {compose with no provider name adds no provider layer} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	writefile [file join $::d providers claude.md] "SHOULD NOT LOAD"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
+test provider-unsafe-name {an unsafe provider name loads nothing (no traversal)} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	writefile [file join $::d prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	rio::agent::prompt::compose "../system"
+} -cleanup { reset_prompt ; file delete -force $::d } -result {BASE}
+
 # --- path / ensure: locate and create the user-editable files -----------------
 
 test path-system {path system points at system.md in the user dir} -setup {
@@ -168,6 +259,34 @@ test path-project-none {path project is "" with no open project} -setup {
 } -body {
 	rio::agent::prompt::path project
 } -cleanup { reset_prompt } -result {}
+
+test path-provider {path provider <name> points at providers/<name>.md} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	string equal [rio::agent::prompt::path provider claude] \
+		[file join $::d providers claude.md]
+} -cleanup { reset_prompt ; file delete -force $::d } -result 1
+
+test path-provider-unsafe {path provider with an unsafe name is ""} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	list [rio::agent::prompt::path provider "../x"] [rio::agent::prompt::path provider ""]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {{} {}}
+
+test ensure-provider {ensure provider creates providers/<name>.md empty} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+} -body {
+	set r [rio::agent::prompt::ensure provider claude]
+	list [dict get $r created] \
+		[string equal [dict get $r path] [file join $::d providers claude.md]] \
+		[file isfile [dict get $r path]] [file size [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {1 1 1 0}
 
 test ensure-creates-empty {ensure system creates an empty file and reports created} -setup {
 	reset_prompt
@@ -223,5 +342,40 @@ test op-bad-which {agent.prompt.edit rejects an unknown prompt} -setup {
 	catch {rio::ops::agent_prompt_edit {which bogus}} e
 	set e
 } -cleanup { reset_prompt } -match glob -result {*unknown prompt*}
+
+# The op validates the provider name against the registry; register a throwaway
+# provider so a valid `provider` edit has something to match (the core process carries
+# only `echo`; the real claude/openai faces live in their extensions).
+test op-provider {agent.prompt.edit provider returns path + created} -setup {
+	reset_prompt
+	set ::d [mkdir]
+	rio::agent::prompt::override_dirs [list $::d]
+	rio::agent::register_provider testprov ::testprov_cmd -label Test
+} -body {
+	set res [dict get [rio::ops::agent_prompt_edit {which provider name testprov}] result]
+	list [dict get $res created] \
+		[string equal [dict get $res path] [file join $::d providers testprov.md]]
+} -cleanup { reset_prompt ; file delete -force $::d } -result {1 1}
+
+test op-provider-noname {agent.prompt.edit provider without a name is a bad_request} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_edit {which provider}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*requires name*}
+
+test op-provider-echo {agent.prompt.edit provider echo is a bad_request} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_edit {which provider name echo}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*echo*}
+
+test op-provider-unknown {agent.prompt.edit provider with an unregistered name is a bad_request} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_edit {which provider name nope}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*unknown agent provider*}
 
 cleanupTests

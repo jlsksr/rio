@@ -1106,6 +1106,18 @@ ok "prompts: dialog closed after open"   [winfo exists .agentprompts] 0
 ok "prompts: system.md opened in a tab"  [expr {[dict size $::buffers] > $::nbuf_before}] 1
 ok "prompts: opened buffer is system.md" [string match {*system.md} [bufget $::cur path]] 1
 
+# The per-provider row (D79): with a real provider registered (openai, live above), the
+# chooser + Edit button appear and default to a non-echo provider; editing resolves+creates
+# providers/<name>.md in the sandbox XDG and opens it as a tab.
+agent_prompts_dialog
+ok "prompts: provider row present"        [winfo exists .agentprompts.prov.edit] 1
+ok "prompts: chooser defaults non-echo"   [expr {$::agent_prompt_provider ni {echo {}}}] 1
+set ::agent_prompt_provider openai
+set ::nbuf_before2 [dict size $::buffers]
+agent_prompt_open provider $::agent_prompt_provider
+ok "prompts: provider dialog closed"      [winfo exists .agentprompts] 0
+ok "prompts: providers/openai.md in a tab" [string match {*providers/openai.md} [bufget $::cur path]] 1
+
 # The Extensions window's detail must WORD-WRAP a long description, not stretch the
 # auto-sized window. No repository is configured in the sandbox, so the window opens
 # on an empty scan; drive extw_select with a synthetic long-description row and check

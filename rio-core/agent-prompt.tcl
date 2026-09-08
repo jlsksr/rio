@@ -8,9 +8,9 @@
 # (the provider contract's `system` argument, agent.tcl), exactly as it already
 # pushes `tools`; a provider with no system-prompt slot (echo) simply ignores it.
 #
-# Three layers, composed in order, deliberately kept apart so a user's own
-# instructions never have to live in rio's shipped code. All three are plain
-# Markdown DATA — loaded, never executed:
+# Four layers, composed in order, deliberately kept apart so a user's own
+# instructions never have to live in rio's shipped code. All are plain Markdown
+# DATA — loaded, never executed:
 #
 #   base (layer 1) — the shipped `agent/prompt.md`: rio's tool contract plus general
 #       coding craft. rio's own machinery, not a user knob. Advanced users may swap
@@ -20,11 +20,19 @@
 #       their standing instructions for EVERY project, ADDED on top of the base (it
 #       never replaces rio's contract). Opt-in (absent/empty adds nothing).
 #
-#   project (layer 3) — an optional `.rio/agent.md` at the open project root: the
-#       instructions specific to THIS codebase (its conventions, its don'ts). Opt-in,
-#       and it lives WITH the project, not with rio.
+#   provider (layer 3, D79) — an optional `providers/<name>.md` in the same XDG agent
+#       dir, added ONLY when that provider is the active one: instructions for talking
+#       to THIS model (its quirks, a local server's house rules). It still stays a
+#       CORE concern — the core picks the file by the active provider's name and folds
+#       its text into the one system string; the provider never learns it exists, so
+#       the contract is unchanged. Opt-in; `echo` has none (it ignores `system`).
 #
-# Layers 2 and 3 are the user-facing prompts, editable from the GUI (Settings ▸ Agent
+#   project (layer 4) — an optional `.rio/agent.md` at the open project root: the
+#       instructions specific to THIS codebase (its conventions, its don'ts). The
+#       tightest, most task-specific layer, so it comes last. Opt-in, and it lives
+#       WITH the project, not with rio.
+#
+# Layers 2–4 are the user-facing prompts, editable from the GUI (Settings ▸ Agent
 # Prompts…, which opens each file in rio's own editor via the `agent.prompt.edit` op).
 # The composed string is what the provider sends as the request's system prompt; if
 # nothing is available at all it is empty and the provider sends none.
@@ -92,6 +100,26 @@ proc rio::agent::prompt::_user {} {
 	return [_read $p]
 }
 
+# Whether a provider name is safe to use as a filename: non-empty and only the
+# characters a registered provider name uses ([A-Za-z0-9_-]) — no path separators,
+# no `..`. Guards the providers/<name>.md path against traversal.
+proc rio::agent::prompt::_safe_provider {name} {
+	return [expr {$name ne "" && [regexp {^[A-Za-z0-9_-]+$} $name]}]
+}
+
+# The per-provider layer (D79): `providers/<name>.md` in the XDG agent dir, for the
+# ACTIVE provider only. "" when no name is given, the name is `echo` (it ignores the
+# system prompt) or unsafe, there is no user dir, or the file is absent. Like _user,
+# it is NEVER read from the shipped source tree — this is the user's alone.
+proc rio::agent::prompt::_provider {name} {
+	if {$name eq "" || $name eq "echo" || ![_safe_provider $name]} { return "" }
+	set d [_userdir]
+	if {$d eq ""} { return "" }
+	set p [file join $d providers $name.md]
+	if {![file isfile $p]} { return "" }
+	return [_read $p]
+}
+
 # The project layer: `.rio/agent.md` at the open project root, or "" when there is
 # no open project or no such file. Per-project instructions live with the project.
 proc rio::agent::prompt::_project {} {
@@ -115,28 +143,37 @@ proc rio::agent::prompt::_read {path} {
 }
 
 # Compose the system prompt the provider will send: the base, then the user's system
-# layer, then any project layer — each appended so the more specific refines the more
-# general (D70). Any layer may be empty; the result is "" only when nothing is
-# available at all.
-proc rio::agent::prompt::compose {} {
+# layer, then the active provider's own layer, then any project layer — each appended
+# so the more specific refines the more general (D70/D79). `provider` is the active
+# provider's NAME (the caller passes rio::agent::provider_name); "" (or echo) simply
+# contributes no provider layer. Any layer may be empty; the result is "" only when
+# nothing is available at all.
+proc rio::agent::prompt::compose {{provider ""}} {
 	set parts {}
-	foreach layer {_base _user _project} {
-		set t [$layer]
+	foreach t [list [_base] [_user] [_provider $provider] [_project]] {
 		if {$t ne ""} { lappend parts $t }
 	}
 	return [join $parts "\n\n"]
 }
 
 # The absolute path of a user-editable prompt file — `which` is `system` (the XDG
-# `system.md`, all projects) or `project` (`.rio/agent.md`, this project). Returns ""
-# when the file cannot be located: no user dir for `system`, or no open project for
-# `project`. Pure — the caller (the agent.prompt.edit op) decides how to report "".
-proc rio::agent::prompt::path {which} {
+# `system.md`, all projects), `provider` (the XDG `providers/<name>.md`, for the named
+# provider), or `project` (`.rio/agent.md`, this project). Returns "" when the file
+# cannot be located: no user dir for `system`/`provider`, an unsafe/empty `name` for
+# `provider`, or no open project for `project`. Pure — the caller (the agent.prompt.edit
+# op) decides how to report "".
+proc rio::agent::prompt::path {which {name ""}} {
 	switch -- $which {
 		system {
 			set d [_userdir]
 			if {$d eq ""} { return "" }
 			return [file join $d system.md]
+		}
+		provider {
+			if {![_safe_provider $name]} { return "" }
+			set d [_userdir]
+			if {$d eq ""} { return "" }
+			return [file join $d providers $name.md]
 		}
 		project {
 			set root [rio::project::root]
@@ -151,9 +188,10 @@ proc rio::agent::prompt::path {which} {
 # open it, creating an EMPTY file (and any parent dir) when absent — empty means the
 # layer contributes nothing until the user writes to it; the GUI dialog and the docs,
 # not a seeded template, explain what to put there (D70). Returns {path created}, or
-# "" if the path cannot be resolved (unknown `which`, no user dir, no open project).
-proc rio::agent::prompt::ensure {which} {
-	set p [path $which]
+# "" if the path cannot be resolved (unknown `which`, no user dir, no open project,
+# or an unsafe provider `name`).
+proc rio::agent::prompt::ensure {which {name ""}} {
+	set p [path $which $name]
 	if {$p eq ""} { return "" }
 	set created 0
 	if {![file isfile $p]} {

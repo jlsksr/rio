@@ -2742,6 +2742,11 @@ proc about_dialog {} {
 # ---------------------------------------------------------------------------
 set ::agent_provider echo   ;# echo | claude | openai | …
 set ::provider_key_show 0   ;# the key dialog's reveal toggle
+# The Agent Prompts dialog's per-provider chooser (D79): which provider's prompt the
+# "Edit its prompt…" button targets, and its live button label. Set when the dialog
+# opens; seeded so the vars exist beforehand.
+set ::agent_prompt_provider ""
+set ::agent_prompt_provider_label ""
 # The providers the core carries, each {name,label,keyed,key_set,signup} — the core
 # owns the list (D30), so the picker and key dialog render from it rather than
 # hardcoding names. Refreshed from agent.providers; an installed provider (milestone
@@ -2903,14 +2908,15 @@ proc provider_key_clear {w name} {
 	destroy $w
 }
 
-# The agent-prompts dialog (Settings ▸ Agent Prompts…, D70). A small modal that opens
-# the two USER-editable system-prompt files in rio's OWN editor: `system.md` (your
-# standing instructions for every project) and the open project's `.rio/agent.md`. The
+# The agent-prompts dialog (Settings ▸ Agent Prompts…, D70/D79). A small modal that opens
+# the USER-editable system-prompt files in rio's OWN editor: `system.md` (your standing
+# instructions for every project), the open project's `.rio/agent.md`, and — per D79 — a
+# chosen provider's own `providers/<name>.md` (active only when that provider runs). The
 # CORE owns and creates the files (agent.prompt.edit) — a remote core resolves them on
 # its own disk (D30), and the opened tab's title shows the real path — so this dialog
 # only asks for the path and calls do_open. rio's shipped instructions always apply
-# underneath; these two files ADD to them. The static help is muted (gutter.fg); the
-# buttons are the only interactive elements, so help never reads as a control (D68).
+# underneath; these files ADD to them. The static help is muted (gutter.fg); the
+# buttons/chooser are the only interactive elements, so help never reads as a control (D68).
 proc agent_prompts_dialog {} {
 	set w .agentprompts
 	destroy $w
@@ -2925,7 +2931,7 @@ proc agent_prompts_dialog {} {
 
 	label $w.intro -anchor w -justify left -font RioUIFont -wraplength 400 \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
-		-text "The agent's instructions are plain Markdown, loaded as data — never run. rio's own instructions always apply; these two files add to them, and either may be left empty."
+		-text "The agent's instructions are plain Markdown, loaded as data — never run. rio's own instructions always apply; these files add to them, and any may be left empty."
 	button $w.sys -text "Edit system prompt…" -font RioUIFont \
 		-command [list agent_prompt_open system]
 	label $w.sysh -anchor w -justify left -font RioUIFont -wraplength 250 \
@@ -2939,6 +2945,52 @@ proc agent_prompts_dialog {} {
 		-text [expr {$have_project ?
 			"For the open project — kept in its .rio/ folder." :
 			"Open a project folder to add one for it."}]
+
+	# The per-provider row (D79): instructions for ONE provider, applied only while
+	# that provider is active. The chooser lists every provider except echo (which
+	# ignores the system prompt entirely); the button opens that provider's
+	# providers/<name>.md via agent.prompt.edit. When only echo is present the row is
+	# disabled with a hint — provider prompts need a provider to attach to.
+	agent_providers_refresh
+	set provnames {}
+	foreach p $::agent_providers {
+		if {[dict get $p name] eq "echo"} continue
+		lappend provnames [dict get $p name]
+	}
+	if {[llength $provnames]} {
+		if {[lsearch -exact $provnames $::agent_provider] >= 0} {
+			set ::agent_prompt_provider $::agent_provider
+		} else {
+			set ::agent_prompt_provider [lindex $provnames 0]
+		}
+		set ::agent_prompt_provider_label "[agent_provider_label $::agent_prompt_provider]  ▾"
+		frame $w.prov -background [dict get $c ui.bg]
+		menubutton $w.prov.sel -textvariable ::agent_prompt_provider_label \
+			-menu $w.prov.sel.m -font RioUIFont -anchor w -relief raised -borderwidth 1 \
+			-highlightthickness 0 -padx 6 -pady 1 \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+			-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+		menu $w.prov.sel.m -tearoff 0 -font RioUIFont \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+			-activebackground [dict get $c editor.selection] -activeforeground [dict get $c ui.fg]
+		foreach name $provnames {
+			$w.prov.sel.m add radiobutton -label [agent_provider_label $name] \
+				-variable ::agent_prompt_provider -value $name \
+				-command [list set ::agent_prompt_provider_label "[agent_provider_label $name]  ▾"]
+		}
+		button $w.prov.edit -text "Edit its prompt…" -font RioUIFont \
+			-command {agent_prompt_open provider $::agent_prompt_provider}
+		pack $w.prov.sel $w.prov.edit -side left -padx {0 6}
+		label $w.provh -anchor w -justify left -font RioUIFont -wraplength 250 \
+			-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+			-text "Only while that provider is active — kept with your rio settings."
+	} else {
+		button $w.prov -text "Edit provider prompt…" -font RioUIFont -state disabled
+		label $w.provh -anchor w -justify left -font RioUIFont -wraplength 250 \
+			-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+			-text "Install a provider to add provider-specific instructions."
+	}
+
 	frame $w.btns -background [dict get $c ui.bg]
 	button $w.btns.close -text "Close" -font RioUIFont -command [list destroy $w]
 	pack $w.btns.close -side right -padx 3
@@ -2948,16 +3000,22 @@ proc agent_prompts_dialog {} {
 	grid $w.sysh  -row 1 -column 1 -sticky w -padx {0 8}
 	grid $w.proj  -row 2 -column 0 -sticky w -padx {8 6} -pady 3
 	grid $w.projh -row 2 -column 1 -sticky w -padx {0 8}
-	grid $w.btns  -row 3 -column 0 -columnspan 2 -sticky e -padx 5 -pady {6 8}
+	grid $w.prov  -row 3 -column 0 -sticky w -padx {8 6} -pady 3
+	grid $w.provh -row 3 -column 1 -sticky w -padx {0 8}
+	grid $w.btns  -row 4 -column 0 -columnspan 2 -sticky e -padx 5 -pady {6 8}
 	bind $w <Escape> [list destroy $w]
 	catch {grab $w}
 	focus $w.sys
 }
-# Ask the core to resolve+create the prompt file, then open it as a normal tab. The
-# core raises bad_request for `project` with no open project — but the button for that
-# is disabled, so this is a safety net, surfaced through the usual error path.
-proc agent_prompt_open {which} {
-	set resp [rio_call agent.prompt.edit [dict create which $which]]
+# Ask the core to resolve+create the prompt file, then open it as a normal tab. `which`
+# is system | project | provider; a provider prompt also needs `name` (the chosen
+# provider). The core raises bad_request for `project` with no open project or a bad
+# provider name — but the relevant control is disabled/validated here, so those are
+# safety nets, surfaced through the usual error path.
+proc agent_prompt_open {which {name ""}} {
+	set params [dict create which $which]
+	if {$name ne ""} { dict set params name $name }
+	set resp [rio_call agent.prompt.edit $params]
 	if {![dict get $resp ok]} {
 		report_error "Could not open the $which prompt:\n[dict get $resp error message]" \
 			[dict get $resp error code]

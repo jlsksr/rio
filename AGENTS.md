@@ -3929,6 +3929,48 @@ change; no core op. tabs.tcl now asserts the row-frame structure instead of grid
 
 ---
 
+### D79 — Per-provider agent prompts (a fourth system-prompt layer)
+
+D34 made the agent's system prompt a **core-owned, provider-agnostic** string; D70 gave the
+user two layers to fill — `system.md` (their standing instructions for **every** project) and
+`.rio/agent.md` (this **project**). jka asked for a third user axis: instructions scoped to a
+**single provider** — Claude-only formatting quirks, or house rules for a local
+OpenAI-compatible model — "besides the general and project-based scope," while keeping this a
+core concern the providers merely respect.
+
+**Decision.** Add a fourth compose layer, `providers/<name>.md` in the XDG agent dir
+(`$XDG_CONFIG_HOME/rio/agent/providers/claude.md`, `…/openai.md`), read **only when that
+provider is the active one**. Compose order is now **base → system → provider → project**: the
+project's own conventions are the tightest, most task-specific context, so they stay last
+(most-refining); the provider layer ("how to talk to *this* model") sits just above it.
+
+**The contract does not change — the provider stays blind to the layer.** `rio::agent::prompt::compose`
+now takes the active provider's *name* (the loop passes `rio::agent::provider_name`); it folds the
+matching file into the **one** `system` string the provider already receives. A provider never
+learns a per-provider layer exists — it just gets more text — so nothing in the provider API,
+the extensions, or `provider.put` moves. `echo` contributes none (it ignores `system`
+entirely), and an empty/unknown name or a missing file simply adds nothing (safe degrade, as
+every prompt layer does). The filename is guarded to `[A-Za-z0-9_-]+` (a registered provider's
+name shape) so `providers/<name>.md` can't be steered outside the dir.
+
+**Op.** `agent.prompt.edit` gains `which = provider` with a required `name`, validated against
+the live registry (`rio::agent::provider_names`) and refusing `echo`; `system`/`project` behave
+exactly as before. The core still owns and creates the file (a remote core on its **own** disk,
+D30), so the frontend only opens the returned path.
+
+**GUI.** Rather than a new consolidated window, jka chose to **grow the existing Agent Prompts…
+dialog** (D70): it now has a third row — a provider chooser (every registered provider *except*
+echo) plus an "Edit its prompt…" button — while the provider picker, per-provider API key, and
+the auto-accept / compare-complex toggles stay where they are in Preferences ▸ Agent. When only
+`echo` is present the row is disabled with a hint (a provider prompt needs a provider to attach
+to). Static help stays muted (D68); the chooser and buttons are the only controls.
+
+**Scope.** User-global per provider (all projects). A project×provider layer
+(`.rio/agent/providers/<name>.md`) is deliberately **not** built — a later axis if it's ever
+wanted. rio without the agent is untouched: this is one more opt-in file that defaults to empty.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

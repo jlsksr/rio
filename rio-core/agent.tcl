@@ -243,9 +243,11 @@ proc rio::agent::send {text emit} {
 # Provider contract — `{*}$provider conversation tools system post`:
 #   tools  = the available tool specs (rio::agent::tools::specs); a provider that
 #            doesn't do tools ignores it.
-#   system = the core-composed system prompt (rio::agent::prompt::compose, D34) —
-#            provider-agnostic instructions the provider sends however its API
-#            spells "system prompt"; a provider without one (echo) ignores it.
+#   system = the core-composed system prompt (rio::agent::prompt::compose, D34/D70/
+#            D79) — base + the user's system layer + the ACTIVE provider's own layer +
+#            the project layer, joined into one provider-agnostic string the provider
+#            sends however its API spells "system prompt"; a provider without one (echo)
+#            ignores it. The provider never sees the layers — only the composed string.
 #   {*}$post delta <text>                 a chunk of assistant text
 #   {*}$post tool  <id> <name> <in> <raw> a requested tool call (in = parsed dict,
 #                                         raw = the original input JSON)
@@ -258,7 +260,7 @@ proc rio::agent::_run {turn emit} {
 	variable maxsteps
 	set co [info coroutine]
 	set toolspecs [rio::agent::tools::specs]
-	set system [rio::agent::prompt::compose]
+	set system [rio::agent::prompt::compose [rio::agent::provider_name]]
 	for {set step 0} {1} {incr step} {
 		set acc ""
 		set calls {}        ;# tool calls this step: {id name input raw} dicts
