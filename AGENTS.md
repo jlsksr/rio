@@ -1071,7 +1071,7 @@ which also makes the synced scroll (shared scrollbar + a guarded `cmp_yscroll`)
 exact. Each line also carries a **`-`/`+` gutter marker** (color-independent), so
 the diff reads even where a Tk build renders tag backgrounds poorly under wrap —
 colour is the emphasis, the marker the guarantee. Reached from
-**View ▸ Compare With File…** (active buffer vs. a picked
+the **Compare** menu ▸ **Compare With File…** (active buffer vs. a picked
 file, read via `fs.read`) and closed with a visible **× Close compare** button (a
 top bar over the panes; its label names the `Esc` shortcut, which alone isn't
 discoverable), **View ▸ Close Compare**, or `Esc`. The panes have no horizontal
@@ -3492,8 +3492,9 @@ fit and behave.
 The fix is to keep the menu **short enough to fit**, not to touch Tk's menu machinery — the
 D59 revert is the standing lesson that patching Tk's post/grab/scroll internals is too
 fragile. Less-frequent items fold into three topical cascades — **Dock Side** (Left/Right),
-**Font & Zoom** (Font…, Zoom In/Out/Reset), **Editor Layout** (Split / Unsplit / Move Tab,
-and Compare) — built like the existing `.m.view.theme` cascade. The often-flicked **display
+**Font & Zoom** (Font…, Zoom In/Out/Reset), **Editor Layout** (Split / Unsplit / Move Tab)
+— built like the existing `.m.view.theme` cascade. (Compare later left Editor Layout for its
+own top-level menu — see **D73**.) The often-flicked **display
 toggles** (Wrap, Indent, Line Numbers, Highlight Current Line, Multi-Line Tabs, Show Hidden
 Files) and the four panel toggles stay at the top level. Result: ~15 items + 3 separators ≈
 18 rows, comparable to Edit, so it posts and hovers as stock Tk.
@@ -3753,6 +3754,23 @@ root) — logged in [CAVEATS.md](CAVEATS.md). A separable future complement — 
 on launch** (a `last_project` pointer in `prefs.json` + a boot-time reopen) — would cover
 the project-folder workflow; deliberately left out here to keep this to the loose-files
 case.
+
+### D73 — Compare is its own top-level menu
+
+The diff view (D28) — **Compare With File…** and **Close Compare** — had lived under **View
+▸ Editor Layout**, next to Split / Unsplit / Move Tab. That grouping conflated two different
+things: **Editor Layout** arranges the editing *groups* (how the open buffers tile), whereas
+Compare is a distinct **mode** that swaps the whole editor surface for two read-only diff
+panes. Reading "Compare" as a *layout* of the editor was the confusion; it never was one.
+
+So Compare moves to its own **top-level `Compare` menu**, sitting after **View** in the
+menubar (File · Edit · View · **Compare** · Tabs · Settings). It holds the two commands and
+nothing else — a two-item menu is justified because the mode is otherwise only reachable by
+the agent's automatic "opened in compare view" flow (D28) or a picked-file dialog; a named
+top-level door makes it discoverable and gives that flow a home the user can point at. This
+keeps **Editor Layout** honestly about group layout, and doesn't lengthen **View** (the D64
+height budget is unaffected — Compare left the submenu, it didn't join the top level of
+View). Pure GUI/menu change; the `compare_*` procs and the `Esc` accelerator are untouched.
 
 ---
 

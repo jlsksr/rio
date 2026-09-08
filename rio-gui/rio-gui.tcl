@@ -7547,15 +7547,22 @@ menu .m.view.layout -tearoff 0
 .m.view.layout add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
 .m.view.layout add command -label "Unsplit Editor"        -command unsplit_editor
 .m.view.layout add command -label "Move Tab to Other Group" -accelerator [key_accel move-tab-other] -command move_tab_other
-.m.view.layout add separator
-.m.view.layout add command -label "Compare With File…" -command compare_with_file_dialog
-.m.view.layout add command -label "Close Compare" -accelerator Esc -command compare_close
 # The Theme cascade is filled from the core (themes_menu_fill) once the channel
 # is up — installed themes (D39) appear here like shipped ones.
 menu .m.view.theme -tearoff 0
 .m.view add cascade -label "Theme" -menu .m.view.theme
 # Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
 # installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
+
+# Compare is its own top-level menu, not a View ▸ Editor Layout item (D73): the diff view
+# (D28) is a distinct mode that swaps the whole editor surface for two read-only panes —
+# it is not one of the split/unsplit/move-tab *layouts* of the editing groups, so it read
+# as misplaced there. A short top-level menu makes the mode discoverable and gives the
+# agent's own "opened in compare view" flow a named home the user can reach directly.
+menu .m.compare -tearoff 0
+.m add cascade -label Compare -menu .m.compare
+.m.compare add command -label "Compare With File…" -command compare_with_file_dialog
+.m.compare add command -label "Close Compare" -accelerator Esc -command compare_close
 # The Tabs menu (D57): every open buffer listed by name — the reliable way to reach a
 # tab when the window is too narrow to show its handle. A pure navigation list (the
 # Multi-Line Tabs view preference lives in the View menu); rebuilt each time it opens
