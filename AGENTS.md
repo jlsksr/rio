@@ -2251,7 +2251,8 @@ before it happens. An open bar stays honest against a changing buffer: any
 the idle loop, the same pattern as the incremental highlighter (D32), and a tab
 switch recounts for the newly focused buffer. All four commands live in the
 keymap table (D23) — Ctrl+F, Ctrl+H, F3, Shift+F3, remappable like everything
-else — and the Edit menu gains the four entries. The match paint is a
+else — and the Edit menu gains the four entries (later moved to a top-level **Find** menu,
+D75). The match paint is a
 `findmatch` text tag coloured by a new **`editor.findmatch` role** in the theme
 vocabulary (D24): the default is the familiar pale yellow, the three shipped
 themes retint it, and any theme that omits it inherits the default; the
@@ -3041,7 +3042,7 @@ location. Match/Whole-word are checkboxes on the query row (each re-runs the sea
 hit on a row is tinted with the **`fimatch`** band, which reuses the theme's `diff.added.bg`
 (a light green on light themes, a dark green on dark ones — always readable under `editor.fg`,
 raised above the selection band); the columns come straight from the op's `cols`, offset by
-the `"<line>  "` row prefix. `Ctrl+Shift+F` / *Edit ▸ Find in Files…* opens it (seeding from
+the `"<line>  "` row prefix. `Ctrl+Shift+F` / *Find ▸ Search…* opens it (seeding from
 the selection like the find bar); double-click / Return on a match opens the file and jumps
 the caret to the line. Search runs on Enter, not per-keystroke — it walks the tree, unlike the
 in-buffer bar's live paint. The panel is transient (not persisted), like the find bar.
@@ -3807,6 +3808,30 @@ data-driven menus in [CAVEATS.md](CAVEATS.md); only the **Theme** cascade remain
 new keyboard shortcut for Switch to Tab… (menu + dialog only) — a `goto-tab` chord is a
 possible later add. Pure GUI change; no core op touched. The **Multi-Line Tabs** view
 preference (D57) stays in the View menu — it was never part of the navigation list.
+
+### D75 — A top-level Find menu
+
+The search cluster added in D36 — **Find…**, **Replace…**, **Find Next**, **Find Previous**
+— plus the project-wide **Search…** (D-around-36, relabelled) lived behind a separator at the
+bottom of the **Edit** menu. That grouping was fine but crowded Edit, and the cluster is
+coherent enough to stand on its own: it now becomes a top-level **Find** menu, placed left of
+Compare (both are editor-action menus to the right of View). Edit is left as the classic
+clipboard/selection ops (Undo/Redo, Cut/Copy/Paste/Select All) — the Win98 canon.
+
+- **Named "Find", not "Search",** deliberately: rio already has a **Search** *pane* toggle in
+  View (D-around-36) and a `Search…` command for project-wide search; a top-level *Search*
+  menu would read as the same thing as that pane. **Find** disambiguates, four of the five
+  items are Find anyway, and the lone `Search…` sits below a separator as the "widen to the
+  whole project" escalation (the Sublime *Find ▸ Find in Files* shape).
+- **Whole cluster or nothing.** Moving the *entire* group (not splitting Find between two
+  menus) is what keeps it intuitive; a half-measure that left some find items in Edit would be
+  worse than either end state. The cost — departing from the *Find-under-Edit* convention of
+  Windows/VSCode/Notepad — is mild and has direct precedent in **Sublime Text**'s top-level
+  Find menu.
+
+Menubar is now **File · Edit · View · Find · Compare · Settings**. Items keep their labels,
+commands, and accelerators; the keymap-refresh block's `entryconfigure` paths move from
+`.m.edit` to `.m.find`. Pure GUI/menu change; the find engine (core, D36) is untouched.
 
 ---
 

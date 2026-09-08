@@ -6823,11 +6823,11 @@ proc keymap_refresh_menus {} {
 	.m.file entryconfigure "Quit"         -accelerator [key_accel quit]
 	.m.edit entryconfigure "Undo"          -accelerator [key_accel undo]
 	.m.edit entryconfigure "Redo"          -accelerator [key_accel redo]
-	.m.edit entryconfigure "Find…"         -accelerator [key_accel find]
-	.m.edit entryconfigure "Replace…"      -accelerator [key_accel replace]
-	.m.edit entryconfigure "Find Next"     -accelerator [key_accel find-next]
-	.m.edit entryconfigure "Find Previous" -accelerator [key_accel find-prev]
-	.m.edit entryconfigure "Search…" -accelerator [key_accel search]
+	.m.find entryconfigure "Find…"         -accelerator [key_accel find]
+	.m.find entryconfigure "Replace…"      -accelerator [key_accel replace]
+	.m.find entryconfigure "Find Next"     -accelerator [key_accel find-next]
+	.m.find entryconfigure "Find Previous" -accelerator [key_accel find-prev]
+	.m.find entryconfigure "Search…"       -accelerator [key_accel search]
 	.m.view entryconfigure "Files"        -accelerator [key_accel show-files]
 	.m.view entryconfigure "Git"          -accelerator [key_accel show-git]
 	.m.view entryconfigure "Agent"        -accelerator [key_accel toggle-chat]
@@ -7581,12 +7581,7 @@ menu .m.edit -tearoff 0
 .m.edit add command -label "Copy"       -command editor_copy
 .m.edit add command -label "Paste"      -command editor_paste
 .m.edit add command -label "Select All" -command editor_select_all
-.m.edit add separator
-.m.edit add command -label "Find…"         -accelerator [key_accel find]      -command {find_open 0}
-.m.edit add command -label "Replace…"      -accelerator [key_accel replace]   -command {find_open 1}
-.m.edit add command -label "Find Next"     -accelerator [key_accel find-next] -command find_next
-.m.edit add command -label "Find Previous" -accelerator [key_accel find-prev] -command find_prev
-.m.edit add command -label "Search…" -accelerator [key_accel search] -command search_open
+# Find / Replace / Search moved out to their own top-level Find menu (D75) — see below.
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
 # The four tool panes toggle from here — a checkmark shows whether each is currently
@@ -7654,6 +7649,22 @@ menu .m.view.theme -tearoff 0
 .m.view add cascade -label "Theme" -menu .m.view.theme
 # Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
 # installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
+
+# Find is its own top-level menu (D75), holding the search cluster that used to sit behind a
+# separator in Edit — in-buffer Find/Replace/Next/Previous plus project-wide Search…. Lifting
+# the whole coherent group (not splitting it) leaves Edit as the classic clipboard/selection
+# ops and gives search a discoverable home, in the spirit of Sublime's top-level Find menu.
+# Named "Find", not "Search", so it doesn't collide with the View ▸ Search *pane* toggle;
+# four of its five items are Find anyway. Placed left of Compare — both are editor-action
+# menus to the right of View.
+menu .m.find -tearoff 0
+.m add cascade -label Find -menu .m.find
+.m.find add command -label "Find…"         -accelerator [key_accel find]      -command {find_open 0}
+.m.find add command -label "Replace…"      -accelerator [key_accel replace]   -command {find_open 1}
+.m.find add command -label "Find Next"     -accelerator [key_accel find-next] -command find_next
+.m.find add command -label "Find Previous" -accelerator [key_accel find-prev] -command find_prev
+.m.find add separator
+.m.find add command -label "Search…"       -accelerator [key_accel search]    -command search_open
 
 # Compare is its own top-level menu, not a View ▸ Editor Layout item (D73): the diff view
 # (D28) is a distinct mode that swaps the whole editor surface for two read-only panes —

@@ -1156,6 +1156,10 @@ ok "compare: menu has close"        [expr {![catch {.m.compare index "Close Comp
 ok "compare: not in Editor Layout"  [expr {[catch {.m.view.layout index "Compare With A File…"}]}] 1
 ok "tabs: top-level menu retired"   [winfo exists .m.tabs] 0
 ok "tabs: Switch to Tab… in View"   [expr {![catch {.m.view index "Switch to Tab…"}]}] 1
+# The search cluster is its own top-level Find menu now (D75), not under Edit.
+ok "find: menu has Find…"           [expr {![catch {.m.find index "Find…"}]}] 1
+ok "find: menu has Search…"         [expr {![catch {.m.find index "Search…"}]}] 1
+ok "find: Find… gone from Edit"     [expr {[catch {.m.edit index "Find…"}]}] 1
 # Compare With Another Tab… diffs the active buffer against another open buffer, both sides
 # live buffer text (D74). Drive compare_with_tab directly (the modal picker's row-building is
 # covered by buffer_pick_rows in tabs.tcl); open two buffers so there's another tab to pick.
