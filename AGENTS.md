@@ -3903,6 +3903,13 @@ would overrun `avail`, so nothing clips. `pack -in` manages geometry without rep
 (the handle stays a child of the strip), so `tabstrip_layout` freely destroys the stale
 `r<n>` frames each pass — including on a `multi`→`scroll` switch, so no empty rows linger.
 
+**The `-in` z-order trap.** Because `-in` doesn't reparent, the handles remain *siblings*
+of the row-frames, and a frame created *after* them stacks on top — its background then
+paints over the tabs, an **empty bar** (a first cut shipped exactly this). `tabstrip_row`
+therefore `lower`s each frame beneath the handles. Guarded in tabs.tcl: `winfo children`
+lists siblings bottom-of-stack first, so every `r<n>` frame must sort before every `b<id>`
+handle — an assertion that fails on the un-lowered version.
+
 `scroll` mode, the `◂ ▸` overflow arrows, `tab_pixwidth` (still analytic, so the layout
 stays synchronous and headless-testable), and `refresh_tabs` are unchanged. Pure GUI
 change; no core op. tabs.tcl now asserts the row-frame structure instead of grid rows.

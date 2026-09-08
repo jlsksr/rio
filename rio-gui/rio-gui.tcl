@@ -4346,10 +4346,15 @@ proc tabstrip_ensure_arrows {strip g} {
 # Create and pack one row container for `multi` mode, spanning the strip width and themed
 # to the bar background. The tab handles pack into it left-to-right (`pack -in`), so each
 # row huddles at natural widths; tabstrip_layout destroys these `r<n>` frames each pass.
+# `pack -in` places the handles geometrically but does NOT reparent them — they stay
+# children of the strip, i.e. SIBLINGS of this frame. This frame is created after them, so
+# it would stack on top and its background would paint over the tabs (an empty bar); lower
+# it beneath them so the handles show. (Re-lowered every pass, since we recreate it.)
 proc tabstrip_row {strip row} {
 	set w $strip.r$row
 	frame $w -background [dict get $::theme_colors tab.bar.bg]
 	pack $w -side top -anchor w -fill x
+	lower $w
 	return $w
 }
 

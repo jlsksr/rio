@@ -109,6 +109,17 @@ set rowframes [lsearch -all -inline [winfo children $strip] $strip.r*]
 ok "multi: wraps onto >1 row"    [expr {[llength $rowframes] > 1}] 1
 ok "multi: a tab packs in a row" [string match $strip.r* [dict get [pack info $strip.b$short] -in]] 1
 ok "multi: handle uses pack"     [mgr $short] pack
+# `pack -in` doesn't reparent — the handles stay SIBLINGS of the row-frames. The frames are
+# created after them, so unless lowered they stack on top and their background paints over
+# the tabs (an empty bar). winfo children lists siblings bottom-of-stack first, so every
+# r<n> frame must sort BEFORE every b<id> handle.
+set kids [winfo children $strip] ; set i 0 ; set lastrow -1 ; set firsttab 1000000
+foreach w $kids {
+	if {[string match $strip.r* $w]}                    { set lastrow $i }
+	if {[string match $strip.b* $w] && $i < $firsttab}  { set firsttab $i }
+	incr i
+}
+ok "multi: rows stack below tabs" [expr {$lastrow < $firsttab}] 1
 set ::tab_layout scroll ; tab_layout_apply
 ok "back to scroll: uses pack"   [mgr $far] pack   ;# $far is active -> visible
 ok "back to scroll: rows gone"   [llength [lsearch -all -inline [winfo children $strip] $strip.r*]] 0
