@@ -206,14 +206,14 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44, D45, D80). Stage / unstage / track
+- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81). Stage / unstage / track
   landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
-  driven from an auto-showing single-line commit bar in the git pane — rio's first
-  inline pane text-input; **discard changes** landed as `git.discard` (D80) — a
-  confirm-gated *Discard Changes…* (revert a tracked file to its last commit) / *Delete…*
-  (remove a never-committed new file) on the git-pane row menu. Still wanted: a **multi-line
-  commit message** body (v1 is a single summary line), a discard entry on the **file-tree**
-  row menu too, and a **Discard all** bulk action.
+  driven from an auto-showing commit bar in the git pane — rio's first inline pane
+  text-input — now with an optional **multi-line description body** behind a `＋` toggle
+  (D81, joined to the summary as git's subject/body); **discard changes** landed as
+  `git.discard` (D80) — a confirm-gated *Discard Changes…* (revert a tracked file to its last
+  commit) / *Delete…* (remove a never-committed new file) on the git-pane row menu. Still
+  wanted: a discard entry on the **file-tree** row menu too, and a **Discard all** bulk action.
 
 ## Agent
 

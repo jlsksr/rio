@@ -1622,6 +1622,39 @@ proc git_commit_bar {show} {
 	} else {
 		pack forget .pgit.commit
 		.pgit.commit.msg delete 0 end
+		.pgit.commit.body delete 1.0 end
+		git_commit_body_set 0
+	}
+}
+
+# Show/hide the optional multi-line description below the summary (D80). Re-packs the
+# whole bar each time so the row order is deterministic: body (when shown) claims the
+# bottom, then Commit + ＋ on the right, the summary filling the left. `＋`/`−` on the
+# toggle says which way it goes. Collapsed is the default — most commits are one line,
+# so the bar stays a single row until the user asks for more (the D36 "only when needed"
+# quality bar, applied within the bar).
+proc git_commit_body_set {show} {
+	foreach w {.pgit.commit.body .pgit.commit.msg .pgit.commit.go .pgit.commit.more} {
+		catch {pack forget $w}
+	}
+	if {$show} { pack .pgit.commit.body -side bottom -fill x -padx 4 -pady {0 3} }
+	pack .pgit.commit.go   -side right -padx {2 4} -pady 2
+	pack .pgit.commit.more -side right -pady 2
+	pack .pgit.commit.msg  -side left -fill x -expand 1 -padx {4 2} -pady 2
+	set ::git_commit_body_shown $show
+	.pgit.commit.more configure -text [expr {$show ? "−" : "＋"}]
+	if {$show} { git_commit_body_hint ; focus .pgit.commit.body }
+}
+proc git_commit_body_toggle {} { git_commit_body_set [expr {!$::git_commit_body_shown}] }
+
+# The body's greyed placeholder, shown only while the description is empty (the same
+# device as the summary hint — a child label placed over the text widget, never part of
+# `.body get`, so the commit assembly stays honest).
+proc git_commit_body_hint {args} {
+	if {[string trim [.pgit.commit.body get 1.0 end]] eq ""} {
+		place .pgit.commit.body.ph -x 4 -y 3 -anchor nw
+	} else {
+		place forget .pgit.commit.body.ph
 	}
 }
 
@@ -1637,19 +1670,26 @@ proc git_commit_hint {args} {
 	}
 }
 
-# Commit the staged index with the bar's summary line. Empty (or whitespace) message is
-# refused quietly — a flash, focus kept, no core call — rather than letting git abort.
-# On success the staged changes vanish, so refresh_dock auto-hides the bar; the header
-# then flashes the new short hash (git_flash outlives the refresh via `after`).
+# Commit the staged index with the bar's summary line, plus the optional description
+# body joined as "summary\n\nbody" — git's own convention (subject, blank line, body),
+# which `git commit -m` records verbatim, so the core op is unchanged. An empty (or
+# whitespace) SUMMARY is refused quietly — a flash, focus kept, no core call — rather than
+# letting git abort; an empty body just adds nothing. On success the staged changes vanish,
+# so refresh_dock auto-hides the bar; the header then flashes the new short hash.
 proc git_commit {} {
-	set msg [string trim [.pgit.commit.msg get]]
-	if {$msg eq ""} { git_flash "enter a commit message" ; focus .pgit.commit.msg ; return }
+	set summary [string trim [.pgit.commit.msg get]]
+	if {$summary eq ""} { git_flash "enter a commit message" ; focus .pgit.commit.msg ; return }
+	set body [string trim [.pgit.commit.body get 1.0 end]]
+	set msg $summary
+	if {$body ne ""} { append msg "\n\n" $body }
 	set resp [rio_call git.commit [dict create message $msg]]
 	if {![dict get $resp ok]} {
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
 	.pgit.commit.msg delete 0 end
+	.pgit.commit.body delete 1.0 end
+	git_commit_body_set 0
 	refresh_dock
 	git_flash "✓ committed [dict get $resp result hash]"
 }
@@ -4770,6 +4810,15 @@ proc apply_theme {theme} {
 	.pgit.commit.msg.ph configure -font RioUIFont \
 		-background [dict get $c editor.bg] \
 		-foreground [blend_hex [dict get $c editor.fg] [dict get $c editor.bg] 50]
+	# The ＋ toggle is chrome; the description body reads like the summary (editor surface),
+	# with its own placeholder muted the same way.
+	.pgit.commit.more configure -font RioUIFont
+	.pgit.commit.body configure -font RioUIFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor]
+	.pgit.commit.body.ph configure -font RioUIFont \
+		-background [dict get $c editor.bg] \
+		-foreground [blend_hex [dict get $c editor.fg] [dict get $c editor.bg] 50]
 	# The agent chat pane (D26): the chat.* roles + RioChatFont; accent on labels.
 	.chat configure -background [dict get $c chat.bg]
 	.chat.hdr configure -background [dict get $c chat.bg]
@@ -6396,20 +6445,37 @@ rl_init .pgit.well.body git_pick {} git_context_menu
 # The commit bar (D45): rio's first inline text-input in a dock pane. A single-line
 # summary entry + a Commit button, packed at the bottom of the git pane by refresh_git
 # ONLY when something is staged (and hidden otherwise) — "appears only when needed", the
-# D36 find-bar quality bar. Enter in the entry commits too. Built here, not packed.
+# D36 find-bar quality bar. Enter in the entry commits too. The ＋ toggle reveals an
+# optional multi-line description (D80), joined to the summary as git's subject+body.
+# Built here, not packed; git_commit_body_set lays out the row (body collapsed to start).
+set ::git_commit_body_shown 0
 frame  .pgit.commit -background "#dddddd"
-entry  .pgit.commit.msg -font {monospace 9} -textvariable git_commit_msg
-button .pgit.commit.go  -text "✓ Commit" -font {monospace 9} -command git_commit
+entry  .pgit.commit.msg  -font {monospace 9} -textvariable git_commit_msg
+button .pgit.commit.more -text "＋" -font {monospace 9} -takefocus 0 -command git_commit_body_toggle
+button .pgit.commit.go   -text "✓ Commit" -font {monospace 9} -command git_commit
+text   .pgit.commit.body -height 4 -font {monospace 9} -wrap word -undo 1 \
+	-borderwidth 1 -relief solid -highlightthickness 0
 # A greyed "message" hint, shown only while the entry is empty (Tk has no native
 # placeholder). It is a child label placed inside the entry, so it never becomes part of
 # `.msg get` — the empty check and the commit stay honest. A trace toggles it on content.
 label .pgit.commit.msg.ph -text message -font {monospace 9} -takefocus 0 -borderwidth 0
 place .pgit.commit.msg.ph -x 3 -rely 0.5 -anchor w
 bind  .pgit.commit.msg.ph <Button-1> {focus .pgit.commit.msg}
+# The body's own placeholder, same device — a child label over the text widget.
+label .pgit.commit.body.ph -text "Longer description (optional)" -font {monospace 9} \
+	-takefocus 0 -borderwidth 0
+bind  .pgit.commit.body.ph <Button-1> {focus .pgit.commit.body}
 trace add variable git_commit_msg write git_commit_hint
-pack .pgit.commit.go  -side right -padx {2 4} -pady 2
-pack .pgit.commit.msg -side left -fill x -expand 1 -padx {4 2} -pady 2
-bind .pgit.commit.msg <Return> git_commit
+bind .pgit.commit.body <KeyRelease> git_commit_body_hint
+bind .pgit.commit.body <FocusIn>    git_commit_body_hint
+bind .pgit.commit.body <FocusOut>   git_commit_body_hint
+tooltip .pgit.commit.more "Add a longer description"
+git_commit_body_set 0   ;# summary row only; body hidden until ＋
+# Enter in the one-line summary commits; in the multi-line body it inserts a newline, so
+# Ctrl+Enter is the commit chord there (and works from the summary too, for muscle memory).
+bind .pgit.commit.msg  <Return>         git_commit
+bind .pgit.commit.msg  <Control-Return> git_commit
+bind .pgit.commit.body <Control-Return> {git_commit ; break}
 
 # A thin draggable divider between the dock and the editor. apply_layout parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which

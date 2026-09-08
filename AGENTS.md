@@ -4019,6 +4019,29 @@ per state.
 
 ---
 
+### D81 — Multi-line commit message body
+
+D45's commit bar took a single **summary** line — fine for the common case, but git commits have a
+subject **and** an optional body (a blank line then prose), which normal users reach for on a
+meatier change. Added the body as an **opt-in expansion of the same bar**, not a second surface.
+
+**Shape.** A small **`＋` toggle** on the bar reveals a multi-line description `text` widget below
+the summary (`−` collapses it); it starts collapsed, so the one-line case is untouched — the same
+"appears only when needed" restraint the bar itself follows (D36). `git_commit` joins them as
+`summary\n\nbody` — git's own subject/blank/body convention, which `git commit -m` records verbatim,
+so **the core op is unchanged** (`git.commit` still takes one `message`). An empty body adds nothing;
+an empty summary is still refused. The body carries its own greyed placeholder (the same
+placed-child-label device as the summary hint, so it never pollutes `.body get`).
+
+**Keys.** Enter in the one-line summary still commits; in the multi-line body Enter inserts a
+newline, so **Ctrl+Enter** is the commit chord there (and works from the summary too, for muscle
+memory). `git_commit_body_set` re-packs the bar deterministically each toggle (body bottom, then
+Commit + `＋` right, summary filling left) and is reused to re-collapse + clear after a commit or
+when the bar auto-hides. Pure GUI; smoke asserts the toggle reveals/collapses the body and that a
+real subject+body is recorded through the core.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

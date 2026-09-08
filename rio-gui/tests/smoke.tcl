@@ -608,6 +608,21 @@ if {![catch {exec git --version}]} {
 	ok "commit: staged change committed" [git_xy_for a.txt] ""
 	ok "commit: entry cleared"           [.pgit.commit.msg get] ""
 	ok "commit: bar hidden after commit" [git_bar_shown] 0
+
+	# Multi-line commit body (D80): the ＋ toggle reveals a description area; committing
+	# joins "summary\n\nbody" (git's subject/blank/body convention).
+	proc body_shown {} { expr {[lsearch -exact [pack slaves .pgit.commit] .pgit.commit.body] >= 0} }
+	gitc $gdir add u.txt ; refresh_git
+	ok "commit: body collapsed by default" [body_shown] 0
+	git_commit_body_toggle
+	ok "commit: + reveals the body"        [body_shown] 1
+	.pgit.commit.msg delete 0 end ; .pgit.commit.msg insert 0 "subject line"
+	.pgit.commit.body delete 1.0 end ; .pgit.commit.body insert 1.0 "first body line\nsecond body line"
+	git_commit
+	ok "commit: subject+body recorded"     [string trim [gitc $gdir log -1 --format=%B]] \
+		"subject line\n\nfirst body line\nsecond body line"
+	ok "commit: body re-collapses after"   [body_shown] 0
+
 	after cancel refresh_git   ;# drop the pending git_flash restore before teardown
 	file delete -force $gdir
 } else {
