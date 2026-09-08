@@ -126,9 +126,11 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   `~/.config/rio/syntax/` to override the shipped one. **(X)HTML, CSS, JavaScript,
   Perl, Tcl, shell, Markdown, PHP, Python, Lua, C, C#, C++, Go, Rust, and JSON** ship.
 - **Sessions** — reopen a project and rio brings back the files you had open and the
-  active tab, plus your view preferences (theme, line-wrap, dock side, chat). The
-  preferences live with the GUI; the open-file set lives with the project on the core,
-  so a **remote session resumes too**. Both are plain data, never your API key.
+  active tab, plus your view preferences (theme, line-wrap, dock side, chat). Even with
+  **no folder open**, the loose files you had open come back too — handy for a scratch
+  "daily workspace" whose files live in different places. The preferences live with the
+  GUI; the open-file set lives with the project on the core, so a **remote session resumes
+  too**. Both are plain data, never your API key.
 - **Local & remote, one transport** — the GUI always talks to a core over a
   channel. **Locally there is nothing to start**: it spawns its own private core as
   a child process automatically. To edit on **another box**, run the core there

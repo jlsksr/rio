@@ -1,7 +1,8 @@
 # Tests for the per-project workspace store (rio::workspace) and the workspace.*
 # ops (AGENTS.md D31): "resume my working space" — which files were open in a
 # project and which tab was active, kept out of tree under the data dir, keyed by
-# the open project root, pruned to paths that still exist. Local only.
+# the open project root, pruned to paths that still exist. Local only. The empty
+# root is the anonymous (no-project) session (D72).
 package require tcltest
 namespace import ::tcltest::*
 
@@ -55,6 +56,18 @@ test ws-key-stable-per-root {each root maps to its own file; the same root is st
 		[expr {[rio::workspace::_path /proj/aaa] ne [rio::workspace::_path /proj/bbb]}]
 } -result {1 1}
 
+test ws-anon-key-reserved {the empty root gets a stable, reserved path, distinct from any real root} -body {
+	list [expr {[rio::workspace::_path ""] eq [rio::workspace::_path ""]}] \
+		[expr {[rio::workspace::_path ""] ne [rio::workspace::_path /proj/aaa]}] \
+		[file tail [rio::workspace::_path ""]]
+} -result {1 1 anonymous.json}
+
+test ws-anon-roundtrip {the anonymous (empty-root) session saves and reads back} -body {
+	rio::workspace::save "" [list /loose/a.txt /other/b.txt] /loose/a.txt
+	set s [rio::workspace::get ""]
+	list [dict get $s open] [dict get $s active]
+} -result {{/loose/a.txt /other/b.txt} /loose/a.txt}
+
 test ws-forget {forget drops the saved session} -body {
 	rio::workspace::save /proj/gone [list /x/1] /x/1
 	rio::workspace::forget /proj/gone
@@ -75,20 +88,27 @@ test ws-dir-perms-0700 {the sessions dir is mode 0700} -constraints unix -body {
 
 # --- through the in-process core (the workspace.* ops) ----------------------
 
-test ws-op-no-project-saves-nothing {workspace.save with no project open is a no-op} -setup {
+test ws-op-anon-fresh-empty {workspace.get with no project open and nothing saved is empty (D72)} -setup {
 	rio::project::close
-} -body {
-	set resp [dict get [rio::core::call workspace.save \
-		[dict create open "/x/1"]] response]
-	dict get $resp result saved
-} -result 0
-
-test ws-op-no-project-get-empty {workspace.get with no project open is empty} -setup {
-	rio::project::close
+	rio::workspace::forget ""
 } -body {
 	set resp [dict get [rio::core::call workspace.get {}] response]
 	list [dict get $resp result open] [dict get $resp result active]
 } -result {{} {}}
+
+test ws-op-anon-roundtrip {with no project open, save/get resume the anonymous session (D72)} -setup {
+	rio::project::close
+	set ::loose [make_tree]   ;# two real files so the prune keeps them
+} -body {
+	set a [file join $::loose a.txt]
+	set b [file join $::loose b.txt]
+	set saved [dict get [dict get [rio::core::call workspace.save \
+		[dict create open "$a\n$b" active $a]] response] result saved]
+	set resp [dict get [rio::core::call workspace.get {}] response]
+	list $saved \
+		[expr {[dict get $resp result open] eq [list $a $b]}] \
+		[expr {[dict get $resp result active] eq $a}]
+} -cleanup { rio::workspace::forget ""; file delete -force $::loose } -result {1 1 1}
 
 test ws-op-save-get-roundtrip {save keyed by the open root, then get reads it back} -setup {
 	set ::tree [make_tree]; rio::project::open $::tree

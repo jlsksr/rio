@@ -76,6 +76,16 @@ ok "open: core has file text"   [rio::doc::text $::cur]  "alpha\nbeta\n"
 ok "open: widget mirrors core"  [widget]                 "alpha\nbeta\n"
 ok "open: encoding detected"    [dict get [bufget $::cur meta] encoding] utf-8
 
+# --- the anonymous (no-project) workspace resumes over the wire (D72) ---------
+# No folder has been opened yet, so this loose file belongs to the anonymous
+# session. session_save + workspace.get must round-trip it across the real channel.
+ok "anon ws: no project open"   [dict get [rio_call project.get {}] result root]  ""
+session_save
+set _aws [rio_call workspace.get {}]
+ok "anon ws: save reported ok"  [dict get $_aws ok]                                true
+ok "anon ws: loose file resumes" \
+	[expr {[lsearch -exact [dict get $_aws result open] $p] >= 0}]                1
+
 # --- edit through the dumb-view proxy, then save -----------------------------
 .ed.t insert 1.0 "X"
 ok "edit: marked modified"      [bufget $::cur modified] 1

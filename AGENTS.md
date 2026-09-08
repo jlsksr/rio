@@ -3727,6 +3727,35 @@ piece of real logic — the number a row shows — is factored into a **pure** `
 
 ---
 
+### D72 — The anonymous (no-project) workspace
+
+D31 resumes a working space **per project root**, keyed by `rio::project::root`; with **no
+project open** the `workspace.*` ops were a deliberate no-op. That left a real workflow
+unremembered: a **loose "daily workspace"** — one always-open rio with many tabs for notes
+and quick edits, whose files **span folders and share no root**. A bare `rio-gui` launch
+came back with view state (layout/panes) but none of those files.
+
+rio already treats **"no project open"** as first-class (the scratch buffer, files opened
+by absolute path). So the fix is small: the **empty root selects an anonymous session** —
+one reserved store file (`sessions/anonymous.json`, a literal name that can't collide with
+a real root's 32-hex md5 key) — instead of a no-op. `workspace.save`/`get` now honor an
+empty root, and the store's `save` keeps the self-describing `root` field empty rather than
+normalizing `""` into the cwd. **Core-only change:** the GUI already calls `session_save`
+on every tab change and quit, and `session_restore` at boot, **unconditionally** — they
+only came up empty because the ops refused to key without a project.
+
+**Still core-owned, like D31.** The anonymous session's files live on the core's
+filesystem (local or remote), so it follows a remote core exactly as a project session
+does — a no-project session resumes over the wire too. **Honest caveat:** there is a
+*single* anonymous session, so two simultaneous no-project instances clobber each other's
+(fine for the one-daily-instance workflow this serves; project sessions stay isolated by
+root). A separable future complement — **remember the last project *folder* and reopen it
+on launch** (a `last_project` pointer in `prefs.json` + a boot-time reopen) — would cover
+the project-folder workflow; deliberately left out here to keep this to the loose-files
+case.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

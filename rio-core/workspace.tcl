@@ -44,18 +44,29 @@ proc rio::workspace::_dir {} {
 # spaces, unicode) yields a short, collision-free, filesystem-safe key regardless
 # of length. The root is also stored INSIDE the file, so the store is
 # self-describing when a human inspects the dir.
+#
+# The empty root is the ANONYMOUS session (D72): the files open with no project — a
+# loose "daily workspace" that spans folders and so has no common root to key by. It
+# gets a reserved literal filename; that can't collide with a real root's key, which
+# is always 32 hex chars of md5.
 proc rio::workspace::_key {root} { return [md5::md5 -hex [file normalize $root]] }
-proc rio::workspace::_path {root} { return [file join [_dir] [_key $root].json] }
+proc rio::workspace::_path {root} {
+	if {$root eq ""} { return [file join [_dir] anonymous.json] }
+	return [file join [_dir] [_key $root].json]
+}
 
 # Save a project's session. `open` is the list of file paths that were open (in
-# tab order); `active` is the focused tab's path (may be "" or not in `open`).
+# tab order); `active` is the focused tab's path (may be "" or not in `open`). An
+# empty root is the anonymous session (D72) — stored verbatim, not normalized (which
+# would turn "" into the cwd), keeping the self-describing `root` field empty.
 # Creates the dir; overwrites any prior session for that root.
 proc rio::workspace::save {root open active} {
 	set dir [_dir]
 	file mkdir $dir
 	catch {file attributes $dir -permissions 0700}
+	set stored [expr {$root eq "" ? "" : [file normalize $root]}]
 	set json [json::write object \
-		root   [json::write string [file normalize $root]] \
+		root   [json::write string $stored] \
 		active [json::write string $active] \
 		open   [json::write array {*}[lmap p $open {json::write string $p}]]]
 	set f [open [_path $root] {WRONLY CREAT TRUNC}]
