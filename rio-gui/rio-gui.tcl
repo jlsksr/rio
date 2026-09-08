@@ -4343,7 +4343,17 @@ proc tabstrip_ensure_arrows {strip g} {
 	}
 }
 
-# Place group `g`'s tab handles. In `multi` mode they wrap across rows (grid); in
+# Create and pack one row container for `multi` mode, spanning the strip width and themed
+# to the bar background. The tab handles pack into it left-to-right (`pack -in`), so each
+# row huddles at natural widths; tabstrip_layout destroys these `r<n>` frames each pass.
+proc tabstrip_row {strip row} {
+	set w $strip.r$row
+	frame $w -background [dict get $::theme_colors tab.bar.bg]
+	pack $w -side top -anchor w -fill x
+	return $w
+}
+
+# Place group `g`'s tab handles. In `multi` mode they wrap across packed per-row frames; in
 # `scroll` mode they sit on one row (pack), and when they overflow the strip's width the
 # ◂ ▸ arrows appear and only a window of them is shown. `reveal` (default on) pulls that
 # window so the active tab is visible — wanted when the active tab changed, suppressed
@@ -4354,20 +4364,30 @@ proc tabstrip_layout {g {reveal 1}} {
 	tabstrip_ensure_arrows $strip $g
 	set ids {}
 	foreach id [gorder $g] { if {[winfo exists $strip.b$id]} { lappend ids $id } }
-	foreach w [winfo children $strip] { catch {pack forget $w} ; catch {grid forget $w} }
+	# Unmanage the arrows and tab handles (they're rebuilt/re-placed below); DESTROY any
+	# leftover row containers from a previous multi-mode pass so a re-flow or a mode switch
+	# leaves no empty rows behind. `-in` never reparents, so a tab handle survives its
+	# row-frame's destruction (it stays a child of the strip) — see the multi branch.
+	foreach w [winfo children $strip] {
+		if {[string match $strip.r* $w]} { destroy $w ; continue }
+		catch {pack forget $w} ; catch {grid forget $w}
+	}
 	if {[llength $ids] == 0} { gset $g taboff 0 ; return }
 	set avail [winfo width $strip]
 
 	if {$::tab_layout eq "multi"} {
-		# Not yet realized (width 1 during boot): one row, and the <Configure> that
-		# arrives with the real width re-flows it. Wrap when the next tab would overrun.
+		# Flow the handles into one packed row-frame per visual row: pack honours each
+		# tab's natural width (tight per-row huddling, no column stretching) and we open a
+		# new row BEFORE a tab would overrun `avail`, so a row never clips off the edge.
+		# Not yet realized (width 1 during boot): one row; the <Configure> that arrives with
+		# the real width re-flows it. `$x > 0` keeps at least one tab per row.
 		set A [expr {$avail <= 1 ? 1000000 : $avail}]
-		set col 0 ; set row 0 ; set x 0
+		set row 0 ; set x 0 ; set rf [tabstrip_row $strip 0]
 		foreach id $ids {
 			set need [tab_pixwidth $id]
-			if {$col > 0 && $x + $need > $A} { incr row ; set col 0 ; set x 0 }
-			grid $strip.b$id -row $row -column $col -sticky w -padx 1 -pady 1
-			incr col ; incr x $need
+			if {$x > 0 && $x + $need > $A} { incr row ; set x 0 ; set rf [tabstrip_row $strip $row] }
+			pack $strip.b$id -in $rf -side left -padx 1 -pady 1
+			incr x $need
 		}
 		gset $g taboff 0
 		return

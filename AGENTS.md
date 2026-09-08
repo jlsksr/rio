@@ -3311,8 +3311,10 @@ preference grafted onto a `-postcommand` navigation list — was the tell.)
 
 **One layout choke point.** `refresh_tabs` builds the tab *handles* (the `b<id>` frames)
 but leaves them unmanaged; **`tabstrip_layout`** places them — `pack` on one row for
-`scroll`, `grid` across rows for `multi` — and runs again on the strip's `<Configure>`
-so a resize re-flows. Widths are measured **analytically** (`tab_pixwidth` via `font
+`scroll`, and for `multi` a `pack` flow across **one row-frame per visual row**
+(`tabstrip_row` makes each `r<n>` container; D78 — it was originally `grid`, which forced
+uniform column widths and both huddling gaps and right-edge clipping) — and runs again on
+the strip's `<Configure>` so a resize re-flows. Widths are measured **analytically** (`tab_pixwidth` via `font
 measure`, mirroring the handle's own padding) rather than from `winfo reqwidth`, so the
 layout is correct *synchronously* — before the handles are mapped — which is also what
 makes it testable without an event loop. The editor pane is a fixed share of the window
@@ -3881,6 +3883,29 @@ them one by one would.
   to cover.
 
 Pure GUI change; no core op.
+
+---
+
+### D78 — Multi-line tabs flow into packed row-frames (not a grid)
+
+The **Multi-Line Tabs** mode (D57's `multi`, `::tab_layout`) laid its rows out with `grid`
+(`-row/-column`), which on Linux and Windows looked wrong two ways (reported by jka): rows
+didn't **huddle** — a short tab left a gap because grid forces **uniform column widths
+across all rows**, stretching it to match a longer tab in the same column index — and the
+**rightmost tab of a row clipped** past the strip edge, because grid's stretched columns
+made the real row wider than the `tab_pixwidth` accumulator that decided where to wrap.
+
+Both are the same root cause, so one fix: `tabstrip_layout`'s `multi` branch now flows the
+handles into **one packed row-frame per visual row** (`tabstrip_row` builds each `r<n>`
+container, `pack -in` places the handles left-to-right). `pack` honours each tab's natural
+width — tight per-row huddling, no column stretching — and a new row opens *before* a tab
+would overrun `avail`, so nothing clips. `pack -in` manages geometry without reparenting
+(the handle stays a child of the strip), so `tabstrip_layout` freely destroys the stale
+`r<n>` frames each pass — including on a `multi`→`scroll` switch, so no empty rows linger.
+
+`scroll` mode, the `◂ ▸` overflow arrows, `tab_pixwidth` (still analytic, so the layout
+stays synchronous and headless-testable), and `refresh_tabs` are unchanged. Pure GUI
+change; no core op. tabs.tcl now asserts the row-frame structure instead of grid rows.
 
 ---
 

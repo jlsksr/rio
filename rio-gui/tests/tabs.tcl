@@ -99,18 +99,19 @@ ok "far tab starts hidden"       [shown $far]  0
 activate $far 0
 ok "activate reveals far tab"    [shown $far]  1
 
-# --- multi-line mode wraps the tabs onto more than one row -------------------------
+# --- multi-line mode wraps the tabs onto more than one packed row-frame -------------
+# Each visual row is a packed r<n> frame; the handles pack (not grid) into it at natural
+# widths, so a short tab huddles left instead of inheriting another row's column width.
+set strip [gget 0 tabs]
 set ::tab_layout multi
 tab_layout_apply
-set maxrow 0
-foreach id $ids {
-	set r [dict get [grid info [gget 0 tabs].b$id] -row]
-	if {$r > $maxrow} { set maxrow $r }
-}
-ok "multi: tabs use grid rows"   [expr {[mgr $short] eq "grid"}] 1
-ok "multi: wraps onto >1 row"    [expr {$maxrow > 0}] 1
+set rowframes [lsearch -all -inline [winfo children $strip] $strip.r*]
+ok "multi: wraps onto >1 row"    [expr {[llength $rowframes] > 1}] 1
+ok "multi: a tab packs in a row" [string match $strip.r* [dict get [pack info $strip.b$short] -in]] 1
+ok "multi: handle uses pack"     [mgr $short] pack
 set ::tab_layout scroll ; tab_layout_apply
-ok "back to scroll: uses pack"   [expr {[mgr $far] eq "pack"}] 1   ;# $far is active -> visible
+ok "back to scroll: uses pack"   [mgr $far] pack   ;# $far is active -> visible
+ok "back to scroll: rows gone"   [llength [lsearch -all -inline [winfo children $strip] $strip.r*]] 0
 
 # --- the buffer picker enumerates every open buffer (navigation only) --------------
 # View ▸ Switch to Tab… and Compare ▸ Compare With Another Tab… share buffer_pick_rows,
