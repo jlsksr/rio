@@ -958,12 +958,19 @@ ok "chat: allowed command previews"        [string match "*\$ pytest -q tests/*"
 ok "chat: allowed command raises no bar"   [bar_shown] 0
 ok "chat: allowed command keeps busy"      $::chat_busy 1
 chat_busy_stop
-# The menu the bar builds for a gated command: program entry first (argv[0]), exact second.
+# The menu the bar builds for a gated command (D84): two cascades — program (argv[0])
+# first, exact second — each opening a scope submenu (all projects / this project /
+# provider). Under the default echo provider there is no provider entry, and with no
+# project open "This project" is disabled.
 chat_clear
 chat_event {event agent.propose params {turn 36 id c6 name run_command kind command command {git status -s} display {git status -s} cwd ""}}
-ok "chat: allow menu has two entries"      [.chat.approve.always.m index end] 1
-ok "chat: allow menu program entry"        [.chat.approve.always.m entrycget 0 -label] "Always allow: git"
-ok "chat: allow menu exact entry"          [string match "*this exact command: git status -s*" [.chat.approve.always.m entrycget 1 -label]] 1
+ok "chat: allow menu has two cascades"     [.chat.approve.always.m index end] 1
+ok "chat: allow menu program cascade"      [.chat.approve.always.m entrycget 0 -label] "Always allow: git"
+ok "chat: allow menu exact cascade"        [string match "*this exact command: git status -s*" [.chat.approve.always.m entrycget 1 -label]] 1
+ok "chat: program cascade opens a submenu" [.chat.approve.always.m entrycget 0 -menu] .chat.approve.always.m.prog
+ok "chat: scope submenu first is global"   [.chat.approve.always.m.prog entrycget 0 -label] "For all projects"
+ok "chat: scope submenu no provider (echo)" [.chat.approve.always.m.prog index end] 1
+ok "chat: scope submenu second is project"  [.chat.approve.always.m.prog entrycget 1 -label] "For this project only"
 approve_bar 0
 # The working indicator pauses at a command bar even under auto-accept (waiting on
 # the human), where an edit under auto-accept keeps running.

@@ -2490,29 +2490,51 @@ proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0}} {
 	}
 }
 
-# Rebuild the "Always allow" menu for the currently proposed command (D84). Program
-# first (the recommended default — trust every invocation of argv[0]), the exact
-# command line second (trust only this identical argv). Each entry both remembers the
-# rule (agent.allow.add) and approves the command in front of the user
-# (agent_allow_always). A long exact command is truncated in the LABEL only.
+# Rebuild the "Always allow" menu for the currently proposed command (D84). Two
+# granularities as cascades — the program (argv[0], the recommended default: trust every
+# invocation) first, the exact command line (trust only this identical argv) second —
+# and each opens a submenu picking the SCOPE the rule is saved in: all projects (global),
+# this project, or the active provider only. A long exact command is truncated in the
+# label only. Each leaf remembers the rule (agent.allow.add) and approves the command in
+# front of the user (agent_allow_always).
 proc chat_allow_menu_populate {argv display} {
 	set m .chat.approve.always.m
 	$m delete 0 end
+	# Which scopes are available right now.
+	set pr [rio_result project.get {}]
+	set haveproj [expr {$pr ne "" && [dict get $pr root] ne ""}]
+	set prov [expr {[info exists ::agent_provider] ? $::agent_provider : ""}]
+	set provok [expr {$prov ne "" && $prov ne "echo"}]
+	set provlabel [expr {$provok ? [agent_provider_label $prov] : ""}]
 	set prog [lindex $argv 0]
-	$m add command -label "Always allow: $prog" \
-		-command [list agent_allow_always [list $prog]]
 	set exact $display
 	if {[string length $exact] > 40} { set exact "[string range $exact 0 39]…" }
-	$m add command -label "Always allow this exact command: $exact" \
-		-command [list agent_allow_always $argv]
+	# (submenu suffix, cascade label, the rule)
+	foreach {suf label rule} [list \
+			prog  "Always allow: $prog"                        [list $prog] \
+			exact "Always allow this exact command: $exact"    $argv] {
+		set sm $m.$suf
+		destroy $sm
+		menu $sm -tearoff 0 -font RioUIFont
+		$sm add command -label "For all projects" \
+			-command [list agent_allow_always $rule global ""]
+		$sm add command -label "For this project only" \
+			-command [list agent_allow_always $rule project ""] \
+			-state [expr {$haveproj ? "normal" : "disabled"}]
+		if {$provok} {
+			$sm add command -label "While $provlabel is the provider" \
+				-command [list agent_allow_always $rule provider $prov]
+		}
+		$m add cascade -label $label -menu $sm
+	}
 }
 
-# Persist a trust rule, then approve the command now in front of the user (D84).
-# "Always allow" = remember + run this one. Add first (so a failed write still leaves
-# the command awaiting the plain decision), then decide.
-proc agent_allow_always {rule} {
+# Persist a trust rule in a scope, then approve the command now in front of the user
+# (D84). "Always allow" = remember + run this one. Add first (so a failed write still
+# leaves the command awaiting the plain decision), then decide.
+proc agent_allow_always {rule scope name} {
 	if {$::pending_turn eq ""} return
-	catch {rio_call agent.allow.add [dict create rule $rule]}
+	catch {rio_call agent.allow.add [dict create rule $rule scope $scope name $name]}
 	agent_decide approve
 }
 
@@ -3235,11 +3257,13 @@ proc agent_prompt_open {which {name ""}} {
 }
 
 # Manage the command allow-list (D84): the human-authored rules that let a proposed
-# command run without the approval bar. Lists the current rules (each an argv prefix)
-# with Remove, and a one-line Add that splits on whitespace into tokens. The list is
-# global (kept with your rio settings, wherever the core runs) and hand-editable on
-# disk too; this is the friendly front door. `::allow_rules` mirrors the core's list so
-# a listbox row maps back to its exact token-list for removal.
+# command run without the approval bar. A scope selector (mirroring the Agent Prompts
+# dialog) chooses which of the three lists to view/edit — all projects (global), this
+# project (.rio/), or a chosen provider — and the box lists that scope's rules, with
+# Remove and a one-line Add that splits on whitespace into tokens. All three lists are
+# hand-editable on disk too; this is the friendly front door. `::allow_scope` holds the
+# selected {scope name}; `::allow_rules` mirrors the shown list so a row maps back to
+# its exact token-list for removal.
 proc agent_allow_dialog {} {
 	set w .agentallow
 	destroy $w
@@ -3249,10 +3273,45 @@ proc agent_allow_dialog {} {
 	wm resizable $w 0 0
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
+	set ::allow_scope [list global ""]
+	set ::allow_scope_label "All projects  ▾"
 
 	label $w.intro -anchor w -justify left -font RioUIFont -wraplength 380 \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
-		-text "Commands whose start matches a rule below run without asking. A one-word rule (pytest) trusts every run of that program; more words (git status) trust only commands that start that way. Removing a rule makes it ask again."
+		-text "Commands whose start matches a rule below run without asking. A one-word rule (pytest) trusts every run of that program; more words (git status) trust only commands that start that way. Each scope is its own list; a command is trusted if any active scope allows it. Removing a rule makes it ask again."
+
+	# Scope selector: which of the three lists this dialog shows (global / project /
+	# per-provider), mirroring the Agent Prompts dialog's provider chooser.
+	set pr [rio_result project.get {}]
+	set haveproj [expr {$pr ne "" && [dict get $pr root] ne ""}]
+	agent_providers_refresh
+	frame $w.scope -background [dict get $c ui.bg]
+	label $w.scope.lbl -text "Scope:" -font RioUIFont -anchor w \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	menubutton $w.scope.sel -textvariable ::allow_scope_label -menu $w.scope.sel.m \
+		-font RioUIFont -anchor w -relief raised -borderwidth 1 -highlightthickness 0 -padx 6 -pady 1 \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+	menu $w.scope.sel.m -tearoff 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c editor.selection] -activeforeground [dict get $c ui.fg]
+	$w.scope.sel.m add command -label "All projects" \
+		-command [list agent_allow_set_scope $w global "" "All projects"]
+	$w.scope.sel.m add command -label "This project" \
+		-state [expr {$haveproj ? "normal" : "disabled"}] \
+		-command [list agent_allow_set_scope $w project "" "This project"]
+	set anyprov 0
+	foreach p $::agent_providers {
+		if {[dict get $p name] eq "echo"} continue
+		set anyprov 1
+		set pl [agent_provider_label [dict get $p name]]
+		$w.scope.sel.m add command -label "$pl only" \
+			-command [list agent_allow_set_scope $w provider [dict get $p name] "$pl only"]
+	}
+	if {$anyprov} { $w.scope.sel.m insert 2 separator }
+	pack $w.scope.lbl -side left -padx {0 6}
+	pack $w.scope.sel -side left
+
 	frame $w.l -background [dict get $c ui.bg]
 	listbox $w.l.box -height 8 -width 46 -font RioUIFont -activestyle none \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
@@ -3276,39 +3335,50 @@ proc agent_allow_dialog {} {
 	pack $w.btns.rm -side right -padx 3
 
 	grid $w.intro -row 0 -column 0 -sticky we -padx 8 -pady {8 6}
-	grid $w.l     -row 1 -column 0 -sticky we -padx 8 -pady 3
-	grid $w.add   -row 2 -column 0 -sticky we -padx 8 -pady 3
-	grid $w.btns  -row 3 -column 0 -sticky we -padx 5 -pady {6 8}
+	grid $w.scope -row 1 -column 0 -sticky w  -padx 8 -pady {0 4}
+	grid $w.l     -row 2 -column 0 -sticky we -padx 8 -pady 3
+	grid $w.add   -row 3 -column 0 -sticky we -padx 8 -pady 3
+	grid $w.btns  -row 4 -column 0 -sticky we -padx 5 -pady {6 8}
 	agent_allow_refresh $w
 	bind $w <Escape> [list destroy $w]
 	catch {grab $w}
 	focus $w.add.e
 }
 
-# Repopulate the manager's listbox from the core's current allow-list.
+# Switch the manager to another scope and reload its list.
+proc agent_allow_set_scope {w scope name label} {
+	set ::allow_scope [list $scope $name]
+	set ::allow_scope_label "$label  ▾"
+	agent_allow_refresh $w
+}
+
+# Repopulate the manager's listbox from the selected scope's allow-list.
 proc agent_allow_refresh {w} {
 	if {![winfo exists $w]} return
-	set res [rio_result agent.allow.list {}]
+	lassign $::allow_scope scope name
+	set res [rio_result agent.allow.list [dict create scope $scope name $name]]
 	set ::allow_rules [expr {$res ne "" ? [dict get $res rules] : {}}]
 	$w.l.box delete 0 end
 	foreach rule $::allow_rules { $w.l.box insert end [join $rule " "] }
 }
 
-# Add the rule typed in the entry (whitespace-split into tokens), then refresh.
+# Add the rule typed in the entry (whitespace-split into tokens) to the selected scope.
 proc agent_allow_add_from_entry {w} {
 	set toks [regexp -all -inline {\S+} [$w.add.e get]]
 	if {![llength $toks]} return
-	rio_call agent.allow.add [dict create rule $toks]
+	lassign $::allow_scope scope name
+	rio_call agent.allow.add [dict create rule $toks scope $scope name $name]
 	$w.add.e delete 0 end
 	agent_allow_refresh $w
 }
 
-# Remove the selected rule (mapped back to its exact token-list), then refresh.
+# Remove the selected rule from the selected scope, then refresh.
 proc agent_allow_remove_selected {w} {
 	set sel [$w.l.box curselection]
 	if {![llength $sel]} return
 	set rule [lindex $::allow_rules [lindex $sel 0]]
-	rio_call agent.allow.remove [dict create rule $rule]
+	lassign $::allow_scope scope name
+	rio_call agent.allow.remove [dict create rule $rule scope $scope name $name]
 	agent_allow_refresh $w
 }
 
