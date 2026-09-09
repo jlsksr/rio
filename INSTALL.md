@@ -52,7 +52,7 @@ argument you get an empty scratch buffer.
 Out of the box the only agent provider is the offline **echo** stub. To use a real
 agent, **install a provider** from *Settings ▸ Extensions…* (e.g. **Claude** over the
 Anthropic API, or **ChatGPT** over the OpenAI API), restart rio, then pick it under
-*Settings ▸ Agent Provider* and enter its key under *Settings ▸ Agent API Key* (stored
+*Settings ▸ Agent Provider* and enter its key under *Preferences ▸ Agent* (stored
 0600 — see §5).
 
 ---
@@ -188,7 +188,7 @@ Consequences:
   `$XDG_DATA_HOME/rio/secrets/` (default `~/.local/share/rio/secrets/`) **on the core's
   host** — one file per provider (Claude's is `claude-api.secret`) — never in the GUI,
   never in synced config. In mode B the key lives on the **server**. Enter/clear it from
-  *Settings ▸ Agent API Key* (it crosses the channel once via `agent.key.set`; the GUI
+  *Preferences ▸ Agent* (it crosses the channel once via `agent.key.set`; the GUI
   never retains it).
 - **Don't want the key on a given box?** Run the core locally (mode A) and edit
   remote files some other way — the GUI is identical. The choice of *where the agent

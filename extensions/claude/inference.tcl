@@ -254,7 +254,7 @@ proc rio::claude::_classify {status raw} {
 		if {[dict exists $d error message]} { set detail ": [dict get $d error message]" }
 	}
 	if {$status == 401 || $status == 403} {
-		return [list auth "Claude rejected the credentials (HTTP $status) — check your API key (Settings ▸ Agent API Key)$detail"]
+		return [list auth "Claude rejected the credentials (HTTP $status) — check your API key (Preferences ▸ Agent)$detail"]
 	} elseif {$status == 429} {
 		return [list rate_limit "Rate limited by Claude (HTTP $status) — wait a moment and retry$detail"]
 	} elseif {$status >= 500} {

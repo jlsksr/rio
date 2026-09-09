@@ -182,8 +182,8 @@ because it needs the least. What each adds:
   stage/commit pane is there.
 - **The agent (Claude)** — works if your Tcl build includes **`tls`** (Magicsplat's
   batteries-included distribution normally does; `rio-dev-deploy.ps1` reports `tls ok`
-  or `MISSING` in its verify). Then pick *Settings ▸ Agent: Claude (API key)* and enter
-  your key under *Settings ▸ Claude API Key…*. One Windows note: rio's `0600` lock-down
+  or `MISSING` in its verify). Then pick *Settings ▸ Agent Provider ▸ Claude (API key)*
+  and enter your key under *Preferences ▸ Agent*. One Windows note: rio's `0600` lock-down
   of the key file is a POSIX no-op on NTFS, so the key file inherits your user-profile
   permissions rather than being explicitly restricted — fine for a personal machine,
   worth knowing.

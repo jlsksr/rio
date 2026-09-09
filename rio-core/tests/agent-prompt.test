@@ -1,7 +1,7 @@
 # Tests for the agent system-prompt composer (rio::agent::prompt, AGENTS.md D34/D70):
 # the three layers (shipped base + XDG override, the user's `system.md`, and the
 # per-project `.rio/agent.md`), how compose() joins them in order, and the path/ensure
-# helpers + the agent.prompt.edit op behind Settings ▸ Agent Prompts…. Pure filesystem
+# helpers + the agent.prompt.edit op behind Preferences ▸ Agent ▸ Agent Prompts…. Pure filesystem
 # — no network, no event loop.
 package require tcltest
 namespace import ::tcltest::*

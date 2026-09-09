@@ -52,7 +52,7 @@ proc rio::claude::api::provider {conversation tools system post} {
 	set key [_api_key]
 	if {$key eq ""} {
 		{*}$post error not_configured \
-			"No Claude API key — add one in Settings ▸ Agent API Key"
+			"No Claude API key — add one in Preferences ▸ Agent"
 		return
 	}
 	set auth [list x-api-key $key]

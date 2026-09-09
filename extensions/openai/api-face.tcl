@@ -53,7 +53,7 @@ proc rio::openai::api::provider {conversation tools system post} {
 	set key [_api_key]
 	if {$key eq ""} {
 		{*}$post error not_configured \
-			"No OpenAI API key — add one in Settings ▸ Agent API Key (a local OpenAI-compatible server may need none: set its URL and any placeholder key)"
+			"No OpenAI API key — add one in Preferences ▸ Agent (a local OpenAI-compatible server may need none: set its URL and any placeholder key)"
 		return
 	}
 	set auth [list Authorization "Bearer $key"]

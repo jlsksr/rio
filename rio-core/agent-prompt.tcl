@@ -32,8 +32,8 @@
 #       tightest, most task-specific layer, so it comes last. Opt-in, and it lives
 #       WITH the project, not with rio.
 #
-# Layers 2–4 are the user-facing prompts, editable from the GUI (Settings ▸ Agent
-# Prompts…, which opens each file in rio's own editor via the `agent.prompt.edit` op).
+# Layers 2–4 are the user-facing prompts, editable from the GUI (Preferences ▸ Agent ▸
+# Agent Prompts…, which opens each file in rio's own editor via the `agent.prompt.edit` op).
 # The composed string is what the provider sends as the request's system prompt; if
 # nothing is available at all it is empty and the provider sends none.
 

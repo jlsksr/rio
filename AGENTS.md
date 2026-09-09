@@ -3702,7 +3702,7 @@ empty file contributes nothing.
 **Surfaced without welding UI to paths.** A new core op **`agent.prompt.edit {which}`**
 ([ops-agent.tcl](rio-core/ops-agent.tcl)) resolves the `system`/`project` file, **creates
 it empty if absent** (`ensure`), and returns its path; `project` with no open project is a
-`bad_request`. The GUI's **Settings ▸ Agent Prompts…** dialog
+`bad_request`. The GUI's **Agent Prompts…** dialog (reached from Preferences ▸ Agent; see D85)
 ([rio-gui.tcl](rio-gui/rio-gui.tcl)) calls it and opens the file in **rio's own editor**
 (`do_open`) rather than building a bespoke text widget — so editing is the normal edit
 path, and because the **core** owns and creates the file, a **remote** core resolves it on
@@ -3971,8 +3971,9 @@ to). Static help stays muted (D68); the chooser and buttons are the only control
 *Follow-up (same feature):* the **Preferences ▸ Agent pane** was reading as a stub — with no
 provider installed it was just the `echo` radio and two toggles, and it had no door to the
 prompt work at all. Two additions, both by existing patterns: an **Agent Prompts…** button
-(the reach-not-reimplement pattern of the Keyboard pane's shortcuts button, so the "second
-door" reaches the same dialog the Settings menu does), and a **muted `echo`-only hint**
+(the reach-not-reimplement pattern of the Keyboard pane's shortcuts button — at the time a
+"second door" beside the Settings menu's; **D85** later made the Preferences pane the *only*
+door), and a **muted `echo`-only hint**
 (`prefs_hint`, gutter.fg) pointing at Extensions… — shown only while no real provider is
 installed, since the pane is self-explanatory once one is. The provider radios / keys / toggles
 are unchanged.
@@ -4174,9 +4175,9 @@ registered non-echo name, project needs an open folder). GUI: an `auto` command 
 bar** and does not pause the busy indicator; a gated command's bar gains an **"Always allow ▾"**
 menubutton whose two cascades (program first, exact second) each open a **scope submenu** (all
 projects / this project / *provider* only), remembering the rule in the chosen scope *and* approving
-the one in front of the user; a **Settings ▸ Agent: Allowed commands…** manager has a **scope
-selector** (mirroring the Agent Prompts provider chooser) and lists that scope's rules with
-Add/Remove (mirrored in Preferences). *(Program-vs-exact and scope are per-click choices, not
+the one in front of the user; an **Allowed commands…** manager (reached from Preferences ▸ Agent
+after D85; originally the Settings menu) has a **scope selector** (mirroring the Agent Prompts
+provider chooser) and lists that scope's rules with Add/Remove. *(Program-vs-exact and scope are per-click choices, not
 persistent modes — deciding at the moment of trust beats a toggle you flip back and forth.)* Tested
 offline: prefix-match, the **scope union** and each layer's isolation (a provider rule inert under a
 different/echo provider; a project rule inert with no project open), add/remove/dedup + persistence,
@@ -4188,6 +4189,41 @@ had the model call `run_command`, the core raised `agent.propose` with **`auto 1
 ran to `exit 0` with **zero approvals issued** — the standing-approval auto-run path proven end to end
 for both scopes with a real provider. **Remaining** (deferred): a richer rules editor (regex, per-cwd,
 session-only trust).
+
+---
+
+### D85 — Agent config lives in Preferences; the Settings menu keeps only fast switches
+
+As the agent grew (D66 provider extensions, D26 keys, D70/D79 prompts, D84 allow-list) the
+**Settings menu** had accreted a full column of agent items: an *Agent Provider* cascade, an
+*Agent API Key* cascade, *Agent Prompts…*, *Agent: Allowed commands…*, and the two edit toggles.
+jka's call: **choosing the provider from the top-level menu is right — it's a quick runtime switch,
+"which model am I talking to right now" — but the other agent settings (keys, prompts, allow-list)
+belong in the Preferences window.** The Preferences **Agent pane** (D58/D79) already carried all of
+them as a "second door", so this makes that pane the **only** door and trims the menu.
+
+**What stays in Settings ▸ :** the **Agent Provider** picker and the two frequently-flipped
+checkbuttons — **Auto-accept edits** and **Compare complex edits** (jka kept these as quick
+toggles). **What moved to Preferences ▸ Agent only:** the per-provider **API Key…** buttons, the
+**Agent Prompts…** dialog, and the **Allowed commands…** manager. Nothing was reimplemented — the
+same procs (`provider_key_dialog`, `agent_prompts_dialog`, `agent_allow_dialog`) are simply no
+longer wired to menu entries; `providers_menu_fill` stopped filling the now-gone `.m.settings.keys`
+cascade.
+
+**Why:** a menu is for fast, low-ceremony switches; a settings *window* is where configuration
+gathers and can grow (a scope selector, a key field, a multi-file prompt editor) without cramming
+the menubar. One home also ends the two-door upkeep — the menu and pane could drift. This is the
+same "don't let the top-level menus keep accreting" reasoning that created the Preferences window
+(D58); D85 finishes the job for the agent cluster.
+
+**Ripple:** user-facing strings that named the old path were corrected to **Preferences ▸ Agent** —
+the provider extensions' `not_configured` / auth-error messages
+([extensions/claude](extensions/claude/api-face.tcl), [extensions/openai](extensions/openai/api-face.tcl),
+their `inference.tcl` HTTP-401/403 text) and the doc set (README/INSTALL/WINDOWS/ROADMAP/PITCH). The
+`Settings ▸ Agent Provider` references stay (provider still lives there). Tests: `smoke.tcl` asserts
+the *Agent Prompts…* entry is **gone** from Settings and the `not_configured` message now points at
+Preferences; `prefs_window.tcl` asserts the pane carries both the prompts and allow buttons and that
+the three moved items are absent from the Settings menu while the provider cascade remains.
 
 ---
 

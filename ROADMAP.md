@@ -241,7 +241,7 @@ for later:
   layers** — **global** (every project), **per-provider** (only while that provider
   runs), and **project** (`.rio/`) — and a command is trusted if **any active scope**
   allows it. Added one-click from the bar's **Always allow** menu (program or exact ×
-  scope submenu) or managed per-scope in **Settings ▸ Agent: Allowed commands…**; it
+  scope submenu) or managed per-scope in **Preferences ▸ Agent ▸ Allowed commands…**; it
   skips **only** the bar — `prepare_exec`'s guards still run. Verified live against
   ChatGPT (global + per-provider auto-run, zero approvals).
   Still wanted: **streaming** a command's output as it runs and a per-command

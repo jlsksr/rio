@@ -2999,11 +2999,12 @@ proc adopt_agent_status {} {
 # The chat status strip (under the Send button): which agent is live and whether
 # proposed edits auto-apply or wait for review. A spot for context-window usage
 # later. Called on provider change and on the auto-accept toggle.
-# Fill the Settings ▸ Agent Provider picker and the Settings ▸ Agent API Key menu
-# from the core's provider list (mirrors themes_menu_fill). Rebuilt on connect and
-# reconnect (adopt_agent_status) so an installed provider (milestone B) shows up
-# with no code change. The provider radios share ::agent_provider with the
-# Preferences pane; each keyed provider gets a key-dialog entry.
+# Fill the Settings ▸ Agent Provider picker from the core's provider list (mirrors
+# themes_menu_fill). Rebuilt on connect and reconnect (adopt_agent_status) so an
+# installed provider (milestone B) shows up with no code change. The provider radios
+# share ::agent_provider with the Preferences pane. Provider choice is the one agent
+# knob quick enough to belong in the menu; its key/prompts/allow-list are configured
+# from the Preferences Agent pane (jka, 2026-09-09), not from here.
 proc providers_menu_fill {} {
 	agent_providers_refresh
 	if {[winfo exists .m.settings.provider]} {
@@ -3011,14 +3012,6 @@ proc providers_menu_fill {} {
 		foreach p $::agent_providers {
 			.m.settings.provider add radiobutton -label [provider_radio_label $p] \
 				-variable ::agent_provider -value [dict get $p name] -command apply_provider
-		}
-	}
-	if {[winfo exists .m.settings.keys]} {
-		.m.settings.keys delete 0 end
-		foreach p $::agent_providers {
-			if {![dict get $p keyed]} continue
-			.m.settings.keys add command -label "[dict get $p label] API Key…" \
-				-command [list provider_key_dialog [dict get $p name]]
 		}
 	}
 }
@@ -3068,7 +3061,7 @@ proc chat_status_update {} {
 	catch {.chat.status configure -text "$agent   ·   $mode"}
 }
 
-# The provider API-key dialog (Settings ▸ Agent API Key ▸ <provider>…). A small
+# The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
 # modal that is a dumb view of one provider's key store: it never holds the key, it
 # hands what the user types to agent.key.set for THAT provider / removes it with
 # agent.key.clear. Title, prompt and signup hint come from the provider's declared
@@ -3139,7 +3132,7 @@ proc provider_key_clear {w name} {
 	destroy $w
 }
 
-# The agent-prompts dialog (Settings ▸ Agent Prompts…, D70/D79). A small modal that opens
+# The agent-prompts dialog (Preferences ▸ Agent ▸ Agent Prompts…, D70/D79). A small modal that opens
 # the USER-editable system-prompt files in rio's OWN editor: `system.md` (your standing
 # instructions for every project), the open project's `.rio/agent.md`, and — per D79 — a
 # chosen provider's own `providers/<name>.md` (active only when that provider runs). The
@@ -7614,14 +7607,13 @@ proc prefs_fill_agent {f} {
 			-row [incr r] -column 0 -sticky w -pady {4 2}
 	}
 	# The agent's instructions (system / project / per-provider prompts, D70/D79) are
-	# the third leg of its config alongside provider + key. The Settings menu already
-	# has this door; Preferences is the "second door", so mirror it here rather than
-	# leave the user hunting the menu — the same reach-not-reimplement pattern as the
-	# Keyboard pane's shortcuts button.
+	# the third leg of its config alongside provider + key. This pane is their ONLY home
+	# now — the Settings menu keeps just the provider picker and the two quick toggles,
+	# so all of the agent's heavier configuration gathers here (jka, 2026-09-09).
 	grid [prefs_button $f.prompts "Agent Prompts…" agent_prompts_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
-	# The command allow-list (D84) — the standing-approval companion to the gate. Same
-	# second-door mirroring as the prompts button just above.
+	# The command allow-list (D84) — the standing-approval companion to the gate. Its
+	# only door, beside the prompts button just above.
 	grid [prefs_button $f.allow "Allowed commands…" agent_allow_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
@@ -8301,21 +8293,16 @@ menu .m.settings -tearoff 0
 # window mirrors this with its own Extensions… button.
 .m.settings add command -label "Extensions…" -command extensions_window
 .m.settings add separator
-# The agent provider and its per-provider key live in cascades filled from the core
-# (providers_menu_fill, mirroring View ▸ Theme): the list scales as providers are
-# added (D39/milestone B), and the collapsed menu stays short.
+# The agent provider is a cascade filled from the core (providers_menu_fill, mirroring
+# View ▸ Theme): the list scales as providers are added (D39/milestone B), and the
+# collapsed menu stays short. Choosing which model is live is a quick runtime switch,
+# so it earns a menu home; the provider's heavier configuration — its API key, its
+# prompts, its command allow-list — lives only in the Preferences Agent pane (jka,
+# 2026-09-09), keeping this menu to fast toggles.
 menu .m.settings.provider -tearoff 0
 .m.settings add cascade -label "Agent Provider" -menu .m.settings.provider
-menu .m.settings.keys -tearoff 0
-.m.settings add cascade -label "Agent API Key" -menu .m.settings.keys
-# Agent Prompts… completes the agent config trio (provider, its key, its instructions):
-# it opens the user's system prompt (all projects) and the project prompt (this folder)
-# in the editor — a well-defined home for the "soul" the core composes (D70).
-.m.settings add command -label "Agent Prompts…" -command agent_prompts_dialog
-# Allowed Commands… (D84): the human-authored allow-list of commands that run without
-# the approval bar. Standing approval, not autonomy — a person authors every rule.
-.m.settings add command -label "Agent: Allowed commands…" -command agent_allow_dialog
-.m.settings add separator
+# Auto-accept and compare-complex are the two agent toggles flipped often enough mid-
+# session to keep here alongside the provider (their twins live in Preferences too).
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}
 .m.settings add checkbutton -label "Agent: Compare complex edits" \

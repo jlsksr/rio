@@ -75,7 +75,7 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   the official Anthropic API and **ChatGPT** over the OpenAI API. ChatGPT is
   OpenAI-*compatible*, so pointing its base URL at a **local** server (Ollama,
   llama-server, LM Studio, vLLM) runs a local model through the same path. Each provider
-  brings its own API key, entered under *Settings ▸ Agent API Key* (a local server may need none). The agent lives in the core
+  brings its own API key, entered under *Preferences ▸ Agent* (a local server may need none). The agent lives in the core
   and runs wherever it does — so over a remote core the turn and your key stay
   server-side, with the same GUI either way (see D30). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
@@ -89,9 +89,9 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   command always waits for you**, unless you mark it **trusted**: an **Always allow**
   button on the command remembers it (the program, or that exact command) so it stops
   asking — for **all projects**, **this project only**, or **only while a chosen
-  provider is running**. It's standing approval you author and manage under *Settings ▸
-  Agent: Allowed commands…*. You can
-  **shape how it works** from *Settings ▸ Agent Prompts…*: a **system prompt** (your
+  provider is running**. It's standing approval you author and manage under *Preferences ▸
+  Agent ▸ Allowed commands…*. You can
+  **shape how it works** from *Preferences ▸ Agent ▸ Agent Prompts…*: a **system prompt** (your
   standing instructions for every project), a **project prompt** for the open folder, and
   a **per-provider prompt** applied only while a chosen provider (Claude, or an
   OpenAI-compatible model) is the one running. All open in rio's own editor and are plain

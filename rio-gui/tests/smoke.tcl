@@ -1116,7 +1116,7 @@ chat_clear
 chat_send
 pump_until {string match {*not_configured*} [.chat.log get 1.0 end]}
 ok "provider: claude w/o key errors actionably" \
-	[string match {*Settings*Agent API Key*(not_configured)*} [.chat.log get 1.0 end]] 1
+	[string match {*Preferences*Agent*(not_configured)*} [.chat.log get 1.0 end]] 1
 
 # The generic key dialog stores / clears through the agent.key.* ops (the core's
 # 0600 store), targeting the named provider. Its title/prompt come from the
@@ -1216,12 +1216,14 @@ provider_key_dialog openai
 provider_key_clear .providerkey openai
 ok "keydlg: openai key cleared"        [rio::openai::api::configured] 0
 
-# --- Agent Prompts dialog (Settings ▸ Agent Prompts…, D70) --------------------
+# --- Agent Prompts dialog (Preferences ▸ Agent ▸ Agent Prompts…, D70) ---------
 # The dialog opens the two user-editable system-prompt files in rio's editor; the core
-# owns and creates them (agent.prompt.edit). Menu entry present, dialog builds, its
-# project button tracks whether a project is open, and editing the system prompt
-# resolves+creates system.md (in the sandbox XDG) and opens it as a tab.
-ok "menu: Settings has Agent Prompts…"  [expr {[.m.settings index "Agent Prompts…"] ne ""}] 1
+# owns and creates them (agent.prompt.edit). Its door is the Preferences Agent pane now
+# (not the Settings menu — jka, 2026-09-09); dialog builds, its project button tracks
+# whether a project is open, and editing the system prompt resolves+creates system.md
+# (in the sandbox XDG) and opens it as a tab.
+ok "menu: Agent Prompts… no longer in Settings" \
+	[catch {.m.settings index "Agent Prompts…"}] 1
 agent_prompts_dialog
 ok "prompts: dialog opens"               [winfo exists .agentprompts] 1
 ok "prompts: system button enabled"      [.agentprompts.sys cget -state] normal
