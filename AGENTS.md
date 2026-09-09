@@ -4342,6 +4342,40 @@ the row's own dir and auto-unfolds a subdir on create; the existing git-gutter p
 column truth-table (arrow vs name at depth 0/1, files never an arrow). Out of scope:
 persisting expand-state across launches; drag-to-reorder / drag between folders.
 
+### D88 — Reopen the last folder on the next launch
+
+Opening a folder, quitting, and relaunching `rio` came back to a **blank Files pane** —
+the opened project was forgotten. The cause: the core holds "which folder is open"
+(`rio::project::root`) in memory only, reset on every fresh process; nothing persisted it
+and nothing reopened it. The per-project workspace restore (D31) is keyed by that root, so
+it silently resolved to the *anonymous* session (D72) on a bare launch — the D31 resume only
+ever worked when the folder was named on the command line (`rio <dir>`, which opens it before
+the restore runs).
+
+**Decision: the GUI remembers the last folder and reopens it at boot.** The last-opened root
+rides `prefs.json` (the GUI's persistence home, D31/D56) under a new `project` key, mirrored
+in `::last_project`. `on_project_opened` records it; a new **`reopen_last_project`** runs in
+the boot sequence *before* `session_restore` (so the workspace restore has a root to key on)
+and, when argv opened nothing, reopens it via the normal `project.open` path. That single
+reopen is also what makes D31's per-project file resume actually fire on a bare launch.
+
+**Local cores only.** A project root is a path on the *core's* filesystem; in remote mode
+(`::core_remote`) that is a **server** path this GUI can't stat and mustn't reopen against a
+different core — so `on_project_opened` records nothing in remote mode (a remote root never
+clobbers the remembered local one) and `reopen_last_project` no-ops. **The core stays the
+owner of "which folder is open":** if a persistent local daemon already holds a project,
+`reopen_last_project` **adopts** it (via `project.get`) rather than overriding it with the
+remembered path — the remembered path is only a fallback for when the core has none. A folder
+that has since vanished is skipped silently.
+
+**Still not persisted:** the *unfolded-dir set* within the project (`::nav_expanded`) — D87's
+out-of-scope note stands; a reopened project shows its root collapsed. This remembers **which
+folder**, not the tree's open shape. Tested in `smoke.tcl` (that suite attaches over a socket,
+so the block forces the local branch like the drop-routing test): open records `last_project`;
+it round-trips `prefs.json`; `reopen_last_project` adopts an already-open core project, reopens
+a remembered one when the core has none, skips a vanished folder, no-ops when a project is
+already open, and no-ops on a remote core.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

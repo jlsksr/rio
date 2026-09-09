@@ -427,6 +427,63 @@ fs_apply_delete [file join $proj lambda.txt]
 ok "fs: deleted file on disk"   [file exists [file join $proj lambda.txt]] 0
 ok "fs: open tab closed"        [dict size $::buffers] [expr {$before - 1}]
 
+# --- reopen the last folder on a bare launch (D88) ----------------------------
+# A local core forgets its project on restart, so the GUI remembers the last-opened folder
+# in prefs and reopens it at boot (reopen_last_project), which is also what gives the
+# workspace restore a root to key on. This is a LOCAL-core feature; this suite attaches over
+# a socket (::core_remote 1), so force the local branch for the block — same idiom as the
+# drop-routing test above. The core is on loopback, so its paths are ours to stat.
+set _rlp_navroot $::nav_root ; set _rlp_remote $::core_remote ; set ::core_remote 0
+
+# Opening a folder on a local core records it as last_project, and it rides prefs.json like
+# the other view prefs. (on_project_opened is the open path; call it directly, as the socket
+# harness doesn't drive the project.opened event here.)
+on_project_opened [dict create root [file normalize $proj]]
+ok "reopen: open recorded last_project" $::last_project [file normalize $proj]
+set ::last_project "/some/where"
+prefs_save ; set ::last_project "" ; prefs_load
+ok "reopen: last_project round-trips prefs" $::last_project "/some/where"
+
+# reopen_last_project's branches, isolated from the live core with a project.get stub and an
+# open_folder spy (the rename-stub idiom the drop-routing test uses). A project is open now,
+# so the guard makes it a no-op — assert that before swapping nav_root out.
+set ::_rlp_opened NONE
+rename ::open_folder ::_rlp_saved_open_folder
+proc ::open_folder {p} { set ::_rlp_opened $p ; return 1 }
+reopen_last_project
+ok "reopen: no-op when a project is already open" $::_rlp_opened NONE
+
+set ::nav_root ""
+rename ::rio_call ::_rlp_saved_rio_call
+set ::_rlp_getroot ""
+proc ::rio_call {op {params {}}} {
+	if {$op eq "project.get"} { return [dict create ok 1 result [dict create root $::_rlp_getroot]] }
+	return [::_rlp_saved_rio_call $op $params]
+}
+# Core has a project already (persistent daemon): adopt it, don't reopen over it.
+set ::_rlp_getroot $proj ; set ::_rlp_opened NONE
+reopen_last_project
+ok "reopen: adopts the core's open project" [list $::nav_root $::_rlp_opened] [list $proj NONE]
+# Core has none + a remembered folder that exists: reopen it.
+set ::nav_root "" ; set ::_rlp_getroot "" ; set ::_rlp_opened NONE ; set ::last_project $proj
+reopen_last_project
+ok "reopen: reopens remembered folder when core has none" $::_rlp_opened $proj
+# Core has none + the remembered folder has vanished: skip silently.
+set ::nav_root "" ; set ::_rlp_opened NONE ; set ::last_project [file join $proj gone-[clock clicks]]
+reopen_last_project
+ok "reopen: skips a vanished folder" $::_rlp_opened NONE
+# Remote core: never reopen a local-remembered path against a server we can't stat it on.
+set ::nav_root "" ; set ::_rlp_opened NONE ; set ::last_project $proj ; set ::core_remote 1
+reopen_last_project
+set ::core_remote 0
+ok "reopen: no reopen on a remote core" $::_rlp_opened NONE
+
+rename ::rio_call {} ; rename ::_rlp_saved_rio_call ::rio_call
+rename ::open_folder {} ; rename ::_rlp_saved_open_folder ::open_folder
+set ::nav_root $_rlp_navroot ; set ::core_remote $_rlp_remote
+set ::last_project [file normalize $proj]
+prefs_save   ;# leave prefs.json matching current state for later tests
+
 file delete -force $proj
 
 # --- dock sites (D35 c1b): host tab strips, pane switch, side switch ----------

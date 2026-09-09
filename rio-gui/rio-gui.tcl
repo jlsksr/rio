@@ -167,6 +167,7 @@ set ::edit_mode windows   ;# active editing mode (D38/D41): windows ships; emacs
 set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" before boot)
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
+set ::last_project ""    ;# last folder opened on a LOCAL core — persisted, reopened on next launch (D88)
 set ::theme_choice default ;# the View ▸ Theme radio: tracks theme_name, snaps back on a failed switch (D39)
 # Tab-strip overflow (D57). When a group has more tabs than fit its width, `scroll`
 # (the default) keeps them on ONE line and shows ◂ ▸ arrows to page the visible window;
@@ -920,6 +921,11 @@ proc open_folder {path} {
 proc on_project_opened {p} {
 	set ::nav_root [dict get $p root]
 	set ::nav_expanded [dict create]   ;# a fresh project shows the collapsed root (D87)
+	# Remember this folder so the next launch reopens it (D88). Local cores only: a remote
+	# root is a path on the SERVER, meaningless to reopen against a local core (and it must
+	# not clobber the remembered local project). prefs_save self-gates on ::rio_started, so
+	# this no-ops during the boot reopen and persists once the user opens a folder live.
+	if {!$::core_remote} { set ::last_project $::nav_root ; prefs_save }
 	refresh_dock
 }
 
@@ -5691,6 +5697,9 @@ proc prefs_load {} {
 		set ::layout [rio::layout::boot [rio::layout::migrate $d]]
 	}
 	if {[dict exists $d editmode]} { set ::edit_mode [dict get $d editmode] }
+	# The last folder opened on a local core (D88). Stashed only — the project can't be
+	# reopened until the channel is up; reopen_last_project does that during boot.
+	if {[dict exists $d project]} { set ::last_project [dict get $d project] }
 }
 
 # Persist the current preferences. Called from each view-state applier (do_theme,
@@ -5717,7 +5726,8 @@ proc prefs_save {} {
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
 			font_size   $::editor_font_size \
-			editmode   $::edit_mode]]
+			editmode   $::edit_mode \
+			project    $::last_project]]
 		# scalars minus its trailing brace, then the layout member and a final closing
 		# brace (backslash-escaped so this literal brace does not end the catch body).
 		set json "[string range $scalars 0 end-1],\"layout\":[rio::layout::json]\}"
@@ -5739,6 +5749,25 @@ proc session_save {} {
 	}
 	set active [expr {$::cur ne "" ? [bufget $::cur path] : ""}]
 	catch {rio_call workspace.save [dict create open [join $paths "\n"] active $active]}
+}
+
+# Reopen the folder open at the last launch (D88), so a bare `rio` resumes where you
+# left off instead of a blank pane. The core keeps "which folder is open" in memory only
+# (rio::project — reset on a fresh process), so the GUI persists the path (prefs.json) and
+# reopens it here, which is also what points workspace.get at the right per-project session
+# below. Runs during boot before session_restore, only when nothing else already opened a
+# project (an argv folder or an adopted core project wins). Local cores only: ::last_project
+# is never set from a remote (server) root, and open_folder would report_error on a path the
+# local core can't see. A folder that has since vanished is skipped silently.
+proc reopen_last_project {} {
+	if {$::nav_root ne "" || $::core_remote} return
+	# The core owns "which folder is open": a persistent local daemon may already hold one,
+	# so adopt that rather than overriding it with the remembered path (this also fills the
+	# pane in the adopted-project case). Only when the core has none do we reopen last time's.
+	set root [dict get [rio_call project.get {}] result root]
+	if {$root ne ""} { on_project_opened [dict create root $root] ; return }
+	if {$::last_project eq "" || ![file isdirectory $::last_project]} return
+	open_folder $::last_project
 }
 
 # Restore the open project's workspace: reopen each saved file (the core has already
@@ -8527,10 +8556,15 @@ foreach f $argv {
 	}
 }
 
+# Reopen the folder from last launch if argv opened none (D88), so a bare `rio` resumes
+# the project instead of a blank pane — and so the workspace restore below has a root to
+# key on. Local cores only; a no-op when a project is already open.
+reopen_last_project
+
 # Resume the project's workspace: reopen the files that were open last time (D31).
-# Only meaningful once a project is open (argv opened one — or none, then this is a
-# no-op); the core prunes vanished paths, so a restore never errors on stale entries.
-# Still guarded by ::rio_started=0, so the do_opens here don't each re-save.
+# Only meaningful once a project is open (argv opened one, or reopen_last_project did — or
+# none, then this is a no-op); the core prunes vanished paths, so a restore never errors on
+# stale entries. Still guarded by ::rio_started=0, so the do_opens here don't each re-save.
 session_restore
 
 # Let the window settle at its natural content size, then stop child geometry from
