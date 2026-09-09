@@ -56,19 +56,21 @@ proc rio::workspace::_path {root} {
 }
 
 # Save a project's session. `open` is the list of file paths that were open (in
-# tab order); `active` is the focused tab's path (may be "" or not in `open`). An
-# empty root is the anonymous session (D72) — stored verbatim, not normalized (which
-# would turn "" into the cwd), keeping the self-describing `root` field empty.
-# Creates the dir; overwrites any prior session for that root.
-proc rio::workspace::save {root open active} {
+# tab order); `active` is the focused tab's path (may be "" or not in `open`);
+# `expanded` is the set of directories unfolded in the file tree (D89), an
+# unordered list. An empty root is the anonymous session (D72) — stored verbatim,
+# not normalized (which would turn "" into the cwd), keeping the self-describing
+# `root` field empty. Creates the dir; overwrites any prior session for that root.
+proc rio::workspace::save {root open active {expanded {}}} {
 	set dir [_dir]
 	file mkdir $dir
 	catch {file attributes $dir -permissions 0700}
 	set stored [expr {$root eq "" ? "" : [file normalize $root]}]
 	set json [json::write object \
-		root   [json::write string $stored] \
-		active [json::write string $active] \
-		open   [json::write array {*}[lmap p $open {json::write string $p}]]]
+		root     [json::write string $stored] \
+		active   [json::write string $active] \
+		open     [json::write array {*}[lmap p $open {json::write string $p}]] \
+		expanded [json::write array {*}[lmap p $expanded {json::write string $p}]]]
 	set f [open [_path $root] {WRONLY CREAT TRUNC}]
 	fconfigure $f -encoding utf-8
 	puts -nonewline $f $json
@@ -76,22 +78,24 @@ proc rio::workspace::save {root open active} {
 	return
 }
 
-# Read a project's session as {open <list> active <path>}, or {open {} active ""}
-# for a first-time (or corrupt) project — a resume must never be what stops the
-# editor from starting, so a bad file reads as empty rather than throwing.
+# Read a project's session as {open <list> active <path> expanded <list>}, or all
+# empty for a first-time (or corrupt) project — a resume must never be what stops the
+# editor from starting, so a bad file reads as empty rather than throwing. `expanded`
+# defaults empty so a session written before D89 (no such key) reads back cleanly.
 proc rio::workspace::get {root} {
 	set path [_path $root]
-	if {![file exists $path]} { return [dict create open {} active ""] }
+	if {![file exists $path]} { return [dict create open {} active "" expanded {}] }
 	if {[catch {
 		set f [open $path r]
 		fconfigure $f -encoding utf-8
 		set text [::read $f]
 		close $f
 		set d [json::json2dict $text]
-	}]} { return [dict create open {} active ""] }
-	set open   [expr {[dict exists $d open]   ? [dict get $d open]   : {}}]
-	set active [expr {[dict exists $d active] ? [dict get $d active] : ""}]
-	return [dict create open $open active $active]
+	}]} { return [dict create open {} active "" expanded {}] }
+	set open     [expr {[dict exists $d open]     ? [dict get $d open]     : {}}]
+	set active   [expr {[dict exists $d active]   ? [dict get $d active]   : ""}]
+	set expanded [expr {[dict exists $d expanded] ? [dict get $d expanded] : {}}]
+	return [dict create open $open active $active expanded $expanded]
 }
 
 # Drop a project's saved session.

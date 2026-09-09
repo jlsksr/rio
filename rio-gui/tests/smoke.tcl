@@ -468,10 +468,12 @@ ok "reopen: adopts the core's open project" [list $::nav_root $::_rlp_opened] [l
 set ::nav_root "" ; set ::_rlp_getroot "" ; set ::_rlp_opened NONE ; set ::last_project $proj
 reopen_last_project
 ok "reopen: reopens remembered folder when core has none" $::_rlp_opened $proj
-# Core has none + the remembered folder has vanished: skip silently.
+# Core has none + the remembered folder has vanished: skip silently AND forget the dead
+# pointer so launches stop chasing it (D89).
 set ::nav_root "" ; set ::_rlp_opened NONE ; set ::last_project [file join $proj gone-[clock clicks]]
 reopen_last_project
 ok "reopen: skips a vanished folder" $::_rlp_opened NONE
+ok "reopen: clears the pointer to a vanished folder" $::last_project ""
 # Remote core: never reopen a local-remembered path against a server we can't stat it on.
 set ::nav_root "" ; set ::_rlp_opened NONE ; set ::last_project $proj ; set ::core_remote 1
 reopen_last_project
@@ -483,6 +485,50 @@ rename ::open_folder {} ; rename ::_rlp_saved_open_folder ::open_folder
 set ::nav_root $_rlp_navroot ; set ::core_remote $_rlp_remote
 set ::last_project [file normalize $proj]
 prefs_save   ;# leave prefs.json matching current state for later tests
+
+# --- the file tree's unfolded shape resumes across a launch (D89) --------------
+# ::nav_expanded is saved into the per-project CORE session (workspace.*), so unlike D88's
+# project pointer it rides the wire and works in this socket harness as-is (and, in real
+# use, follows the project onto a remote host). A project is open here (nav_root = proj).
+set ::_exp_sub [file join $::nav_root sub]
+# Save: the unfolded set lands in the session and reads back (pruned to dirs that exist).
+set ::nav_expanded [dict create $::_exp_sub 1]
+session_save
+set _exp_got [dict get [rio_call workspace.get {}] result expanded]
+ok "unfold: expanded set persists in the core session" \
+	[expr {[lsearch -exact $_exp_got $::_exp_sub] >= 0}] 1
+# Restore: session_restore refills ::nav_expanded and repaints (the subdir's child shows).
+# Stub workspace.get so no real tabs are reopened — we're testing the expand branch only.
+rename ::rio_call ::_exp_saved_rio_call
+proc ::rio_call {op {params {}}} {
+	if {$op eq "workspace.get"} {
+		return [dict create ok 1 result [dict create open {} active "" expanded [list $::_exp_sub]]]
+	}
+	return [::_exp_saved_rio_call $op $params]
+}
+set ::nav_expanded [dict create]        ;# a fresh launch starts collapsed
+session_restore
+rename ::rio_call {} ; rename ::_exp_saved_rio_call ::rio_call
+ok "unfold: session_restore refills the expanded set" [dict exists $::nav_expanded $::_exp_sub] 1
+ok "unfold: the subdir renders unfolded after restore" \
+	[expr {[lsearch -exact [nav_payloads] [list file [file join $::_exp_sub inner.txt]]] >= 0}] 1
+
+# --- Edge: the project's own folder vanishes under us (D89) --------------------
+# Deleting the open root on disk should CLOSE the project to the placeholder on the next
+# repaint — not pop an error dialog (which would also hang a headless run). Force local so
+# the last_project clear applies (a remote root is never the remembered local pointer).
+set _ed_remote $::core_remote ; set ::core_remote 0
+set ::last_project $::nav_root ; set ::nav_expanded [dict create]
+set ::_ed_errs 0
+rename ::report_error ::_ed_saved_report_error
+proc ::report_error {msg {code ""}} { incr ::_ed_errs ; return }
+file delete -force $::nav_root
+populate_nav
+rename ::report_error {} ; rename ::_ed_saved_report_error ::report_error
+set ::core_remote $_ed_remote
+ok "vanish: a gone root closes to the placeholder" [list $::nav_root [nav_labels]] {{} {{Open a folder…}}}
+ok "vanish: no error dialog for a gone root"       $::_ed_errs 0
+ok "vanish: forgets the reopen pointer"            $::last_project ""
 
 file delete -force $proj
 

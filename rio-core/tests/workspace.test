@@ -27,13 +27,32 @@ proc make_tree {} {
 
 test ws-absent-empty {a project with no saved session reads back empty} -body {
 	rio::workspace::get /no/such/project
-} -result {open {} active {}}
+} -result {open {} active {} expanded {}}
 
 test ws-roundtrip {save then get returns the same open list and active} -body {
 	rio::workspace::save /proj/one [list /proj/one/a.txt /proj/one/b.txt] /proj/one/b.txt
 	set s [rio::workspace::get /proj/one]
 	list [dict get $s open] [dict get $s active]
 } -result {{/proj/one/a.txt /proj/one/b.txt} /proj/one/b.txt}
+
+test ws-expanded-roundtrip {the unfolded-tree set (D89) round-trips like the open list} -body {
+	rio::workspace::save /proj/exp [list /proj/exp/a.txt] /proj/exp/a.txt \
+		[list /proj/exp/src /proj/exp/src/net]
+	dict get [rio::workspace::get /proj/exp] expanded
+} -result {/proj/exp/src /proj/exp/src/net}
+
+test ws-expanded-defaults-empty {save without an expanded arg reads back an empty set} -body {
+	rio::workspace::save /proj/noexp [list /proj/noexp/a.txt] ""
+	dict get [rio::workspace::get /proj/noexp] expanded
+} -result {}
+
+test ws-expanded-pre-d89 {a session file missing the expanded key reads back empty, not an error} -body {
+	set p [rio::workspace::_path /proj/old]
+	file mkdir [file dirname $p]
+	set f [open $p w]; puts -nonewline $f {{"root":"/proj/old","active":"","open":["/proj/old/a.txt"]}}; close $f
+	set s [rio::workspace::get /proj/old]
+	list [dict get $s open] [dict get $s expanded]
+} -result {/proj/old/a.txt {}}
 
 test ws-paths-with-spaces {paths containing spaces survive the JSON round-trip} -body {
 	rio::workspace::save /proj/sp [list "/a dir/x y.txt"] "/a dir/x y.txt"
@@ -43,7 +62,7 @@ test ws-paths-with-spaces {paths containing spaces survive the JSON round-trip} 
 test ws-empty-open {an empty open list round-trips as empty} -body {
 	rio::workspace::save /proj/empty {} ""
 	rio::workspace::get /proj/empty
-} -result {open {} active {}}
+} -result {open {} active {} expanded {}}
 
 test ws-overwrite {a second save replaces the first} -body {
 	rio::workspace::save /proj/ow [list /x/1] /x/1
@@ -72,14 +91,14 @@ test ws-forget {forget drops the saved session} -body {
 	rio::workspace::save /proj/gone [list /x/1] /x/1
 	rio::workspace::forget /proj/gone
 	rio::workspace::get /proj/gone
-} -result {open {} active {}}
+} -result {open {} active {} expanded {}}
 
 test ws-corrupt-reads-empty {a corrupt session file reads back empty, not an error} -body {
 	set p [rio::workspace::_path /proj/corrupt]
 	file mkdir [file dirname $p]
 	set f [open $p w]; puts $f "@@ not valid json @@"; close $f
 	rio::workspace::get /proj/corrupt
-} -result {open {} active {}}
+} -result {open {} active {} expanded {}}
 
 test ws-dir-perms-0700 {the sessions dir is mode 0700} -constraints unix -body {
 	rio::workspace::save /proj/perm {} ""
@@ -142,15 +161,25 @@ test ws-op-prunes-missing-paths {get drops paths that no longer exist} -setup {
 		[expr {[dict get $resp result active] eq ""}]
 } -cleanup { rio::project::close; file delete -force $::tree } -result {1 1}
 
+test ws-op-expanded-roundtrip-and-prune {expanded dirs round-trip; a vanished one is pruned (D89)} -setup {
+	set ::tree [make_tree]; file mkdir [file join $::tree src]; rio::project::open $::tree
+} -body {
+	set src  [file join $::tree src]
+	set gone [file join $::tree gone]
+	rio::core::call workspace.save [dict create open "" active "" expanded "$src\n$gone"]
+	set got [dict get [dict get [rio::core::call workspace.get {}] response] result expanded]
+	expr {$got eq [list $src]}
+} -cleanup { rio::project::close; file delete -force $::tree } -result 1
+
 test ws-ops-registered {workspace.save and workspace.get are in the live registry} -body {
 	expr {"workspace.save" in [rio::dispatch::opnames] \
 		&& "workspace.get" in [rio::dispatch::opnames]}
 } -result 1
 
-test ws-get-wire {workspace.get encodes to JSON with an open array + active string} -body {
-	set result [dict create open [list /p/a.txt /p/b.txt] active /p/b.txt]
+test ws-get-wire {workspace.get encodes to JSON with open + expanded arrays and an active string} -body {
+	set result [dict create open [list /p/a.txt /p/b.txt] active /p/b.txt expanded [list /p/src]]
 	rio::wire::response [dict create id 1 ok true op workspace.get result $result]
-} -result {{"id":"1","ok":true,"result":{"open":["/p/a.txt","/p/b.txt"],"active":"/p/b.txt"}}}
+} -result {{"id":"1","ok":true,"result":{"open":["/p/a.txt","/p/b.txt"],"active":"/p/b.txt","expanded":["/p/src"]}}}
 
 file delete -force $::dir
 cleanupTests

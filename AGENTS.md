@@ -4368,13 +4368,61 @@ owner of "which folder is open":** if a persistent local daemon already holds a 
 remembered path — the remembered path is only a fallback for when the core has none. A folder
 that has since vanished is skipped silently.
 
-**Still not persisted:** the *unfolded-dir set* within the project (`::nav_expanded`) — D87's
-out-of-scope note stands; a reopened project shows its root collapsed. This remembers **which
-folder**, not the tree's open shape. Tested in `smoke.tcl` (that suite attaches over a socket,
-so the block forces the local branch like the drop-routing test): open records `last_project`;
-it round-trips `prefs.json`; `reopen_last_project` adopts an already-open core project, reopens
-a remembered one when the core has none, skips a vanished folder, no-ops when a project is
-already open, and no-ops on a remote core.
+**Still not persisted** *(at D88; lifted by D89)***:** the *unfolded-dir set* within the
+project (`::nav_expanded`). This decision remembered **which folder**, not the tree's open
+shape. Tested in `smoke.tcl` (that suite attaches over a socket, so the block forces the local
+branch like the drop-routing test): open records `last_project`; it round-trips `prefs.json`;
+`reopen_last_project` adopts an already-open core project, reopens a remembered one when the
+core has none, skips a vanished folder, no-ops when a project is already open, and no-ops on a
+remote core.
+
+### D89 — Remember the tree's unfolded shape; survive a folder deleted underneath
+
+Two follow-ups to D88, one feature and one robustness pair.
+
+**Remember what's unfolded.** D88 (and D87) left the *unfolded-dir set* (`::nav_expanded`)
+unpersisted — a reopened project showed its root collapsed. Now it resumes. The home is **not**
+`prefs.json` (where D88 put the root) but the **per-project workspace session** (`rio::workspace`,
+D31) — the same store that already remembers which files were open, keyed by the project root
+and pruned to paths that still exist. That is the honest home: the tree shape is per-project
+content, exactly like the open-file list, and putting it there buys a property the root pointer
+can't have — it **follows the project onto a remote host** (D30), so it works in remote mode too
+(the root reopen is local-only because the root is a server path). `workspace.save`/`get` and
+the store gained an `expanded` list beside `open`/`active` (wire: a newline-joined string in,
+a JSON array out, pruned on `get` against `file isdirectory`); `session_save` sends
+`[dict keys $::nav_expanded]`, `session_restore` refills the set (after the project is open, so
+it keys on the right session) and repaints, and `nav_toggle_expand` saves on every fold/unfold.
+A session file written before D89 simply lacks the key and reads back an empty set.
+
+**Edge — the project's own folder is deleted on disk mid-run.** Previously the next repaint ran
+`fs.list` on the vanished root, which failed into a `report_error` **dialog** (and a recursive
+`rm` could pop several). A gone root isn't an error to shout about — it **closes the project**.
+`populate_nav` now probes the root's `fs.list` **once** (the core's stat, which also works in
+remote mode where the GUI can't see a server path): on failure it resets `::nav_root`/`::nav_expanded`
+to empty and falls through to the `(no folder)` placeholder, and forgets the reopen pointer if
+this root was it (`::nav_root eq $::last_project`, so a remote root never wipes the remembered
+*local* one). The probe's entry list is handed to the new **`nav_render_entries`** (split out of
+`nav_render_level`) so the root isn't listed twice. A vanished *sub*dir needs nothing: its
+parent's listing simply omits it, so the recursion is never entered for it — the `report_error`
+path now only catches a genuine race or permission fault.
+
+**Edge — the remembered folder is gone at the next launch.** `reopen_last_project` already
+skipped a non-directory `::last_project`; now it also **clears** it (in memory; persisted on the
+next `prefs_save`) so launches stop chasing a dead path and `prefs.json` self-tidies.
+
+**Deliberately *not* done: deleting the orphaned core session file.** When a project is forgotten
+we clear the *pointer* but leave its `rio::workspace` session on disk, because (a) the session is
+keyed by the path's hash, so if the folder is ever recreated there the open-files + unfold shape
+legitimately resume, and (b) forgetting an arbitrary root would force the *frontend to name a
+non-current root* — the one thing `rio::workspace`'s "the frontend never names the root" rule
+exists to prevent. The residue is one tiny JSON file per distinct project ever opened; a real
+sweep would be a core-side GC, out of scope here.
+
+**Tests.** Core `workspace.test`: `expanded` round-trips the pure store and through the ops,
+prunes a vanished dir, and a pre-D89 file (no key) reads empty; the wire encoder emits the third
+array. GUI `smoke.tcl`: the unfolded set persists into the session and `session_restore` refills
+it and renders the child; a deleted root closes to the placeholder with **no** dialog and forgets
+the pointer; the launch-time skip clears a dead pointer.
 
 ---
 

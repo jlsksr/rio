@@ -259,9 +259,10 @@ proc rio::wire::_result_provider_list {result} {
 }
 rio::wire::result_encoder provider.list rio::wire::_result_provider_list
 
-# workspace.get: `open` is an array of path strings; `active` is a string leaf.
+# workspace.get: `open` and `expanded` are arrays of path strings; `active` is a
+# string leaf. `expanded` is the unfolded-tree set (D89).
 proc rio::wire::_result_workspace_get {result} {
-	return "{\"open\":[strarr [dict get $result open]],\"active\":[str [dict get $result active]]}"
+	return "{\"open\":[strarr [dict get $result open]],\"active\":[str [dict get $result active]],\"expanded\":[strarr [dict get $result expanded]]}"
 }
 rio::wire::result_encoder workspace.get rio::wire::_result_workspace_get
 

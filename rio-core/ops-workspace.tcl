@@ -22,19 +22,23 @@ proc rio::ops::workspace_save {params} {
 	set root [rio::project::root]
 	set joined [expr {[dict exists $params open] ? [dict get $params open] : ""}]
 	set active [expr {[dict exists $params active] ? [dict get $params active] : ""}]
+	set exj    [expr {[dict exists $params expanded] ? [dict get $params expanded] : ""}]
 	set open {}
 	foreach p [split $joined "\n"] { if {$p ne ""} { lappend open $p } }
-	rio::workspace::save $root $open $active
+	set expanded {}
+	foreach p [split $exj "\n"] { if {$p ne ""} { lappend expanded $p } }
+	rio::workspace::save $root $open $active $expanded
 	return [dict create result [dict create saved 1]]
 }
 rio::dispatch::register workspace.save rio::ops::workspace_save
 
-# workspace.get -> {open <array of path>, active <path>}
+# workspace.get -> {open <array of path>, active <path>, expanded <array of dir>}
 # The saved session for the open project — or the anonymous session when none is open
 # (D72) — PRUNED to paths that still exist: a file deleted or moved since last time
-# silently drops out, so a resume never spams "can't open" for stale entries.
-# Existence is judged on the CORE's filesystem, the right one in remote mode. Empty
-# when nothing was saved for that key.
+# silently drops out, so a resume never spams "can't open" for stale entries. The
+# unfolded-tree set (D89) is pruned the same way, against `file isdirectory` — a folder
+# gone since last time simply isn't re-expanded. Existence is judged on the CORE's
+# filesystem, the right one in remote mode. Empty when nothing was saved for that key.
 proc rio::ops::workspace_get {params} {
 	set root [rio::project::root]
 	set s [rio::workspace::get $root]
@@ -42,6 +46,8 @@ proc rio::ops::workspace_get {params} {
 	foreach p [dict get $s open] { if {[file isfile $p]} { lappend open $p } }
 	set active [dict get $s active]
 	if {$active ne "" && ![file isfile $active]} { set active "" }
-	return [dict create result [dict create open $open active $active]]
+	set expanded {}
+	foreach p [dict get $s expanded] { if {[file isdirectory $p]} { lappend expanded $p } }
+	return [dict create result [dict create open $open active $active expanded $expanded]]
 }
 rio::dispatch::register workspace.get rio::ops::workspace_get

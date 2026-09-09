@@ -1119,6 +1119,21 @@ proc populate_nav {} {
 	set b .pfiles.well.body
 	rl_begin $b
 	set ::nav_row_depth [dict create]   ;# path -> tree depth, for the arrow-click hit test (D87)
+	# Probe the root once. Its own folder can vanish under us (deleted on disk mid-run); the
+	# core's fs.list is the stat that also works in remote mode (the GUI can't see a server
+	# path). A gone root is not an error worth a dialog — it CLOSES the project: forget it as
+	# the reopen target if it was the remembered one (D88), and fall through to the placeholder.
+	set entries {}
+	if {$::nav_root ne ""} {
+		set probe [rio_call fs.list [dict create path $::nav_root]]
+		if {[dict get $probe ok]} {
+			set entries [dict get $probe result entries]
+		} else {
+			if {$::nav_root eq $::last_project} { set ::last_project "" }
+			set ::nav_root ""
+			set ::nav_expanded [dict create]
+		}
+	}
 	if {$::nav_root eq ""} {
 		.pfiles.hdr.head configure -text "(no folder)"
 		$b insert end "    Open a folder…\n"
@@ -1130,20 +1145,28 @@ proc populate_nav {} {
 	.pfiles.hdr.head configure -text [file tail $::nav_root]
 	set git [nav_git_map $::nav_root]
 	set ::nav_git $git   ;# stashed so the row context menu can read status (D44)
-	nav_render_level $::nav_root 0 $git
+	nav_render_entries $::nav_root 0 $git $entries
 	rl_end $b
 }
 
 # Render one directory level and recurse into whichever of its subdirs are unfolded
 # (::nav_expanded). A folded dir shows ▸, an unfolded one ▾ with its children indented one
 # step deeper. An fs.list error is reported once but leaves the siblings already drawn.
+# (A vanished subdir raises no error here: its parent's listing simply omits it, so this is
+# never called for it — only a live race or a permission fault reaches the report.)
 proc nav_render_level {dir depth git} {
 	set resp [rio_call fs.list [dict create path $dir]]
 	if {![dict get $resp ok]} {
 		report_error [dict get $resp error message] [dict get $resp error code]
 		return
 	}
-	set entries [dict get $resp result entries]
+	nav_render_entries $dir $depth $git [dict get $resp result entries]
+}
+
+# Draw one already-listed level's rows (dirs then files, core-sorted), recursing into each
+# unfolded subdir. Split from nav_render_level so the root's listing — fetched once in
+# populate_nav to probe for a vanished project — is not fetched a second time.
+proc nav_render_entries {dir depth git entries} {
 	foreach grp {dir file} {
 		foreach e $entries {
 			if {[dict get $e type] ne $grp} continue
@@ -1274,6 +1297,7 @@ proc nav_toggle_expand {path} {
 		dict set ::nav_expanded $path 1
 	}
 	populate_nav
+	session_save   ;# the unfolded set changed — record it so the next launch resumes it (D89)
 }
 
 # Click routing for the files pane (D87). A folder unfolds on a SINGLE click of its arrow —
@@ -5737,9 +5761,11 @@ proc prefs_save {} {
 }
 
 # Save the open project's workspace: the paths of the open tabs (untitled/unsaved
-# tabs, which have no path, are omitted) and the active tab's path. The core keys it
-# by the open project root and no-ops when none is open, so this is safe to call
-# unconditionally. `open` rides the wire as a newline-joined string (workspace.*).
+# tabs, which have no path, are omitted), the active tab's path, and the file tree's
+# unfolded-dir set (D89). The core keys it by the open project root and no-ops when
+# none is open, so this is safe to call unconditionally. `open` and `expanded` ride the
+# wire as newline-joined strings (workspace.*). Unlike D88's project pointer, the tree
+# shape lives in the core session, so it follows the project onto a remote host too.
 proc session_save {} {
 	if {!$::rio_started} return
 	set paths {}
@@ -5748,7 +5774,8 @@ proc session_save {} {
 		if {$p ne ""} { lappend paths $p }
 	}
 	set active [expr {$::cur ne "" ? [bufget $::cur path] : ""}]
-	catch {rio_call workspace.save [dict create open [join $paths "\n"] active $active]}
+	catch {rio_call workspace.save [dict create open [join $paths "\n"] active $active \
+		expanded [join [dict keys $::nav_expanded] "\n"]]}
 }
 
 # Reopen the folder open at the last launch (D88), so a bare `rio` resumes where you
@@ -5766,7 +5793,13 @@ proc reopen_last_project {} {
 	# pane in the adopted-project case). Only when the core has none do we reopen last time's.
 	set root [dict get [rio_call project.get {}] result root]
 	if {$root ne ""} { on_project_opened [dict create root $root] ; return }
-	if {$::last_project eq "" || ![file isdirectory $::last_project]} return
+	if {$::last_project eq ""} return
+	if {![file isdirectory $::last_project]} {
+		# The remembered folder is gone from disk (deleted since we last ran). Stop pointing
+		# launches at a dead path (D89) — the in-memory clear persists on the next prefs_save.
+		set ::last_project ""
+		return
+	}
 	open_folder $::last_project
 }
 
@@ -5785,6 +5818,15 @@ proc session_restore {} {
 		foreach id [dict keys $::buffers] {
 			if {[bufget $id path] eq $active} { activate $id ; break }
 		}
+	}
+	# Restore the file tree's unfolded shape (D89), now the project is open so this keys on
+	# the right session. The core pruned any dir that has since vanished. on_project_opened
+	# reset the set to empty when the folder opened; this refills it and repaints. Only with a
+	# project actually open — the anonymous (no-folder) session has no tree.
+	if {$::nav_root ne ""} {
+		set ::nav_expanded [dict create]
+		foreach d [dict get $res expanded] { dict set ::nav_expanded $d 1 }
+		if {[dict size $::nav_expanded]} { populate_nav }
 	}
 }
 
