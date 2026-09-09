@@ -241,6 +241,15 @@ proc rio::wire::_result_agent_providers {result} {
 }
 rio::wire::result_encoder agent.providers rio::wire::_result_agent_providers
 
+# agent.allow.list: `rules` is an array of rules, each rule an array of argv-prefix
+# token strings (D84) — a nested string array, declared here rather than inferred.
+proc rio::wire::_result_agent_allow_list {result} {
+	set items {}
+	foreach r [dict get $result rules] { lappend items [strarr $r] }
+	return "{\"rules\":[arr $items]}"
+}
+rio::wire::result_encoder agent.allow.list rio::wire::_result_agent_allow_list
+
 # provider.list: `providers` is an array of flat {name,version,source,api,loadable}
 # objects (installed-on-disk providers, D66); `api_max` is a string leaf.
 proc rio::wire::_result_provider_list {result} {

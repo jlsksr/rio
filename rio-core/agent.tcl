@@ -411,9 +411,11 @@ proc rio::agent::_do_write {turn id name input emit co} {
 }
 
 # Handle one run_command call (D83): prepare a reviewable command, surface it
-# (agent.propose, kind command), and — ALWAYS, ignoring auto_accept — yield until an
-# agent.approve resumes us with the user's decision (running arbitrary argv is the
-# most dangerous tool, so a human always confirms the exact command). On approval the
+# (agent.propose, kind command), and — unless a human-authored allow-list rule already
+# covers this argv (D84 standing approval) — yield until an agent.approve resumes us
+# with the user's decision. The edits-only auto_accept toggle never applies here:
+# running arbitrary argv is the most dangerous tool, so absent an explicit allow rule a
+# human always confirms the exact command. On approval (or an allow-list match) the
 # command runs ASYNCHRONOUSLY via rio::exec::start (the core stays responsive while
 # it runs) and we yield again until its completion callback resumes us; the result
 # becomes the tool_result. On rejection the model gets a plain "rejected". The
@@ -428,18 +430,24 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 				summary [dict get $prep summary]]]
 		return $prep
 	}
+	# Standing approval (D84): a command whose argv is covered by a human-authored
+	# allow-list rule runs WITHOUT the bar. The `auto` flag rides the propose event so
+	# the frontend can show what auto-ran (no bar, work continues). This skips only the
+	# human confirmation — prepare_exec above already applied every other guard.
+	set auto [rio::agent::allow::matches [dict get $prep command]]
 	{*}$emit [dict create event agent.propose \
 		params [dict create turn $turn id $id name $name kind command \
 			command [dict get $prep command] cwd [dict get $prep cwddisp] \
-			display [dict get $prep display]]]
-	# Always gated — no auto-accept path for a command.
-	set pending($turn) [list $co $id]
-	set decision [yield]
-	unset -nocomplain pending($turn)
-	if {$decision ne "approve"} {
-		{*}$emit [dict create event agent.tool_result \
-			params [dict create turn $turn id $id name $name ok 0 summary "rejected by user"]]
-		return [dict create ok 0 content "The user rejected running this command." summary "rejected by user"]
+			display [dict get $prep display] auto $auto]]
+	if {!$auto} {
+		set pending($turn) [list $co $id]
+		set decision [yield]
+		unset -nocomplain pending($turn)
+		if {$decision ne "approve"} {
+			{*}$emit [dict create event agent.tool_result \
+				params [dict create turn $turn id $id name $name ok 0 summary "rejected by user"]]
+			return [dict create ok 0 content "The user rejected running this command." summary "rejected by user"]
+		}
 	}
 	set token [rio::exec::start [dict get $prep command] [dict get $prep cwd] "" \
 		[expr {[dict get $prep timeout] * 1000}] \

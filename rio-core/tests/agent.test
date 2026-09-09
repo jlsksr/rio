@@ -578,6 +578,65 @@ test agent-exec-always-gated {run_command still waits for approval even with aut
 	list $s1 $s2 [string match {ran *exit 0} [ev_summary w1]]
 } -cleanup { rio::agent::set_auto_accept 0 ; rio::project::close } -result {propose done 1}
 
+# --- allow-list: standing approval (D84) -------------------------------------
+# A command covered by an allow-list rule runs WITHOUT an agent.approve — the propose
+# event carries auto=1 and the turn completes on its own. The allow-list is pinned to a
+# throwaway dir so the real ~/.config is untouched. `ev_auto w1` reads the propose's
+# auto flag; the run still round-trips a tool_result.
+proc ev_auto {id} {
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.propose" && [dict get $ev params id] eq $id} {
+			return [dict get $ev params auto]
+		}
+	}
+	return ""
+}
+
+test agent-exec-allow-auto {an allow-listed command runs with no approval, auto=1} -setup {
+	set ::adir [makeDirectory agxa-allow]
+	rio::agent::allow::override_dir $::adir
+	rio::agent::allow::add [list $::tcl]
+	set ::pdir [makeDirectory agxa]
+	makeFile "puts ok; exit 0" run.tcl $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name run_command
+	set ::wt_input [dict create command [list $::tcl run.tcl]]
+	set ::wt_raw {{"command":["tclsh","run.tcl"]}}
+} -body {
+	# No agent.approve is issued — run_turn pumps straight to done.
+	set out [run_turn "go" write_provider]
+	list [dict get $out fin] [ev_auto w1] [string match {ran *exit 0} [ev_summary w1]]
+} -cleanup {
+	rio::agent::allow::override_dir "" ; rio::project::close
+} -result {done 1 1}
+
+test agent-exec-unmatched-parks {a command not on the allow-list still parks, auto=0} -setup {
+	set ::adir [makeDirectory agxu-allow]
+	rio::agent::allow::override_dir $::adir
+	rio::agent::allow::add [list some-other-program]
+	set ::pdir [makeDirectory agxu]
+	makeFile "exit 0" run.tcl $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name run_command
+	set ::wt_input [dict create command [list $::tcl run.tcl]]
+	set ::wt_raw {{"command":["tclsh","run.tcl"]}}
+} -body {
+	set s1 [start_write turn]
+	set a [ev_auto w1]
+	# Nothing ran yet (parked at the gate); approve to finish and not leak the turn.
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	list $s1 $a $s2
+} -cleanup {
+	rio::agent::allow::override_dir "" ; rio::project::close
+} -result {propose 0 done}
+
 test agent-exec-prepare-empty {run_command with an empty argv is refused} -body {
 	set r [rio::agent::tools::prepare_exec [dict create command {}]]
 	list [dict get $r ok] [dict get $r summary]

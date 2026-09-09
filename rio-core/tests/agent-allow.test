@@ -1,0 +1,130 @@
+# Tests for the agent command allow-list (rio::agent::allow, AGENTS.md D84): standing
+# approval for trusted commands. Covers argv-prefix matching (program rule vs exact
+# rule vs no match), add/remove/dedup + persistence round-trip through the file, the
+# empty-rule guard, and the three agent.allow.* ops. Pure filesystem — no network, no
+# event loop.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# A throwaway agent dir per test, pinned via the allow-list's test override so nothing
+# touches the real ~/.config.
+proc alloc_dir {} {
+	set d [file join [::tcltest::temporaryDirectory] rioallow-[clock clicks][incr ::seq]]
+	file mkdir $d
+	return $d
+}
+proc reset_allow {} { rio::agent::allow::override_dir "" }
+
+# --- matching: a one-token (program) rule trusts any args --------------------
+
+test match-program {a program rule matches any argv that starts with it} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list pytest]
+	list \
+		[rio::agent::allow::matches [list pytest]] \
+		[rio::agent::allow::matches [list pytest -q tests/]] \
+		[rio::agent::allow::matches [list pytes]] \
+		[rio::agent::allow::matches [list python -m pytest]]
+} -cleanup { reset_allow ; file delete -force $::d } -result {1 1 0 0}
+
+# --- matching: an exact (full-argv) rule matches only itself ------------------
+
+test match-exact {a full-argv rule matches only that exact command} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list git status -s]
+	list \
+		[rio::agent::allow::matches [list git status -s]] \
+		[rio::agent::allow::matches [list git status -s -uno]] \
+		[rio::agent::allow::matches [list git status]] \
+		[rio::agent::allow::matches [list git push]]
+} -cleanup { reset_allow ; file delete -force $::d } -result {1 1 0 0}
+
+# A longer rule than the command can never match (prefix would run past the argv).
+test match-rule-longer {a rule longer than the command does not match} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list git status -s]
+	rio::agent::allow::matches [list git]
+} -cleanup { reset_allow ; file delete -force $::d } -result 0
+
+# --- empty rule is refused and never matches ---------------------------------
+
+test add-empty-refused {an empty rule is not added} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	set ok [rio::agent::allow::add {}]
+	list $ok [llength [rio::agent::allow::rules]]
+} -cleanup { reset_allow ; file delete -force $::d } -result {0 0}
+
+# --- dedup: adding the same rule twice keeps one -----------------------------
+
+test add-dedup {adding an identical rule twice is a no-op} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list pytest]
+	rio::agent::allow::add [list pytest]
+	llength [rio::agent::allow::rules]
+} -cleanup { reset_allow ; file delete -force $::d } -result 1
+
+# --- persistence: rules survive a fresh read (new process would see the file) -
+
+test persist-roundtrip {rules written are read back verbatim, spaces preserved} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list npm run build]
+	rio::agent::allow::add [list "my prog" --flag]
+	# Re-resolve from disk (rules reads the file each call — no cache).
+	lsort [rio::agent::allow::rules]
+} -cleanup { reset_allow ; file delete -force $::d } -result {{npm run build} {{my prog} --flag}}
+
+# --- remove drops the exact rule, leaves others ------------------------------
+
+test remove-exact {remove drops only the matching rule} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add [list pytest]
+	rio::agent::allow::add [list npm test]
+	rio::agent::allow::remove [list pytest]
+	list [rio::agent::allow::matches [list pytest]] \
+		[rio::agent::allow::matches [list npm test]]
+} -cleanup { reset_allow ; file delete -force $::d } -result {0 1}
+
+# --- comments and blank lines in a hand-edited file are ignored ---------------
+
+test read-skips-comments {# lines and blanks are skipped, real rules kept} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+	set fh [open [file join $::d allow.list] w]
+	puts $fh "# a comment"
+	puts $fh ""
+	puts $fh "pytest"
+	puts $fh "   "
+	puts $fh "npm test"
+	close $fh
+} -body {
+	lsort [rio::agent::allow::rules]
+} -cleanup { reset_allow ; file delete -force $::d } -result {{npm test} pytest}
+
+# --- the ops round-trip through the dispatcher --------------------------------
+
+test op-add-list-remove {agent.allow.add / .list / .remove via the core} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::core::call agent.allow.add [dict create rule [list pytest -q]]
+	set r1 [dict get [rio::core::call agent.allow.list {}] response result rules]
+	rio::core::call agent.allow.remove [dict create rule [list pytest -q]]
+	set r2 [dict get [rio::core::call agent.allow.list {}] response result rules]
+	list $r1 $r2
+} -cleanup { reset_allow ; file delete -force $::d } -result {{{pytest -q}} {}}
+
+test op-add-empty-bad {agent.allow.add with an empty rule is a bad_request} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	set r [dict get [rio::core::call agent.allow.add [dict create rule {}]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -cleanup { reset_allow ; file delete -force $::d } -result {false bad_request}
+
+cleanupTests

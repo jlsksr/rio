@@ -50,6 +50,50 @@ proc rio::ops::agent_reset {params} {
 }
 rio::dispatch::register agent.reset rio::ops::agent_reset
 
+# --- command allow-list (D84) -------------------------------------------------
+#
+# Standing approval for trusted commands: a human-authored allow-list, persisted
+# GLOBALLY in the core's XDG agent dir (D79's home). A rule is an argv PREFIX (a list
+# of leading tokens); a command whose argv starts with a rule's tokens runs without
+# the approval bar (rio::agent::_do_exec consults it, D84). Like every agent setting
+# these are ops, so a remote core owns the list on ITS disk (D30). The list changes
+# ONLY whether the human bar appears — prepare_exec's guards always run.
+
+# agent.allow.list -> {rules:[[token,…],…]} ; the current allow-list, for a manager
+# view. Each rule is an array of argv-prefix token strings (wire shape encoder, D25).
+proc rio::ops::agent_allow_list {params} {
+	return [dict create result [dict create rules [rio::agent::allow::rules]]]
+}
+rio::dispatch::register agent.allow.list rio::ops::agent_allow_list
+
+# agent.allow.add {rule} -> {} ; trust an argv prefix. `rule` is a JSON array of
+# strings (the leading tokens) — a one-element rule trusts a program with any args, a
+# full-argv rule trusts only that exact command. An empty rule is bad_request (it would
+# trust everything). Adding a rule already present is a no-op (dedup).
+proc rio::ops::agent_allow_add {params} {
+	if {![dict exists $params rule]} {
+		rio::error::raise bad_request "agent.allow.add requires rule"
+	}
+	set rule [dict get $params rule]
+	if {[llength $rule] == 0} {
+		rio::error::raise bad_request "agent.allow.add: rule is empty"
+	}
+	rio::agent::allow::add $rule
+	return [dict create result {}]
+}
+rio::dispatch::register agent.allow.add rio::ops::agent_allow_add
+
+# agent.allow.remove {rule} -> {} ; forget an exact-equal rule. A rule not present is
+# a no-op.
+proc rio::ops::agent_allow_remove {params} {
+	if {![dict exists $params rule]} {
+		rio::error::raise bad_request "agent.allow.remove requires rule"
+	}
+	rio::agent::allow::remove [dict get $params rule]
+	return [dict create result {}]
+}
+rio::dispatch::register agent.allow.remove rio::ops::agent_allow_remove
+
 # --- provider / key / policy controls (D30) ----------------------------------
 #
 # The agent is a core concern reached over the channel, so its settings are ops,
