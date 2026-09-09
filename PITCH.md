@@ -174,6 +174,12 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **The agent's "working" indicator** — while the agent is thinking, the chat status line
+  cheerfully cycles vintage loading messages ("Reticulating splines…", "Defragmenting…") so a
+  wait never looks like a freeze. — *feature · D82 · `946e6ae` · 2026-09-09*
+- **Longer commit messages** — the Git pane's commit box now has a **＋** to add a multi-line
+  description under the summary line, so a bigger change can carry a proper explanation instead
+  of just a one-liner. — *feature · D81 · `e7e2f43` · 2026-09-08*
 - **Discard your changes** — right-click a changed file in the Git pane to throw your edits
   away: **Discard Changes…** returns a tracked file to its last committed version, **Delete…**
   removes a brand-new file — each behind a one-click confirm. — *feature · D80 · `0a82d64` ·
