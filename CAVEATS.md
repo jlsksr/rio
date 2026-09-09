@@ -47,6 +47,29 @@ design limit that surprises, append it to the matching section.
 
 ## Behavioural limitations
 
+### Drag-to-open needs the optional tkdnd extension, and a local core
+
+- **Symptom.** Dragging a file from the OS file manager onto the rio-gui window does
+  **nothing** — no tab opens. Or: it works for a locally-launched rio but not when the GUI is
+  attached to a remote core.
+- **Cause.** Two separate reasons. (1) **Plain Tk cannot receive an OS file drop at all** — that
+  capability lives only in the external **tkdnd** extension (AGENTS.md **D86**), which rio loads
+  *optionally* (`catch {package require tkdnd}`): where it isn't installed, there is simply
+  nothing listening for the drop. (2) A dropped path is a path on the **GUI's own machine**, but
+  the *core* performs the file open; with a **remote** core that path is meaningless, so rio
+  registers drop targets only for a **local** core — a remote drop is refused with the native
+  "no-drop" cursor.
+- **Where it's fine.** A **local** rio with **tkdnd installed** (the Magicsplat Tcl/Tk
+  distribution bundles it on Windows; Linux/BSD install the `tkdnd` package). Drag one or several
+  files — or a folder — onto the editor, a dock, or the tab strip and they open.
+- **Mitigation in rio.** The feature degrades cleanly: without tkdnd rio-gui runs exactly as
+  before, and **every other way to open a file** (File ▸ Open…, the file pane, `argv`) is
+  unaffected. Install tkdnd to turn drag-to-open on — see [INSTALL.md](INSTALL.md) /
+  [WINDOWS.md](WINDOWS.md).
+- **Planned.** Uploading a dropped *local* file's bytes to a **remote** core (so drag-to-open
+  works over the wire too) is a deliberate follow-up, noted out-of-scope in AGENTS.md **D86**,
+  not yet scheduled.
+
 ### Two no-project windows share one anonymous session
 
 - **Symptom.** Run **two rio instances that both have no folder open** (the loose "daily

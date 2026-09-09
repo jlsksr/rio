@@ -29,6 +29,14 @@ HTTP by the core, with Tcl's own `http` package.
 
 > `http` (used by the TLS transport) ships with Tcl itself — no separate package.
 
+**Optional — `tkdnd`** (drag a file onto the window to open it, D86). rio-gui loads it if
+present and works without it; the hard dependency bar stays Tk + json. Install it to enable
+OS drag-to-open (Debian/Ubuntu `tklib`-adjacent package `tkdnd`; Alpine/OpenBSD via ports if
+packaged; Windows the Magicsplat Tcl/Tk distribution bundles it). Without it, dragging a file
+onto the window simply does nothing — every other way to open a file is unaffected. Drag-to-open
+also needs a **local** core: a dropped path is on the GUI's own machine, so it isn't offered
+against a remote core.
+
 A wide pseudo-glyph note: rio's UI uses monochrome Unicode glyphs, so a font with
 reasonable coverage helps, but nothing extra is required.
 

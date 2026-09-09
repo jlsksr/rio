@@ -187,6 +187,32 @@ ok "open: both files opened"    [llength [gorder $::focus]] [expr {$before + 2}]
 ok "open: last one active"      [bufget $::cur path]        $m2
 ok "open: first one present"    [expr {[lsearch -exact [lmap id [gorder $::focus] {bufget $id path}] $m1] >= 0}] 1
 
+# --- OS file-drop handler opens what's dropped (D86) --------------------------
+# Headless has no tkdnd and can't fire a real <<Drop>>, so drive the handler proc
+# directly with a synthetic path list — the same way the internal-DnD tests drive their
+# resolvers. tkdnd is an OPTIONAL dependency, absent in CI, so the drop targets are never
+# registered here; what we test is the dispatch a real <<Drop>> would trigger.
+ok "drop: tkdnd optional, absent in CI" $::have_tkdnd 0
+# Real path: a dropped file opens as a buffer.
+set d1 [tmpbytes "DROPPED ONE\n"]
+set dbefore [llength [gorder $::focus]]
+dnd_open_files [list $d1]
+ok "drop: dropped file opened"    [bufget $::cur path]        $d1
+ok "drop: one new buffer"         [llength [gorder $::focus]] [expr {$dbefore + 1}]
+# Dispatch: stub do_open/open_folder to record which branch a mixed drop (a directory +
+# a file) takes, without perturbing project or buffer state.
+set ddir [file dirname $d1]
+set ::_drop_log {}
+rename ::do_open ::_saved_do_open
+rename ::open_folder ::_saved_open_folder
+proc ::do_open {p}     { lappend ::_drop_log [list file $p] ; return 1 }
+proc ::open_folder {p} { lappend ::_drop_log [list dir  $p] ; return 1 }
+dnd_open_files [list $ddir $d1]
+rename ::do_open {} ; rename ::_saved_do_open ::do_open
+rename ::open_folder {} ; rename ::_saved_open_folder ::open_folder
+ok "drop: folder routes to open_folder" [lindex $::_drop_log 0] [list dir  $ddir]
+ok "drop: file routes to do_open"       [lindex $::_drop_log 1] [list file $d1]
+
 # --- error surfacing ---------------------------------------------------------
 # A failed op must reach the user through report_error, never crash a caller
 # that read `result` blindly (regression: an op on a vanished buffer threw

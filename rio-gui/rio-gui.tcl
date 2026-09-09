@@ -26,6 +26,14 @@
 package require Tk
 package require json
 
+# OS file-drop (D86): plain Tk cannot receive a drop from the OS file manager — that
+# capability lives only in the external tkdnd extension. Load it OPTIONALLY: where it is
+# installed, dragging a file onto the window opens it (drop targets registered further
+# down); where it is absent, rio-gui runs exactly as before, just without drag-to-open, so
+# the hard dependency bar stays Tk + json. (The "pure Tk, no tkdnd" note for INTERNAL tab
+# dragging still holds — that gesture needs no extension; OS file-drop is the one that does.)
+set ::have_tkdnd [expr {![catch {package require tkdnd}]}]
+
 # ---------------------------------------------------------------------------
 # Transport (AGENTS.md D30): the GUI is ALWAYS a client to a core at the far end of
 # a channel — it never embeds the core. Two channel kinds, one client code path:
@@ -870,6 +878,22 @@ proc do_open {path} {
 	}
 	session_save   ;# the open-file set changed — record it for resume (D31)
 	return 1
+}
+
+# A file (or several, or a folder) dropped onto the window from the OS file manager (D86).
+# tkdnd hands DND_Files as a ready-made Tcl list of local paths; we reuse the very same
+# dir-vs-file dispatch the argv startup loop uses, then raise the window so the freshly
+# opened buffer is in view. Only ever reached with a LOCAL core: drop targets register
+# solely when !$::core_remote (a dropped path is local to this machine, which a remote core
+# could not resolve), so the handler needs no remote guard of its own. The raise is skipped
+# under the test harness — deiconify would un-withdraw the headless window.
+proc dnd_open_files {paths} {
+	foreach f $paths {
+		if {[file isdirectory $f]} { open_folder $f } else { do_open $f }
+	}
+	if {[llength $paths] && ![info exists ::env(RIO_GUI_HEADLESS)]} {
+		wm deiconify . ; raise . ; focus -force .
+	}
 }
 
 # ---------------------------------------------------------------------------
@@ -7867,6 +7891,14 @@ proc make_editor_group {g} {
 	# refresh, this covers pure navigation. Guarded on focus so a stray event is a no-op.
 	bind $f.t <KeyRelease>      [list cursor_moved $g]
 	bind $f.t <ButtonRelease-1> [list cursor_moved $g]
+	# OS file-drop onto the editor text opens the file (D86). tkdnd doesn't bubble a drop
+	# to ancestors, so each group's text widget registers as its own target (the toplevel,
+	# below, covers the docks and tab strips); every drop routes to the one dnd_open_files.
+	# Optional extension + local core only — a no-op in a headless run (no tkdnd there).
+	if {$::have_tkdnd && !$::core_remote} {
+		tkdnd::drop_target register $f.t DND_Files
+		bind $f.t <<Drop>> {dnd_open_files %D}
+	}
 	return $g
 }
 
@@ -8416,6 +8448,15 @@ pack propagate . 0
 
 # Startup is done: from here, view-state and workspace changes persist (D31).
 set ::rio_started 1
+
+# Register the whole window as an OS file-drop target (D86) so a file dropped anywhere —
+# a dock, the tab strip, empty editor space — opens (each editor text widget also registers
+# itself in make_editor_group, for drops that land on buffer text). Optional tkdnd + local
+# core only; a headless run has no tkdnd, so this is a no-op there.
+if {$::have_tkdnd && !$::core_remote} {
+	tkdnd::drop_target register . DND_Files
+	bind . <<Drop>> {dnd_open_files %D}
+}
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }

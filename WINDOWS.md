@@ -54,7 +54,9 @@ safe to re-run.
 
 Skip this if §1 worked. rio needs **Tk** and **tcllib** (for the `json`/`md5` packages
 the wire protocol and sessions use); `http` ships with Tcl itself, and you do **not**
-need `tcltls` unless you later use the Claude agent.
+need `tcltls` unless you later use the Claude agent. **`tkdnd`** is optional — it enables
+dragging a file onto the window to open it (D86); the Magicsplat distribution below
+bundles it, and rio runs fine without it (drag-to-open just does nothing).
 
 **[Magicsplat Tcl/Tk](https://www.magicsplat.com/tcl-installer/)** is the path of least
 resistance — one distribution bundling Tk *and* tcllib, which puts `wish.exe` and

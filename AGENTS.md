@@ -4225,6 +4225,39 @@ the *Agent Prompts…* entry is **gone** from Settings and the `not_configured` 
 Preferences; `prefs_window.tcl` asserts the pane carries both the prompts and allow buttons and that
 the three moved items are absent from the Settings menu while the provider cascade remains.
 
+### D86 — Drag a file onto the window to open it (OS file-drop, optional tkdnd)
+
+Dragging a file from the OS file manager onto the rio-gui window now opens it — verified
+missing on both local Windows and local Linux. The plumbing was already there: [`do_open`](rio-gui/rio-gui.tcl)
+/ [`open_folder`](rio-gui/rio-gui.tcl) take a path, and the argv startup loop is the exact
+"directory → `open_folder`, else `do_open`" dispatch. What was entirely absent was *receiving*
+the drop — and that is the one thing **plain Tk cannot do**. OS drop reception lives only in
+the external **tkdnd** extension (`<<Drop>>`, `tkdnd::drop_target`); there is no pure-Tcl path
+(X11 XDND would mean hand-rolling the protocol; Windows needs an OLE C shim). Note this does
+**not** contradict the "pure Tk, no tkdnd" choice for *internal tab dragging* (D-note above):
+that gesture is press/motion/release inside our own widgets, which Tk handles natively — OS
+file-drop is a different capability Tk genuinely lacks.
+
+**tkdnd is taken as an OPTIONAL dependency** (jka, 2026-09-09): `set ::have_tkdnd [expr {![catch
+{package require tkdnd}]}]`. Where it's installed, drag-to-open works; where it's absent,
+rio-gui runs exactly as before, so the **hard** dependency bar stays Tk + json — tkdnd is a soft
+enhancement, documented as optional in INSTALL/WINDOWS.
+
+**Local core only.** A dropped path is a path on the *GUI's* machine, but the core performs the
+`file.open`; with a remote core (`::core_remote`) that path is meaningless. So drop targets are
+registered **only when `$::have_tkdnd && !$::core_remote`** — a remote user's drop is simply not
+accepted (the native "no-drop" cursor), no confusing failure. tkdnd doesn't bubble a drop to
+ancestors, so registration is in two places: the **toplevel `.`** (covers docks, the tab strip,
+empty editor space) at startup, and **each group's text widget** in `make_editor_group` (drops
+landing on buffer text). Both route to one handler, `dnd_open_files`, which runs the same
+dir-vs-file dispatch and then raises the window (skipped under `RIO_GUI_HEADLESS`, where
+deiconify would un-withdraw the test window). Tests drive `dnd_open_files` directly with a
+synthetic path list — headless has no tkdnd and can't fire a real `<<Drop>>` — asserting a
+dropped file opens as a buffer and the dir/file branch routes correctly (`smoke.tcl`); the
+optional load means the whole suite runs unchanged with tkdnd absent (`$::have_tkdnd` is 0
+there). Out of scope: uploading a dropped local file's bytes to a *remote* core (a separate
+feature), and non-file (text/URI) drops.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

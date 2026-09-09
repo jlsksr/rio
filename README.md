@@ -65,7 +65,10 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   and view **git status and diffs** for the open repo with **stage, unstage, and
   commit** right from the pane. The file pane keeps itself current — it updates on the
   agent's own writes, when rio regains focus, and on a manual refresh (⟳). Files
-  and git share one dockable, resizable side panel.
+  and git share one dockable, resizable side panel. **Drag a file (or folder) from your OS
+  file manager onto the window to open it** — a convenience that needs the optional `tkdnd`
+  extension and a local core (see [INSTALL.md](INSTALL.md)); without it every other way to
+  open a file still works.
 - **Compare view** — a **side-by-side diff** of two documents, original beside
   proposed, with added/removed lines coloured and aligned (VSCode-style). Compare
   the active buffer against any file from the View menu.
