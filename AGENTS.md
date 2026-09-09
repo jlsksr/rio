@@ -2739,7 +2739,14 @@ per `rl_row`. Two callbacks wire behaviour: `onselect` (click or arrow) and
 `{}`/`nav_open` (selection is inert; activating opens); the git pane passes
 `git_pick`/`{}` (picking a change shows its diff — the old `<<ListboxSelect>>`
 behaviour). This kept the panes' *meaning* in small pane-specific procs while the
-chrome and feel are literally the same code.
+chrome and feel are literally the same code. **One row selects at a time** — the
+component has its own row model, and the `text` widget's native text-selection has no
+place in it, so `rl_init` breaks every gesture that would begin or extend a `sel` range
+(the drag `<B1-Motion>` and its variants, `<Shift-Button-1>`, `<Triple-Button-1>`,
+`<Shift-Up>`/`<Shift-Down>`). `-state disabled` does *not* suppress that selection in Tk
+— a drag over a read-only list still swept a stray multi-line highlight (spotted in the
+files pane) until this. The git *diff* area below the list is a plain read-only `text`,
+not an `rl_*` body, so it stays freely selectable for copying.
 
 **The git pane is now a rich-list too.** Its `listbox` becomes the same sunken well +
 read-only body; a change row is the two porcelain status chars (each colour-tagged by

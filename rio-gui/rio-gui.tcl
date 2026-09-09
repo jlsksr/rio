@@ -990,6 +990,16 @@ proc rl_init {b onselect onactivate oncontext} {
 	bind $b <Motion>          "rl_hover_at %W %x %y"
 	bind $b <Leave>           "rl_set_hover %W -1"
 	bind $b <Button-3>        "rl_context %W %x %y %X %Y ; break"
+	# A read-only list selects one row at a time (Button-1 / Return / arrows). It has
+	# no use for the Text widget's own text selection, and -state disabled does not
+	# suppress it: a drag, a shift-click or a line/word multi-click still sweeps a
+	# stray multi-line highlight over the row model (reported in the files pane).
+	# Neutralise every gesture that would begin or extend a text selection — mouse and
+	# keyboard — while leaving scrolling and our own navigation untouched.
+	foreach seq {<B1-Motion> <Double-B1-Motion> <Triple-B1-Motion> <Shift-B1-Motion>
+	             <Shift-Button-1> <Triple-Button-1> <Shift-Up> <Shift-Down>} {
+		bind $b $seq break
+	}
 }
 proc rl_reset {b} {
 	set ::rl_rows($b)  {}

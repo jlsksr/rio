@@ -318,6 +318,17 @@ ok "arrow: depth-1 dir arrow at col 5"     [nav_col_is_arrow dir 1 5] 1
 ok "arrow: depth-1 dir name at col 6"      [nav_col_is_arrow dir 1 6] 0
 ok "arrow: a file row is never an arrow"   [nav_col_is_arrow file 0 2] 0
 
+# Selection is one row at a time: the Text widget's own text-selection gestures are
+# neutralised so a drag or shift/multi-click can't sweep a stray multi-line highlight
+# across the row model (-state disabled does not suppress it). The drag binding is the
+# one a user trips accidentally; assert the whole set breaks, on the files pane and the
+# git list (both rl_init bodies). rl_init sets these; the files pane's Button-1 override
+# leaves them intact.
+foreach seq {<B1-Motion> <Shift-Button-1> <Triple-Button-1> <Shift-Down>} {
+	ok "select: files pane $seq breaks text-select" [bind .pfiles.well.body $seq] break
+	ok "select: git list  $seq breaks text-select"  [bind .pgit.well.body   $seq] break
+}
+
 # fs.changed repaints the files pane when the write lands in the shown directory, so an
 # agent-created file appears without a manual reload (D47). Create a file on disk behind
 # the pane's back, then feed it the event the core would broadcast.
