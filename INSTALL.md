@@ -276,8 +276,11 @@ Repositories…* are just an apt-style sources file you can edit yourself:
 `$XDG_CONFIG_HOME/rio/sources.list` (default `~/.config/rio/sources.list`), **one
 `http://` base URL per line**, `#` comments and blank lines allowed. The dialog reads
 and writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
-picked up the next time the Extensions window scans. Optional — no file means no
-repositories. What you've actually installed (and from where) is tracked separately in
+picked up the next time the Extensions window scans. On a **first run** rio pre-fills this
+file with the project's own repository (`http://rio.skylm.org/rio`) so the Extensions window
+isn't empty out of the box; remove it in *Repositories…* (or delete the line) and it stays
+gone — the pre-fill happens only when the file doesn't yet exist, never on top of your edits.
+Otherwise it's optional — no file means no repositories. What you've actually installed (and from where) is tracked separately in
 a provenance ledger, `$XDG_DATA_HOME/rio/extensions.json` (default
 `~/.local/share/rio/extensions.json`): rio writes it, and each entry records the source
 URL and version a `kind/name` came from. Publishing a repository of your own is a

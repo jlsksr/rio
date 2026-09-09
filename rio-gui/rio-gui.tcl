@@ -5818,6 +5818,18 @@ proc sources_save {urls} {
 	}
 }
 
+# The repository rio ships pre-configured (D39): the project's own extension repo, so a
+# fresh install has something to browse in the Extensions window out of the box. Seeded into
+# sources.list ONLY on a true first run — when the file does not yet exist — so a user who
+# removes it in Repositories… (which leaves a header-only file behind) is never re-seeded.
+# No trailing slash: repo_source_scan appends "/rio-repository.conf" to the base.
+set ::default_repo "http://rio.skylm.org/rio"
+proc sources_seed_default {} {
+	set path [sources_path]
+	if {$path eq "" || [file exists $path]} return
+	sources_save [list $::default_repo]
+}
+
 # --- the provenance ledger ----------------------------------------------------
 proc ledger_path {} {
 	if {[info exists ::env(XDG_DATA_HOME)] && $::env(XDG_DATA_HOME) ne ""} {
@@ -8451,6 +8463,7 @@ modes_menu_fill
 # the default rather than erroring at startup (D31).
 prefs_load
 ledger_load   ;# which extensions this GUI installed, with their provenance (D39)
+sources_seed_default   ;# first run: pre-fill sources.list with rio's own repo (D39)
 # Greet the core before any other op. This is the first exchange over the channel, so
 # it's also where a stale connection surfaces: a dead `ssh -L` forward accepts the
 # socket but never answers, and without this bounded handshake the GUI would hang with

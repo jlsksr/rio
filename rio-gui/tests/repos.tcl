@@ -156,6 +156,17 @@ ok "autoindex: openbsd httpd" [repo_parse_autoindex {<!DOCTYPE html>
 <tr><td><a href="index">index</a></td></tr>
 </table></body></html>}] {night-theme}
 
+# --- first-run seed (D39) -------------------------------------------------------
+# Booting with no sources.list pre-fills rio's own repository, so a fresh install has
+# something to browse. It is a true-first-run only act: idempotent while the file exists,
+# and it never comes back once the user has emptied the list.
+ok "seed: first run pre-fills rio's repo" [sources_load] [list $::default_repo]
+sources_seed_default
+ok "seed: idempotent while file exists"   [sources_load] [list $::default_repo]
+sources_save {}
+sources_seed_default
+ok "seed: no re-seed after the file exists" [sources_load] {}
+
 # --- sources.list round-trip ----------------------------------------------------
 sources_save [list $A $B $C $D $DEAD]
 ok "sources: round-trip" [sources_load] [list $A $B $C $D $DEAD]

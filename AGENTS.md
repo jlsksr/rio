@@ -2576,6 +2576,19 @@ editor). Live-network behaviour is verified against a real webdir at release
 (no live HTTP in the test environment — the fetch seam is stubbed with
 fixture tables instead).
 
+**Addendum (2026-09-09) — ship with the project repo pre-filled.** rio now seeds
+`sources.list` with **one default repository, `http://rio.skylm.org/rio`** (the project's own
+extension repo), so a fresh install has something to browse in the Extensions window out of
+the box instead of an empty list. The seed (`sources_seed_default`, run once at boot after
+`ledger_load`) is a **true-first-run-only** act — it writes the file *only when it does not
+yet exist*. Removing the repo in *Repositories…* leaves a header-only file behind, so the
+file now exists and the default **never comes back**; the seed also can't override a
+hand-edited list. Stored **without a trailing slash** (`repo_source_scan` appends
+`/rio-repository.conf`). It's just a normal source once seeded — no special status, no
+pinning, plain HTTP like any other (still no rio-side TLS, D39). The URL is a single constant
+(`::default_repo`); `repos.tcl` covers the seed, its idempotence, and the no-re-seed contract.
+The repo is currently a test/POC endpoint that may become the production home.
+
 ### D40 — Column / block editing: a vertical multi-line cursor, GUI-only
 
 Notepad++'s **column mode**: a rectangular (vertical) selection whose zero-width

@@ -126,7 +126,9 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   drag a width and typing overwrites the rectangular block. Off by default.
 - **Extensions & repositories** — install syntax highlighters, editing modes,
   and themes from **repositories you choose**: plain http-served directories,
-  apt-sources style, no marketplace and no central index (see below). Browse,
+  apt-sources style, no marketplace and no central index (see below). rio ships with
+  the project's own repo (`http://rio.skylm.org/rio`) pre-filled so there's something
+  to browse on first run — remove it in *Repositories…* if you'd rather not. Browse,
   install, and remove in *Settings ▸ Extensions…*; every installed extension shows
   which repository it came from, same-name extensions from different authors
   coexist and you pick, and it all works over a remote core too.
