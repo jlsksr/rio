@@ -4118,9 +4118,12 @@ parameterized (prompt + the edit-only Compare button). Tested offline: the async
 callback), `prepare_exec` validation (empty argv, redirection token, cwd escape, timeout clamp),
 `format_exec` semantics, and the gated loop against a fake provider (approve/reject round-trips,
 **still-gated-with-auto-accept-on**); GUI smoke covers the command bar, preview, and busy pause.
-**Remaining** (deferred, each a later add): **streaming** a command's output as it runs and a
-per-command **Stop/cancel** (both want the D10 event-over-time model); a live run against a real
-provider; output in its **own dock panel** rather than inline.
+**Verified live** against **ChatGPT** on a remote core: a real turn had the model call
+`run_command`, the gate raised `agent.propose` with the exact argv, approval ran it async, and the
+model read `exit 0` + the stdout back — the provider-agnostic gate proven end to end with a real
+model. **Remaining** (deferred, each a later add): **streaming** a command's output as it runs and
+a per-command **Stop/cancel** (both want the D10 event-over-time model); output in its **own dock
+panel** rather than inline.
 
 ---
 

@@ -232,9 +232,9 @@ for later:
   gated** (auto-accept is edits-only), **argv-only** (no shell) with a redirection-
   token guard, **cwd-confined** to the project, run **asynchronously** so the core
   stays responsive, and **timeout-bounded** (default 120 s, max 600 s). No
-  allow-list (D53: the gate is approval, not a ban). Still wanted: **streaming** a
-  command's output as it runs and a per-command **Stop/cancel** (both need the D10
-  event-over-time model); a live run against a real provider; command output in its
+  allow-list (D53: the gate is approval, not a ban). Verified live against ChatGPT.
+  Still wanted: **streaming** a command's output as it runs and a per-command
+  **Stop/cancel** (both need the D10 event-over-time model); command output in its
   **own dock panel** rather than inline in the chat.
 
 ## Remote / transport
