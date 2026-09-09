@@ -4042,6 +4042,31 @@ real subject+body is recorded through the core.
 
 ---
 
+### D82 — Agent "working" indicator (retro-productivity busy animation)
+
+Sending a turn to a real LLM has a multi-second gap before the first token streams (and again
+after each tool round-trip); the agent pane showed nothing there and looked frozen. jka wanted
+the familiar "working…" affordance (the VSCode-plugin feel) done the rio way — pure Tk, no deps —
+and, for character, cycling **90s/2000s productivity-software loading phrases** ("Reticulating
+splines…", "Defragmenting…") rather than the modern "elaborating/actioning" vocabulary.
+
+**Implementation.** A small busy state machine (`chat_busy_start`/`tick`/`render`/`stop`) drives
+the existing **`.chat.status`** strip via an `after` loop — no new widget. `render` paints the
+current phrase with a 1→2→3 dot cycle (**ASCII periods only**, so no UI font can drop a glyph —
+the D54 Windows/Alpine/OpenBSD matrix); the phrase re-rolls from `::chat_busy_words` (an in-file
+list, data — no download) every ~2.4 s. `chat_status_update` is guarded to no-op while busy, so a
+provider/mode change can't clobber the animation; `stop` hands the strip back to "Provider · mode".
+
+**Lifecycle.** Start in `chat_send` on a good ack; stop on `agent.message`/`agent.error`; **pause**
+on an `agent.propose` that raises the approval bar (now waiting on the *user*, not the model — but
+under auto-accept it keeps running); restart in `agent_decide` (the turn resumes); stop in
+`chat_clear`. Entirely GUI chrome over events that already flow — **no core change**. smoke covers
+it deterministically (start/stop flags, the pure render at fixed frames, each lifecycle event, and
+a real echo turn flipping it on then off). Noted, not built: a leading ASCII spinner, a
+per-provider prefix, and turning ▶ into a Stop button (no per-turn cancel op yet).
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

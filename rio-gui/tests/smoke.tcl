@@ -917,6 +917,40 @@ chat_event {event agent.propose params {turn 8 id w2 name propose_create path ba
 ok "chat: auto-accept raises no bar" [bar_shown] 0
 set ::agent_auto_accept 0
 
+# The "working" indicator (D82): a turn in flight animates the status strip with a retro
+# phrase; it clears when the turn ends and pauses while an approval waits on the user.
+chat_clear
+ok "busy: idle before any turn"       $::chat_busy 0
+chat_busy_start
+ok "busy: start sets the flag"        $::chat_busy 1
+ok "busy: a real phrase is chosen"    [expr {$::chat_busy_word in $::chat_busy_words}] 1
+chat_busy_stop
+ok "busy: stop clears the flag"       $::chat_busy 0
+ok "busy: idle status restored"       [string match "*·*" [.chat.status cget -text]] 1
+# render is a pure function of frame+word: a 1→2→3 "Please wait…" dot cycle.
+set ::chat_busy_word "Reticulating splines" ; set ::chat_busy_frame 0 ; chat_busy_render
+ok "busy: one dot at frame 0"         [.chat.status cget -text] "Reticulating splines."
+set ::chat_busy_frame 2 ; chat_busy_render
+ok "busy: three dots at frame 2"      [.chat.status cget -text] "Reticulating splines..."
+# A turn ending (message or error) stops the animation.
+chat_busy_start ; chat_event {event agent.message params {turn 20 role assistant text hi}}
+ok "busy: message ends it"            $::chat_busy 0
+chat_busy_start ; chat_event {event agent.error params {turn 21 code x message y}}
+ok "busy: error ends it"              $::chat_busy 0
+# An approval waiting on the user pauses it; auto-accept keeps it running.
+chat_clear ; set ::agent_auto_accept 0 ; chat_busy_start
+chat_event {event agent.propose params {turn 22 id p1 name propose_edit path z.txt diff "+ a"}}
+ok "busy: pauses at the approval bar" $::chat_busy 0
+approve_bar 0
+chat_clear ; set ::agent_auto_accept 1 ; chat_busy_start
+chat_event {event agent.propose params {turn 23 id p2 name propose_create path z2.txt diff "+ b"}}
+ok "busy: keeps running on auto-accept" $::chat_busy 1
+chat_busy_stop ; set ::agent_auto_accept 0
+# A decision resumes the turn, so the indicator restarts.
+chat_clear ; set ::pending_turn 24 ; agent_decide reject
+ok "busy: a decision resumes it"      $::chat_busy 1
+chat_busy_stop ; set ::pending_turn ""
+
 # End to end over the channel: send a turn with the echo provider and pump the event
 # loop until the streamed reply lands. agent.send returns only an ack — the content
 # arrives as agent.* events the core broadcasts back over the socket (D30).
@@ -938,6 +972,15 @@ ok "chat: transcript shows the reply"  [string match "*Agent*echo: hello there*"
 set msgs [dict get [rio_call agent.history {}] result messages]
 ok "chat: core recorded the turn"      [llength $msgs] 2
 ok "chat: assistant text is the reply" [dict get [lindex $msgs 1] text] "echo: hello there"
+
+# The working indicator over a real (echo) turn: on at send, off once the reply lands.
+chat_clear
+.chat.input delete 1.0 end ; .chat.input insert end "ping"
+chat_send
+ok "busy: on right after send"         $::chat_busy 1
+set ::busy_deadline [expr {[clock milliseconds] + 3000}]
+while {[clock milliseconds] < $::busy_deadline && $::chat_busy} { update }
+ok "busy: off after the reply lands"   $::chat_busy 0
 
 # Clear resets both the view and the core conversation.
 chat_clear

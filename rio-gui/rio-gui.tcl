@@ -176,6 +176,23 @@ set ::editor_theme_family monospace ;# the active theme's editor family (apply_t
 set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
+# The agent "working" indicator (D82): while a turn is in flight the .chat.status strip
+# animates a cycling retro-productivity phrase with a "Please wait…" dot cadence, so a
+# multi-second wait on the LLM never looks frozen. Pure Tk (an `after` loop) — no deps.
+set ::chat_busy       0    ;# a turn is being worked (animation running)
+set ::chat_busy_after ""   ;# the pending `after` id, so it can be cancelled
+set ::chat_busy_frame 0    ;# tick counter: drives the dots and the phrase change
+set ::chat_busy_word  ""   ;# the phrase currently shown
+# Loading phrases in the spirit of 90s/2000s productivity software — data, edit at will.
+set ::chat_busy_words {
+	"Reticulating splines" "Defragmenting drive" "Recalculating cells" "Compacting database"
+	"Rebuilding index" "Checking spelling" "Consulting the Office Assistant" "Merging mail"
+	"Collating pages" "Formatting document" "Optimizing memory" "Cross-referencing"
+	"Autosaving" "Synergizing deliverables" "Tabulating results" "Calibrating"
+	"Negotiating baud rate" "Buffering" "Encoding" "Paginating" "Word-wrapping"
+	"Generating WordArt" "Sorting records" "Indexing" "Scanning for viruses" "Twiddling bits"
+	"Warming up the CRT" "Rendering clip art"
+}
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
@@ -2339,6 +2356,8 @@ proc chat_send {} {
 		set e [dict get $resp error]
 		chat_label error-label "Error"
 		chat_log "[dict get $e message] ([dict get $e code])\n"
+	} else {
+		chat_busy_start   ;# the turn is in flight — animate until it replies (D82)
 	}
 }
 
@@ -2357,9 +2376,11 @@ proc chat_event {ev} {
 			}
 			chat_log "\n"
 			set ::chat_turn_open 0
+			chat_busy_stop   ;# turn done (D82)
 		}
 		agent.error {
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			chat_busy_stop   ;# turn failed (D82)
 			approve_bar 0
 			chat_label error-label "Error"
 			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
@@ -2391,6 +2412,7 @@ proc chat_event {ev} {
 			if {!$::agent_auto_accept} {
 				set ::pending_turn $turn
 				approve_bar 1
+				chat_busy_stop   ;# now waiting on the user, not the model (D82)
 			}
 		}
 		agent.tool_result {
@@ -2429,11 +2451,13 @@ proc agent_decide {decision} {
 	approve_bar 0
 	compare_close
 	catch {rio_call agent.approve [dict create turn $t decision $decision]}
+	chat_busy_start   ;# the turn resumes; the next message/error stops it (D82)
 }
 
 # Clear the conversation: reset the core's state (agent.reset) and the transcript.
 proc chat_clear {} {
 	rio_call agent.reset {}
+	chat_busy_stop   ;# abort any working animation (D82)
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
 	.chat.log configure -state disabled
@@ -2904,7 +2928,46 @@ proc providers_menu_fill {} {
 	}
 }
 
+# --- the agent "working" indicator (D82) -------------------------------------
+# Begin animating: a turn is now being worked. Idempotent — cancels any pending tick
+# first, so a fresh send (or a resumed turn) just restarts the cycle from a new phrase.
+proc chat_busy_start {} {
+	after cancel $::chat_busy_after
+	set ::chat_busy 1
+	set ::chat_busy_frame 0
+	set ::chat_busy_word [lindex $::chat_busy_words \
+		[expr {int(rand() * [llength $::chat_busy_words])}]]
+	chat_busy_render
+	set ::chat_busy_after [after 400 chat_busy_tick]
+}
+# One animation frame: advance the dots every tick and the phrase every ~2.4 s, then
+# reschedule. A stray tick after a stop is a no-op (guarded on ::chat_busy).
+proc chat_busy_tick {} {
+	if {!$::chat_busy} return
+	incr ::chat_busy_frame
+	if {$::chat_busy_frame % 6 == 0} {
+		set ::chat_busy_word [lindex $::chat_busy_words \
+			[expr {int(rand() * [llength $::chat_busy_words])}]]
+	}
+	chat_busy_render
+	set ::chat_busy_after [after 400 chat_busy_tick]
+}
+# Paint the current phrase with a 1→2→3 "Please wait…" dot cycle. ASCII dots only, so no
+# UI font can drop a glyph (the D54 Windows / Alpine / OpenBSD matrix).
+proc chat_busy_render {} {
+	set dots [string repeat "." [expr {$::chat_busy_frame % 3 + 1}]]
+	catch {.chat.status configure -text "$::chat_busy_word$dots"}
+}
+# Stop animating and hand the strip back to its idle "Provider · mode" text.
+proc chat_busy_stop {} {
+	after cancel $::chat_busy_after
+	set ::chat_busy_after ""
+	set ::chat_busy 0
+	chat_status_update
+}
+
 proc chat_status_update {} {
+	if {$::chat_busy} return   ;# the working indicator owns the strip while a turn runs
 	set agent [agent_provider_label $::agent_provider]
 	set mode  [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
 	catch {.chat.status configure -text "$agent   ·   $mode"}
