@@ -519,6 +519,108 @@ test agent-proposal-stale {agent.proposal with nothing pending is a bad_request}
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
 
+# --- run_command / exec gate (D83) -------------------------------------------
+# run_command reuses the write_provider harness (it posts $::wt_name/$::wt_input/
+# $::wt_raw as tool w1) and the start_write/wait_done pump. The child under test is
+# tclsh running a script file in the project (run_command feeds no stdin), so the
+# suite needs no /bin/sh. Unlike a write, the gate is NEVER skippable.
+set ::tcl [info nameofexecutable]
+
+test agent-exec-approve {an approved run_command runs and its exit code comes back} -setup {
+	set ::pdir [makeDirectory agx]
+	makeFile "puts ok; exit 0" run.tcl $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name run_command
+	set ::wt_input [dict create command [list $::tcl run.tcl]]
+	set ::wt_raw {{"command":["tclsh","run.tcl"]}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	list $s1 $s2 [string match {ran *exit 0} [ev_summary w1]]
+} -cleanup { rio::project::close } -result {propose done 1}
+
+test agent-exec-reject {a rejected run_command does not run and feeds back "rejected"} -setup {
+	set ::pdir [makeDirectory agxr]
+	makeFile "exit 0" run.tcl $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name run_command
+	set ::wt_input [dict create command [list $::tcl run.tcl]]
+	set ::wt_raw {{"command":["tclsh","run.tcl"]}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision reject]
+	set s2 [wait_done]
+	list $s1 $s2 [ev_summary w1]
+} -cleanup { rio::project::close } -result {propose done {rejected by user}}
+
+test agent-exec-always-gated {run_command still waits for approval even with auto-accept on} -setup {
+	set ::pdir [makeDirectory agxg]
+	makeFile "puts hi; exit 0" run.tcl $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 1
+	rio::agent::set_provider write_provider
+	set ::wt_name run_command
+	set ::wt_input [dict create command [list $::tcl run.tcl]]
+	set ::wt_raw {{"command":["tclsh","run.tcl"]}}
+} -body {
+	# Auto-accept is ON — a write would skip the gate, but a command must not.
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	list $s1 $s2 [string match {ran *exit 0} [ev_summary w1]]
+} -cleanup { rio::agent::set_auto_accept 0 ; rio::project::close } -result {propose done 1}
+
+test agent-exec-prepare-empty {run_command with an empty argv is refused} -body {
+	set r [rio::agent::tools::prepare_exec [dict create command {}]]
+	list [dict get $r ok] [dict get $r summary]
+} -result {0 {error: empty command}}
+
+test agent-exec-prepare-redirection {a shell redirection token in argv is refused unread} -body {
+	set r [rio::agent::tools::prepare_exec [dict create command [list echo hi > out.txt]]]
+	list [dict get $r ok] [dict get $r summary]
+} -result {0 {refused: shell token}}
+
+test agent-exec-prepare-cwd-escape {a cwd outside the project is refused} -setup {
+	set ::pdir [makeDirectory agxc] ; rio::project::open $::pdir
+} -body {
+	set r [rio::agent::tools::prepare_exec [dict create command [list ls] cwd ../..]]
+	list [dict get $r ok] [string match {*outside the open project*} [dict get $r content]]
+} -cleanup { rio::project::close } -result {0 1}
+
+test agent-exec-prepare-timeout-clamp {timeout clamps to [1,600]; missing/invalid -> 120} -setup {
+	set ::pdir [makeDirectory agxt] ; rio::project::open $::pdir
+} -body {
+	set hi [dict get [rio::agent::tools::prepare_exec [dict create command [list x] timeout 999]] timeout]
+	set lo [dict get [rio::agent::tools::prepare_exec [dict create command [list x] timeout 0]] timeout]
+	set df [dict get [rio::agent::tools::prepare_exec [dict create command [list x]]] timeout]
+	list $hi $lo $df
+} -cleanup { rio::project::close } -result {600 120 120}
+
+test agent-exec-format-timeout {a timed-out result is ok 0 and names the timeout} -body {
+	set r [rio::agent::tools::format_exec [list mycmd] \
+		[dict create exitcode -1 stdout "" stderr "" timedout 1]]
+	list [dict get $r ok] [dict get $r summary] [string match {*timeout*} [dict get $r content]]
+} -result {0 {timed out: mycmd} 1}
+
+test agent-exec-format-nonzero {a non-zero exit is a successful run whose code is data} -body {
+	set r [rio::agent::tools::format_exec [list mycmd] \
+		[dict create exitcode 2 stdout "out\n" stderr "err\n" timedout 0]]
+	list [dict get $r ok] [dict get $r summary] [string match {*exit code: 2*} [dict get $r content]]
+} -result {1 {ran mycmd -> exit 2} 1}
+
+test agent-exec-run-command-registered {run_command is a registered exec-kind tool} -body {
+	list [rio::agent::tools::kind_of run_command] [rio::agent::tools::is_gated run_command] \
+		[expr {"run_command" in [dict keys [set ::rio::agent::tools::specs]]}]
+} -result {exec 1 1}
+
 # --- provider / key / policy control ops (D30) -------------------------------
 # A frontend drives the agent over the channel: provider, key, and policy are ops,
 # not in-process swaps. echo is built in; tests register a fake provider (and a

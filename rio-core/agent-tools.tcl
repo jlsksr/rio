@@ -56,6 +56,10 @@ rio::agent::tools::_def propose_create write "" \
 	"Propose creating a new file in the project with the given content. Fails if the file already exists (use propose_edit instead). Parent folders are created. The user reviews and approves before the file is written." \
 	{{"type":"object","properties":{"path":{"type":"string","description":"New file path relative to the project root."},"content":{"type":"string","description":"The file's contents."}},"required":["path","content"]}}
 
+rio::agent::tools::_def run_command exec "" \
+	"Run a command in the open project and return its exit code, stdout, and stderr — for tests, a linter, a build, git, and the like. `command` is an ARGUMENT VECTOR, not a shell line: pass the program and each argument as separate array elements (e.g. \[\"pytest\",\"-q\",\"tests/\"\]). There is NO shell, so pipes, redirects, globs, quotes, ~, environment-variable expansion and `&&`/`;` do NOT work — chain steps by calling the tool again. The user reviews the exact command and approves or rejects before it runs; a run always waits for the human. A non-zero exit is a normal result (its code is data). cwd is confined to the project; the command is killed if it exceeds its timeout." \
+	{{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"description":"The command as an argument vector: the program followed by each argument as a separate string. Not a shell string."},"cwd":{"type":"string","description":"Working directory relative to the project root (omit for the root). Must stay within the project."},"timeout":{"type":"integer","description":"Seconds before the command is killed (default 120, max 600)."}},"required":["command"]}}
+
 # The tool specs handed to a provider: {name, description, input_schema} per tool.
 # input_schema is a JSON-string fragment the provider splices verbatim (D26).
 proc rio::agent::tools::specs {} {
@@ -73,6 +77,20 @@ proc rio::agent::tools::specs {} {
 proc rio::agent::tools::is_write {name} {
 	variable specs
 	expr {[dict exists $specs $name] && [dict get $specs $name kind] eq "write"}
+}
+
+# A tool's kind (read|write|exec), or "" if unknown.
+proc rio::agent::tools::kind_of {name} {
+	variable specs
+	if {[dict exists $specs $name]} { return [dict get $specs $name kind] }
+	return ""
+}
+
+# Does this tool go through the approval gate? Write (edit/create) and exec
+# (run_command) both do; only reads auto-run.
+proc rio::agent::tools::is_gated {name} {
+	set k [kind_of $name]
+	expr {$k eq "write" || $k eq "exec"}
 }
 
 # Execute one READ tool call. Returns {ok <0|1>, content <text for Claude>, summary
@@ -211,6 +229,106 @@ proc rio::agent::tools::apply_write {plan} {
 	}
 	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)" \
 		events [dict get $out events]]
+}
+
+# --- exec: prepare (validate + build a reviewable command) -------------------
+# The run_command tool (D83). Returns {ok 1, name, command, cwd, timeout, display}
+# for the loop to surface (agent.propose, kind command) and — only after the user
+# approves — run asynchronously via rio::exec::start. Like a write it NEVER
+# auto-runs; unlike a write the approval is not skippable (running arbitrary argv
+# is the most dangerous surface, so a human always sees the exact command first).
+# On a bad request returns an ok 0 _err the model can act on.
+proc rio::agent::tools::prepare_exec {input} {
+	if {![dict exists $input command]} {
+		return [_err "run_command requires command (an argument vector)" "error: missing command"]
+	}
+	set argv [dict get $input command]
+	if {[llength $argv] == 0} { return [_err "command is empty" "error: empty command"] }
+	# No shell: refuse any element Tcl's exec would interpret as a redirection or
+	# pipe rather than pass to the program. This closes the residual exec
+	# redirection-token surface (exec.tcl) on the agent path — a model can't smuggle
+	# a `> /etc/passwd` past the human by hiding it in an argv element.
+	foreach a $argv {
+		if {[_is_redirection $a]} {
+			return [_err "the argument \"$a\" looks like a shell redirection or pipe — run_command takes a literal argument vector, not a shell line (no <, >, |, &). Pass the program and each argument separately." \
+				"refused: shell token"]
+		}
+	}
+	# cwd: default to the project root; a given cwd is confined to the project.
+	if {[dict exists $input cwd] && [dict get $input cwd] ne ""} {
+		set guard [_confine [dict get $input cwd]]
+		if {[dict get $guard ok] == 0} { return $guard }
+		set cwd [rio::project::resolve [dict get $input cwd]]
+		if {![file isdirectory $cwd]} {
+			return [_err "cwd is not a directory: [dict get $input cwd]" "error: no such dir"]
+		}
+	} else {
+		if {[catch {rio::project::resolve ""} cwd]} {
+			return [_err "No project is open — open a folder first." "no project open"]
+		}
+	}
+	set timeout [_clamp_timeout [expr {[dict exists $input timeout] ? [dict get $input timeout] : 0}]]
+	return [dict create ok 1 name run_command command $argv cwd $cwd \
+		timeout $timeout display [_cmd_display $argv]]
+}
+
+# Shape an async exec result ({exitcode, stdout, stderr, timedout, ?error}) into the
+# {ok, content, summary} the loop turns into a tool_result. A non-zero exit is a
+# SUCCESSFUL run (ok 1) — the exit code is data the model reads; only a launch
+# failure or a timeout is ok 0 (is_error), so the model knows the command didn't
+# actually complete.
+proc rio::agent::tools::format_exec {argv result} {
+	set disp [_cmd_display $argv]
+	if {[dict exists $result error]} {
+		return [_err "couldn't run $disp: [dict get $result error]" "error: couldn't run"]
+	}
+	if {[dict get $result timedout]} {
+		return [dict create ok 0 \
+			content "The command was killed after exceeding its timeout:\n\$ $disp\n[_exec_streams $result]" \
+			summary "timed out: $disp"]
+	}
+	set ec [dict get $result exitcode]
+	return [_cap "exit code: $ec\n[_exec_streams $result]" "ran $disp -> exit $ec"]
+}
+
+# Would Tcl's exec read this argument as a redirection or pipe (rather than pass it
+# to the program)? True for a leading <, >, >>, 2>, <<, <@, >@, >&, a leading |, or
+# a lone &. Only leading operators matter — exec treats a whole argument as
+# redirection only when it starts with the operator (an arg like "a>b" is literal).
+proc rio::agent::tools::_is_redirection {a} {
+	if {$a eq "&"} { return 1 }
+	return [regexp {^([0-9]*[<>]|\|)} $a]
+}
+
+# Clamp a requested timeout (seconds) to [1,600]; a missing/invalid/<=0 value
+# becomes the 120 s default. There is no "unlimited" — every command is bounded,
+# since there is no per-command cancel yet.
+proc rio::agent::tools::_clamp_timeout {v} {
+	if {![string is integer -strict $v] || $v <= 0} { return 120 }
+	if {$v > 600} { return 600 }
+	return $v
+}
+
+# A shell-style rendering of an argv, for the human's review line and the tool_result
+# echo. Display only — nothing is ever run through a shell; single-quote any element
+# with whitespace or shell-special characters so the review reads unambiguously.
+proc rio::agent::tools::_cmd_display {argv} {
+	set out {}
+	foreach a $argv {
+		if {$a eq "" || [regexp {[^A-Za-z0-9_./:=@%+-]} $a]} {
+			lappend out "'[string map {' '\\''} $a]'"
+		} else {
+			lappend out $a
+		}
+	}
+	return [join $out " "]
+}
+
+# The stdout/stderr sections of an exec result, trailing blank lines trimmed.
+proc rio::agent::tools::_exec_streams {result} {
+	set out [string trimright [dict get $result stdout] "\n"]
+	set err [string trimright [dict get $result stderr] "\n"]
+	return "--- stdout ---\n$out\n--- stderr ---\n$err"
 }
 
 # --- helpers -----------------------------------------------------------------

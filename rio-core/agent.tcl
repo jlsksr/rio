@@ -34,8 +34,9 @@ namespace eval rio::agent {
 	variable provider     [namespace current]::echo_provider
 	variable pending                                ;# array: turn -> {coro id} awaiting approval
 	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
-	variable auto_accept       0                    ;# skip the approval gate (opt-in)
+	variable auto_accept       0                    ;# skip the approval gate (opt-in; EDITS only, D83)
 	variable proposals                              ;# array: turn -> {name,path,original,proposed} awaiting review
+	variable running                                ;# array: turn -> {coro token} a run_command in flight (D83)
 
 	# The named-provider registry (D26/D30). A provider is known by NAME so a
 	# frontend can pick one over the channel (agent.provider.set) without ever
@@ -164,13 +165,20 @@ proc rio::agent::reset {} {
 	variable conversation
 	variable pending
 	variable proposals
+	variable running
 	set conversation {}
 	foreach turn [array names pending] {
 		lassign $pending($turn) co id
 		catch {rename $co {}}
 	}
+	foreach turn [array names running] {
+		lassign $running($turn) co token
+		catch {rio::exec::cancel $token}
+		catch {rename $co {}}
+	}
 	array unset pending
 	array unset proposals
+	array unset running
 	return
 }
 
@@ -201,12 +209,19 @@ proc rio::agent::_seal_dangling {} {
 	variable conversation
 	variable pending
 	variable proposals
+	variable running
 	foreach turn [array names pending] {
 		lassign $pending($turn) co id
 		catch {rename $co {}}
 	}
+	foreach turn [array names running] {
+		lassign $running($turn) co token
+		catch {rio::exec::cancel $token}
+		catch {rename $co {}}
+	}
 	array unset pending
 	array unset proposals
+	array unset running
 	set last [lindex $conversation end]
 	set results {}
 	if {[llength $last] && [dict get $last role] eq "assistant"} {
@@ -279,9 +294,10 @@ proc rio::agent::_run {turn emit} {
 				tool {
 					lassign $msg _ id name input raw
 					lappend calls [dict create id $id name $name input $input raw $raw]
-					# Announce a read call now (it auto-runs); a write call is announced
-					# in phase 2 as agent.propose, carrying the diff for review.
-					if {![rio::agent::tools::is_write $name]} {
+					# Announce a read call now (it auto-runs); a gated call (write or
+					# run_command) is announced in phase 2 as agent.propose, carrying the
+					# diff / the command for review.
+					if {![rio::agent::tools::is_gated $name]} {
 						{*}$emit [dict create event agent.tool \
 							params [dict create turn $turn id $id name $name \
 								args [_args_str $input]]]
@@ -331,13 +347,15 @@ proc rio::agent::_run {turn emit} {
 		foreach c $calls {
 			set name [dict get $c name]
 			set id   [dict get $c id]
-			if {[rio::agent::tools::is_write $name]} {
-				set r [_do_write $turn $id $name [dict get $c input] $emit $co]
-			} else {
-				set r [rio::agent::tools::run $name [dict get $c input]]
-				{*}$emit [dict create event agent.tool_result \
-					params [dict create turn $turn id $id name $name \
-						ok [dict get $r ok] summary [dict get $r summary]]]
+			switch -- [rio::agent::tools::kind_of $name] {
+				write { set r [_do_write $turn $id $name [dict get $c input] $emit $co] }
+				exec  { set r [_do_exec  $turn $id $name [dict get $c input] $emit $co] }
+				default {
+					set r [rio::agent::tools::run $name [dict get $c input]]
+					{*}$emit [dict create event agent.tool_result \
+						params [dict create turn $turn id $id name $name \
+							ok [dict get $r ok] summary [dict get $r summary]]]
+				}
 			}
 			lappend results [dict create type tool_result \
 				tool_use_id $id content [dict get $r content] \
@@ -392,8 +410,59 @@ proc rio::agent::_do_write {turn id name input emit co} {
 	return $r
 }
 
+# Handle one run_command call (D83): prepare a reviewable command, surface it
+# (agent.propose, kind command), and — ALWAYS, ignoring auto_accept — yield until an
+# agent.approve resumes us with the user's decision (running arbitrary argv is the
+# most dangerous tool, so a human always confirms the exact command). On approval the
+# command runs ASYNCHRONOUSLY via rio::exec::start (the core stays responsive while
+# it runs) and we yield again until its completion callback resumes us; the result
+# becomes the tool_result. On rejection the model gets a plain "rejected". The
+# in-flight command is registered in `running` so reset/_seal_dangling can kill it.
+proc rio::agent::_do_exec {turn id name input emit co} {
+	variable pending
+	variable running
+	set prep [rio::agent::tools::prepare_exec $input]
+	if {[dict get $prep ok] == 0} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 \
+				summary [dict get $prep summary]]]
+		return $prep
+	}
+	{*}$emit [dict create event agent.propose \
+		params [dict create turn $turn id $id name $name kind command \
+			command [dict get $prep command] cwd [dict get $prep cwd] \
+			display [dict get $prep display]]]
+	# Always gated — no auto-accept path for a command.
+	set pending($turn) [list $co $id]
+	set decision [yield]
+	unset -nocomplain pending($turn)
+	if {$decision ne "approve"} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 summary "rejected by user"]]
+		return [dict create ok 0 content "The user rejected running this command." summary "rejected by user"]
+	}
+	set token [rio::exec::start [dict get $prep command] [dict get $prep cwd] "" \
+		[expr {[dict get $prep timeout] * 1000}] \
+		[list [namespace current]::_exec_done $co]]
+	set running($turn) [list $co $token]
+	set result [yield]
+	unset -nocomplain running($turn)
+	set r [rio::agent::tools::format_exec [dict get $prep command] $result]
+	{*}$emit [dict create event agent.tool_result \
+		params [dict create turn $turn id $id name $name \
+			ok [dict get $r ok] summary [dict get $r summary]]]
+	return $r
+}
+
+# rio::exec::start's completion bridge: resume the suspended turn with the capture.
+# Deferred onto the event loop like _post, so resuming is always legal.
+proc rio::agent::_exec_done {co result} {
+	after 0 [list [namespace current]::_resume $co $result]
+}
+
 # Resolve a pending approval: resume the suspended turn's coroutine with the user's
-# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5).
+# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5). Serves
+# both a proposed edit and a proposed command — both park in `pending`.
 proc rio::agent::approve {turn decision} {
 	variable pending
 	if {![info exists pending($turn)]} {
