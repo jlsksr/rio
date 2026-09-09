@@ -227,9 +227,15 @@ for later:
   from the core (`agent.providers`). A first-party provider is a plugin mirroring these two;
   **anyone** can now publish one to a repository (see Extensions ▸ "Provider as an
   installable `kind`").
-- **Run-command tool (with guardrails)** — *planned.* Let the agent run shell
-  commands under explicit approval/confinement, alongside its existing read and
-  propose-edit tools.
+- **Run-command tool** — *landed* (AGENTS.md D83). The agent runs commands
+  (`run_command`) through the same propose/approve gate as an edit, but **always
+  gated** (auto-accept is edits-only), **argv-only** (no shell) with a redirection-
+  token guard, **cwd-confined** to the project, run **asynchronously** so the core
+  stays responsive, and **timeout-bounded** (default 120 s, max 600 s). No
+  allow-list (D53: the gate is approval, not a ban). Still wanted: **streaming** a
+  command's output as it runs and a per-command **Stop/cancel** (both need the D10
+  event-over-time model); a live run against a real provider; command output in its
+  **own dock panel** rather than inline in the chat.
 
 ## Remote / transport
 

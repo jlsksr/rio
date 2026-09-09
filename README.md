@@ -79,11 +79,14 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   and runs wherever it does — so over a remote core the turn and your key stay
   server-side, with the same GUI either way (see D30). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
-  open buffers — shown as it works) and **propose edits**: it suggests a change or
+  open buffers — shown as it works), **propose edits**: it suggests a change or
   a new file, you review the **diff** and **Approve or Reject**, and on approval
-  it applies (and, by default, saves). A **complex** edit opens live in the
+  it applies (and, by default, saves) — and **run commands** (tests, a linter, a
+  build): it proposes the exact command, you see it and **Approve or Reject**, then
+  it runs, confined to your project and time-boxed. A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
-  every write waits for you (or opt into *Settings ▸ Auto-accept edits*). You can
+  every write waits for you (or opt into *Settings ▸ Auto-accept edits*) — and **every
+  command always waits for you**, no matter that setting. You can
   **shape how it works** from *Settings ▸ Agent Prompts…*: a **system prompt** (your
   standing instructions for every project), a **project prompt** for the open folder, and
   a **per-provider prompt** applied only while a chosen provider (Claude, or an
@@ -152,8 +155,8 @@ locally, or a socket to a core running elsewhere (**server mode**, like
 `emacs-server`). Same op calls either way; there is no separate in-process path.
 Frontends are thin views — the core owns your files and broadcasts changes back.
 
-**Still to come:** git discard/restore, an agent run-command tool (with
-guardrails), the terminal frontend (below), and a polished install/packaging path.
+**Still to come:** streaming command output (and a Stop button) for the agent,
+the terminal frontend (below), and a polished install/packaging path.
 The fuller list of candidate work lives in [ROADMAP.md](ROADMAP.md).
 
 ## Extensions & repositories

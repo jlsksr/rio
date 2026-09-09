@@ -31,12 +31,12 @@ Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
 preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
 tree, a git read pane, a side-by-side compare view, live theming, and a working
-**agent** (read + propose-edit, Claude over the official Anthropic API). The GUI
-is **always a client to the core over a channel** — a pipe to a private core it
-spawns locally, or a socket to a remote core; **there is no in-process path**
-(D29/D30 retired it). Still mapped-but-unbuilt: the TUI, the full plugin
-platform, git write ops, and the agent's run-command surface — see Sequencing.
-Decisions carry an *Implemented* note where code now backs them.
+**agent** (read + propose-edit + gated run-command, Claude over the official
+Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
+to a private core it spawns locally, or a socket to a remote core; **there is no
+in-process path** (D29/D30 retired it). Still mapped-but-unbuilt: the TUI and the
+full plugin platform — see Sequencing. Decisions carry an *Implemented* note where
+code now backs them.
 
 > **Sequencing (read this).** This is a **multi-phase** project and there is **no
 > application yet.** The full design space (agent, plugins, server) is mapped
@@ -51,8 +51,7 @@ Decisions carry an *Implemented* note where code now backs them.
 > GUI existed; that bar is now met, so its **core-orchestration slice is built
 > (D26, slices 1–5; over the channel since D30 P3)** — the `agent.*` protocol, the
 > provider interface, an in-box Claude provider over the official Anthropic API
-> (API key), read + propose-edit — while the heavy run-command guardrails stay
-> deferred (O4). The agent's first providers ride the
+> (API key), read + propose-edit, and gated run-command (D83). The agent's first providers ride the
 > *thin* protocol-participant transport (essentially D11), **not** the full
 > platform. The **marketplace** (O11) is deferred further still. Depth in this
 > design log ≠ priority to build.
@@ -805,8 +804,8 @@ any-language-frontend promise rides on the wire being real JSON.)*
 ### D26 — Agent subsystem, first slice: `agent.*` protocol + provider interface; in-box Claude over the official Anthropic API
 
 Activates the **core-orchestration slice** of the agent (D20 / O4) now that a
-working core + GUI exists. Scope is deliberately narrow; the heavy run-command
-guardrails stay deferred (O4).
+working core + GUI exists. Scope was deliberately narrow; the run-command surface
+followed later, gated, as **D83**.
 
 **Protocol (`agent.*`, core-owned).** One streaming op drives a turn:
 `agent.send {text}` starts/continues the orchestration loop for the open
@@ -978,8 +977,9 @@ updates through the existing `buffer.changed`→`apply_change` path. All paths a
 tested offline (approve/reject round-trips, auto-accept, the stale-approve error,
 the prepare refusals, `fs.write` incl. parent-dir creation) and the Claude suite is
 **unchanged** — the proof it's provider-agnostic. **Remaining:** a live write
-against `api.anthropic.com`, and the exposed-as-config UI for the write policy /
-the run-command tool with its allow-list guardrails (O4).
+against `api.anthropic.com`, and the exposed-as-config UI for the write policy.
+*(The run-command tool landed later as **D83** — gated, async, timeout-bounded;
+no allow-list, since D53 makes approval the gate.)*
 
 **Amendment — an approved write re-resolves its target (landed).** The gate had a
 time-of-check/time-of-use hole: `prepare_write` located the edit's coordinates when
@@ -4067,6 +4067,63 @@ per-provider prefix, and turning ▶ into a Stop button (no per-turn cancel op y
 
 ---
 
+### D83 — Agent run-command tool (gated, async, timeout-bounded)
+
+The last deferred piece of the agent's tool surface (O4): letting it **run commands** — tests, a
+linter, a build, git. D53 already settled the philosophy (the line is *autonomy*, not capability):
+a command is in scope **because a human approves it**. So run-command lands as a new tool behind
+the *same* propose/approve gate the write slice uses (D26 s5), with the guardrails its danger
+warrants. **No provider plugin changed** — the gate is core, provider-agnostic (proof: the Claude
+suite is untouched).
+
+**Always gated — the one place auto-accept doesn't reach.** A write can be auto-applied
+(*Auto-accept edits*); a command **never** is. Running arbitrary argv is the most dangerous
+surface, so the core's `_do_exec` yields for approval unconditionally (it doesn't consult
+`auto_accept`), and the GUI raises the bar regardless of the toggle. jka's call: the toggle stays
+scoped to edits, and no second "auto-run commands" toggle was added — a human always sees the exact
+command first.
+
+**Async, because a timeout demands it.** `exec.run` blocks the whole single-threaded core to
+completion — fine for git's short reads, but the agent may run anything, and an `after`-based
+timeout can't fire while the interpreter sits blocked in `exec`. So command execution is
+**asynchronous**: a new `rio::exec::start {argv cwd stdin timeout_ms donecmd}` spawns the child,
+returns at once, reads stdout off a pipe as it arrives (stderr to a temp file, exit code from
+`close`'s `-errorcode` — same mapping as `run`), and fires `donecmd` on completion; `_do_exec`
+yields until then. The core stays responsive while a command runs (a real win for the
+remote/multi-frontend architecture, not just timeout plumbing). `run` is untouched — git keeps it.
+
+**Bounded timeout (jka's call).** Every command is time-boxed — default **120 s**, max **600 s**,
+no "unlimited" (there's no per-command cancel op yet, so the timeout is the safety net). A watchdog
+`after` kills an overrunning child (`kill -TERM` on unix, `taskkill /F /T` on Windows — log any
+Windows quirk in [CAVEATS.md](CAVEATS.md)) and reports it as `timed out` (an `is_error`
+tool_result, so the model knows it didn't complete). `reset`/`_seal_dangling` cancel an in-flight
+command (kill + drop the coroutine) so a mid-run reset leaks no process.
+
+**Confinement = approval + argv discipline (no allow-list).** Per D53 the gate is approval, **not**
+a ban, so there's deliberately no command allow-list. The rails are: **argv-only, no shell** (the
+tool description drills this into the model — no pipes/redirects/globs/`&&`); **cwd confined to the
+project root** (reuses `_confine`); and `prepare_exec` **refuses any argv element Tcl's `exec` would
+read as a redirection or pipe** (`<`, `>`, `2>`, `|`, `&`, …) — closing the residual exec
+redirection-token surface (noted deferred in [exec.tcl](rio-core/exec.tcl)) on the agent path, so a
+model can't smuggle a `>` past the human by hiding it in the vector. A **non-zero exit is a
+successful run** whose code is data (a failed test isn't a tool error); only a launch failure or a
+timeout is `is_error`.
+
+**Shape.** New tool `run_command`, `kind exec` (a third kind beside read/write); `is_gated` =
+write∪exec drives both the mid-stream announce guard and the dispatch. The `agent.propose` event
+gained a `kind` (edit|command); a command carries `command`/`display`/`cwd` (a project-relative
+`cwddisp`, so a frontend needn't know the root) instead of a diff, and the GUI's `approve_bar` is
+parameterized (prompt + the edit-only Compare button). Tested offline: the async primitive
+(stdout, non-zero exit, separate stderr, timeout kill, cwd, launch failure, cancel-fires-no-
+callback), `prepare_exec` validation (empty argv, redirection token, cwd escape, timeout clamp),
+`format_exec` semantics, and the gated loop against a fake provider (approve/reject round-trips,
+**still-gated-with-auto-accept-on**); GUI smoke covers the command bar, preview, and busy pause.
+**Remaining** (deferred, each a later add): **streaming** a command's output as it runs and a
+per-command **Stop/cancel** (both want the D10 event-over-time model); a live run against a real
+provider; output in its **own dock panel** rather than inline.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
@@ -4468,15 +4525,16 @@ Both renderings come from the **same** region model (D13) and layout policy
   `propose_edit` / `propose_create` tools, the `agent.propose`→`agent.approve`
   approval gate with a diff review, apply-via-`buffer.replace`+`file.save` /
   `fs.write` (root-confined), and the `apply_writes_disk` / `auto_accept` policy
-  flags — provider-agnostic, so no plugin change was needed. The **run-command**
-  guardrails below remain **deferred** per Sequencing.) Still open here: surfacing
-  the write-policy flags as persisted config (D21), guardrails for the headless
-  run-command primitive (now
-  implemented as `exec.run` — see O2; its argv-not-shell discipline is the
-  baseline, but allow-lists, agent confirmation, and closing exec's
-  redirection-token surface remain here), the permission model for
-  plugin-contributed tools, and a truncation/scrollback rule for long command
-  output surfaced in `chat`.
+  flags — provider-agnostic, so no plugin change was needed. The **run-command
+  slice is now built too — D83**: the `run_command` tool through the same gate
+  (always gated — auto-accept is edits-only), run **asynchronously** via
+  `rio::exec::start` and **timeout-bounded**, argv-only with a redirection-token
+  guard and cwd confined to the project — which **closes** exec's redirection-token
+  surface on the agent path and settles the allow-list question (D53: the gate is
+  approval, not a ban).) Still open here: surfacing the write-policy flags as
+  persisted config (D21), the permission model for plugin-contributed tools, and a
+  truncation/scrollback rule for long command output surfaced in `chat` (the
+  per-read size cap applies today; streaming output over time is deferred with D10).
 - **O5 — Config & session format.** ✅ **Resolved — D21** (plain key-value
   settings + JSON session state, XDG locations, per-project `.rio/`).
 - **O6 — Default keymap.** ✅ **Resolved — D23 + D38.** Binding *model* in D23
