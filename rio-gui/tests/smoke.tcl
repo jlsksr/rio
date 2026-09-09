@@ -920,34 +920,55 @@ set ::agent_auto_accept 0
 # A proposed run_command (D83): the command previews, and the bar is ALWAYS raised —
 # even under auto-accept edits — asking to run, with no edit-only Compare button.
 proc cmp_shown {} { expr {[lsearch -exact [pack slaves .chat.approve] .chat.approve.cmp] >= 0} }
+proc always_shown {} { expr {[lsearch -exact [pack slaves .chat.approve] .chat.approve.always] >= 0} }
 chat_clear ; set ::agent_auto_accept 0
-chat_event {event agent.propose params {turn 30 id c1 name run_command kind command display {pytest -q} cwd ""}}
+chat_event {event agent.propose params {turn 30 id c1 name run_command kind command command {pytest -q} display {pytest -q} cwd ""}}
 ok "chat: command preview rendered"   [string match "*\$ pytest -q*" [.chat.log get 1.0 end]] 1
 ok "chat: command bar shown"          [bar_shown] 1
 ok "chat: command bar asks to run"    [.chat.approve.lbl cget -text] "Run this command?"
 ok "chat: command hides Compare"      [cmp_shown] 0
+ok "chat: command shows Always allow" [always_shown] 1
 ok "chat: command pending turn"       $::pending_turn 30
 # cwd is shown when it isn't the project root.
 chat_clear
-chat_event {event agent.propose params {turn 31 id c2 name run_command kind command display {ls} cwd sub/dir}}
+chat_event {event agent.propose params {turn 31 id c2 name run_command kind command command {ls} display {ls} cwd sub/dir}}
 ok "chat: command cwd shown"          [string match "*in sub/dir/*" [.chat.log get 1.0 end]] 1
 approve_bar 0
 # Auto-accept edits must NOT skip a command — the bar still rises.
 chat_clear ; set ::agent_auto_accept 1
-chat_event {event agent.propose params {turn 32 id c3 name run_command kind command display {rm -rf build} cwd ""}}
+chat_event {event agent.propose params {turn 32 id c3 name run_command kind command command {rm -rf build} display {rm -rf build} cwd ""}}
 ok "chat: command gated despite auto-accept" [bar_shown] 1
 ok "chat: command still pending turn"        $::pending_turn 32
 approve_bar 0 ; set ::agent_auto_accept 0
-# An edit bar after a command restores the edit prompt and the Compare button.
+# An edit bar after a command restores the edit prompt and the Compare button, and hides
+# the command-only Always allow.
 chat_clear
 chat_event {event agent.propose params {turn 33 id w3 name propose_edit path e.txt diff "+ y"}}
 ok "chat: edit bar asks to apply"     [.chat.approve.lbl cget -text] "Apply this edit?"
 ok "chat: edit bar restores Compare"  [cmp_shown] 1
+ok "chat: edit hides Always allow"    [always_shown] 0
+approve_bar 0
+
+# Standing approval (D84): a command carrying auto=1 (covered by an allow-list rule)
+# previews but raises NO bar and does not pause the busy indicator — the turn keeps
+# working. And the Always-allow menu offers the program first, then the exact command.
+chat_clear ; set ::agent_auto_accept 0 ; chat_busy_start
+chat_event {event agent.propose params {turn 35 id c5 name run_command kind command command {pytest -q tests/} display {pytest -q tests/} cwd "" auto 1}}
+ok "chat: allowed command previews"        [string match "*\$ pytest -q tests/*" [.chat.log get 1.0 end]] 1
+ok "chat: allowed command raises no bar"   [bar_shown] 0
+ok "chat: allowed command keeps busy"      $::chat_busy 1
+chat_busy_stop
+# The menu the bar builds for a gated command: program entry first (argv[0]), exact second.
+chat_clear
+chat_event {event agent.propose params {turn 36 id c6 name run_command kind command command {git status -s} display {git status -s} cwd ""}}
+ok "chat: allow menu has two entries"      [.chat.approve.always.m index end] 1
+ok "chat: allow menu program entry"        [.chat.approve.always.m entrycget 0 -label] "Always allow: git"
+ok "chat: allow menu exact entry"          [string match "*this exact command: git status -s*" [.chat.approve.always.m entrycget 1 -label]] 1
 approve_bar 0
 # The working indicator pauses at a command bar even under auto-accept (waiting on
 # the human), where an edit under auto-accept keeps running.
 chat_clear ; set ::agent_auto_accept 1 ; chat_busy_start
-chat_event {event agent.propose params {turn 34 id c4 name run_command kind command display {make} cwd ""}}
+chat_event {event agent.propose params {turn 34 id c4 name run_command kind command command {make} display {make} cwd ""}}
 ok "busy: command pauses at the bar even on auto-accept" $::chat_busy 0
 approve_bar 0 ; chat_busy_stop ; set ::agent_auto_accept 0
 

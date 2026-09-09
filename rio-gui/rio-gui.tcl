@@ -2401,11 +2401,23 @@ proc chat_event {ev} {
 			set turn [dict get $ev params turn]
 			set kind [expr {[dict exists $ev params kind] ? [dict get $ev params kind] : "edit"}]
 			if {$kind eq "command"} {
-				chat_log "· proposes run_command\n" tool
-				chat_command_preview [dict get $ev params display] [dict get $ev params cwd]
-				set ::pending_turn $turn
-				approve_bar 1 "Run this command?" 0
-				chat_busy_stop   ;# now waiting on the user, not the model (D82)
+				set argv [expr {[dict exists $ev params command] ? [dict get $ev params command] : {}}]
+				set disp [dict get $ev params display]
+				set auto [expr {[dict exists $ev params auto] ? [dict get $ev params auto] : 0}]
+				if {$auto} {
+					# Covered by an allow-list rule (D84): it runs without a bar. Show
+					# what ran and keep the busy indicator — the turn is still working.
+					chat_log "· runs run_command (allowed)\n" tool
+					chat_command_preview $disp [dict get $ev params cwd]
+				} else {
+					chat_log "· proposes run_command\n" tool
+					chat_command_preview $disp [dict get $ev params cwd]
+					set ::pending_turn $turn
+					set ::pending_cmd_argv $argv
+					chat_allow_menu_populate $argv $disp
+					approve_bar 1 "Run this command?" 0 1
+					chat_busy_stop   ;# now waiting on the user, not the model (D82)
+				}
 			} else {
 				# A *complex* edit (more than ::compare_threshold diff lines) opens in the
 				# side-by-side compare view instead of dumping the whole diff inline —
@@ -2454,9 +2466,11 @@ proc chat_diff {diff} {
 }
 
 # Show/hide the Approve/Reject bar for a pending proposal. `prompt` is the bar's
-# question (an edit vs. a command asks differently) and `compare` shows the
-# edit-only Compare button (a command has no diff to compare) — D83.
-proc approve_bar {show {prompt "Apply this edit?"} {compare 1}} {
+# question (an edit vs. a command asks differently); `compare` shows the edit-only
+# Compare button (a command has no diff to compare, D83); `always` shows the
+# command-only "Always allow" menubutton (standing approval, D84 — an edit has no
+# allow-list). Both extra buttons default off, so an edit shows just Approve/Reject.
+proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0}} {
 	if {$show} {
 		.chat.approve.lbl configure -text $prompt
 		if {$compare} {
@@ -2464,11 +2478,42 @@ proc approve_bar {show {prompt "Apply this edit?"} {compare 1}} {
 		} else {
 			catch {pack forget .chat.approve.cmp}
 		}
+		if {$always} {
+			pack .chat.approve.always -side right -after .chat.approve.no
+		} else {
+			catch {pack forget .chat.approve.always}
+		}
 		pack .chat.approve -side bottom -fill x -before .chat.input
 	} else {
 		catch {pack forget .chat.approve}
 		set ::pending_turn ""
 	}
+}
+
+# Rebuild the "Always allow" menu for the currently proposed command (D84). Program
+# first (the recommended default — trust every invocation of argv[0]), the exact
+# command line second (trust only this identical argv). Each entry both remembers the
+# rule (agent.allow.add) and approves the command in front of the user
+# (agent_allow_always). A long exact command is truncated in the LABEL only.
+proc chat_allow_menu_populate {argv display} {
+	set m .chat.approve.always.m
+	$m delete 0 end
+	set prog [lindex $argv 0]
+	$m add command -label "Always allow: $prog" \
+		-command [list agent_allow_always [list $prog]]
+	set exact $display
+	if {[string length $exact] > 40} { set exact "[string range $exact 0 39]…" }
+	$m add command -label "Always allow this exact command: $exact" \
+		-command [list agent_allow_always $argv]
+}
+
+# Persist a trust rule, then approve the command now in front of the user (D84).
+# "Always allow" = remember + run this one. Add first (so a failed write still leaves
+# the command awaiting the plain decision), then decide.
+proc agent_allow_always {rule} {
+	if {$::pending_turn eq ""} return
+	catch {rio_call agent.allow.add [dict create rule $rule]}
+	agent_decide approve
 }
 
 # The user's decision on the pending edit → agent.approve resumes the turn, whose
@@ -3187,6 +3232,84 @@ proc agent_prompt_open {which {name ""}} {
 	}
 	destroy .agentprompts
 	do_open [dict get $resp result path]
+}
+
+# Manage the command allow-list (D84): the human-authored rules that let a proposed
+# command run without the approval bar. Lists the current rules (each an argv prefix)
+# with Remove, and a one-line Add that splits on whitespace into tokens. The list is
+# global (kept with your rio settings, wherever the core runs) and hand-editable on
+# disk too; this is the friendly front door. `::allow_rules` mirrors the core's list so
+# a listbox row maps back to its exact token-list for removal.
+proc agent_allow_dialog {} {
+	set w .agentallow
+	destroy $w
+	toplevel $w
+	wm title $w "Allowed Commands"
+	wm transient $w .
+	wm resizable $w 0 0
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+
+	label $w.intro -anchor w -justify left -font RioUIFont -wraplength 380 \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg] \
+		-text "Commands whose start matches a rule below run without asking. A one-word rule (pytest) trusts every run of that program; more words (git status) trust only commands that start that way. Removing a rule makes it ask again."
+	frame $w.l -background [dict get $c ui.bg]
+	listbox $w.l.box -height 8 -width 46 -font RioUIFont -activestyle none \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-selectbackground [dict get $c editor.selection] -selectforeground [dict get $c editor.fg] \
+		-yscrollcommand [list $w.l.sb set]
+	scrollbar $w.l.sb -command [list $w.l.box yview]
+	pack $w.l.box -side left -fill both -expand 1
+	pack $w.l.sb -side right -fill y
+	frame $w.add -background [dict get $c ui.bg]
+	entry $w.add.e -font RioUIFont -width 34 \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor]
+	button $w.add.b -text "Add" -font RioUIFont -command [list agent_allow_add_from_entry $w]
+	bind $w.add.e <Return> [list agent_allow_add_from_entry $w]
+	pack $w.add.e -side left -fill x -expand 1 -padx {0 6}
+	pack $w.add.b -side left
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.rm -text "Remove" -font RioUIFont -command [list agent_allow_remove_selected $w]
+	button $w.btns.close -text "Close" -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right -padx 3
+	pack $w.btns.rm -side right -padx 3
+
+	grid $w.intro -row 0 -column 0 -sticky we -padx 8 -pady {8 6}
+	grid $w.l     -row 1 -column 0 -sticky we -padx 8 -pady 3
+	grid $w.add   -row 2 -column 0 -sticky we -padx 8 -pady 3
+	grid $w.btns  -row 3 -column 0 -sticky we -padx 5 -pady {6 8}
+	agent_allow_refresh $w
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.add.e
+}
+
+# Repopulate the manager's listbox from the core's current allow-list.
+proc agent_allow_refresh {w} {
+	if {![winfo exists $w]} return
+	set res [rio_result agent.allow.list {}]
+	set ::allow_rules [expr {$res ne "" ? [dict get $res rules] : {}}]
+	$w.l.box delete 0 end
+	foreach rule $::allow_rules { $w.l.box insert end [join $rule " "] }
+}
+
+# Add the rule typed in the entry (whitespace-split into tokens), then refresh.
+proc agent_allow_add_from_entry {w} {
+	set toks [regexp -all -inline {\S+} [$w.add.e get]]
+	if {![llength $toks]} return
+	rio_call agent.allow.add [dict create rule $toks]
+	$w.add.e delete 0 end
+	agent_allow_refresh $w
+}
+
+# Remove the selected rule (mapped back to its exact token-list), then refresh.
+proc agent_allow_remove_selected {w} {
+	set sel [$w.l.box curselection]
+	if {![llength $sel]} return
+	set rule [lindex $::allow_rules [lindex $sel 0]]
+	rio_call agent.allow.remove [dict create rule $rule]
+	agent_allow_refresh $w
 }
 
 proc do_save_as {path} {
@@ -4944,6 +5067,8 @@ proc apply_theme {theme} {
 	.chat.approve.yes configure -font RioUIFont
 	.chat.approve.no  configure -font RioUIFont
 	.chat.approve.cmp configure -font RioUIFont
+	.chat.approve.always configure -font RioUIFont
+	.chat.approve.always.m configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
 	.chat.isash configure -background [dict get $c tab.bar.bg]
 	# The find/replace bar (D36): UI chrome, entries on the editor surface.
@@ -7425,6 +7550,10 @@ proc prefs_fill_agent {f} {
 	# Keyboard pane's shortcuts button.
 	grid [prefs_button $f.prompts "Agent Prompts…" agent_prompts_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
+	# The command allow-list (D84) — the standing-approval companion to the gate. Same
+	# second-door mirroring as the prompts button just above.
+	grid [prefs_button $f.allow "Allowed commands…" agent_allow_dialog] \
+		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 
 # Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
@@ -7777,6 +7906,12 @@ label .chat.approve.lbl -text "Apply this edit?" -anchor w -font {monospace 9} \
 button .chat.approve.yes -text "Approve" -font {monospace 9} -command {agent_decide approve}
 button .chat.approve.no  -text "Reject"  -font {monospace 9} -command {agent_decide reject}
 button .chat.approve.cmp -text "Compare" -font {monospace 9} -command {compare_proposal $::pending_turn}
+# "Always allow" (command proposals only, D84): remember a trust rule so this command
+# stops asking. Packed on demand by approve_bar; its menu is rebuilt per proposal by
+# chat_allow_menu_populate. tearoff off — a floating menu makes no sense here.
+menubutton .chat.approve.always -text "Always allow ▾" -font {monospace 9} \
+	-menu .chat.approve.always.m -relief raised -borderwidth 1 -padx 4
+menu .chat.approve.always.m -tearoff 0
 pack .chat.approve.yes -side right
 pack .chat.approve.no  -side right
 pack .chat.approve.cmp -side right
@@ -8107,6 +8242,9 @@ menu .m.settings.keys -tearoff 0
 # it opens the user's system prompt (all projects) and the project prompt (this folder)
 # in the editor — a well-defined home for the "soul" the core composes (D70).
 .m.settings add command -label "Agent Prompts…" -command agent_prompts_dialog
+# Allowed Commands… (D84): the human-authored allow-list of commands that run without
+# the approval bar. Standing approval, not autonomy — a person authors every rule.
+.m.settings add command -label "Agent: Allowed commands…" -command agent_allow_dialog
 .m.settings add separator
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}
