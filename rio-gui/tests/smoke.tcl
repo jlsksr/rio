@@ -188,11 +188,14 @@ ok "open: last one active"      [bufget $::cur path]        $m2
 ok "open: first one present"    [expr {[lsearch -exact [lmap id [gorder $::focus] {bufget $id path}] $m1] >= 0}] 1
 
 # --- OS file-drop handler opens what's dropped (D86) --------------------------
-# Headless has no tkdnd and can't fire a real <<Drop>>, so drive the handler proc
-# directly with a synthetic path list — the same way the internal-DnD tests drive their
-# resolvers. tkdnd is an OPTIONAL dependency, absent in CI, so the drop targets are never
-# registered here; what we test is the dispatch a real <<Drop>> would trigger.
-ok "drop: tkdnd optional, absent in CI" $::have_tkdnd 0
+# Headless can't fire a real <<Drop>>, so drive the handler proc directly with a
+# synthetic path list — the same way the internal-DnD tests drive their resolvers.
+# tkdnd is an OPTIONAL dependency and its PRESENCE is a property of the host, not
+# something to assert: a bare Linux CI box has none, while the Magicsplat
+# distribution bundles it on Windows (CAVEATS.md), where the drop targets really do
+# get registered. Either way, what we test below is the dispatch a real <<Drop>>
+# would trigger.
+ok "drop: tkdnd presence is a boolean" [expr {$::have_tkdnd in {0 1}}] 1
 # Real path: a dropped file opens as a buffer.
 set d1 [tmpbytes "DROPPED ONE\n"]
 set dbefore [llength [gorder $::focus]]
