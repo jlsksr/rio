@@ -430,7 +430,7 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 	}
 	{*}$emit [dict create event agent.propose \
 		params [dict create turn $turn id $id name $name kind command \
-			command [dict get $prep command] cwd [dict get $prep cwd] \
+			command [dict get $prep command] cwd [dict get $prep cwddisp] \
 			display [dict get $prep display]]]
 	# Always gated — no auto-accept path for a command.
 	set pending($turn) [list $co $id]

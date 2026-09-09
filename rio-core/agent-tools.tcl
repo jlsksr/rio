@@ -268,8 +268,10 @@ proc rio::agent::tools::prepare_exec {input} {
 		}
 	}
 	set timeout [_clamp_timeout [expr {[dict exists $input timeout] ? [dict get $input timeout] : 0}]]
+	# cwd is absolute (for the run); cwddisp is the project-relative dir for the
+	# review surface ("" = the project root), so a frontend needn't know the root.
 	return [dict create ok 1 name run_command command $argv cwd $cwd \
-		timeout $timeout display [_cmd_display $argv]]
+		cwddisp [_rel $cwd] timeout $timeout display [_cmd_display $argv]]
 }
 
 # Shape an async exec result ({exitcode, stdout, stderr, timedout, ?error}) into the

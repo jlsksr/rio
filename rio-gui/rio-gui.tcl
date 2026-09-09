@@ -2393,26 +2393,37 @@ proc chat_event {ev} {
 			chat_log "· [dict get $ev params name][expr {$args eq "" ? "" : " $args"}]\n" tool
 		}
 		agent.propose {
-			# A proposed EDIT awaiting the user's decision (D26 s5). Show the diff and,
-			# unless auto-accept is on, raise the Approve/Reject bar. A *complex* edit (more
-			# than ::compare_threshold diff lines) opens in the side-by-side compare view
-			# instead of dumping the whole diff inline — unless the user turned that off
-			# (Settings ▸ Compare complex edits) (D28).
+			# A proposed action awaiting the user's decision. Two kinds (D26 s5, D83):
+			# an EDIT carries a diff (auto-accept may skip the gate); a run_command
+			# carries the argv and is ALWAYS gated (never auto-run, even under
+			# auto-accept edits — running a command is the more dangerous act).
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
 			set turn [dict get $ev params turn]
-			set diff [dict get $ev params diff]
-			chat_log "· proposes [dict get $ev params name]: [dict get $ev params path]\n" tool
-			set complex [expr {[llength [split $diff "\n"]] > $::compare_threshold}]
-			if {$::agent_compare_complex && $complex && !$::agent_auto_accept \
-					&& [compare_proposal $turn]} {
-				chat_log "  (opened in compare view)\n" tool
-			} else {
-				chat_diff $diff
-			}
-			if {!$::agent_auto_accept} {
+			set kind [expr {[dict exists $ev params kind] ? [dict get $ev params kind] : "edit"}]
+			if {$kind eq "command"} {
+				chat_log "· proposes run_command\n" tool
+				chat_command_preview [dict get $ev params display] [dict get $ev params cwd]
 				set ::pending_turn $turn
-				approve_bar 1
+				approve_bar 1 "Run this command?" 0
 				chat_busy_stop   ;# now waiting on the user, not the model (D82)
+			} else {
+				# A *complex* edit (more than ::compare_threshold diff lines) opens in the
+				# side-by-side compare view instead of dumping the whole diff inline —
+				# unless the user turned that off (Settings ▸ Compare complex edits) (D28).
+				set diff [dict get $ev params diff]
+				chat_log "· proposes [dict get $ev params name]: [dict get $ev params path]\n" tool
+				set complex [expr {[llength [split $diff "\n"]] > $::compare_threshold}]
+				if {$::agent_compare_complex && $complex && !$::agent_auto_accept \
+						&& [compare_proposal $turn]} {
+					chat_log "  (opened in compare view)\n" tool
+				} else {
+					chat_diff $diff
+				}
+				if {!$::agent_auto_accept} {
+					set ::pending_turn $turn
+					approve_bar 1
+					chat_busy_stop   ;# now waiting on the user, not the model (D82)
+				}
 			}
 		}
 		agent.tool_result {
@@ -2424,6 +2435,15 @@ proc chat_event {ev} {
 	}
 }
 
+# Render a proposed command for review (D83): the shell-style command line (no tag,
+# so it reads in the plain foreground — the human must read it before approving) and,
+# when it isn't the project root, the directory it runs in. Display only: the core
+# runs the argument vector directly, never through a shell.
+proc chat_command_preview {display cwd} {
+	chat_log "  \$ $display\n"
+	if {$cwd ne ""} { chat_log "  in $cwd/\n" tool }
+}
+
 # Render a proposed edit's diff: -removed in red, +added in green.
 proc chat_diff {diff} {
 	foreach line [split $diff "\n"] {
@@ -2433,9 +2453,17 @@ proc chat_diff {diff} {
 	}
 }
 
-# Show/hide the Approve/Reject bar for a pending proposal.
-proc approve_bar {show} {
+# Show/hide the Approve/Reject bar for a pending proposal. `prompt` is the bar's
+# question (an edit vs. a command asks differently) and `compare` shows the
+# edit-only Compare button (a command has no diff to compare) — D83.
+proc approve_bar {show {prompt "Apply this edit?"} {compare 1}} {
 	if {$show} {
+		.chat.approve.lbl configure -text $prompt
+		if {$compare} {
+			pack .chat.approve.cmp -side right -after .chat.approve.no
+		} else {
+			catch {pack forget .chat.approve.cmp}
+		}
 		pack .chat.approve -side bottom -fill x -before .chat.input
 	} else {
 		catch {pack forget .chat.approve}
