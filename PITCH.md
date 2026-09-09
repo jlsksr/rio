@@ -174,12 +174,17 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **Agent settings gathered in one place** — the top-level *Settings* menu now keeps only the two
+  quick agent switches you flip mid-task — **which provider is live** and the edit toggles — while the
+  agent's real configuration (its **API key**, its **prompts**, its **trusted-command list**) moved
+  into the **Preferences** window's Agent pane, where a settings window can grow without cramming the
+  menubar. One home, one place to look. — *housekeeping · D85 · `5205f6c` · 2026-09-09*
 - **Trust a command so it stops asking** — when the agent proposes a command, the approve bar now
   offers **Always allow**: remember the **program** (every `pytest` from now on) or just **that exact
   command**, and choose how far the trust reaches — **all projects**, **this project only**, or
   **only while a particular model is running**. rio runs it next time without stopping you. It's an
   **opt-in** list *you* write — standing permission, not the agent going off on its own — managed
-  under *Settings ▸ Agent: Allowed commands…* (or edited by hand). Everything else still waits for
+  under *Preferences ▸ Agent ▸ Allowed commands…* (or edited by hand). Everything else still waits for
   you, and a trusted command is still run the safe way — no shell, confined to your project,
   time-boxed. The bar you approve once becomes the bar you never see again. — *feature · D84 · `e566586` · 2026-09-09*
 - **The agent can run commands** — ask it to run your tests, a linter, or a build, and it
@@ -200,7 +205,7 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 - **Per-provider agent instructions** — alongside your all-projects and per-project prompts,
   you can now write instructions that apply *only* while a particular provider is running —
   Claude-specific quirks, or house rules for a local OpenAI-compatible model. Editable from
-  Settings ▸ Agent Prompts…; the agent stays entirely optional. — *feature · D79 · `a66c737` ·
+  Preferences ▸ Agent ▸ Agent Prompts…; the agent stays entirely optional. — *feature · D79 · `a66c737` ·
   2026-09-08*
 - **Multi-line tabs, tightened** — in multi-line tab mode each row now packs its tabs at
   their natural width and justifies to fill the strip, so a short tab no longer inherits a
