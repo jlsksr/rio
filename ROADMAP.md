@@ -54,12 +54,13 @@ Each entry notes its state:
   jka has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image
   at a few sizes (16/32/48). Note this is a *raster* asset, distinct from the mono-Unicode
   in-UI iconography rule — a glyph would have to be rendered to a pixmap first.
-- **Files pane — richer view, later** — *deferred* (builds on AGENTS.md D42/D43: the
+- **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
-  component the git pane also uses, and file rows carry git-status flags). Candidates:
-  an expandable Explorer-style tree (structural change to the flat navigator);
-  drawn-bitmap icons if glyphs prove too plain. (Hiding dotfiles from the navigator, with
-  a show-hidden toggle, landed as D62.) The larger fork — **core-backed
+  component the git pane also uses, and file rows carry git-status flags). The
+  **expandable Explorer-style tree** — the big structural candidate here — landed as
+  **D87** (the flat navigator became an unfoldable tree from the project root). Remaining
+  candidate: drawn-bitmap icons if glyphs prove too plain. (Hiding dotfiles from the
+  navigator, with a show-hidden toggle, landed as D62.) The larger fork — **core-backed
   read-only "view buffers"** (emacs-like modes for dired/git/log, re-backing the
   rich-list widget with the core) — is noted but *not taken*; today the pane is
   deliberately GUI-local chrome, not a buffer.

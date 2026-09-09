@@ -4258,6 +4258,70 @@ optional load means the whole suite runs unchanged with tkdnd absent (`$::have_t
 there). Out of scope: uploading a dropped local file's bytes to a *remote* core (a separate
 feature), and non-file (text/URI) drops.
 
+### D87 — Files pane: an unfoldable tree from the project root
+
+The Files pane was a **flat single-directory navigator**: it showed one directory, a `▴ ..`
+row climbed to the parent, and double-clicking a folder *replaced* the view with that
+folder's contents. You could only ever see one level. jka asked to **unfold directories in
+place** — the VSCode / Win98-Explorer model — which was already the anticipated direction
+(the expand/collapse twisty glyph was called out as *deferred* under the iconography sweep,
+around the D-note at line ~1027, and ROADMAP's "Files pane — richer view" listed "an
+expandable Explorer-style tree" as a candidate). This lands it.
+
+**Decision: full tree from the project root.** The flat navigator is replaced by a tree
+rooted at the open project root. Directories carry a `▸`/`▾` twisty; the twisty and the
+gutter/indent left of the name are the **arrow**, and a **single click on the arrow** unfolds
+the dir in place (its children drawn one indent step deeper right below it) or folds it. The
+**name** is reserved for **double-click** (a dir toggles, a file opens); Return activates the
+selected row too. A single click on the name just selects it; arrow keys move the selection
+(all unchanged `rl_*` rich-list). The `..` row and the descend-replace navigation are **gone**
+— you always view from the root and unfold only the branches you want. Folding keeps any
+descendant expand-state, so re-opening a dir restores the sub-shape it had (VSCode behaviour).
+
+**Click routing.** The single-vs-double, arrow-vs-name split is a files-pane concern, so it
+overrides the plain `rl_*` click binds **only on the files body** (the git pane keeps
+select-on-single-click). `nav_col_is_arrow {type depth col}` is the pure decision — a dir
+row's name starts at char column `2 + 2·depth + 2` (gutter + indent + glyph + space), a click
+left of that is the arrow — kept separate so it is unit-testable without pixels; `nav_b1` /
+`nav_b1_double` map the pixel click to a row + column (`::nav_row_depth`, filled per paint)
+and route it. Double-click on the arrow is a deliberate no-op (the first click already
+toggled), so it can't fold-back a just-unfolded dir.
+
+**State.** `::nav_dir` (which had meant "the shown dir") is renamed **`::nav_root`** — it is
+now invariably the project root, set once on `project.opened`, never mutated by navigation.
+A new **`::nav_expanded`** dict is used as a *set* of absolute dir paths currently unfolded;
+it resets to empty on project open (a fresh project shows the collapsed root) and is **not
+persisted** to the session (nav state never was — out of scope).
+
+**Rendering.** `populate_nav` keeps the placeholder / header (now just the root's basename)
+/ git-map setup, then calls the new recursive **`nav_render_level {dir depth git}`**, which
+lists one directory via the same `fs.list` op, draws dirs-then-files (core-sorted), and
+recurses into each unfolded subdir. `nav_render_row` gained a **`depth`** arg and inserts
+`[string repeat "  " $depth]` between the fixed 2-char git-status gutter (flags stay column-
+aligned across depths) and the type glyph. The git gutter (`nav_git_map` / `nav_dir_status`
+rollup / `nav_file_status`) is untouched — `nav_dir_status` already rolled a change up from
+*any* depth, so a folded folder still shows its `·`.
+
+**Refresh scope.** The fs.changed / focus-return auto-refresh (D47) now repaints when the
+change lands in a directory **currently on screen** — the root or an unfolded dir — via the
+new `nav_dir_visible {d}` helper, replacing the old "== the one shown dir" test. A change
+under a *folded* folder is correctly ignored until it's unfolded.
+
+**File-management verbs (extends D48).** New File / New Folder now target the **clicked
+row's own directory** (a dir row → inside it, and it **auto-unfolds** so the new entry shows;
+a file row → alongside it; nothing selected → the root) rather than one global "shown dir",
+and **Rename / Delete apply to any real file/dir row** — the tree has no `..` placeholder to
+exclude, so the old `dirname == nav_dir` gate is dropped (the no-folder placeholder is still
+excluded). The target dir threads through `nav_new`/`fs_apply_create`.
+
+**Tests** (`smoke.tcl`, headless drives the procs directly): collapsed root lists only its
+own rows; `nav_toggle_expand` unfolds a subdir (twisty flips, child renders indented, in
+order) and re-folds; the fs.changed guard skips a change under a folded dir; New File targets
+the row's own dir and auto-unfolds a subdir on create; the existing git-gutter pane tests
+(dir rollup `·`, file `M`/`?`) still pass over the tree; `nav_col_is_arrow` is checked as a
+column truth-table (arrow vs name at depth 0/1, files never an arrow). Out of scope:
+persisting expand-state across launches; drag-to-reorder / drag between folders.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

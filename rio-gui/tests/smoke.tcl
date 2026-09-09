@@ -261,16 +261,25 @@ proc nav_click {row} {
 	rl_select .pfiles.well.body $row ; rl_activate .pfiles.well.body
 }
 
+# Row payloads {type abspath}, in render order — used for the tree/indent assertions
+# (indent shifts the label text, so payloads are the depth-independent thing to check).
+proc nav_payloads {} {
+	set b .pfiles.well.body
+	set out {}
+	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} { lappend out [rl_payload $b $i] }
+	return $out
+}
 set tf [file tempfile tpath] ; close $tf
 set proj [file join [file dirname $tpath] riogui-nav-[clock clicks]]
 file mkdir [file join $proj sub]
+set inf [open [file join $proj sub inner.txt] w] ; puts -nonewline $inf "INNER\n" ; close $inf
 set zf [open [file join $proj zeta.txt] w] ; puts -nonewline $zf "ZETA\n" ; close $zf
 
 ok "pane: empty before folder open" [nav_labels] {{Open a folder…}}
 open_folder $proj
-ok "pane: nav_dir is the root"   $::nav_dir              [file normalize $proj]
+ok "pane: nav_root is the root"  $::nav_root             [file normalize $proj]
 ok "pane: header is project name" [.pfiles.hdr.head cget -text] [file tail $proj]
-ok "pane: dirs then files"        [nav_labels]           {sub/ zeta.txt}
+ok "pane: root collapsed shows dirs then files" [nav_labels] {sub/ zeta.txt}
 # Bands: a selection covers exactly its row (through the newline, so it spans full
 # width); a hover tags the hovered row. (D42 rich-list.)
 rl_select .pfiles.well.body 0
@@ -281,12 +290,30 @@ update idletasks
 ok "pane: scrollbar hidden when list fits" \
 	[expr {[lsearch -exact [pack slaves .pfiles.well] .pfiles.well.sb] < 0}] 1
 
-# Descend into the subdir (row 0 = sub/), then back up via "..".
+# Unfold the subdir (row 0 = sub/) in place: its child renders indented right below it,
+# the twisty flips ▸→▾, and the subdir stays put (a tree, not a descend). Then fold it back.
+set subp [file join $::nav_root sub]
 nav_click 0
-ok "pane: descended into sub"     $::nav_dir             [file normalize [file join $proj sub]]
-ok "pane: subdir shows .. first"  [lindex [nav_labels] 0] ".."
+ok "pane: sub is now unfolded"    [dict exists $::nav_expanded $subp] 1
+ok "pane: unfolded child in order" [nav_payloads] \
+	[list [list dir $subp] [list file [file join $subp inner.txt]] [list file [file join $::nav_root zeta.txt]]]
+# The sub/ row's glyph sits just past the 2-char gutter (index 2) and flips ▸→▾ on unfold.
+ok "pane: twisty shows ▾ unfolded" [string index [.pfiles.well.body get 1.0 "1.0 lineend"] 2] "▾"
+# The depth-1 child sits one indent step (two spaces) right of the gutter, so its glyph
+# column (index 4) holds the file glyph while the dir's glyph sat at index 2.
+ok "pane: child row is indented"   [string range [.pfiles.well.body get 2.0 "2.0 lineend"] 2 4] "  ▪"
 nav_click 0
-ok "pane: ascended to root"       $::nav_dir             [file normalize $proj]
+ok "pane: folded back to root"    [dict exists $::nav_expanded $subp] 0
+ok "pane: folded shows just root" [nav_payloads] \
+	[list [list dir $subp] [list file [file join $::nav_root zeta.txt]]]
+# Click routing (D87): on a dir row the arrow is everything left of the name, which starts at
+# column 2+2·depth+2 — a click there unfolds, a click on the name is left for double-click; a
+# file row has no arrow. (nav_col_is_arrow is the pixel-free core of nav_b1's decision.)
+ok "arrow: depth-0 dir glyph col is arrow" [nav_col_is_arrow dir 0 2] 1
+ok "arrow: depth-0 dir name col not arrow" [nav_col_is_arrow dir 0 4] 0
+ok "arrow: depth-1 dir arrow at col 5"     [nav_col_is_arrow dir 1 5] 1
+ok "arrow: depth-1 dir name at col 6"      [nav_col_is_arrow dir 1 6] 0
+ok "arrow: a file row is never an arrow"   [nav_col_is_arrow file 0 2] 0
 
 # fs.changed repaints the files pane when the write lands in the shown directory, so an
 # agent-created file appears without a manual reload (D47). Create a file on disk behind
@@ -295,9 +322,9 @@ set nf [open [file join $proj gamma.txt] w] ; puts -nonewline $nf "G\n" ; close 
 ok "pane: new file absent pre-event"   [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 0
 dispatch_event [dict create event fs.changed params [dict create path [file join $proj gamma.txt]]]
 ok "pane: fs.changed reveals new file" [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 1
-# A write OUTSIDE the shown directory does not repaint it (single-dir navigator): create
-# delta.txt in the root but signal a change under sub/ — the guard skips the repaint, so
-# delta.txt must stay hidden until something legitimately refreshes.
+# A write under a FOLDED directory does not repaint the pane (nav_dir_visible is false for
+# sub/, which we folded back above): create delta.txt in the root but signal a change under
+# sub/ — the guard skips the repaint, so delta.txt must stay hidden until a real refresh.
 set df [open [file join $proj delta.txt] w] ; puts -nonewline $df "D\n" ; close $df
 dispatch_event [dict create event fs.changed params [dict create path [file join $proj sub deep.txt]]]
 ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 0
@@ -330,11 +357,11 @@ nav_click 1
 ok "pane: file opened in a tab"   [bufget $::cur path]   [file join $proj zeta.txt]
 ok "pane: opened file's text"     [rio::doc::text $::cur] "ZETA\n"
 
-# --- file-management context actions (D48) -----------------------------------
+# --- file-management context actions (D48/D87) -------------------------------
 # The verbs sit between Copy Path and any git items; with no repo here the row menu is
-# just Open/Copy Path + the four fs verbs. On the shown dir's own entry all four appear;
-# on a ".." row (a dir whose parent is NOT the shown dir) only New File/New Folder do,
-# never Rename/Delete of the parent.
+# just Open/Copy Path + the four fs verbs. Every real row (file OR dir) now offers all
+# four — the tree has no ".." placeholder to exclude (D87) — and New File/Folder target
+# the row's OWN directory: a file row → its parent, a dir row → inside that dir.
 proc menu_labels2 {m} {
 	set out {}
 	for {set i 0} {$i <= [$m index end]} {incr i} {
@@ -346,19 +373,29 @@ menu .fsm -tearoff 0
 nav_menu_build .fsm [list file [file join $proj zeta.txt]]
 ok "fs-menu: file row has all four verbs" [menu_labels2 .fsm] \
 	[list Open {Copy Path} --- {New File…} {New Folder…} Rename… Delete…]
-.fsm delete 0 end ; nav_menu_build .fsm [list dir [file dirname $proj]]
-ok "fs-menu: .. row omits Rename/Delete" [menu_labels2 .fsm] [list Open --- {New File…} {New Folder…}]
+ok "fs-menu: New File targets file's parent" \
+	[lindex [.fsm entrycget 3 -command] 1] [file join $proj]
+.fsm delete 0 end ; nav_menu_build .fsm [list dir [file join $proj sub]]
+ok "fs-menu: dir row also has all four" [menu_labels2 .fsm] \
+	[list Open --- {New File…} {New Folder…} Rename… Delete…]
+ok "fs-menu: New File targets the dir itself" \
+	[lindex [.fsm entrycget 2 -command] 1] [file join $proj sub]
 destroy .fsm
 
-# fs_apply_create writes through the core and the pane shows it after a repaint.
-fs_apply_create file kappa.txt
+# fs_apply_create writes through the core (into the given dir) and the pane shows it.
+fs_apply_create $proj file kappa.txt
 ok "fs: created file on disk"   [file isfile [file join $proj kappa.txt]] 1
 ok "fs: created file in pane"   [expr {[lsearch -exact [nav_labels] kappa.txt] >= 0}] 1
-fs_apply_create dir newdir
+fs_apply_create $proj dir newdir
 ok "fs: created folder on disk" [file isdirectory [file join $proj newdir]] 1
 ok "fs: created folder in pane" [expr {[lsearch -exact [nav_labels] newdir/] >= 0}] 1
+# Creating inside a subdir auto-unfolds it, so the new entry is on screen (D87).
+fs_apply_create [file join $::nav_root sub] file within.txt
+ok "fs: sub auto-unfolded on create" [dict exists $::nav_expanded [file join $::nav_root sub]] 1
+ok "fs: new file under sub is shown"  [expr {[lsearch -exact [nav_payloads] [list file [file join $::nav_root sub within.txt]]] >= 0}] 1
+dict unset ::nav_expanded [file join $::nav_root sub] ; populate_nav   ;# refold for the rows that follow
 # An invalid (non-single-component) name is refused: nothing created, no crash.
-fs_apply_create file "a/b.txt"
+fs_apply_create $proj file "a/b.txt"
 ok "fs: nested name refused"    [file exists [file join $proj a]] 0
 
 # Rename a file that is open in a tab: disk renamed AND the tab retargets (path + title).

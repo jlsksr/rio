@@ -58,7 +58,9 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   unsplits. When a window is too narrow to show every tab, **◂ ▸ arrows** page through
   them, **View ▸ *Switch to Tab…*** lists them all by name in a picker (with a path hint, so same‑named files are easy to tell apart), and **View ▸ *Multi‑Line Tabs***
   wraps them onto several rows instead.
-- **Files & git** — open a project folder and browse it in a side pane (dotfiles are
+- **Files & git** — open a project folder and browse it in a side pane as an **unfoldable
+  tree** — click a folder's arrow (or double-click its name) to unfold it in place and see the
+  nested directories you want, fold it back to tidy up (dotfiles are
   hidden by default, like `ls`; a ◉/◌ button in the pane header — or *View ▸ Show Hidden
   Files* — reveals them); **create, rename, and delete** files and folders from the row
   menu (deletes confirm first);
