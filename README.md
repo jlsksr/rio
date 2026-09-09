@@ -86,7 +86,10 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
   it runs, confined to your project and time-boxed. A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
   every write waits for you (or opt into *Settings ▸ Auto-accept edits*) — and **every
-  command always waits for you**, no matter that setting. You can
+  command always waits for you**, unless you mark it **trusted**: an **Always allow**
+  button on the command remembers it (the program, or that exact command) so it stops
+  asking — standing approval you author and manage under *Settings ▸ Agent: Allowed
+  commands…*. You can
   **shape how it works** from *Settings ▸ Agent Prompts…*: a **system prompt** (your
   standing instructions for every project), a **project prompt** for the open folder, and
   a **per-provider prompt** applied only while a chosen provider (Claude, or an

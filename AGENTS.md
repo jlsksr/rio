@@ -31,7 +31,8 @@ Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
 preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
 tree, a git read pane, a side-by-side compare view, live theming, and a working
-**agent** (read + propose-edit + gated run-command, Claude over the official
+**agent** (read + propose-edit + gated run-command with an opt-in trusted-command
+allow-list, Claude over the official
 Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
 to a private core it spawns locally, or a socket to a remote core; **there is no
 in-process path** (D29/D30 retired it). Still mapped-but-unbuilt: the TUI and the
@@ -51,7 +52,8 @@ code now backs them.
 > GUI existed; that bar is now met, so its **core-orchestration slice is built
 > (D26, slices 1–5; over the channel since D30 P3)** — the `agent.*` protocol, the
 > provider interface, an in-box Claude provider over the official Anthropic API
-> (API key), read + propose-edit, and gated run-command (D83). The agent's first providers ride the
+> (API key), read + propose-edit, and gated run-command (D83) with an opt-in
+> human-authored allow-list for trusted commands (D84). The agent's first providers ride the
 > *thin* protocol-participant transport (essentially D11), **not** the full
 > platform. The **marketplace** (O11) is deferred further still. Depth in this
 > design log ≠ priority to build.
@@ -978,8 +980,9 @@ tested offline (approve/reject round-trips, auto-accept, the stale-approve error
 the prepare refusals, `fs.write` incl. parent-dir creation) and the Claude suite is
 **unchanged** — the proof it's provider-agnostic. **Remaining:** a live write
 against `api.anthropic.com`, and the exposed-as-config UI for the write policy.
-*(The run-command tool landed later as **D83** — gated, async, timeout-bounded;
-no allow-list, since D53 makes approval the gate.)*
+*(The run-command tool landed later as **D83** — gated, async, timeout-bounded —
+then **D84** added an opt-in, human-authored allow-list: standing approval that skips
+the bar for commands the user marked trusted, still human-in-the-loop per D53.)*
 
 **Amendment — an approved write re-resolves its target (landed).** The gate had a
 time-of-check/time-of-use hole: `prepare_write` located the edit's coordinates when
@@ -4100,7 +4103,9 @@ tool_result, so the model knows it didn't complete). `reset`/`_seal_dangling` ca
 command (kill + drop the coroutine) so a mid-run reset leaks no process.
 
 **Confinement = approval + argv discipline (no allow-list).** Per D53 the gate is approval, **not**
-a ban, so there's deliberately no command allow-list. The rails are: **argv-only, no shell** (the
+a ban, so there's deliberately no command allow-list. *(D84 later adds an **opt-in**, human-authored
+allow-list — standing approval, still human-in-the-loop; it changes only whether the bar appears,
+never these rails.)* The rails are: **argv-only, no shell** (the
 tool description drills this into the model — no pipes/redirects/globs/`&&`); **cwd confined to the
 project root** (reuses `_confine`); and `prepare_exec` **refuses any argv element Tcl's `exec` would
 read as a redirection or pipe** (`<`, `>`, `2>`, `|`, `&`, …) — closing the residual exec
@@ -4124,6 +4129,48 @@ model read `exit 0` + the stdout back — the provider-agnostic gate proven end 
 model. **Remaining** (deferred, each a later add): **streaming** a command's output as it runs and
 a per-command **Stop/cancel** (both want the D10 event-over-time model); output in its **own dock
 panel** rather than inline.
+
+---
+
+### D84 — Agent command allow-list (standing approval)
+
+D83 made `run_command` **always gated** — every command waits for a human. That is the right
+*default*, but it re-asks even for the command you run twenty times an hour (`pytest`, `npm test`).
+jka asked for what other agent frontends offer: mark a command **trusted** so it stops re-prompting
+— "just like the pre-prompts thing" (the per-provider prompts of D79, persisted files in the XDG
+agent dir).
+
+**This refines D53/D83, it does not contradict them.** D53's line is **autonomy, not capability**:
+the concern is a machine acting *unwatched*. A human-authored allow-list is **standing approval** —
+a person decided, in advance, that `pytest` is fine — so it stays a human-in-the-loop act, not
+cron/unattended autonomy ([[llm-integration-scope]]). The earlier "no allow-list" wording is
+narrowed to: **no *silent* autonomy; a human authors every trust rule.** The allow-list skips
+**only** the approval bar — an allowed command still passes the full `prepare_exec` gauntlet
+(redirection guard, `_confine`d cwd, timeout clamp). Nothing else is loosened.
+
+Two decisions (jka): **default trust = the program** (`argv[0]` — trust every invocation, the
+"allow `npm *`" mental model), with the **exact command line selectable** per click; **global**
+scope — one list for every project, persisted like D79's prompts.
+
+**Shape.** A rule is an **argv prefix** (a list of leading tokens); a command matches when its argv
+*starts with* a rule's tokens (exact per-token compare — no shell, no globs). New core module
+[`rio::agent::allow`](rio-core/agent-allow.tcl) owns an `allow.list` in the XDG agent dir (one
+Tcl-list rule per line, `#`/blank ignored, hand-editable), with `matches`/`add`/`remove`/`rules`
+and a test override. `_do_exec` consults `matches` and rides a new **`auto`** flag on
+`agent.propose`: `auto 1` skips the approval yield and runs immediately (still async, still
+registered for reset/seal); `auto 0` parks for the bar as before. Ops `agent.allow.list`/`.add`/
+`.remove` (list = a wire shape-encoded array of string-arrays). GUI: an `auto` command previews
+with **no bar** and does not pause the busy indicator; a gated command's bar gains an **"Always
+allow ▾"** menubutton (program first, exact second — each remembers the rule *and* approves the one
+in front of the user); a **Settings ▸ Agent: Allowed commands…** manager lists rules with Add/Remove
+(mirrored in Preferences, the "second door"). *(The program-vs-exact choice is a per-click menu, not
+a persistent mode — flipping a global toggle back and forth is worse UX than choosing at the moment
+of trust.)* Tested offline: prefix-match semantics, add/remove/dedup + persistence round-trip, the
+empty-rule guard, the three ops; the gated loop's **auto-runs-without-approval** and
+**unmatched-still-parks** paths; GUI smoke covers the no-bar auto path, the menubutton's
+presence/absence and its two entries. **Remaining** (deferred): **per-project** scope (global was
+chosen); a richer rules editor (regex, per-cwd, session-only trust). *Live-provider verification
+pending jka's go (costs tokens).*
 
 ---
 
@@ -4533,8 +4580,10 @@ Both renderings come from the **same** region model (D13) and layout policy
   (always gated — auto-accept is edits-only), run **asynchronously** via
   `rio::exec::start` and **timeout-bounded**, argv-only with a redirection-token
   guard and cwd confined to the project — which **closes** exec's redirection-token
-  surface on the agent path and settles the allow-list question (D53: the gate is
-  approval, not a ban).) Still open here: surfacing the write-policy flags as
+  surface on the agent path. **D84** then adds an **opt-in, human-authored allow-list**
+  (standing approval — a command the user marked trusted skips the bar; the rails still
+  run), refining D53 to "no *silent* autonomy, a human authors every rule" rather than
+  "no allow-list at all".) Still open here: surfacing the write-policy flags as
   persisted config (D21), the permission model for plugin-contributed tools, and a
   truncation/scrollback rule for long command output surfaced in `chat` (the
   per-read size cap applies today; streaming output over time is deferred with D10).

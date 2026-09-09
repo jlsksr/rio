@@ -231,11 +231,20 @@ for later:
   (`run_command`) through the same propose/approve gate as an edit, but **always
   gated** (auto-accept is edits-only), **argv-only** (no shell) with a redirection-
   token guard, **cwd-confined** to the project, run **asynchronously** so the core
-  stays responsive, and **timeout-bounded** (default 120 s, max 600 s). No
-  allow-list (D53: the gate is approval, not a ban). Verified live against ChatGPT.
+  stays responsive, and **timeout-bounded** (default 120 s, max 600 s). Verified
+  live against ChatGPT.
+- **Trusted-command allow-list** — *landed* (AGENTS.md D84). An **opt-in**,
+  human-authored list of commands that run **without** the approval bar — standing
+  approval, not autonomy (a person authors every rule; refines D53). A rule is an
+  **argv prefix**: a one-word rule (`pytest`) trusts every run of that program, more
+  words (`git status`) trust only that start. **Global** (kept with your rio settings,
+  applies to every project). Added one-click from the bar's **Always allow** menu
+  (program by default, exact command optional) or managed in **Settings ▸ Agent:
+  Allowed commands…**; it skips **only** the bar — `prepare_exec`'s guards still run.
   Still wanted: **streaming** a command's output as it runs and a per-command
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
-  **own dock panel** rather than inline in the chat.
+  **own dock panel** rather than inline in the chat; **per-project** allow-list scope;
+  a richer rules editor.
 
 ## Remote / transport
 
