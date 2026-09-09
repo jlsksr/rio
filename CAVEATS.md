@@ -63,6 +63,28 @@ design limit that surprises, append it to the matching section.
 - **Planned.** Nothing. Windows cannot distinguish "killed" from "exited 1", so this is a
   property of the platform, not a gap to close.
 
+### "Open Folder…" needs a double-click to enter the folder (X11)
+
+- **Symptom.** In the local **Open Folder…** dialog on Linux, a **single click** on a folder
+  highlights it but pressing **Open** does not open it — you must **double-click into** the
+  folder first (so it becomes the dialog's current directory) and then press Open.
+- **Cause.** rio's local folder chooser is Tk's **native `tk_chooseDirectory`**. On X11 that is
+  Tk's own scripted dialog, whose OK/Open button returns the directory you have **entered**, not
+  the one merely highlighted in the list — a long-standing behaviour of that dialog with no
+  option flag to change it. It is not rio code, so we can't fix it from our side without
+  replacing the dialog.
+- **Where it's fine.** **Windows and macOS**, where `tk_chooseDirectory` renders the **native
+  OS folder dialog** and single-click-then-Open works as expected. And **remote mode on every
+  platform**: there the native choosers browse the wrong (client) disk, so rio substitutes its
+  **own** `fs.list` browser (`remote_browse_dialog`), whose Open **does** open the highlighted
+  folder (AGENTS.md D29/D30).
+- **Mitigation in rio.** Keeping the **native** dialog locally is a deliberate choice (jka) for
+  the native look and feel, accepting this wart as the trade. Every other way to open a project
+  is unaffected — a folder on the command line, or double-clicking into it in the dialog.
+- **Planned.** None. Routing local Open Folder through rio's own `fs.list` browser (as remote
+  mode already does) would fix it but drop the OS-native chooser; that swap was considered and
+  **declined** in favour of the native dialog.
+
 ---
 
 ## Behavioural limitations
