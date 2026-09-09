@@ -237,14 +237,15 @@ for later:
   human-authored list of commands that run **without** the approval bar — standing
   approval, not autonomy (a person authors every rule; refines D53). A rule is an
   **argv prefix**: a one-word rule (`pytest`) trusts every run of that program, more
-  words (`git status`) trust only that start. **Global** (kept with your rio settings,
-  applies to every project). Added one-click from the bar's **Always allow** menu
-  (program by default, exact command optional) or managed in **Settings ▸ Agent:
-  Allowed commands…**; it skips **only** the bar — `prepare_exec`'s guards still run.
+  words (`git status`) trust only that start. **Three scopes mirror the prompt
+  layers** — **global** (every project), **per-provider** (only while that provider
+  runs), and **project** (`.rio/`) — and a command is trusted if **any active scope**
+  allows it. Added one-click from the bar's **Always allow** menu (program or exact ×
+  scope submenu) or managed per-scope in **Settings ▸ Agent: Allowed commands…**; it
+  skips **only** the bar — `prepare_exec`'s guards still run.
   Still wanted: **streaming** a command's output as it runs and a per-command
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
-  **own dock panel** rather than inline in the chat; **per-project** allow-list scope;
-  a richer rules editor.
+  **own dock panel** rather than inline in the chat; a richer rules editor.
 
 ## Remote / transport
 

@@ -4148,29 +4148,42 @@ narrowed to: **no *silent* autonomy; a human authors every trust rule.** The all
 **only** the approval bar — an allowed command still passes the full `prepare_exec` gauntlet
 (redirection guard, `_confine`d cwd, timeout clamp). Nothing else is loosened.
 
-Two decisions (jka): **default trust = the program** (`argv[0]` — trust every invocation, the
-"allow `npm *`" mental model), with the **exact command line selectable** per click; **global**
-scope — one list for every project, persisted like D79's prompts.
+Decisions (jka): **default trust = the program** (`argv[0]` — trust every invocation, the "allow
+`npm *`" mental model), with the **exact command line selectable** per click; and **three scopes
+that mirror the system-prompt layers** (D79/D70) one-to-one — **global** (`allow.list` in the XDG
+agent dir; every project), **per-provider** (`providers/<name>.allow.list` there; active only while
+that provider runs, echo excluded), and **project** (`.rio/allow.list` at the project root). *(The
+first cut shipped global-only; jka asked why the allow-list shouldn't layer exactly as the prompts
+do — there was no reason, so it now does.)*
+
+**Union semantics.** A command is trusted if **any currently-active layer** allows it: global
+always; project when a folder is open; the active provider's layer when a provider runs. No
+precedence — a match anywhere is enough — the allow-list analog of how the prompt layers all apply
+together.
 
 **Shape.** A rule is an **argv prefix** (a list of leading tokens); a command matches when its argv
-*starts with* a rule's tokens (exact per-token compare — no shell, no globs). New core module
-[`rio::agent::allow`](rio-core/agent-allow.tcl) owns an `allow.list` in the XDG agent dir (one
-Tcl-list rule per line, `#`/blank ignored, hand-editable), with `matches`/`add`/`remove`/`rules`
-and a test override. `_do_exec` consults `matches` and rides a new **`auto`** flag on
+*starts with* a rule's tokens (exact per-token compare — no shell, no globs). Core module
+[`rio::agent::allow`](rio-core/agent-allow.tcl) resolves the three per-scope files (each one
+Tcl-list rule per line, `#`/blank ignored, hand-editable) and unions the active ones in `matches`;
+`rules`/`add`/`remove` take a `{scope name}`; an XDG test override covers global+provider, an open
+temp project covers project. `_do_exec` consults `matches` and rides a new **`auto`** flag on
 `agent.propose`: `auto 1` skips the approval yield and runs immediately (still async, still
 registered for reset/seal); `auto 0` parks for the bar as before. Ops `agent.allow.list`/`.add`/
-`.remove` (list = a wire shape-encoded array of string-arrays). GUI: an `auto` command previews
-with **no bar** and does not pause the busy indicator; a gated command's bar gains an **"Always
-allow ▾"** menubutton (program first, exact second — each remembers the rule *and* approves the one
-in front of the user); a **Settings ▸ Agent: Allowed commands…** manager lists rules with Add/Remove
-(mirrored in Preferences, the "second door"). *(The program-vs-exact choice is a per-click menu, not
-a persistent mode — flipping a global toggle back and forth is worse UX than choosing at the moment
-of trust.)* Tested offline: prefix-match semantics, add/remove/dedup + persistence round-trip, the
-empty-rule guard, the three ops; the gated loop's **auto-runs-without-approval** and
-**unmatched-still-parks** paths; GUI smoke covers the no-bar auto path, the menubutton's
-presence/absence and its two entries. **Remaining** (deferred): **per-project** scope (global was
-chosen); a richer rules editor (regex, per-cwd, session-only trust). *Live-provider verification
-pending jka's go (costs tokens).*
+`.remove` grew optional `scope`/`name` (default `global`/active provider; provider validated as a
+registered non-echo name, project needs an open folder). GUI: an `auto` command previews with **no
+bar** and does not pause the busy indicator; a gated command's bar gains an **"Always allow ▾"**
+menubutton whose two cascades (program first, exact second) each open a **scope submenu** (all
+projects / this project / *provider* only), remembering the rule in the chosen scope *and* approving
+the one in front of the user; a **Settings ▸ Agent: Allowed commands…** manager has a **scope
+selector** (mirroring the Agent Prompts provider chooser) and lists that scope's rules with
+Add/Remove (mirrored in Preferences). *(Program-vs-exact and scope are per-click choices, not
+persistent modes — deciding at the moment of trust beats a toggle you flip back and forth.)* Tested
+offline: prefix-match, the **scope union** and each layer's isolation (a provider rule inert under a
+different/echo provider; a project rule inert with no project open), add/remove/dedup + persistence,
+the empty-rule guard, the scope-aware ops; the gated loop's **auto-runs-without-approval** and
+**unmatched-still-parks** paths; GUI smoke covers the no-bar auto path and the cascade/scope-submenu
+structure. **Remaining** (deferred): a richer rules editor (regex, per-cwd, session-only trust).
+*Live-provider verification pending jka's go (costs tokens).*
 
 ---
 
