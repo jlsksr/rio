@@ -4182,8 +4182,12 @@ offline: prefix-match, the **scope union** and each layer's isolation (a provide
 different/echo provider; a project rule inert with no project open), add/remove/dedup + persistence,
 the empty-rule guard, the scope-aware ops; the gated loop's **auto-runs-without-approval** and
 **unmatched-still-parks** paths; GUI smoke covers the no-bar auto path and the cascade/scope-submenu
-structure. **Remaining** (deferred): a richer rules editor (regex, per-cwd, session-only trust).
-*Live-provider verification pending jka's go (costs tokens).*
+structure. **Verified live against ChatGPT** (remote core over the SSH-tunnel transport): with an
+`echo` rule pre-added in the **global** scope, then in the **openai per-provider** scope, a real turn
+had the model call `run_command`, the core raised `agent.propose` with **`auto 1`**, and the command
+ran to `exit 0` with **zero approvals issued** — the standing-approval auto-run path proven end to end
+for both scopes with a real provider. **Remaining** (deferred): a richer rules editor (regex, per-cwd,
+session-only trust).
 
 ---
 

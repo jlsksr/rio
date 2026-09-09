@@ -242,7 +242,8 @@ for later:
   runs), and **project** (`.rio/`) — and a command is trusted if **any active scope**
   allows it. Added one-click from the bar's **Always allow** menu (program or exact ×
   scope submenu) or managed per-scope in **Settings ▸ Agent: Allowed commands…**; it
-  skips **only** the bar — `prepare_exec`'s guards still run.
+  skips **only** the bar — `prepare_exec`'s guards still run. Verified live against
+  ChatGPT (global + per-provider auto-run, zero approvals).
   Still wanted: **streaming** a command's output as it runs and a per-command
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
   **own dock panel** rather than inline in the chat; a richer rules editor.
