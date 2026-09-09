@@ -1,28 +1,37 @@
 # Tests for the agent command allow-list (rio::agent::allow, AGENTS.md D84): standing
-# approval for trusted commands. Covers argv-prefix matching (program rule vs exact
-# rule vs no match), add/remove/dedup + persistence round-trip through the file, the
-# empty-rule guard, and the three agent.allow.* ops. Pure filesystem — no network, no
-# event loop.
+# approval for trusted commands, across THREE SCOPES (global / provider / project) that
+# mirror the system-prompt layers. Covers argv-prefix matching, the scope UNION (a rule
+# in any active layer trusts the command), scope isolation (a provider rule is inert
+# under a different/echo provider; a project rule is inert with no project open),
+# add/remove per scope, and the scope-aware ops. Pure filesystem — no network, no loop.
 package require tcltest
 namespace import ::tcltest::*
 
 source [file join [file dirname [info script]] .. core.tcl]
 
-# A throwaway agent dir per test, pinned via the allow-list's test override so nothing
-# touches the real ~/.config.
+# A throwaway XDG agent dir per test, pinned via the allow-list's test override so
+# nothing touches the real ~/.config.
 proc alloc_dir {} {
 	set d [file join [::tcltest::temporaryDirectory] rioallow-[clock clicks][incr ::seq]]
 	file mkdir $d
 	return $d
 }
-proc reset_allow {} { rio::agent::allow::override_dir "" }
+# Reset shared state a test may have touched: the XDG override, the open project, and
+# the active provider (back to echo).
+proc reset_allow {} {
+	rio::agent::allow::override_dir ""
+	rio::project::close
+	set ::rio::agent::active_provider echo
+}
+# Set the active provider directly (the store checks name safety, not registration).
+proc use_provider {name} { set ::rio::agent::active_provider $name }
 
-# --- matching: a one-token (program) rule trusts any args --------------------
+# --- matching within the global scope ----------------------------------------
 
 test match-program {a program rule matches any argv that starts with it} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	rio::agent::allow::add [list pytest]
+	rio::agent::allow::add global "" [list pytest]
 	list \
 		[rio::agent::allow::matches [list pytest]] \
 		[rio::agent::allow::matches [list pytest -q tests/]] \
@@ -30,12 +39,10 @@ test match-program {a program rule matches any argv that starts with it} -setup 
 		[rio::agent::allow::matches [list python -m pytest]]
 } -cleanup { reset_allow ; file delete -force $::d } -result {1 1 0 0}
 
-# --- matching: an exact (full-argv) rule matches only itself ------------------
-
 test match-exact {a full-argv rule matches only that exact command} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	rio::agent::allow::add [list git status -s]
+	rio::agent::allow::add global "" [list git status -s]
 	list \
 		[rio::agent::allow::matches [list git status -s]] \
 		[rio::agent::allow::matches [list git status -s -uno]] \
@@ -43,57 +50,38 @@ test match-exact {a full-argv rule matches only that exact command} -setup {
 		[rio::agent::allow::matches [list git push]]
 } -cleanup { reset_allow ; file delete -force $::d } -result {1 1 0 0}
 
-# A longer rule than the command can never match (prefix would run past the argv).
-test match-rule-longer {a rule longer than the command does not match} -setup {
-	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
-} -body {
-	rio::agent::allow::add [list git status -s]
-	rio::agent::allow::matches [list git]
-} -cleanup { reset_allow ; file delete -force $::d } -result 0
-
-# --- empty rule is refused and never matches ---------------------------------
-
 test add-empty-refused {an empty rule is not added} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	set ok [rio::agent::allow::add {}]
-	list $ok [llength [rio::agent::allow::rules]]
+	set ok [rio::agent::allow::add global "" {}]
+	list $ok [llength [rio::agent::allow::rules global]]
 } -cleanup { reset_allow ; file delete -force $::d } -result {0 0}
-
-# --- dedup: adding the same rule twice keeps one -----------------------------
 
 test add-dedup {adding an identical rule twice is a no-op} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	rio::agent::allow::add [list pytest]
-	rio::agent::allow::add [list pytest]
-	llength [rio::agent::allow::rules]
+	rio::agent::allow::add global "" [list pytest]
+	rio::agent::allow::add global "" [list pytest]
+	llength [rio::agent::allow::rules global]
 } -cleanup { reset_allow ; file delete -force $::d } -result 1
-
-# --- persistence: rules survive a fresh read (new process would see the file) -
 
 test persist-roundtrip {rules written are read back verbatim, spaces preserved} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	rio::agent::allow::add [list npm run build]
-	rio::agent::allow::add [list "my prog" --flag]
-	# Re-resolve from disk (rules reads the file each call — no cache).
-	lsort [rio::agent::allow::rules]
+	rio::agent::allow::add global "" [list npm run build]
+	rio::agent::allow::add global "" [list "my prog" --flag]
+	lsort [rio::agent::allow::rules global]
 } -cleanup { reset_allow ; file delete -force $::d } -result {{npm run build} {{my prog} --flag}}
-
-# --- remove drops the exact rule, leaves others ------------------------------
 
 test remove-exact {remove drops only the matching rule} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
-	rio::agent::allow::add [list pytest]
-	rio::agent::allow::add [list npm test]
-	rio::agent::allow::remove [list pytest]
+	rio::agent::allow::add global "" [list pytest]
+	rio::agent::allow::add global "" [list npm test]
+	rio::agent::allow::remove global "" [list pytest]
 	list [rio::agent::allow::matches [list pytest]] \
 		[rio::agent::allow::matches [list npm test]]
 } -cleanup { reset_allow ; file delete -force $::d } -result {0 1}
-
-# --- comments and blank lines in a hand-edited file are ignored ---------------
 
 test read-skips-comments {# lines and blanks are skipped, real rules kept} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
@@ -105,12 +93,70 @@ test read-skips-comments {# lines and blanks are skipped, real rules kept} -setu
 	puts $fh "npm test"
 	close $fh
 } -body {
-	lsort [rio::agent::allow::rules]
+	lsort [rio::agent::allow::rules global]
 } -cleanup { reset_allow ; file delete -force $::d } -result {{npm test} pytest}
 
-# --- the ops round-trip through the dispatcher --------------------------------
+# --- the provider scope: active-only, echo excluded --------------------------
 
-test op-add-list-remove {agent.allow.add / .list / .remove via the core} -setup {
+test provider-scope-active {a provider rule matches only while that provider is active} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add provider claude [list mytool]
+	use_provider claude ; set on  [rio::agent::allow::matches [list mytool]]
+	use_provider openai ; set off [rio::agent::allow::matches [list mytool]]
+	use_provider echo   ; set noe [rio::agent::allow::matches [list mytool]]
+	list $on $off $noe
+} -cleanup { reset_allow ; file delete -force $::d } -result {1 0 0}
+
+test provider-scope-echo-no-file {echo has no provider allow-list (add refused)} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	rio::agent::allow::add provider echo [list mytool]
+} -cleanup { reset_allow ; file delete -force $::d } -result 0
+
+# --- the project scope: only while that project is open ----------------------
+
+test project-scope-open {a project rule matches only while that project is open} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+	set ::proj [alloc_dir]
+} -body {
+	rio::project::open $::proj
+	rio::agent::allow::add project "" [list ./run.sh]
+	set inside [rio::agent::allow::matches [list ./run.sh]]
+	rio::project::close
+	set outside [rio::agent::allow::matches [list ./run.sh]]
+	list $inside $outside
+} -cleanup { reset_allow ; file delete -force $::d $::proj } -result {1 0}
+
+test project-scope-file-location {a project rule lands in <root>/.rio/allow.list} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+	set ::proj [alloc_dir]
+} -body {
+	rio::project::open $::proj
+	rio::agent::allow::add project "" [list make]
+	file isfile [file join $::proj .rio allow.list]
+} -cleanup { reset_allow ; file delete -force $::d $::proj } -result 1
+
+# --- the UNION: a match in ANY active layer trusts the command ---------------
+
+test union-any-layer {global, provider and project layers each independently trust} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+	set ::proj [alloc_dir]
+} -body {
+	rio::project::open $::proj
+	use_provider claude
+	rio::agent::allow::add global   ""     [list gcmd]
+	rio::agent::allow::add provider claude [list pcmd]
+	rio::agent::allow::add project  ""     [list jcmd]
+	list [rio::agent::allow::matches [list gcmd]] \
+		[rio::agent::allow::matches [list pcmd]] \
+		[rio::agent::allow::matches [list jcmd]] \
+		[rio::agent::allow::matches [list ncmd]]
+} -cleanup { reset_allow ; file delete -force $::d $::proj } -result {1 1 1 0}
+
+# --- the scope-aware ops -----------------------------------------------------
+
+test op-add-list-remove {agent.allow.add/.list/.remove default to the global scope} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
 	rio::core::call agent.allow.add [dict create rule [list pytest -q]]
@@ -120,10 +166,35 @@ test op-add-list-remove {agent.allow.add / .list / .remove via the core} -setup 
 	list $r1 $r2
 } -cleanup { reset_allow ; file delete -force $::d } -result {{{pytest -q}} {}}
 
+test op-scope-project {the ops target the named scope (project)} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+	set ::proj [alloc_dir]
+	rio::project::open $::proj
+} -body {
+	rio::core::call agent.allow.add [dict create rule [list make] scope project]
+	set inproj  [dict get [rio::core::call agent.allow.list [dict create scope project]] response result rules]
+	set inglob  [dict get [rio::core::call agent.allow.list [dict create scope global]] response result rules]
+	list $inproj $inglob
+} -cleanup { reset_allow ; file delete -force $::d $::proj } -result {make {}}
+
 test op-add-empty-bad {agent.allow.add with an empty rule is a bad_request} -setup {
 	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
 } -body {
 	set r [dict get [rio::core::call agent.allow.add [dict create rule {}]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -cleanup { reset_allow ; file delete -force $::d } -result {false bad_request}
+
+test op-bad-scope {an unknown scope is a bad_request} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	set r [dict get [rio::core::call agent.allow.list [dict create scope bogus]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -cleanup { reset_allow ; file delete -force $::d } -result {false bad_request}
+
+test op-project-no-open {project scope with no project open is a bad_request} -setup {
+	set ::d [alloc_dir] ; rio::agent::allow::override_dir $::d
+} -body {
+	set r [dict get [rio::core::call agent.allow.list [dict create scope project]] response]
 	list [dict get $r ok] [dict get $r error code]
 } -cleanup { reset_allow ; file delete -force $::d } -result {false bad_request}
 

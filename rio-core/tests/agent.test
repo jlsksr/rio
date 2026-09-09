@@ -595,7 +595,7 @@ proc ev_auto {id} {
 test agent-exec-allow-auto {an allow-listed command runs with no approval, auto=1} -setup {
 	set ::adir [makeDirectory agxa-allow]
 	rio::agent::allow::override_dir $::adir
-	rio::agent::allow::add [list $::tcl]
+	rio::agent::allow::add global "" [list $::tcl]
 	set ::pdir [makeDirectory agxa]
 	makeFile "puts ok; exit 0" run.tcl $::pdir
 	rio::project::open $::pdir
@@ -616,7 +616,7 @@ test agent-exec-allow-auto {an allow-listed command runs with no approval, auto=
 test agent-exec-unmatched-parks {a command not on the allow-list still parks, auto=0} -setup {
 	set ::adir [makeDirectory agxu-allow]
 	rio::agent::allow::override_dir $::adir
-	rio::agent::allow::add [list some-other-program]
+	rio::agent::allow::add global "" [list some-other-program]
 	set ::pdir [makeDirectory agxu]
 	makeFile "exit 0" run.tcl $::pdir
 	rio::project::open $::pdir

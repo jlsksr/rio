@@ -52,24 +52,50 @@ rio::dispatch::register agent.reset rio::ops::agent_reset
 
 # --- command allow-list (D84) -------------------------------------------------
 #
-# Standing approval for trusted commands: a human-authored allow-list, persisted
-# GLOBALLY in the core's XDG agent dir (D79's home). A rule is an argv PREFIX (a list
-# of leading tokens); a command whose argv starts with a rule's tokens runs without
-# the approval bar (rio::agent::_do_exec consults it, D84). Like every agent setting
-# these are ops, so a remote core owns the list on ITS disk (D30). The list changes
-# ONLY whether the human bar appears — prepare_exec's guards always run.
+# Standing approval for trusted commands: a human-authored allow-list, persisted in the
+# core's XDG agent dir / open project (D79's home). A rule is an argv PREFIX (a list of
+# leading tokens); a command whose argv starts with a rule's tokens runs without the
+# approval bar (rio::agent::_do_exec consults it, D84). THREE SCOPES mirror the prompt
+# layers: `global` (every project), `provider` (the named/active provider only, echo
+# excluded), `project` (the open project's .rio/). `matches` unions the active layers.
+# Like every agent setting these are ops, so a remote core owns the lists on ITS disk
+# (D30). The list changes ONLY whether the human bar appears — prepare_exec always runs.
+#
+# `scope` defaults to `global` and `name` to the active provider, so the pre-scope flat
+# calls still work. Provider `name` is validated as a registered non-echo provider.
+proc rio::ops::_agent_allow_scope {params} {
+	set scope [expr {[dict exists $params scope] ? [dict get $params scope] : "global"}]
+	if {$scope ni {global provider project}} {
+		rio::error::raise bad_request "agent.allow.*: unknown scope '$scope'"
+	}
+	set name [expr {[dict exists $params name] ? [dict get $params name] : ""}]
+	if {$scope eq "provider"} {
+		if {$name eq ""} { set name [rio::agent::provider_name] }
+		if {$name eq "echo"} {
+			rio::error::raise bad_request "the echo provider has no allow-list"
+		}
+		if {$name ni [rio::agent::provider_names]} {
+			rio::error::raise bad_request "unknown agent provider: $name"
+		}
+	}
+	if {$scope eq "project" && [rio::project::root] eq ""} {
+		rio::error::raise bad_request "no project is open"
+	}
+	return [list $scope $name]
+}
 
-# agent.allow.list -> {rules:[[token,…],…]} ; the current allow-list, for a manager
-# view. Each rule is an array of argv-prefix token strings (wire shape encoder, D25).
+# agent.allow.list {?scope? ?name?} -> {rules:[[token,…],…]} ; one scope's list, for a
+# manager view. Each rule is an array of argv-prefix token strings (wire encoder, D25).
 proc rio::ops::agent_allow_list {params} {
-	return [dict create result [dict create rules [rio::agent::allow::rules]]]
+	lassign [_agent_allow_scope $params] scope name
+	return [dict create result [dict create rules [rio::agent::allow::rules $scope $name]]]
 }
 rio::dispatch::register agent.allow.list rio::ops::agent_allow_list
 
-# agent.allow.add {rule} -> {} ; trust an argv prefix. `rule` is a JSON array of
-# strings (the leading tokens) — a one-element rule trusts a program with any args, a
-# full-argv rule trusts only that exact command. An empty rule is bad_request (it would
-# trust everything). Adding a rule already present is a no-op (dedup).
+# agent.allow.add {rule ?scope? ?name?} -> {} ; trust an argv prefix in one scope.
+# `rule` is a JSON array of strings — a one-element rule trusts a program with any args,
+# a full-argv rule trusts only that exact command. An empty rule is bad_request (it
+# would trust everything). Adding a rule already present is a no-op (dedup).
 proc rio::ops::agent_allow_add {params} {
 	if {![dict exists $params rule]} {
 		rio::error::raise bad_request "agent.allow.add requires rule"
@@ -78,18 +104,20 @@ proc rio::ops::agent_allow_add {params} {
 	if {[llength $rule] == 0} {
 		rio::error::raise bad_request "agent.allow.add: rule is empty"
 	}
-	rio::agent::allow::add $rule
+	lassign [_agent_allow_scope $params] scope name
+	rio::agent::allow::add $scope $name $rule
 	return [dict create result {}]
 }
 rio::dispatch::register agent.allow.add rio::ops::agent_allow_add
 
-# agent.allow.remove {rule} -> {} ; forget an exact-equal rule. A rule not present is
-# a no-op.
+# agent.allow.remove {rule ?scope? ?name?} -> {} ; forget an exact-equal rule from one
+# scope. A rule not present is a no-op.
 proc rio::ops::agent_allow_remove {params} {
 	if {![dict exists $params rule]} {
 		rio::error::raise bad_request "agent.allow.remove requires rule"
 	}
-	rio::agent::allow::remove [dict get $params rule]
+	lassign [_agent_allow_scope $params] scope name
+	rio::agent::allow::remove $scope $name [dict get $params rule]
 	return [dict create result {}]
 }
 rio::dispatch::register agent.allow.remove rio::ops::agent_allow_remove
