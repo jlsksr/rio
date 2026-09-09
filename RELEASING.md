@@ -36,14 +36,21 @@ below; none of them blocks the platform claim.
 ### Gate 0 findings — first Windows run (2026-09-02/03)
 
 Windows 11 Pro 22631, Magicsplat Tcl/Tk 8.6.16, Git for Windows 2.55.0.5.
-**Every suite is now green on Windows** except one known hang:
+**Every suite is now green on Windows**, with nothing hanging. Re-verified 2026-09-09
+against `697acd2`, which brought D56–D87 (providers as extensions, the agent's
+run-command tool and its allow-list, the tab strip, the files tree, drag-to-open):
 
 | Suite | Result |
 |-------|--------|
-| `rio-core` | 388 total, **385 passed, 0 failed**, 3 skipped (the `unix`-constrained permission tests) |
+| `rio-core` | 478 total, **475 passed, 0 failed**, 3 skipped (the `unix`-constrained permission tests) |
 | `syntax` | **532 / 532** |
-| `rio-gui` | **923 checks, 0 failed** across smoke, browse, find, highlight, keymap, modes, pipe, remote, repos, session, split, stale, vi |
-| `rio-gui/tests/reconnect.tcl` | **HANGS** — see *Still open* |
+| `plugins/lib` | **9 / 9** |
+| `extensions/claude` | **30 / 30** |
+| `extensions/openai` | **29 / 29** |
+| `rio-gui` | **1218 checks, 0 failed** across all 21 suites |
+
+The earlier note that `reconnect.tcl` hangs was already superseded by finding 7 below
+(it was the test's own teardown, fixed); it passes.
 
 What was **not** a problem, recorded so nobody re-investigates it: the spawned-core
 child + pipe transport (`pipe.tcl` green — `auto_execok tclsh`, the `wish`→`tclsh`
@@ -185,6 +192,32 @@ close that does not even yield to the event loop (a probe written to race it wit
 the close waited on it indefinitely. Now `taskkill /PID $bpid /F` on Windows, `kill`
 elsewhere. **`reconnect.tcl` passes.** Nothing was wrong with reconnect itself.
 
+#### 8. `transport.test` deadlocked its own event loop — **fixed** (2026-09-09)
+
+The shared-transport suite **hung indefinitely** (killed after ten minutes) at
+`transport-stream-200`, despite that test arming a 5s watchdog — the watchdog is armed
+*after* `stream` returns, so it could never fire. The transport itself is fine on
+Windows: driven from a probe it delivered its chunk and a 200 in 165ms.
+
+The fault was the test's own one-shot HTTP server, which shares its process — and so
+its single event loop — with the async client it serves. Its `gets` was **blocking**,
+and `::http` writes the request *from that same loop*: the server sat waiting for
+headers only the starved loop could send. Instrumenting it showed the server reading
+`POST /v1/messages HTTP/1.0` and then hanging on the next line, i.e. a genuinely
+partial request. This is **latent on Linux**, where a loopback connect completes
+promptly enough that the whole request is usually buffered before the accept callback
+first runs — the ordering was never guaranteed there either. The server now reads via
+fileevents; the suite went from a ten-minute hang to 9/9 in two seconds.
+
+#### 9. A killed child's exit code is 1 on Windows, not -1 — **test corrected**
+
+`exec-start-timeout` asserted `exitcode -1` for a command killed by its watchdog. That
+is unix's `CHILDKILLED`; Windows has no signals, so `taskkill /F` leaves an ordinary
+exit 1. The implementation is right on both — `timedout` was correctly 1 — and nothing
+reads the exit code in that case (`format_exec` checks `timedout` first). The test now
+asserts `timedout` plus *non-zero*, and the platform difference is logged in
+[CAVEATS.md](CAVEATS.md), as `exec.tcl`'s own comment asks.
+
 #### Verified against a real remote core (2026-09-03)
 
 Windows GUI → the live `rio-core` on **vps01.jkdata.de** over an SSH tunnel, i.e. a
@@ -218,10 +251,20 @@ though the interactive behaviour is right.
   matters — the **live vps01 core, which predates the field, was confirmed not to send
   it** and the Windows GUI degraded to `/` and browsed correctly anyway. So the
   additive-not-a-protocol-bump claim is tested against a genuine older peer, not only
-  a mock.
-- **`smoke.tcl`'s `pane: scrollbar hidden when list fits` is flaky** — one failure in
-  seven runs, timing-dependent on the pane having repainted. Not a regression (the
-  same build passes the other six); noted so the next person does not chase it as one.
+  a mock. **Re-checked 2026-09-09, now against the updated vps01 core**, closing the
+  other half: it *does* send `fsroot: /`, the Windows client reads that as absolute
+  (its own `file pathtype /` says `volumerelative`, which is exactly the trap D55
+  exists to avoid), and `fs.list /` returns the Linux root's 20 entries. Both a peer
+  that sends the field and one that doesn't are now verified live, not stubbed.
+- ~~**`smoke.tcl`'s `pane: scrollbar hidden when list fits` is flaky**~~ — **fixed, and
+  it was never a flake.** I misdiagnosed it as timing: it was the headless window's
+  *geometry*. X11 gives a toplevel real geometry whether or not it is ever mapped;
+  Windows does not, so a window withdrawn from boot stayed 120x1 and every child
+  collapsed with it — a pane one pixel high never "fits" a two-row list, and the strip
+  measured 47px so every tab past the first overflowed (`tabs.tcl`'s two `few:` checks
+  failed the same way, and `gutter_select.tcl` silently *skipped* its pixel-mapping
+  check). `rio-gui.tcl`'s headless branch now maps the window once, off-screen, before
+  withdrawing it; the sizes survive. All three suites pass and the skipped check runs.
 - **`secret.tcl`'s `0600`/`0700` lock-down is a no-op on NTFS.** The calls are
   `catch`-wrapped, so nothing breaks, but the Claude API key file inherits
   user-profile permissions rather than being explicitly restricted (WINDOWS.md §7).

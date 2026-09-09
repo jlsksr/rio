@@ -224,22 +224,48 @@ git config core.filemode false
 Line endings need no setup — [.gitattributes](.gitattributes) pins the whole tree to
 LF (and `*.ps1` to CRLF) regardless of your `core.autocrlf`.
 
-**Run the suites.** All three run natively; none needs a display server:
+**Run the suites.** They all run natively; none needs a display server:
 
 ```
-tclsh rio-core\tests\all.tcl        # core (tcltest)
-tclsh syntax\tests\all.tcl          # highlighters (pure Tcl)
-wish  rio-gui\tests\smoke.tcl       # GUI, window withdrawn
-wish  rio-gui\tests\pipe.tcl        # the spawned-core pipe transport
+tclsh rio-core\tests\all.tcl              # core (tcltest)
+tclsh syntax\tests\all.tcl                # highlighters (pure Tcl)
+tclsh plugins\lib\tests\all.tcl           # shared plugin lib (json + HTTP transport)
+tclsh extensions\claude\tests\all.tcl     # the Claude provider extension
+tclsh extensions\openai\tests\all.tcl     # the OpenAI-compatible provider extension
+wish  rio-gui\tests\smoke.tcl             # GUI, window withdrawn
+wish  rio-gui\tests\pipe.tcl              # the spawned-core pipe transport
 ```
+
+The `rio-gui\tests\*.tcl` suites are each run the same way; `sandbox.tcl` is a helper
+the others source, not a suite.
 
 Note the GUI form: CONTRIBUTING shows `RIO_GUI_HEADLESS=1 wish …`, which is POSIX
 shell syntax that PowerShell cannot parse. **No prefix is needed** — the GUI test
 scripts set `RIO_GUI_HEADLESS` themselves. To set it anyway, PowerShell wants
 `$env:RIO_GUI_HEADLESS = 1` as its own statement first.
 
-**Seeing failures — read this before you debug anything.** `wish.exe` is a
-GUI-subsystem binary: an *uncaught* error at the top level of a script does not go to
+**Capturing a GUI suite's output — PowerShell's `>` does not work.** `wish.exe` is a
+GUI-subsystem binary with no console attached, and **PowerShell's redirection operator
+captures nothing from it** — `wish rio-gui\tests\smoke.tcl > out.txt` leaves you a
+**zero-byte file** and no error. Two things do work, because both hand the process a
+real file handle:
+
+```
+cmd /c "wish rio-gui\tests\smoke.tcl > out.txt 2>&1"
+```
+
+```
+# and, for scripting a whole sweep with a per-suite timeout:
+$p = Start-Process wish -ArgumentList "rio-gui\tests\smoke.tcl" -NoNewWindow -PassThru `
+     -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+if (-not $p.WaitForExit(180000)) { $p.Kill() }
+```
+
+Run a suite with no redirection at all and you see nothing either way, so a green run
+and a broken one look identical. Capture first, then read the result.
+
+**Seeing failures — read this before you debug anything.** Being GUI-subsystem has a
+second consequence: an *uncaught* error at the top level of a script does not go to
 stderr, it opens a **modal "Error in startup script" dialog and blocks until someone
 clicks OK**. Redirecting stderr captures nothing. So an aborting suite looks like
 output that simply stops early for no reason, and an *unattended* run appears to
@@ -260,12 +286,32 @@ if {[catch {uplevel #0 [list source $t]} err]} {
 wish runtest.tcl rio-gui\tests\highlight.tcl
 ```
 
-**Where Windows stands today.** Everything is green: `rio-core` 385 passed / 0 failed
-(3 skipped — the `unix`-constrained permission tests), `syntax` 532/532, and 923
-`rio-gui` checks across thirteen suites with no failures. The one exception is
-`rio-gui/tests/reconnect.tcl`, which **hangs** and is still uninvestigated. The
-findings that got it there — and the handful of things still open — are in
+**Where Windows stands today.** Everything is green, with nothing hanging and nothing
+skipped beyond the three `unix`-constrained permission tests:
+
+| Suite | Result |
+|---|---|
+| `rio-core` | 475 passed / 0 failed (3 skipped: `unix` constraint) |
+| `syntax` | 532 / 532 |
+| `plugins/lib` | 9 / 9 |
+| `extensions/claude` | 30 / 30 |
+| `extensions/openai` | 29 / 29 |
+| `rio-gui` | 1218 checks / 0 failed, across 21 suites |
+
+The findings behind that — and the handful of things still open — are in
 [RELEASING.md](RELEASING.md) Gate 0.
+
+**Writing a GUI test that measures widget geometry.** A headless run withdraws the
+window — but X11 assigns a toplevel real geometry whether or not it is ever mapped,
+and **Windows does not**. Left withdrawn from boot, `winfo width .` there stays at a
+trivial 120x1 and every child collapses with it (the tab strip measured 47px), so any
+check asking whether something *fits* its pane silently reads the wrong answer: a
+scrollbar that should have auto-hidden stays, every tab past the first "overflows".
+`rio-gui.tcl`'s headless branch therefore **maps the window once, off-screen, before
+withdrawing it** — the sizes survive the withdraw. Nothing extra is needed in a test,
+but if a geometry-dependent check ever disagrees across platforms, this is the first
+thing to suspect; guard genuinely WM-dependent checks the way
+`rio-gui/tests/gutter_select.tcl` guards its pixel-mapping one.
 
 **One rule to keep it that way: every entry point sets the encoding first.** Tcl 8.6
 decodes a script with the *system* encoding, which is cp1252 on Windows, so any file
