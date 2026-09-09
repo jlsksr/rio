@@ -174,6 +174,11 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **The agent can run commands** — ask it to run your tests, a linter, or a build, and it
+  proposes the **exact command**; you see it and **Approve or Reject** before anything runs. A
+  command **always** waits for you — even with *Auto-accept edits* on — runs **confined to your
+  project**, and is **time-boxed** so nothing hangs the editor. No shell, no surprises: rio runs the
+  literal command you approved. — *feature · D83 · `9f6a688` · 2026-09-09*
 - **The agent's "working" indicator** — while the agent is thinking, the chat status line
   cheerfully cycles vintage loading messages ("Reticulating splines…", "Defragmenting…") so a
   wait never looks like a freeze. — *feature · D82 · `946e6ae` · 2026-09-09*
