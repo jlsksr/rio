@@ -174,6 +174,14 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **Trust a command so it stops asking** — when the agent proposes a command, the approve bar now
+  offers **Always allow**: remember the **program** (every `pytest` from now on) or just **that exact
+  command**, and choose how far the trust reaches — **all projects**, **this project only**, or
+  **only while a particular model is running**. rio runs it next time without stopping you. It's an
+  **opt-in** list *you* write — standing permission, not the agent going off on its own — managed
+  under *Settings ▸ Agent: Allowed commands…* (or edited by hand). Everything else still waits for
+  you, and a trusted command is still run the safe way — no shell, confined to your project,
+  time-boxed. The bar you approve once becomes the bar you never see again. — *feature · D84 · `e566586` · 2026-09-09*
 - **The agent can run commands** — ask it to run your tests, a linter, or a build, and it
   proposes the **exact command**; you see it and **Approve or Reject** before anything runs. A
   command **always** waits for you — even with *Auto-accept edits* on — runs **confined to your
