@@ -4245,7 +4245,19 @@ proc rbrowse_activate {} {
 # the selected file (open). An empty Name / no file selection just beeps.
 proc rbrowse_choose {} {
 	switch -- $::rbrowse_mode {
-		dir  { set ::rbrowse_result $::rbrowse_dir }
+		dir {
+			# Open the HIGHLIGHTED folder if a row is selected — the intuitive "click a folder,
+			# press Open" that a bare tk_chooseDirectory denies (it returns only the folder you
+			# have entered, not the one clicked). With nothing selected, fall back to the folder
+			# currently shown, so you can still open a folder by navigating into it. In dir mode
+			# only dirs and the "../" parent are listed, so a selection is always a directory.
+			set sel [.rbrowse.body.list curselection]
+			if {$sel ne ""} {
+				set ::rbrowse_result [lindex [lindex $::rbrowse_rows $sel] 1]
+			} else {
+				set ::rbrowse_result $::rbrowse_dir
+			}
+		}
 		save {
 			set name [string trim [.rbrowse.name get]]
 			if {$name eq ""} { bell ; return }

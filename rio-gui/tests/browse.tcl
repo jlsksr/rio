@@ -137,13 +137,20 @@ rbrowse_activate
 ok "open: descend"        $::rbrowse_dir [file join $T sub1]
 ok "open: deep listed"    [expr {[row_index deep.txt] >= 0}] 1
 
-# DIR mode: files are hidden; choose returns the shown directory.
+# DIR mode: files are hidden; choose returns the highlighted folder, or — with nothing
+# selected — the shown directory (so you can open a folder by navigating into it).
 skeleton dir
 rbrowse_go $T
 ok "dir: files hidden"    [row_index a.txt] -1
 ok "dir: only dirs+parent" [.rbrowse.body.list size] 3
 rbrowse_choose
-ok "dir: choose the dir"  $::rbrowse_result $T
+ok "dir: choose the shown dir when nothing selected" $::rbrowse_result $T
+# A single click on a folder + Choose opens THAT folder, not just the shown one.
+skeleton dir
+rbrowse_go $T
+.rbrowse.body.list selection set [row_index sub1]
+rbrowse_choose
+ok "dir: choose the highlighted folder" $::rbrowse_result [file join $T sub1]
 
 # SAVE mode: a typed Name joins the shown directory; a file row fills the Name.
 skeleton save

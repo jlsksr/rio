@@ -1177,6 +1177,13 @@ prompt became a full point-and-click **`remote_browse_dialog`** — it walks the
 server's tree over the same `fs.list` op the file pane uses, so the choosers
 browse the remote disk directly, with an editable Location bar that keeps the
 typed-path jump; this subsumed and retired `remote_path_dialog`. See D30 below.)*
+*(Later still: in **dir** mode `rbrowse_choose` opens the **highlighted** folder,
+falling back to the shown one when nothing is selected — the intuitive "click a
+folder, press Open" that a bare `tk_chooseDirectory` denies. The **local** Open
+Folder stays on the native `tk_chooseDirectory` by choice, for the native look;
+its own single-click-then-Open wart is inherent to that dialog and unfixable from
+here, so a user double-clicks into the folder there — a deliberately accepted
+trade for keeping the OS-native chooser locally.)*
 
 **Agent stays in-process this pass.** Its provider/key/policy plumbing isn't ops
 yet, so in remote mode the chat column is hidden and its menu entries greyed; the
