@@ -174,6 +174,14 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **Browse your project as an unfoldable tree** — the Files pane used to show one directory at
+  a time: to look inside a folder you replaced the whole view with its contents, then climbed
+  back out with a `..` row. Now it's a tree rooted at your project — click a folder's little
+  arrow (or double-click its name) and it *unfolds in place*, its contents nested right
+  underneath, so you can open up just the branches you care about and see several levels at
+  once. Fold it back to tidy up; the twisty (▸/▾) shows what's open. Creating a file in a
+  folder unfolds it for you, and the git-status flags ride along at every depth. — *feature ·
+  D87 · `be43197` · 2026-09-09*
 - **Drag a file onto the window to open it** — grab a file (or a whole folder, or several at once)
   in your OS file manager and drop it anywhere on the rio window — the editor, a side pane, the tab
   strip — and it opens, just as you'd expect from any editor. It rides on the optional `tkdnd`
