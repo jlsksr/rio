@@ -9,21 +9,53 @@ source [file join [file dirname [info script]] .. transport.tcl]
 
 # A one-shot HTTP/1.1 server: reads the request (capturing it in ::srv_req),
 # then replies with the given status + body and closes.
+#
+# Every read here is NON-BLOCKING and driven by fileevents, which matters more than it
+# looks. This server shares its process — and so its single event loop — with the async
+# client it is serving: ::http writes the request from that same loop. A blocking `gets`
+# in this callback therefore starves the client, and the server ends up waiting for
+# headers that nobody can now send. That deadlock is latent on Linux, where a loopback
+# connect completes so promptly that the whole request is already buffered by the time
+# this callback first runs; it is reproducible on Windows, where the async connect
+# completes via the event loop and geturl returns having written only the request line
+# (verified: the server read "POST /v1/messages HTTP/1.0" and then hung forever).
+# Reading from fileevents keeps the loop turning for both sides on either host.
 proc http_accept {status body chan addr port} {
-	fileevent $chan readable [list http_handle $status $body $chan]
+	fconfigure $chan -translation crlf -blocking 0
+	set ::srvconn($chan) [dict create phase head line "" hdrs {} clen 0 body "" \
+		status $status reply $body]
+	fileevent $chan readable [list http_handle $chan]
 }
-proc http_handle {status body chan} {
-	fconfigure $chan -translation crlf -blocking 1
-	set reqline [gets $chan]
-	set headers {} ; set clen 0
-	while {[gets $chan line] >= 0 && $line ne ""} {
-		lappend headers $line
-		if {[regexp -nocase {^Content-Length:\s*(\d+)} $line -> n]} { set clen $n }
+proc http_handle {chan} {
+	set st $::srvconn($chan)
+	if {[dict get $st phase] eq "head"} {
+		while {[gets $chan line] >= 0} {
+			if {[dict get $st line] eq ""} { dict set st line $line ; continue }
+			if {$line eq ""} {
+				dict set st phase body
+				fconfigure $chan -translation binary
+				break
+			}
+			dict lappend st hdrs $line
+			if {[regexp -nocase {^Content-Length:\s*(\d+)} $line -> n]} { dict set st clen $n }
+		}
+		set ::srvconn($chan) $st
+		if {[dict get $st phase] eq "head"} { return }   ;# a partial request: wait for more
 	}
-	set reqbody ""
-	if {$clen > 0} { fconfigure $chan -translation binary ; set reqbody [read $chan $clen] }
-	set ::srv_req [dict create line $reqline headers $headers body $reqbody]
-	fconfigure $chan -translation crlf
+	dict append st body [read $chan]
+	set ::srvconn($chan) $st
+	if {[string length [dict get $st body]] < [dict get $st clen] && ![eof $chan]} { return }
+	set ::srv_req [dict create line [dict get $st line] \
+		headers [dict get $st hdrs] body [dict get $st body]]
+	http_reply $chan
+}
+# The response is a couple of hundred bytes — well inside the socket buffer — so this
+# one blocking write cannot stall the way a blocking READ can.
+proc http_reply {chan} {
+	set st $::srvconn($chan) ; unset ::srvconn($chan)
+	set status [dict get $st status] ; set body [dict get $st reply]
+	fileevent $chan readable {}
+	fconfigure $chan -translation crlf -blocking 1
 	puts $chan "HTTP/1.1 $status [expr {$status == 200 ? {OK} : {Error}}]"
 	puts $chan "Content-Type: text/event-stream"
 	puts $chan "Content-Length: [string length $body]"
