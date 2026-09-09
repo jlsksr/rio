@@ -124,12 +124,19 @@ test exec-start-stderr {async captures stdout and stderr on separate streams} -b
 } {oops
 }}
 
+# The exit code of a KILLED child is platform-specific, so it is deliberately not
+# pinned here: unix reports CHILDKILLED (exitcode -1), but Windows has no signals —
+# taskkill /F makes the child exit 1, which arrives as an ordinary CHILDSTATUS.
+# `timedout` is the flag that carries the meaning, and format_exec reads it before it
+# ever looks at the exit code. What must hold on every host: the child is marked timed
+# out, it really was killed (non-zero), and it never got to write.
 test exec-start-timeout {a child that overruns its timeout is killed and marked timedout} -body {
 	set ::done ""
 	rio::exec::start [list $::tcl] "" "after 5000; puts done" 100 [list set ::done]
 	vwait ::done
-	list [dict get $::done timedout] [dict get $::done exitcode] [dict get $::done stdout]
-} -result {1 -1 {}}
+	list [dict get $::done timedout] \
+		[expr {[dict get $::done exitcode] != 0}] [dict get $::done stdout]
+} -result {1 1 {}}
 
 test exec-start-cwd {async runs in the requested working directory} -setup {
 	set ::wd [file join [::tcltest::temporaryDirectory] exec-start-cwd]

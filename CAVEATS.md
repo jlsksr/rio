@@ -43,6 +43,26 @@ design limit that surprises, append it to the matching section.
   per-buffer **Tabs** cascade, was already retired this way in **D74** — it became the
   bounded **View ▸ Switch to Tab…** dialog.)
 
+### A killed command's exit code differs on Windows (there are no signals)
+
+- **Symptom.** When the agent's `run_command` tool **times out** and rio kills the child, the
+  exit code in the result is **-1 on unix but 1 on Windows**. The same happens for any other
+  killed child.
+- **Cause.** `rio::exec::_kill` has no portable primitive to reach for (Tcl 8.6), so it shells
+  out: `kill -TERM` on unix, `taskkill /F /T` on Windows. Unix then reports the death as a
+  **signal** — Tcl surfaces `CHILDKILLED`, which rio maps to -1. Windows **has no signals**:
+  a force-terminated process simply *exits*, with code 1, which arrives as an ordinary
+  `CHILDSTATUS`. There is no Windows exit code that means "was killed".
+- **Where it's fine.** **Everywhere, in practice** — because nothing reads that number to
+  decide what happened. The `timedout` flag carries the meaning, and
+  `rio::agent::tools::format_exec` checks it *before* it ever looks at the exit code, so a
+  timed-out command is reported to the model as a timeout on both platforms.
+- **Mitigation in rio.** Treat `timedout` as the signal and the exit code as data. The test
+  (`rio-core/tests/exec.test`, `exec-start-timeout`) asserts `timedout` and *non-zero*
+  rather than pinning a platform-specific number.
+- **Planned.** Nothing. Windows cannot distinguish "killed" from "exited 1", so this is a
+  property of the platform, not a gap to close.
+
 ---
 
 ## Behavioural limitations
