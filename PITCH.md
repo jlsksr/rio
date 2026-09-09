@@ -174,6 +174,11 @@ Everything below was built end to end that way, agent-assisted, in about two mon
 
 ### September 2026
 
+- **Drag a file onto the window to open it** — grab a file (or a whole folder, or several at once)
+  in your OS file manager and drop it anywhere on the rio window — the editor, a side pane, the tab
+  strip — and it opens, just as you'd expect from any editor. It rides on the optional `tkdnd`
+  extension (install it once; rio runs fine without it, drag-to-open simply stays off) and works
+  with a local core, since a dropped file lives on your own machine. — *feature · D86 · `ed682cd` · 2026-09-09*
 - **Agent settings gathered in one place** — the top-level *Settings* menu now keeps only the two
   quick agent switches you flip mid-task — **which provider is live** and the edit toggles — while the
   agent's real configuration (its **API key**, its **prompts**, its **trusted-command list**) moved
