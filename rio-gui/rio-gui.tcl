@@ -8536,14 +8536,28 @@ set ::rio_started 1
 # Register the whole window as an OS file-drop target (D86) so a file dropped anywhere —
 # a dock, the tab strip, empty editor space — opens (each editor text widget also registers
 # itself in make_editor_group, for drops that land on buffer text). Optional tkdnd + local
-# core only; a headless run has no tkdnd, so this is a no-op there.
+# core only. Whether that holds headless depends on the host: a bare Linux CI box has no
+# tkdnd and this is a no-op, but the Magicsplat distribution bundles it on Windows, where
+# the targets really are registered (harmless — nothing can drop onto a withdrawn window).
 if {$::have_tkdnd && !$::core_remote} {
 	tkdnd::drop_target register . DND_Files
 	bind . <<Drop>> {dnd_open_files %D}
 }
 
 # A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
-if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }
+#
+# Map it once, off-screen, before withdrawing it. X11 assigns a toplevel real
+# geometry whether or not it is ever mapped, so plain `wm withdraw .` was enough
+# there; Windows does not — `winfo width .` stays at the trivial 120x1 and every
+# child collapses with it (the tab strip measured 47px), so any check that asks
+# whether something FITS its pane reads the wrong answer. The sizes survive the
+# withdraw, so the final state is the same withdrawn window as before, only with
+# a usable layout underneath it. See CAVEATS.md.
+if {[info exists ::env(RIO_GUI_HEADLESS)]} {
+	wm geometry . 1200x800-4000-4000
+	update                       ;# a full update: idletasks alone does not MAP it
+	wm withdraw .
+}
 
 # If keys.json had entries we couldn't use, say so once — a silent skip would leave the
 # user's remap mysteriously ineffective. The editor still ran on the valid rest.
