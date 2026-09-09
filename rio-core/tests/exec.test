@@ -96,4 +96,77 @@ test exec-op-registered {exec.run shows up in the live op registry} -body {
 	expr {"exec.run" in [rio::dispatch::opnames]}
 } -result 1
 
+# --- async spawn (rio::exec::start, D83) -------------------------------------
+# The callback stores its result in ::done; vwait pumps the event loop until it
+# fires. Same tclsh-as-child trick as run, so no /bin/sh is needed.
+
+test exec-start-stdout {async start captures stdout and a zero exit} -body {
+	set ::done ""
+	rio::exec::start [list $::tcl] "" "$::lf puts hello" 0 [list set ::done]
+	vwait ::done
+	list [dict get $::done exitcode] [dict get $::done stdout] [dict get $::done timedout]
+} -result {0 {hello
+} 0}
+
+test exec-start-exitcode {async non-zero exit reports the code, not a timeout} -body {
+	set ::done ""
+	rio::exec::start [list $::tcl] "" "exit 3" 0 [list set ::done]
+	vwait ::done
+	list [dict get $::done exitcode] [dict get $::done timedout]
+} -result {3 0}
+
+test exec-start-stderr {async captures stdout and stderr on separate streams} -body {
+	set ::done ""
+	rio::exec::start [list $::tcl] "" "$::lf puts out; puts stderr oops" 0 [list set ::done]
+	vwait ::done
+	list [dict get $::done stdout] [dict get $::done stderr]
+} -result {{out
+} {oops
+}}
+
+test exec-start-timeout {a child that overruns its timeout is killed and marked timedout} -body {
+	set ::done ""
+	rio::exec::start [list $::tcl] "" "after 5000; puts done" 100 [list set ::done]
+	vwait ::done
+	list [dict get $::done timedout] [dict get $::done exitcode] [dict get $::done stdout]
+} -result {1 -1 {}}
+
+test exec-start-cwd {async runs in the requested working directory} -setup {
+	set ::wd [file join [::tcltest::temporaryDirectory] exec-start-cwd]
+	file mkdir $::wd
+} -body {
+	set ::done ""
+	rio::exec::start [list $::tcl] $::wd "puts \[pwd\]" 0 [list set ::done]
+	vwait ::done
+	expr {[file normalize [string trim [dict get $::done stdout]]] eq [file normalize $::wd]}
+} -cleanup {
+	file delete -force $::wd
+} -result 1
+
+test exec-start-launch-failure {a bad executable reports failure asynchronously, exit -1} -body {
+	set ::done ""
+	rio::exec::start [list rio-no-such-command-xyzzy] "" "" 0 [list set ::done]
+	vwait ::done
+	list [dict get $::done exitcode] \
+		[expr {[dict exists $::done error] || [string length [dict get $::done stderr]] > 0}]
+} -result {-1 1}
+
+test exec-start-empty-argv {start with an empty argv is a bad_request} -body {
+	catch {rio::exec::start {} "" "" 0 [list set ::done]} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test exec-start-bad-cwd {start with a missing working directory is an io_error} -body {
+	catch {rio::exec::start [list $::tcl] /no/such/dir/here "puts hi" 0 [list set ::done]} e opts
+	rio::error::code_of $opts
+} -result io_error
+
+test exec-start-cancel {cancel kills the child and fires NO callback} -body {
+	set ::done SENTINEL
+	set tok [rio::exec::start [list $::tcl] "" "after 5000" 0 [list set ::done]]
+	rio::exec::cancel $tok
+	after 200 {set ::wake 1} ; vwait ::wake
+	set ::done
+} -result SENTINEL
+
 cleanupTests
