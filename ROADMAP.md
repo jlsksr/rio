@@ -31,10 +31,18 @@ Each entry notes its state:
   `git pull`, an agent's `fs.write`, or rio's own **discard** (D80/D93) — the tab still
   shows the old text until you close and reopen it, and a later Save writes it back over
   the new content. What's wanted is the ordinary editor answer: on `fs.changed` (and on
-  focus return) compare the file's mtime/size against what the buffer was loaded from, then
-  reload a **clean** buffer silently and ask about a **modified** one. The core already
-  knows a buffer's disk identity, so this is mostly GUI. *Discard all* (D93) is the first
-  action that can stale several buffers at once, which is what surfaced it.
+  focus return) compare the file against what the buffer was loaded from, then reload a
+  **clean** buffer silently and ask about a **modified** one. Three pieces are missing, in
+  this order: a buffer's `meta` records `path`/`encoding`/`eol`/`bom` but **no mtime or
+  size**, so `file.open` and `file.save` must stamp one; the comparison has to run
+  **core-side** (`buffers.stale`), because in remote mode the file is on the server and a
+  GUI-side `[file mtime]` would be answering about the wrong machine (D29); and a
+  `buffers.reload` to re-read into the same buffer id, taking a **list** so a bulk change
+  doesn't cost one round trip per tab. Only the clean/modified *policy* is GUI-side, where
+  the modified flag lives (D22). rio's own tree-writing ops should also emit `fs.changed` —
+  `git.discard` / `git.discard_all` don't today, so the one case rio causes itself goes
+  unannounced. *Discard all* (D93) is the first action that can stale several buffers at
+  once, which is what surfaced this.
 - **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
   New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
   Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45
