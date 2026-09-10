@@ -4565,10 +4565,16 @@ menubutton menu with the same problem. Fixing one would have left the caveat liv
 **The decision (jka, 2026-09-10).** Retire both into the **bounded picker**, the shape D74
 already proved — a themed modal with a listbox and an auto-hiding scrollbar, which scrolls
 *inside a fixed frame* and can never outgrow the screen. Deliberately **not** a live-preview or
-swatch-per-row picker: those want the `rl_*` rich-list (only a text widget can colour a row),
-and that would add a second dialog idiom for a control you touch rarely. One idiom, already
-tested, is worth more here than a richer one. (ROADMAP/CAVEATS had both promised an `rl_*`
-picker; the listbox is what actually fits, so those notes were corrected rather than obeyed.)
+swatch-per-row picker. The decisive cost is not the widget but the **data**: a swatch means
+drawing each row in the colours of the theme it names, and the GUI knows only theme *names*
+until it asks — so painting the list costs one `theme.get` per theme, **N round-trips to the
+core** every time the dialog opens, on a channel that may be a socket to another machine (D29).
+That is a real price for a control you touch rarely. The widget follows from it: a listbox
+*can* colour a row (`itemconfigure -background/-foreground`, one pair per item) and only a text
+widget — i.e. the `rl_*` rich-list — can put several colours *inside* one row, so the richer
+sketch would also have cost a second dialog idiom. One idiom, already tested, is worth more here.
+(ROADMAP/CAVEATS had both promised an `rl_*` picker; the listbox is what fits, so those notes
+were corrected rather than obeyed, and the richer variant is a ROADMAP candidate.)
 
 - **`pick_dialog {title rows {initial ""}}`** — D74's `buffer_pick_dialog` generalised. The
   dialog no longer knows what a row *means*: rows are `{payload label}`, the return is the

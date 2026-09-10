@@ -38,6 +38,19 @@ Each entry notes its state:
   line** landed as D61, and **relative line numbers** — vim's hybrid — as D71).
   Consciously left: gutter numbers in the side-by-side **compare panes** — the same
   `gutter_redraw` seam at a second call site, not a structural change.
+- **A theme picker that shows the themes** — *deferred* (builds on AGENTS.md **D92**, which
+  retired the unbounded Theme cascade into the bounded `pick_dialog`). Today the picker lists
+  theme *names*; the richer variant previews them — either a **swatch per row** (each row drawn
+  in the colours of the theme it names) or **live preview** (moving the selection re-themes the
+  editor, Cancel restores). What defers it is the **data cost, not the widget**: the GUI knows
+  only names until it asks, so painting swatches means one `theme.get` per theme — N round-trips
+  every time the dialog opens, over a channel that may be a socket to another machine (D29) —
+  for a control you touch rarely. Live preview avoids that (it fetches only the row you land on)
+  and is the cheaper half if this is ever wanted. A *multi-colour* row additionally needs the
+  `rl_*` rich-list rather than the listbox — a Tk listbox colours a whole item, one
+  foreground/background pair, but cannot vary colour *within* a row — which would put a second
+  dialog idiom in the tree. Any of this would want a way to fetch several themes in one call
+  before it's worth doing.
 - **Window / taskbar icon** — *deferred.* rio sets no `_NET_WM_ICON`, so the xfwm4 title
   bar and the xfce4-panel taskbar each fall back to their own default (hence the mismatch).
   jka has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image
