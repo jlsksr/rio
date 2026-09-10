@@ -124,5 +124,99 @@ foreach {_ cmd} [regexp -all -inline -line {^\| `([a-z-]+)` \|} $kb] {
 }
 ok "keyboard.md invents no command" $invented {}
 
+# --- 4. preferences.md's key table matches what prefs_save actually writes ----
+#
+# Second row of AGENTS.md §7's derived-facts register. The source of truth is the
+# behaviour, not the source text: write a real prefs.json into the sandbox and read
+# its keys back. That is why the register's other unguarded rows matter — this table
+# had already lost seven keys (font, tab layout, the last project) by the time it was
+# written down.
+
+set prefs [slurp [file join $::docs preferences.md]]
+set ::rio_started 1 ;# prefs_save no-ops during boot; we want the file
+prefs_save
+set ::rio_started 0
+
+set written {}
+if {[file exists [prefs_path]]} {
+	set written [lsort [dict keys [json::json2dict [slurp [prefs_path]]]]]
+}
+ok "prefs_save wrote a file" [expr {[llength $written] > 1}] 1
+
+# Rows of the key table: `| \`key\` |`. The path tables below can't collide — every
+# path there carries a `.`, a `/` or a `*`.
+set documented {}
+foreach {_ k} [regexp -all -inline -line {^\s*\| `([a-z_]+)` \|} $prefs] { lappend documented $k }
+set documented [lsort -unique $documented]
+
+set undocumented {}
+foreach k $written {
+	if {[lsearch -exact $documented $k] < 0} { lappend undocumented $k }
+}
+ok "preferences.md documents every prefs.json key" $undocumented {}
+
+set phantom {}
+foreach k $documented {
+	if {[lsearch -exact $written $k] < 0} { lappend phantom $k }
+}
+ok "preferences.md invents no prefs.json key" $phantom {}
+
+# --- 5. "Where everything lives" matches the paths the code builds ------------
+#
+# Third register row. Every config/data location comes from exactly one proc; this
+# holds the two tables against them in both directions. It is the check that would
+# have caught the agent files (added to the code, never to the table) and the
+# provider store, both of which were missing when docs/ was first written.
+
+# proc to call -> which XDG root its result hangs under
+set producers {
+	{prefs_path}                        config
+	{keys_path}                         config
+	{sources_path}                      config
+	{hl_user_dir}                       config
+	{modes_user_dir}                    config
+	{lindex [rio::theme::searchdirs] 0} config
+	{rio::agent::prompt::_userdir}      config
+	{rio::agent::allow::_dir}           config
+	{ledger_path}                       data
+	{rio::secret::_dir}                 data
+	{rio::workspace::_dir}              data
+	{rio::provider::_dir}               data
+}
+
+# The first path segment of a table cell — `agent/providers/<name>.md` and
+# `secrets/*.secret` both reduce to what the code actually names.
+proc first_seg {p} { return [lindex [split [string trimright $p /] /] 0] }
+
+# The two XDG tables, sliced apart so a config path can't satisfy a data row.
+proc doc_segs {text from to} {
+	set body [string range $text [string first $from $text] \
+		[expr {[string first $to $text] - 1}]]
+	set out {}
+	foreach {_ cell} [regexp -all -inline -line {^\| `([^`]+)` \|} $body] {
+		lappend out [first_seg $cell]
+	}
+	return [lsort -unique $out]
+}
+set doc(config) [doc_segs $prefs "**Config —" "**Data —"]
+set doc(data)   [doc_segs $prefs "**Data —"   "**Project-local"]
+
+set missing {}
+set produced(config) {} ; set produced(data) {}
+foreach {call root} $producers {
+	set seg [file tail [uplevel #0 $call]]
+	lappend produced($root) $seg
+	if {[lsearch -exact $doc($root) $seg] < 0} { lappend missing "$root/$seg ($call)" }
+}
+ok "every config & data path is documented" $missing {}
+
+set orphaned {}
+foreach root {config data} {
+	foreach seg $doc($root) {
+		if {[lsearch -exact $produced($root) $seg] < 0} { lappend orphaned "$root/$seg" }
+	}
+}
+ok "no documented path the code never builds" $orphaned {}
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

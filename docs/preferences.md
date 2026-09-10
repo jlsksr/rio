@@ -45,9 +45,16 @@ separate "make this the default" step and no "save settings" button.
   | `wrap` | `"1"` word-wrap on, `"0"` off |
   | `wrap_indent` | `"1"` aligns a wrapped line's continuation rows under its own indentation (visible only while `wrap` is on), `"0"` leaves them at the left margin |
   | `line_numbers` | `"1"`/`"0"` shows or hides the gutter |
+  | `relative_line_numbers` | `"1"` numbers the gutter *relative to the caret* (vi-style), `"0"` counts from the top of the file |
+  | `highlight_current_line` | `"1"` tints the line the caret sits on, `"0"` leaves it plain |
   | `column_edit` | `"1"` enables Notepad++-style column editing, `"0"` off |
+  | `show_hidden` | `"1"` lists dot-files in the Files pane, `"0"` hides them (like `ls`) |
+  | `tab_layout` | `scroll` — one row of tabs with ◂ ▸ arrows — or `multi`, wrapping them onto as many rows as they need |
   | `theme` | a name from `themes/`, or `default` |
+  | `font_family` | an editor font overriding the theme's; empty means "use the theme's" |
+  | `font_size` | the editor font size in points, 5–72; out-of-range values are ignored |
   | `editmode` | `windows`, `vi` or `emacs` — the last two only take effect once installed as extensions |
+  | `project` | the folder that was open at the last launch, reopened on the next one (local cores only) |
   | `layout` | a **nested object** holding the whole dock arrangement: which panes sit left, right or bottom, which are hidden, and their sizes |
 
   `layout` is fiddly to write by hand, so toggle it from the **View** menu and let
@@ -101,7 +108,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 
 | Path | Holds | Edit by hand? |
 | ---- | ----- | ------------- |
-| `prefs.json` | GUI preferences: `theme`, `wrap`, `wrap_indent`, `line_numbers`, `column_edit`, `editmode`, and the `layout` object | yes — plain JSON (above); `layout` best left to the View menu |
+| `prefs.json` | GUI preferences — every key is listed [above](#setting-a-default-is-just-setting-the-value) | yes — plain JSON (above); `layout` best left to the View menu |
 | `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes — see [keyboard shortcuts](keyboard.md) |
 | `sources.list` | extension-repository URLs, one `http://` base per line | yes (above) |
 | `themes/` | user theme files, read by the **core** | drop-in / installed |
@@ -118,6 +125,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | Path | Holds |
 | ---- | ----- |
 | `sessions/` | per-project open files + active tab, keyed by project root |
+| `providers/` | installed agent providers — the extension kind that ships executable code, so it lives with the data, not the hand-edited config |
 | `extensions.json` | the provenance ledger — what's installed, from which repository, at which version |
 | `secrets/*.secret` | API keys, mode `0600` — never in `prefs.json` |
 

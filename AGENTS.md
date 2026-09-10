@@ -25,7 +25,9 @@
 >   data, never Tk-shaped — so the protocol seam stays honest for the future TUI.
 > - **Keep the docs in sync** (§7): a decision change → here, *with its why*; a
 >   deployment change → INSTALL.md. This log is **append-and-annotate** — edit a
->   decision when it changes and note the change; don't erase the history.
+>   decision when it changes and note the change; don't erase the history. When a
+>   fact must live in both the code and a doc, add it to §7's **derived-facts
+>   register** and give it a guard — a copy nothing checks always rots.
 
 Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
@@ -4541,6 +4543,11 @@ a ROADMAP candidate.
 `.md` link in every page resolves to a real file; and **every command in `::keymap_default`
 appears in `keyboard.md`** — the check that would have caught the stale INSTALL table.
 
+*(Follow-on: the suite grew two more guards — `preferences.md`'s key table against what
+`prefs_save` actually writes, and its *Where everything lives* tables against the procs that
+build those paths. Both immediately found real drift: seven undocumented prefs keys and the
+missing provider store. The general rule they came from is §7's derived-facts register.)*
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -5045,6 +5052,44 @@ contributors, agents):
 its why*; a deployment change lands in INSTALL.md; a change to what a user does or
 sees lands in the matching `docs/` topic, with a one-line mention in README.
 Don't let the same fact live in two docs where it can drift.
+
+### The derived-facts register
+
+Sometimes a fact *must* live twice: the code is the truth, and a doc restates it
+for a reader who will never open the source. That copy is the thing that rots —
+silently, because nothing fails when it does. rio's shortcut table drifted for
+months this way (it had lost seven commands by D91), and so had the config-file
+table (it predated the whole `agent/` tree and the provider store).
+
+The rule that failed there was this section's own "keep them in sync": a per-commit
+instruction addressed to whoever happens to be editing, which only works if they
+already know the copy exists. **A periodic "revisit these" chore is the same
+failure one level up** — it rots exactly like the table it was meant to protect.
+
+So this is not a chore list. It is a register of facts with two homes, and each row
+names its **guard**. A row with a guard needs no attention at all; a row without one
+is a *backlog item*, and the fix is to write the guard, not to schedule a re-read.
+
+| Source of truth | The copy | Guard |
+| --------------- | -------- | ----- |
+| `::keymap_default` (D23) | `docs/keyboard.md`'s chord table | `docs.tcl` — both directions |
+| the `docs/*.md` on disk | `docs/index.md`'s contents | `docs.tcl` — no orphans, no dead entries |
+| what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
+| the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
+| the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
+| the menu cascades | menu paths quoted throughout `docs/` | **none** |
+| the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
+| `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
+
+Two lessons are baked into the guards above and belong in any new row. **Assert
+against behaviour, not source text**: the prefs guard *calls* `prefs_save` and reads
+the file it produced, so it cannot be fooled by a refactor that moves the key list.
+And **check both directions**: a doc that invents a setting or a path that no longer
+exists is the same drift, and it is the direction a human reviewer never notices.
+
+The last three rows are the honest backlog. Where a fact is genuinely prose —
+README's status section — accept that it has no guard and re-read it when the
+status changes, rather than pretending a test could hold it.
 
 ---
 
