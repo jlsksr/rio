@@ -26,6 +26,9 @@ Everything below runs today:
 sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide in
 [INSTALL.md](INSTALL.md).)
 
+The list below is the feature tour. For **how to use** any of it, the user manual is
+in [docs/](docs/index.md).
+
 **What works now (GUI):**
 
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
@@ -221,11 +224,15 @@ as untested rather than claimed.
 
 ## Learn more
 
+- **[docs/](docs/index.md)** — **the user manual**: how to actually use rio, one
+  topic per page — the editor, files & projects, find & replace, git, the agent,
+  preferences, keyboard shortcuts, extensions, and working over a remote core.
+  Start here if you have rio running and want to know what it can do.
 - **[INSTALL.md](INSTALL.md)** — install & deployment: requirements, the deploy
   scripts, local vs. remote (server mode over SSH), the agent/Claude key, and
   troubleshooting. rio keeps **no single `~/.riorc`** — one file per concern under
   `~/.config/rio/`; the
-  [config & data files reference](INSTALL.md#all-config--data-files-at-a-glance)
+  [config & data files reference](docs/preferences.md#where-everything-lives)
   lists them all (paths, contents, which are hand-editable).
 - **[AGENTS.md](AGENTS.md)** — the living design & decision log (the *why* behind
   every choice). Start here if you want the full picture.

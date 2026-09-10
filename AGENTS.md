@@ -4485,6 +4485,62 @@ one-character `buffer.replace`s are one step, `coalesce 0` splits them, and undo
 undo, the break is one-shot and splits a run); `vi.tcl` proves the end-to-end contract — `xxx`
 undoes one `x` at a time, while `i` + typing takes one `u`.
 
+### D91 — The user manual lives in-tree, as `docs/`
+
+**The gap.** rio had documentation for everyone *except* the person using it: AGENTS.md for
+agents and contributors, INSTALL.md for deployment, CONTRIBUTING.md for programmers,
+CAVEATS.md for rough edges, README as the shop window. Nothing said *how to use the editor*.
+What user-facing material existed had been scattered into the wrong homes — most of it into
+INSTALL.md §6, which carried ~170 lines of pure usage reference. That scattering had already
+cost accuracy: INSTALL's shortcut table was missing **seven** commands present in
+`::keymap_default` (`find`, `replace`, `find-next`, `find-prev`, `search`, `toggle-linenums`,
+`preferences`). Nothing checked it, so it drifted.
+
+**The decision (jka, 2026-09-10).** A real user manual, written as Markdown, **in the source
+tree** at `docs/` — and shaped so it can later be rendered *inside* rio as help, the WinHelp
+model: a contents page, topic pages, jumps between them, F1. This **supersedes §7's plan** for
+a separate `rio-wiki.git`. In-tree wins three things a wiki cannot: it **ships with rio** (a
+help viewer needs the files locally, offline), it **versions with the code** (a feature and its
+page land in one commit, and CONTRIBUTING now says so), and it is reviewable in the same diff.
+
+**The conventions, and why each exists.** One topic per file, and **the filename is the topic
+id** — stable, kebab-case, not renamed casually, because a rename breaks help links and any
+future context-sensitive id. H1 = the topic title, matching its line in `index.md`. Links
+between topics are **relative** (`[the editor](editor.md)`), so they become topic jumps
+unchanged. A **restrained Markdown subset** — headings, paragraphs, lists, inline code, fenced
+blocks, links, bold/italic, simple pipe tables, and blockquote asides; no HTML, images,
+footnotes, nested tables or task lists — chosen so a Tk text widget can render it with modest
+effort (every construct in the set maps to a tag or an indent). Voice: second
+person, present tense, the *rule* plus the one-line *why*, no D-numbers in user prose. **No
+duplication, by home**: the manual owns how to use rio, INSTALL owns install & deploy, CAVEATS
+owns rough edges, README stays the shop window; pages link rather than restate. **Stubs are
+honest, never dead ends** — title, scope, and a pointer at whichever document holds the facts
+today.
+
+**What landed.** `docs/index.md` (contents + the conventions above) and fourteen topics: three
+written from scratch (`getting-started`, `editor`, `agent`), two **moved out of INSTALL.md §6**
+(`preferences`, `keyboard`), nine honest stubs. INSTALL keeps a pointer table where §6 was,
+plus the two facts that *are* deployment concerns (prefs live with the GUI, the workspace with
+the core; no settings file holds a key). **INSTALL §7 stays** — it is deployment faults, not
+user-side trouble; `docs/troubleshooting.md` is the user-side page and links to it. The
+keyboard table was **rebuilt from `::keymap_default`** rather than moved, since the shipped one
+was wrong.
+
+**Designing for the viewer, without building it.** Recorded so the later build is cheap and
+nothing written now blocks it: the **Help menu already exists** (`.m.help`, only *About rio*),
+so *Contents…* + `F1` lands beside it with no new menu; **topic ids are filenames** and
+`index.md` is the contents, which is the whole navigation model; **search comes free** — the
+core already greps (`project.search` / `rio::doc::grep_lines`), pointed at `docs/`; the
+**cheapest first render** is a read-only buffer through rio's own Markdown highlighter in
+`syntax/`, before any real renderer exists. When the viewer lands, `docs/` must ship alongside
+`themes/`/`syntax/` — an INSTALL and deploy-script change *then*, not now. The viewer itself is
+a ROADMAP candidate.
+
+**Tests.** New `rio-gui/tests/docs.tcl` guards the drift that caused this: every page listed in
+`index.md` exists and every `docs/*.md` is listed (no orphans, no dead entries); every relative
+`.md` link in every page resolves to a real file; and **every command in `::keymap_default`
+appears in `keyboard.md`** — the check that would have caught the stale INSTALL table.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -4980,11 +5036,14 @@ contributors, agents):
   what rio is and why, for someone who's never heard of it.
 - **CONTRIBUTING.md** — for **human programmers** who hack on rio: build, test,
   conventions. Points here for the "why"; build/test sections firm up with O7.
-- **rio wiki** (separate `rio-wiki.git`) — comprehensive user documentation,
-  eventually with screenshots. *Hold screenshots until there's a UI to show.*
+- **`docs/`** — the **user manual**, in-tree: one Markdown topic per page, source
+  for a later in-app help viewer (D91). This replaces the separate `rio-wiki.git`
+  once planned here. *Hold screenshots until there's a UI to show.*
+- **CAVEATS.md** — known rough edges and cross-platform behaviour differences.
 
 **Keep them in sync.** A change that shifts a decision lands in AGENTS.md *with
-its why*; a deployment change lands in INSTALL.md; user-facing changes in README.
+its why*; a deployment change lands in INSTALL.md; a change to what a user does or
+sees lands in the matching `docs/` topic, with a one-line mention in README.
 Don't let the same fact live in two docs where it can drift.
 
 ---

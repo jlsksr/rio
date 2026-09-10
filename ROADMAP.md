@@ -150,6 +150,19 @@ Each entry notes its state:
   make the boundary a shared **git-status service** (git publishes status; the
   navigator subscribes if the extension is present, degrading to no-flags exactly like
   the current no-repo case) rather than a clean lift-out of "the git pane".
+- **In-app help viewer (Help ▸ Contents…)** — *planned* (the manual it renders landed as
+  AGENTS.md **D91**: `docs/`, one Markdown topic per file). The WinHelp shape: a contents
+  list, topic pages, jumps between them, `F1`. Everything it needs already exists —
+  **the home**: `.m.help` carries only *About rio*, so *Contents…* slots in beside it with
+  no new menu; **navigation**: topic ids *are* the filenames, `index.md` *is* the contents,
+  and inter-topic links are already relative; **search**: the core greps
+  (`project.search` / `rio::doc::grep_lines`), so help search is that engine pointed at
+  `docs/`; **rendering**: v0 can be a read-only buffer through rio's own Markdown
+  highlighter in `syntax/`, with a real renderer (headings, tables, clickable links) as the
+  step after. The one *shipping* change it forces: `docs/` must install alongside
+  `themes/`/`syntax/` (INSTALL.md + the deploy scripts), which is why that wasn't done
+  with D91. Open design question: whether help is a dock-site panel (D35 makes that cheap)
+  or its own tool window.
 
 ## Syntax highlighting
 

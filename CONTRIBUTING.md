@@ -390,8 +390,10 @@ involved.
 
 - **Keep it focused.** One concern per change, small enough to review comfortably.
 - **Keep the docs honest.** If your change shifts a design decision, note it in
-  [AGENTS.md](AGENTS.md); user-facing changes belong in the README (and, later,
-  the wiki).
+  [AGENTS.md](AGENTS.md); if it changes what a *user* does or sees, update the
+  matching topic in [docs/](docs/index.md) — the user manual — in the same commit,
+  so the feature and its page never drift apart. The README stays the overview: a
+  one-line entry there, the how-to in `docs/`.
 - **Say why.** A short explanation of the reasoning — especially for anything
   touching the core's protocol — makes review much easier.
 
