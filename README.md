@@ -68,8 +68,11 @@ in [docs/](docs/index.md).
   hidden by default, like `ls`; a ◉/◌ button in the pane header — or *View ▸ Show Hidden
   Files* — reveals them); **create, rename, and delete** files and folders from the row
   menu (deletes confirm first);
-  and view **git status and diffs** for the open repo with **stage, unstage, and
-  commit** right from the pane. The file pane keeps itself current — it updates on the
+  and view **git status and diffs** for the open repo with **stage, unstage,
+  commit, and discard** right from the pane — *discard* puts a file back the way the last
+  commit left it, from either pane's row menu, or the whole project at once via the **↩**
+  button that appears in the git header while anything is changed (both confirm first, and
+  neither touches files git ignores). The file pane keeps itself current — it updates on the
   agent's own writes, when rio regains focus, and on a manual refresh (⟳). Files
   and git share one dockable, resizable side panel. **Drag a file (or folder) from your OS
   file manager onto the window to open it** — a convenience that needs the optional `tkdnd`

@@ -113,6 +113,43 @@ proc rio::git::discard {cwd path} {
 	return revert
 }
 
+# Has this repo a commit yet? A non-zero exit is the ANSWER here ("unborn HEAD"), not a
+# failure, so this goes around _run rather than through it (_run would raise).
+proc rio::git::_has_head {cwd} {
+	set r [rio::exec::run [list git rev-parse --verify -q HEAD] $cwd]
+	return [expr {[dict get $r exitcode] == 0}]
+}
+
+# git.discard_all: throw away EVERY local change at once (D93) — the bulk form of discard,
+# for "put this project back the way the last commit left it". It is the per-path rule
+# applied to the whole repo, but NOT a loop over the paths: two git commands, one round
+# trip, so a channel that drops mid-way (D29) can't leave a half-discarded tree.
+#   HEAD exists -> `git reset -q --hard`  : index AND worktree back to HEAD — every tracked
+#                  modification and deletion reverted, every staged addition demoted to a
+#                  plain untracked file
+#   unborn HEAD -> `git reset -q`         : there is nothing to revert *to*, so only empty
+#                  the index (`--hard` can't resolve HEAD on older git; plain `reset` is
+#                  the same choice D44's unstage made)
+# then `git clean -fd -- :/` removes what is left — the untracked files, the former staged
+# additions among them. `:/` is git's repo-root pathspec, so the sweep covers the whole repo
+# however deep the cwd sits; no `-x`, so IGNORED files (build output, a local .env) survive:
+# discarding your edits must not cost you untracked state git was told to disregard.
+# Returns how many changed paths there were, for the frontend's confirmation. A repo with
+# nothing to discard is a bad_request, like the per-path op.
+proc rio::git::discard_all {cwd} {
+	set n [llength [dict get [status $cwd] changes]]
+	if {$n == 0} {
+		rio::error::raise bad_request "nothing to discard"
+	}
+	if {[_has_head $cwd]} {
+		_run $cwd reset -q --hard
+	} else {
+		_run $cwd reset -q
+	}
+	_run $cwd clean -fd -- :/
+	return $n
+}
+
 # git.commit: record the staged index as a commit — `git commit -m <msg>`. The second
 # git write family after D44's add/unstage. We lean on git's own guards, surfaced as
 # bad_request by _run: an empty message (`commit -m ""` aborts) and nothing staged

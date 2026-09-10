@@ -4048,7 +4048,9 @@ action and returns it, so the GUI's wording and the real effect can't drift.
 
 **Scope.** Git-pane menu only for now; the file-tree row menu is an easy follow-on (tracked rows —
 its fs "Delete…" already removes untracked files). Rename-aware discard and a "Discard all" bulk
-action are noted, not built. Tests: git.test drives real-git discard for every state
+action are noted, not built. (**Both followed in D93** — the tree door on exactly those tracked
+rows, and *Discard all* as `git.discard_all`, one core op rather than a loop. Rename-aware discard
+is still open.) Tests: git.test drives real-git discard for every state
 (revert/remove/unstage+revert/clean-path bad_request); smoke asserts the menu offers the right entry
 per state.
 
@@ -4606,6 +4608,82 @@ checks the button, its command, and the ellipsis label.
 cause* — it is still true of Tk, and still the reason menus stay grouped — but its "at scale"
 paragraph is closed: **no menu in rio is data-driven and unbounded any more.** The ROADMAP item
 *Menu overflow at scale* is removed. Pure GUI change; no core op touched.
+
+---
+
+### D93 — Discard, finished: the second door, and the bulk form
+
+D80 shipped **discard** — "throw away my changes to this file" — but only half of it, and said
+so: the entry lived on the **git pane's** row menu alone, and a *Discard all* was "noted, not
+built". Both gaps are the same gap, really: the everyday undo was reachable only if you were
+already looking at the git pane, and only one file at a time.
+
+**The second door.** The **file-tree** row menu now carries the same confirm-gated
+*Discard Changes…* it always could have (`nav_menu_git`) — the file pane already reads each
+row's porcelain XY out of the `::nav_git` stash, so this is a menu entry, not a new mechanism.
+Both doors call the same `git_discard_confirm`, so the wording, the No-defaulted confirm and
+the outcome flash can't drift apart.
+
+**Only tracked changes get it there**, deliberately. A never-committed file (untracked `?`, or a
+staged addition `A`) is *removed* by discard, not reverted — and this menu's own fs **Delete…**
+(D48) already removes it, three entries up. Offering git's *Delete…* too would put **two
+identically-labelled entries in one menu**, which is worse UI than the small asymmetry with the
+git pane, where no fs verbs compete. (The wart underneath: fs Delete on a staged addition leaves
+the index entry behind — `AD`. Recoverable from the git pane's own *Delete…*; noted, not fixed
+here.)
+
+**The tree quotes git's path, not its own.** Tree rows are abspaths; the confirm would otherwise
+ask about `/home/jka/Projekte/rio/rio-gui/rio-gui.tcl` where the git pane asks about
+`rio-gui/rio-gui.tcl`. `nav_repo_rel` re-derives the repo-root-relative form (the project root
+**is** the repo root, D43), so one dialog serves both doors.
+
+**Discard all — one op, not N calls.** `git.discard_all {?cwd?} -> {count N}`
+(`rio::git::discard_all`) is the per-path rule applied to the whole repo **in git**, not a GUI
+loop over the change list. Two commands:
+
+- **HEAD exists** → `git reset -q --hard` — index *and* worktree back to HEAD, so every tracked
+  modification and deletion is reverted and every staged addition is demoted to untracked.
+- **unborn HEAD** → `git reset -q` — there is nothing to revert *to*, so only the index is
+  emptied. (`--hard` cannot resolve HEAD on older git; plain `reset` is the same choice D44's
+  unstage made for the same reason.)
+- then `git clean -fd -- :/` sweeps what is left — the untracked files, the former staged
+  additions among them.
+
+Two details are load-bearing. `:/` is git's **repo-root pathspec**, so the sweep is the whole
+repo however deep the cwd sits — it matches the change list, which porcelain reports repo-wide.
+And there is **no `-x`**: git-**ignored** files survive. Discarding your edits must not cost you
+untracked state git was explicitly told to disregard (a build tree, a local `.env`) — and those
+were never in the list you were shown, so removing them would be a surprise, not a service.
+The count returned is how many changed paths there were, so the GUI's confirmation reports what
+the core actually acted on rather than what the last repaint happened to show.
+
+Why one op rather than looping `git.discard`: N round trips over a channel that may be a socket
+to another machine (D29) — the same cost that shaped D92 — and a channel that drops mid-loop
+would leave a half-discarded tree. git does it atomically enough; rio should not reinvent it.
+
+**Where the bulk action lives (jka's call).** A **`↩` button in the git pane header**, left of
+`⟳`, packed **only while the repo has changes** — the commit bar's rule (D45, the D36 "appears
+only when needed" bar) applied to the header. So rio's most destructive control is *absent* from
+a clean repo's chrome, and present exactly when it means something. It is VSCode's Source Control
+toolbar shape, which is the familiarity bar jka holds the UI to. The alternative considered and
+rejected was an entry at the foot of the git row menu: that menu is scoped to the row you clicked
+(D44's rule), a repo-wide action does not belong in it, and it would be unreachable whenever the
+pane shows a placeholder. The confirm spells out **both halves** (changed files revert, never-
+committed files are deleted), says what it does **not** touch (ignored files), and defaults to
+**No** like every irreversible action since D48.
+
+**Tests.** `git.test` drives real git through `discard_all` for the mixed repo, a restored
+deletion, ignored files surviving, an unborn HEAD, a clean repo (`bad_request`), and the op
+through the core (core 503). `smoke.tcl` covers the tree menu's new entry, that it passes the
+repo-relative path, that a staged addition gets **no** discard there, the `↩` button appearing
+and disappearing with the change count, and the whole bulk discard end to end through the
+channel — last in its section, since it wipes the fixture's working tree by design.
+
+**Still open, unchanged by this.** Rename-aware discard (D80's other deferral). And the wider
+gap this makes easier to notice: an **open buffer is not reloaded** when the file under it
+changes on disk, so after a discard the editor still shows the discarded text until you reopen
+the tab. That is not new — it is true of any external write — but discard-all is the first rio
+action that can trigger it across many buffers at once. ROADMAP.
 
 ---
 

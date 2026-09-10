@@ -744,7 +744,14 @@ if {![catch {exec git --version}]} {
 	set fsv {{New File…} {New Folder…} {Rename…} {Delete…}}
 	menu .tm -tearoff 0
 	nav_menu_build .tm [list file [file join $gdir a.txt]]
-	ok "menu: modified file offers Stage" [menu_labels .tm] [list Open {Copy Path} --- {*}$fsv --- Stage]
+	ok "menu: modified file offers Stage" [menu_labels .tm] \
+		[list Open {Copy Path} --- {*}$fsv --- Stage --- {Discard Changes…}]
+	# The tree's discard quotes git's own path (repo-root-relative), not the abspath the
+	# tree holds, so the confirm reads the same from both doors (D93).
+	ok "menu: discard passes the git path" [.tm entrycget end -command] \
+		{git_discard_confirm a.txt 0}
+	ok "menu: repo path from a nested row" [nav_repo_rel [file join $gdir sub n.txt]] \
+		[file join sub n.txt]
 	.tm delete 0 end ; nav_menu_build .tm [list file [file join $gdir u.txt]]
 	ok "menu: untracked file offers Track" [menu_labels .tm] [list Open {Copy Path} --- {*}$fsv --- {Track (git add)}]
 	.tm delete 0 end ; nav_menu_build .tm [list dir [file join $gdir sub]]
@@ -761,6 +768,15 @@ if {![catch {exec git --version}]} {
 	.tm delete 0 end ; git_menu_build .tm [dict create x ? y ? path b.txt]
 	ok "menu: git untracked offers Delete" [menu_labels .tm] \
 		{Open {Copy Path} --- Stage --- Delete…}
+	# In the TREE a staged addition offers no discard: discarding a never-committed file
+	# removes it, which the fs "Delete…" three entries up already does (D93). ::nav_git is
+	# the builder's only input, so drive it directly rather than restage the fixture.
+	set _ng $::nav_git
+	dict set ::nav_git [file join $gdir a.txt] "A "
+	.tm delete 0 end ; nav_menu_build .tm [list file [file join $gdir a.txt]]
+	ok "menu: tree staged-add has no discard" [menu_labels .tm] \
+		[list Open {Copy Path} --- {*}$fsv --- Unstage]
+	set ::nav_git $_ng
 	destroy .tm
 
 	# The action proc: stage/unstage a path through the core, then the pane repaints.
@@ -821,6 +837,32 @@ if {![catch {exec git --version}]} {
 	ok "commit: subject+body recorded"     [string trim [gitc $gdir log -1 --format=%B]] \
 		"subject line\n\nfirst body line\nsecond body line"
 	ok "commit: body re-collapses after"   [body_shown] 0
+
+	# Discard all (D93). The ↩ button rides the header and is packed only while the repo
+	# has changes; the count it quotes is the length of the list beside it. Then the whole
+	# thing end to end through the channel — the op the button calls, past its own modal
+	# confirm — which wipes the fixture's working tree, so it goes last.
+	proc git_discard_btn {} {
+		expr {[lsearch -exact [pack slaves .pgit.hdr] .pgit.hdr.discard] >= 0}
+	}
+	ok "discard-all: plural of one"    [git_plural 1 change]  change
+	ok "discard-all: plural of many"   [git_plural 2 change]  changes
+	set gf [open [file join $gdir b.txt] w] ; puts -nonewline $gf "bee\ndirty\n" ; close $gf
+	set gf [open [file join $gdir fresh.txt] w] ; puts -nonewline $gf "brand new\n" ; close $gf
+	refresh_git
+	ok "discard-all: shown while dirty" [git_discard_btn] 1
+	ok "discard-all: count is the list" $::git_change_count [llength $::rl_rows(.pgit.well.body)]
+	set _n $::git_change_count
+	set _r [rio_call git.discard_all {}]
+	ok "discard-all: op reported ok"    [expr {[dict get $_r ok] ? 1 : 0}] 1
+	ok "discard-all: counted the same"  [dict get $_r result count] $_n
+	refresh_git
+	ok "discard-all: repo now clean"    [string trim [git_line 0]] "(clean)"
+	ok "discard-all: new file removed"  [file exists [file join $gdir fresh.txt]] 0
+	proc gslurp {p} { set f [open $p r] ; set s [::read $f] ; close $f ; return $s }
+	ok "discard-all: edit reverted"     [gslurp [file join $gdir b.txt]] "bee\n"
+	ok "discard-all: hidden when clean" [git_discard_btn] 0
+	ok "discard-all: confirm no-ops at 0" [git_discard_all_confirm] {}
 
 	after cancel refresh_git   ;# drop the pending git_flash restore before teardown
 	file delete -force $gdir

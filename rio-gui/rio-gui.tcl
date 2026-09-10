@@ -1396,6 +1396,23 @@ proc nav_menu_git {m type path} {
 	}
 	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
 	if {$x ne " "} { $m add command -label "Unstage" -command [list do_git unstage $path] }
+	# Discard, the same confirm-gated entry the git pane carries — this door too (D93), so
+	# "undo my edits to this file" is reachable from wherever you are looking at the file.
+	# TRACKED changes only: a new file (untracked "?", returned above, or a staged addition
+	# "A") is removed rather than reverted, and this menu's own fs "Delete…" already removes
+	# it — two "Delete…" entries in one menu would be the worse UI.
+	if {$x ne "A"} {
+		$m add separator
+		$m add command -label "Discard Changes…" \
+			-command [list git_discard_confirm [nav_repo_rel $path] 0]
+	}
+}
+# A tree row's abspath as git names it: repo-root-relative. The project root IS the repo
+# root (D43), so this is the path porcelain would have printed — which keeps the discard
+# confirm reading the same from both doors, instead of quoting a long absolute path.
+proc nav_repo_rel {path} {
+	set parts [lrange [file split $path] [llength [file split $::nav_root]] end]
+	return [expr {[llength $parts] ? [file join {*}$parts] : [file tail $path]}]
 }
 
 # ---------------------------------------------------------------------------
@@ -1607,6 +1624,7 @@ proc refresh_git {} {
 		.pgit.hdr.branch configure -text "git"
 		git_placeholder "(open a folder)"
 		git_commit_bar 0
+		git_discard_all_button 0
 		rl_end $b
 		return
 	}
@@ -1617,6 +1635,7 @@ proc refresh_git {} {
 		git_placeholder [expr {$code eq "bad_request" ? "(not a git repository)" \
 			: [dict get $resp error message]}]
 		git_commit_bar 0
+		git_discard_all_button 0
 		rl_end $b
 		return
 	}
@@ -1626,6 +1645,7 @@ proc refresh_git {} {
 	if {![llength $changes]} {
 		git_placeholder "(clean)"
 		git_commit_bar 0
+		git_discard_all_button 0
 		rl_end $b
 		return
 	}
@@ -1638,6 +1658,7 @@ proc refresh_git {} {
 		if {$x ne " " && $x ne "?"} { set staged 1 }
 	}
 	git_commit_bar $staged
+	git_discard_all_button [llength $changes]   ;# ↩ in the header, only while there's something to discard (D93)
 	rl_end $b
 }
 
@@ -1752,6 +1773,48 @@ proc git_discard_confirm {path isnew} {
 	}
 	refresh_dock
 	git_flash [expr {[dict get $resp result action] eq "remove" ? "✓ deleted" : "✓ discarded changes"}]
+}
+
+# Show or hide the header's ↩ button — "discard all" (D93) — and stash the change count the
+# confirm will quote. refresh_git passes the number of changes, so the button is packed
+# exactly when there is something to discard: the commit bar's rule (D45, the D36 "only when
+# needed" bar) applied to the header, which also keeps a destructive control off the chrome
+# of a clean repo. Packed with -side right AFTER ⟳ was, so it sits to ⟳'s left.
+proc git_discard_all_button {n} {
+	set ::git_change_count $n
+	if {$n > 0} {
+		if {[lsearch -exact [pack slaves .pgit.hdr] .pgit.hdr.discard] < 0} {
+			pack .pgit.hdr.discard -side right
+		}
+	} else {
+		pack forget .pgit.hdr.discard
+	}
+}
+
+# Confirm, then discard EVERY change in the project (git.discard_all, D93). One core call,
+# not one per file — the core does the whole sweep in git and returns how many changes it
+# found. This is the most destructive thing rio can do to a working tree, so the question
+# spells out both halves (changed files revert, never-committed files are deleted), says
+# what it does NOT touch, and defaults to No like every other irreversible action (D48, D80).
+proc git_discard_all_confirm {} {
+	if {$::git_change_count <= 0} return
+	set q "Discard all $::git_change_count [git_plural $::git_change_count change] in this project?\n\nEvery changed file goes back to its last committed version, and files that were never committed are deleted. Files git ignores are left alone.\n\nThis can't be undone."
+	if {[tk_messageBox -icon warning -type yesno -default no -title "rio — discard all" -message $q] ne "yes"} {
+		return
+	}
+	set resp [rio_call git.discard_all {}]
+	if {![dict get $resp ok]} {
+		report_error [dict get $resp error message] [dict get $resp error code]
+		return
+	}
+	set n [dict get $resp result count]
+	refresh_dock
+	git_flash "✓ discarded $n [git_plural $n change]"
+}
+# "1 change" / "2 changes" — the count is real data (it says how much is about to go), so
+# it can be 1, and "1 changes" in a warning dialog reads as a bug.
+proc git_plural {n word} {
+	return [expr {$n == 1 ? $word : "${word}s"}]
 }
 
 # Show or hide the commit bar (D45). refresh_git calls this with 1 when the index has a
@@ -5206,7 +5269,8 @@ proc apply_theme {theme} {
 	           .pfiles .pfiles.hdr .pgit .pgit.hdr} {
 		$w configure -background [dict get $c ui.bg]
 	}
-	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pfiles.hdr.hidden .pgit.hdr.branch .pgit.hdr.refresh} {
+	foreach w {.pfiles.hdr.head .pfiles.hdr.refresh .pfiles.hdr.hidden \
+	           .pgit.hdr.branch .pgit.hdr.refresh .pgit.hdr.discard} {
 		$w configure -font RioUIFont \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	}
@@ -6925,11 +6989,19 @@ label .pgit.hdr.branch -anchor w -font {monospace 9} -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
 label .pgit.hdr.refresh -text "⟳" -font {monospace 9} -padx 6 \
 	-background "#dddddd" -foreground black
+# ↩ discards every change in the repo (D93). Built here but NOT packed: refresh_git packs it
+# (left of ⟳) only while the repo has changes, so the pane's one destructive control is
+# absent from a clean repo — and a mis-click is caught by the No-defaulted confirm anyway.
+label .pgit.hdr.discard -text "↩" -font {monospace 9} -padx 6 \
+	-background "#dddddd" -foreground black
+set ::git_change_count 0
 pack .pgit.hdr.refresh -side right
 pack .pgit.hdr.branch  -side left -fill x -expand 1
 pack .pgit.hdr -side top -fill x
 bind .pgit.hdr.refresh <Button-1> refresh_git
+bind .pgit.hdr.discard <Button-1> git_discard_all_confirm
 tooltip .pgit.hdr.refresh "Refresh"
+tooltip .pgit.hdr.discard "Discard all changes"
 frame .pgit.well -borderwidth 2 -relief sunken -background white
 scrollbar .pgit.well.sb -command {.pgit.well.body yview}
 text .pgit.well.body -width 26 -height 8 -wrap none -state disabled \

@@ -5,7 +5,9 @@ the editor.
 
 **This topic is still to be written.** It will cover: opening the pane
 (`Ctrl+Shift+G`); reading status for the open repository; viewing a file's diff;
-staging and unstaging; the inline commit bar; the git-status flags shown on rows
+staging and unstaging; the inline commit bar; discarding changes — one file from
+either pane's row menu, or the whole project from the `↩` button in the git
+header; the git-status flags shown on rows
 in the [file tree](files-and-projects.md); and how all of it behaves against a
 [remote core](remote.md), where git runs on whichever box holds the repository.
 

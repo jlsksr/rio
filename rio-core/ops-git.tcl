@@ -50,6 +50,16 @@ proc rio::ops::git_discard {params} {
 }
 rio::dispatch::register git.discard rio::ops::git_discard
 
+# git.discard_all {?cwd?} -> {count N} ; discard every local change in the repo at once
+# (D93) — the bulk form of git.discard, done in git rather than by looping the per-path op
+# over N paths. `count` is how many changed paths there were, for the frontend's
+# confirmation; nothing to discard is a bad_request, as it is per path.
+proc rio::ops::git_discard_all {params} {
+	set n [rio::git::discard_all [_git_cwd $params]]
+	return [dict create result [dict create count $n]]
+}
+rio::dispatch::register git.discard_all rio::ops::git_discard_all
+
 # git.diff {?cwd?, ?path?, ?staged?} -> {diff <unified-diff text>}
 proc rio::ops::git_diff {params} {
 	set path   [expr {[dict exists $params path]   ? [dict get $params path]   : ""}]

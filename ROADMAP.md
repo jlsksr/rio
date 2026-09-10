@@ -26,6 +26,15 @@ Each entry notes its state:
   its cost: Tcl has no built-in inotify, so it means a C extension or shelling to
   per-platform watchers — a dependency plus a platform matrix — against the no-heavy-deps
   grain. The focus-return refresh is the cheap 90% stand-in until then.
+- **An open buffer never notices the file changed under it** — *gap.* `fs.changed` (D47)
+  repaints the *panes*; it does not touch the buffers. So after an external write — a
+  `git pull`, an agent's `fs.write`, or rio's own **discard** (D80/D93) — the tab still
+  shows the old text until you close and reopen it, and a later Save writes it back over
+  the new content. What's wanted is the ordinary editor answer: on `fs.changed` (and on
+  focus return) compare the file's mtime/size against what the buffer was loaded from, then
+  reload a **clean** buffer silently and ask about a **modified** one. The core already
+  knows a buffer's disk identity, so this is mostly GUI. *Discard all* (D93) is the first
+  action that can stale several buffers at once, which is what surfaced it.
 - **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
   New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
   Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45
@@ -226,14 +235,19 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81). Stage / unstage / track
-  landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
+- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93). Stage / unstage /
+  track landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
   driven from an auto-showing commit bar in the git pane — rio's first inline pane
   text-input — now with an optional **multi-line description body** behind a `＋` toggle
   (D81, joined to the summary as git's subject/body); **discard changes** landed as
   `git.discard` (D80) — a confirm-gated *Discard Changes…* (revert a tracked file to its last
-  commit) / *Delete…* (remove a never-committed new file) on the git-pane row menu. Still
-  wanted: a discard entry on the **file-tree** row menu too, and a **Discard all** bulk action.
+  commit) / *Delete…* (remove a never-committed new file) — on the git-pane row menu **and,
+  since D93, on the file-tree row menu** (tracked rows there; a new file is what the tree's own
+  *Delete…* already removes). **Discard all** landed with it as `git.discard_all`, a single core
+  op — `reset --hard` + `clean -fd -- :/`, ignored files untouched — behind a `↩` button that
+  rides the git pane header only while the repo has changes. Still wanted: **rename-aware
+  discard** — a rename (`R`) carries its original path in porcelain, so discarding one should put
+  the file back under its old name; today it goes through the plain tracked-change branch.
 
 ## Agent
 

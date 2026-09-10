@@ -279,11 +279,75 @@ test git-op-discard {git.discard op discards through the core and returns the ac
 	list [dict get $resp ok] [dict get $resp result action] [file exists [file join $d b.txt]]
 } -cleanup {file delete -force $d} -result {true remove 0}
 
-test git-write-ops-registered {git.add, git.unstage, git.commit, git.discard are in the live registry} -body {
+# --- write layer: discard_all (D93) ------------------------------------------
+# The bulk form: every change at once, in git rather than by looping the per-path op.
+# makerepo gives three changes in one go (a.txt " M", c.txt "A ", b.txt "??").
+
+test git-discard-all-mixed {discard_all reverts, removes and unstages the whole repo at once} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set n [rio::git::discard_all $d]
+	list $n [llength [dict get [rio::git::status $d] changes]] \
+		[string trim [slurp [file join $d a.txt]]] \
+		[file exists [file join $d b.txt]] [file exists [file join $d c.txt]]
+} -cleanup {file delete -force $d} -result {3 0 one 0 0}
+
+test git-discard-all-restores-deletion {discard_all brings back a deleted tracked file} \
+		-constraints hasgit -setup {
+	set d [makerepo] ; file delete [file join $d a.txt]      ;# " D" on top of the rest
+} -body {
+	rio::git::discard_all $d
+	list [file exists [file join $d a.txt]] [string trim [slurp [file join $d a.txt]]] \
+		[llength [dict get [rio::git::status $d] changes]]
+} -cleanup {file delete -force $d} -result {1 one 0}
+
+test git-discard-all-keeps-ignored {discard_all leaves git-ignored files alone (no clean -x)} \
+		-constraints hasgit -setup {
+	set d [makerepo]
+	writefile [file join $d .gitignore] "out.log\n"
+	git_in $d add .gitignore ; git_in $d commit -q -m ignore
+	writefile [file join $d out.log] "build noise\n"          ;# ignored, not a change
+} -body {
+	rio::git::discard_all $d
+	list [file exists [file join $d out.log]] \
+		[llength [dict get [rio::git::status $d] changes]]
+} -cleanup {file delete -force $d} -result {1 0}
+
+test git-discard-all-unborn-head {discard_all works with no commits yet (nothing to revert to)} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-dall0-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	git_in $d config user.email t@example.com ; git_in $d config user.name tester
+	writefile [file join $d s.txt] "staged\n" ; git_in $d add s.txt   ;# "A ", unborn HEAD
+	writefile [file join $d u.txt] "untracked\n"                      ;# "??"
+} -body {
+	set n [rio::git::discard_all $d]
+	list $n [file exists [file join $d s.txt]] [file exists [file join $d u.txt]] \
+		[llength [dict get [rio::git::status $d] changes]]
+} -cleanup {file delete -force $d} -result {2 0 0 0}
+
+test git-discard-all-nothing {discard_all on a clean repo is a bad_request} \
+		-constraints hasgit -setup {
+	set d [file join [::tcltest::temporaryDirectory] riogit-dallclean-[clock clicks]]
+	file mkdir $d ; git_in $d init -q ; git_in $d branch -M main
+	writefile [file join $d f.txt] "hi\n" ; git_in $d add f.txt ; git_in $d commit -q -m first
+} -body {
+	catch {rio::git::discard_all $d} err opts
+	rio::error::code_of $opts
+} -cleanup {file delete -force $d} -result bad_request
+
+test git-op-discard-all {git.discard_all op clears the repo through the core and counts} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set resp [dict get [rio::core::call git.discard_all [dict create cwd $d]] response]
+	list [dict get $resp ok] [dict get $resp result count] \
+		[llength [dict get [rio::git::status $d] changes]]
+} -cleanup {file delete -force $d} -result {true 3 0}
+
+test git-write-ops-registered {git.add, git.unstage, git.commit, git.discard, git.discard_all are in the live registry} -body {
 	expr {"git.add" in [rio::dispatch::opnames] \
 		&& "git.unstage" in [rio::dispatch::opnames] \
 		&& "git.commit" in [rio::dispatch::opnames] \
-		&& "git.discard" in [rio::dispatch::opnames]}
+		&& "git.discard" in [rio::dispatch::opnames] \
+		&& "git.discard_all" in [rio::dispatch::opnames]}
 } -result 1
 
 if {[testConstraint hasgit] && [info exists ::repo]} {
