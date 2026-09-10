@@ -15,7 +15,9 @@
 # ($w index/compare, the tk::Text* helpers) — never through expr, which corrupts
 # line.col values ("1.10" -> 1.1). Every edit calls the group proxy (%W), so it
 # reaches the core as a buffer.replace like any other keystroke; one operator is
-# one replace, hence one undo step.
+# one replace, hence one undo step — and every normal-state key arms an undo
+# break (D90) so the core's keystroke coalescing never runs two commands, or a
+# command and the typing before it, into a single step.
 
 namespace eval rio::modes::vi {
 	variable S {}   ;# group id -> {state normal|insert|visual, count "", op "", opcount "", pendg 0}
@@ -145,6 +147,13 @@ proc rio::modes::vi::key {w keysym char kstate} {
 		return 0   ;# insert state is Tk's Text editing, untouched
 	}
 	# --- normal / visual ---
+	# Each command is its own undo step. The core coalesces a run of one-character
+	# edits into one step (D90) — right for typing, wrong here: three x's are three
+	# deletions it cannot tell from three presses of Delete. Arming the break on
+	# every normal/visual key covers both ends: a repeated x / dd / p undoes one
+	# repetition at a time, and i / a / o start a fresh step instead of extending
+	# whatever was typed into the buffer before.
+	undo_break
 	if {$keysym eq "Escape"} { cancel $g $w ; return 1 }
 	# Control/Alt combos: the app chords already fired on the path tag; whatever
 	# reaches us is swallowed inertly so Tk's C-k/C-d/… can't fire in normal state.

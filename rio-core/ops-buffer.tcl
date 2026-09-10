@@ -61,13 +61,17 @@ proc rio::ops::buffer_text {params} {
 }
 rio::dispatch::register buffer.text rio::ops::buffer_text
 
-# buffer.replace {start, end, text} -> {} ; emits buffer.changed to all views.
+# buffer.replace {start, end, text, ?coalesce?} -> {} ; emits buffer.changed to
+# all views. `coalesce` (on unless sent as 0) lets the edit join the undo step
+# being typed — see the coalescing note in rio::doc (D90). A frontend sends 0
+# when it knows this edit is a discrete command rather than a keystroke.
 proc rio::ops::buffer_replace {params} {
 	set id [_bufid $params]
 	set start [dict get $params start]
 	set end   [dict get $params end]
 	set text  [dict get $params text]
-	set removed [rio::doc::edit $id $start $end $text]   ;# recorded for undo (O3)
+	set removed [rio::doc::edit $id $start $end $text \
+		[_flag_dflt $params coalesce 1]]                 ;# recorded for undo (O3)
 	set ev [dict create event buffer.changed params \
 		[dict create buffer $id start $start end $end text $text removed $removed]]
 	return [dict create result {} events [list $ev]]
@@ -90,6 +94,12 @@ proc rio::ops::_needle {params op} {
 # and 0/1 strings alike.
 proc rio::ops::_flag {params key} {
 	return [expr {[dict exists $params $key] && [dict get $params $key] ? 1 : 0}]
+}
+
+# The same, for a flag that is ON when absent (`_flag` can only default off).
+proc rio::ops::_flag_dflt {params key dflt} {
+	if {![dict exists $params $key]} { return $dflt }
+	return [expr {[dict get $params $key] ? 1 : 0}]
 }
 
 # buffer.find {needle, ?from?, ?nocase?, ?backwards?, ?wholeword?, ?buffer?} ->

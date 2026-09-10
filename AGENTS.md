@@ -4433,6 +4433,60 @@ the pointer; the launch-time skip clears a dead pointer.
 
 ---
 
+### D90 — Undo coalescing: a run of keystrokes is one undo step
+
+Until now **every keystroke was its own undo step** — `rio::doc::edit` unconditionally appended
+one record per edit, so taking back a typed word cost as many undos as it had letters. The
+refinement was anticipated from the start (the O3 note said "a later refinement"); this is it.
+
+**Where.** In the **core**, in `rio::doc::edit` — the single door every edit already goes through
+(the GUI proxy sends one `buffer.replace` per keystroke, and vi's operators, paste and the agent
+all land there too). The undo history is the core's (D3), so its granularity is decided there;
+every frontend gets the behaviour for free, over the wire, with **no view-side change**. Undo
+still emits exactly one `buffer.changed` — it just spans the whole run now, so a view needs no
+notion of coalescing at all.
+
+**The rule — word granularity** (jka's pick over vim-style whole-run). A new edit **merges into
+the record on top of the undo stack** when it is a **single character** that **continues** that
+record: typing forward (it lands where the last character ended), Backspace leftwards (its span
+ends where the record starts), or Delete pressed again at the very same spot. The run then
+**seals as soon as the character joining it is blank**, so `the ` is one step and `quick ` the
+next. A **newline never joins a run** — Enter is always its own step, so undoing right after it
+takes back the line break and nothing else. Everything else — a paste, typing over a selection,
+Replace All, an agent edit, anything longer than one character — is its own step and closes the
+run behind it. State is one per-buffer flag, `run` ("the top record is still open"), which
+`undo`/`redo` clear because the record they moved is no longer the one being typed into.
+
+**No clock, and no caret.** The core needs neither. A run continues only while edits stay
+**contiguous**, so clicking elsewhere and typing breaks it *by itself* — the frontend never has
+to report a cursor move (D22 keeps the caret frontend-local, and this respects that). An
+**idle-timeout** break (a pause seals the run) was considered and left out: it would make the
+model time-dependent for a case that adjacency and blanks already cover, and it can be added
+later without touching the protocol.
+
+**The one thing the core cannot infer — `coalesce`.** Two presses of Delete and two presses of
+vi's `x` arrive as the *same* two one-character deletions, yet vim undoes those separately. So
+`buffer.replace` takes an optional **`coalesce`** flag (on when absent, D19-style additive), and
+a frontend dispatching a **discrete command** sends `0`, meaning "begin a new step here". It
+breaks the run **behind** the edit only — the step it begins still grows — which is what makes
+vi's `i` followed by typing a word *one* step rather than a lone first character and then the
+rest. GUI-side this is a **one-shot** `undo_break` armed by a mode and consumed by the next edit
+through `editor_proxy` (`undo_coalesce`); the **vi extension** (bumped to 1.1) arms it on **every
+normal/visual key**, which covers both ends at one call site: repeated `x`/`dd`/`p` stay
+separately undoable, and entering insert starts a fresh step.
+
+**Tests.** Core `undo.test`: a typed word is one undo, blanks give word granularity, Enter stands
+alone, Backspace and repeated-Delete runs merge (and **redo** replays each whole — the delete
+record's `end` has to be recomputed as the run grows), a gap or a change of kind breaks the run,
+a paste stays its own step, `coalesce=0` begins a new step that still grows, typing after an undo
+never extends the record undo moved, and Replace All is untouched; through the ops, two
+one-character `buffer.replace`s are one step, `coalesce 0` splits them, and undoing a run emits
+**one** `buffer.changed` spanning it. GUI `smoke.tcl` types through the real proxy (word-at-a-time
+undo, the break is one-shot and splits a run); `vi.tcl` proves the end-to-end contract — `xxx`
+undoes one `x` at a time, while `i` + typing takes one `u`.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

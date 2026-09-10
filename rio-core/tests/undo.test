@@ -55,14 +55,16 @@ test undo-multiline {a multi-line replacement undoes cleanly} -body {
 } -result "{one\n2\n2.5\nthree} {one\ntwo\nthree}"
 
 test undo-stack-order {two edits undo in reverse order} -body {
+	# Multi-character inserts: two single characters typed in a row would now
+	# coalesce into ONE step (D90), which the coalescing tests below cover.
 	set b [rio::doc::new ""]
-	rio::doc::edit $b 1.0 1.0 "a"
-	rio::doc::edit $b 1.1 1.1 "b"
+	rio::doc::edit $b 1.0 1.0 "ab"
+	rio::doc::edit $b 1.2 1.2 "cd"
 	set ab [rio::doc::text $b]
 	rio::doc::undo $b ; set a [rio::doc::text $b]
 	rio::doc::undo $b ; set e [rio::doc::text $b]
 	list $ab $a $e
-} -result {ab a {}}
+} -result {abcd ab {}}
 
 test undo-new-edit-clears-redo {a fresh edit drops the redo branch} -body {
 	set b [rio::doc::new ""]
@@ -89,6 +91,151 @@ test undo-clamped-index {an out-of-range column clamps, and undo still reverses 
 	rio::doc::undo $b
 	list $after [rio::doc::text $b]
 } -result {hello! hello}
+
+# --- coalescing: a run of keystrokes is one undo step (D90) ------------------
+#
+# Every case here goes through the same door a keystroke does: one edit per
+# character, exactly what editor_proxy sends.
+
+# Type `s` one character at a time from `idx`, as a frontend would.
+proc typechars {b idx s} {
+	foreach ch [split $s ""] {
+		rio::doc::edit $b $idx $idx $ch
+		set idx [rio::doc::_advance $idx $ch]
+	}
+	return $idx
+}
+
+# Backspace `n` times from `idx` (each a one-character delete ending there).
+proc backspace {b idx n} {
+	for {set i 0} {$i < $n} {incr i} {
+		lassign [split $idx .] l c
+		set prev "$l.[expr {$c - 1}]"
+		rio::doc::edit $b $prev $idx ""
+		set idx $prev
+	}
+}
+
+test undo-coalesce-word {a typed word takes one undo, not one per keystroke} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "hello"
+	set typed [rio::doc::text $b]
+	rio::doc::undo $b
+	list $typed [rio::doc::text $b]
+} -result {hello {}}
+
+test undo-coalesce-word-granularity {a blank seals the run: one undo per word} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "the quick fox"
+	set steps {}
+	for {set i 0} {$i < 3} {incr i} {
+		rio::doc::undo $b
+		lappend steps [rio::doc::text $b]
+	}
+	set steps
+} -result {{the quick } {the } {}}
+
+test undo-coalesce-newline-own-step {Enter is always its own step} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "ab\ncd"
+	set steps {}
+	for {set i 0} {$i < 3} {incr i} {
+		rio::doc::undo $b
+		lappend steps [rio::doc::text $b]
+	}
+	set steps
+} -result [list "ab\n" ab {}]
+
+test undo-coalesce-redo-run {redo replays a coalesced run whole} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "hello"
+	rio::doc::undo $b
+	rio::doc::redo $b
+	rio::doc::text $b
+} -result {hello}
+
+test undo-coalesce-backspace {a run of Backspaces is one undo, and redoes whole} -body {
+	set b [rio::doc::new "hello"]
+	backspace $b 1.5 3
+	set left [rio::doc::text $b]
+	rio::doc::undo $b ; set back [rio::doc::text $b]
+	rio::doc::redo $b
+	list $left $back [rio::doc::text $b]
+} -result {he hello he}
+
+test undo-coalesce-delete-key {repeated Delete at one spot is one undo, and redoes whole} -body {
+	# Each press removes the character now under the caret: same start every time.
+	set b [rio::doc::new "hello"]
+	for {set i 0} {$i < 3} {incr i} { rio::doc::edit $b 1.0 1.1 "" }
+	set left [rio::doc::text $b]
+	rio::doc::undo $b ; set back [rio::doc::text $b]
+	rio::doc::redo $b
+	list $left $back [rio::doc::text $b]
+} -result {lo hello lo}
+
+test undo-coalesce-gap-breaks {an edit away from the run starts a new step} -body {
+	# The core needs no notion of the caret: a run continues only while the edits
+	# stay contiguous, so clicking elsewhere and typing breaks it by itself.
+	set b [rio::doc::new "hello"]
+	typechars $b 1.0 "ab"
+	rio::doc::edit $b 1.7 1.7 "z"
+	rio::doc::undo $b
+	rio::doc::text $b
+} -result {abhello}
+
+test undo-coalesce-kind-breaks {a delete never joins an insert run} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "ab"
+	backspace $b 1.2 1
+	rio::doc::undo $b ; set back [rio::doc::text $b]
+	rio::doc::undo $b
+	list $back [rio::doc::text $b]
+} -result {ab {}}
+
+test undo-coalesce-multichar-own-step {a paste is its own step and closes the run} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "ab"
+	rio::doc::edit $b 1.2 1.2 "XY"     ;# a paste: more than one character
+	typechars $b 1.4 "cd"
+	set steps {}
+	for {set i 0} {$i < 3} {incr i} {
+		rio::doc::undo $b
+		lappend steps [rio::doc::text $b]
+	}
+	set steps
+} -result {abXY ab {}}
+
+test undo-coalesce-off {coalesce=0 begins a new step, breaking the run behind it} -body {
+	set b [rio::doc::new ""]
+	rio::doc::edit $b 1.0 1.0 a
+	rio::doc::edit $b 1.1 1.1 b 0   ;# a discrete command (vi's x, p, i, …)
+	rio::doc::edit $b 1.2 1.2 c     ;# typing on: joins the step the break began
+	set steps {}
+	for {set i 0} {$i < 2} {incr i} {
+		rio::doc::undo $b
+		lappend steps [rio::doc::text $b]
+	}
+	set steps
+} -result {a {}}
+
+test undo-coalesce-after-undo {typing after an undo never extends the record it moved} -body {
+	set b [rio::doc::new ""]
+	typechars $b 1.0 "ab"
+	rio::doc::undo $b
+	typechars $b 1.0 "cd"
+	rio::doc::undo $b
+	rio::doc::text $b
+} -result {}
+
+test undo-coalesce-replace-all {Replace All stays one step and closes the run} -body {
+	set b [rio::doc::new "aa"]
+	typechars $b 1.2 "a"
+	rio::doc::replace_all $b a b
+	set all [rio::doc::text $b]
+	rio::doc::undo $b ; set back [rio::doc::text $b]
+	rio::doc::undo $b
+	list $all $back [rio::doc::text $b]
+} -result {bbb aaa aa}
 
 # --- through the core / edit.* ops -------------------------------------------
 
@@ -122,5 +269,37 @@ test undo-op-nothing {edit.undo with empty history succeeds with no event} -body
 		[dict get $r response result changed] \
 		[llength [dict get $r events]]
 } -result {true false 0}
+
+test undo-op-coalesce {consecutive one-character replaces are one undo step} -body {
+	set b [rio::doc::new ""]
+	rio::core::call buffer.replace [dict create buffer $b start 1.0 end 1.0 text h]
+	rio::core::call buffer.replace [dict create buffer $b start 1.1 end 1.1 text i]
+	set typed [rio::doc::text $b]
+	rio::core::call edit.undo [dict create buffer $b]
+	list $typed [rio::doc::text $b]
+} -result {hi {}}
+
+test undo-op-coalesce-off {coalesce=0 keeps an edit in its own undo step} -body {
+	set b [rio::doc::new ""]
+	rio::core::call buffer.replace [dict create buffer $b start 1.0 end 1.0 text h]
+	rio::core::call buffer.replace \
+		[dict create buffer $b start 1.1 end 1.1 text i coalesce 0]
+	rio::core::call edit.undo [dict create buffer $b]
+	rio::doc::text $b
+} -result {h}
+
+test undo-op-coalesce-event {undoing a run emits ONE buffer.changed spanning it} -body {
+	# The view resyncs through the same generic event — it just carries the whole
+	# run now, so a frontend needs no notion of coalescing at all.
+	set b [rio::doc::new ""]
+	foreach {col ch} {1.0 h 1.1 i} {
+		rio::core::call buffer.replace [dict create buffer $b start $col end $col text $ch]
+	}
+	set r [rio::core::call edit.undo [dict create buffer $b]]
+	set ev [lindex [dict get $r events] 0]
+	list [llength [dict get $r events]] \
+		[dict get $ev params start] [dict get $ev params end] \
+		[dict get $ev params removed]
+} -result {1 1.0 1.2 hi}
 
 cleanupTests

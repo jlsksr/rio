@@ -29,7 +29,8 @@ sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide 
 **What works now (GUI):**
 
 - **Editing** — open and save with encoding and line-ending (LF/CRLF)
-  **preservation** (no silent rewrites), range-based editing, undo/redo, several
+  **preservation** (no silent rewrites), range-based editing, undo/redo a typed
+  word at a time (not a keystroke at a time), several
   buffers as tabs, scrollbars, a line-number gutter (with an optional relative mode),
   current-line highlighting, a cursor-position (line/column) readout in the status bar,
   and optional line wrap.

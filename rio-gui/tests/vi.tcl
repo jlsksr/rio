@@ -121,6 +121,29 @@ load_text "ab"
 press xp
 ok "vi: xp swaps"             [buf_text $::cur] "ba"
 
+# --- undo granularity (D90) ------------------------------------------------------
+# The core merges a run of one-character edits into ONE undo step, which is right
+# for typing and wrong for a repeated command: three x's are three one-character
+# deletions it cannot tell from three presses of Delete. Every normal-state key
+# arms an undo break, so each command stays separately undoable.
+load_text "hello"
+press xxx
+ok "vi: xxx deletes three"    [buf_text $::cur] "lo"
+press u
+ok "vi: u undoes one x"       [buf_text $::cur] "llo"
+press u ; press u
+ok "vi: each x undid alone"   [buf_text $::cur] "hello"
+# Typing in insert state IS coalesced: one u takes the whole word back. `i` armed a
+# break too, but a break only splits the step BEFORE it — the new one still grows,
+# or this would undo as "f" and then "ast".
+load_text ""
+press i
+foreach ch [split "fast" ""] { typed $ch }
+esc
+ok "vi: insert typing lands"  [buf_text $::cur] "fast"
+press u
+ok "vi: one u takes the word" [buf_text $::cur] ""
+
 # --- operators: dw, d$, d2w, cw, cc --------------------------------------------
 load_text "alpha beta"
 press dw

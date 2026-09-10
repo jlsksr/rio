@@ -6979,6 +6979,21 @@ bind .bsash <ButtonRelease-1> { rio::layout::put bottom size [winfo height .site
 panedwindow .groups -orient horizontal -borderwidth 0 \
 	-sashwidth 6 -sashrelief raised -opaqueresize 1
 
+# A one-shot undo break (D90). The core merges a run of single-character edits
+# into one undo step — right for typing, wrong for a repeated command: vi's `x`
+# pressed three times is three one-character deletions the core cannot tell from
+# three presses of Delete. A mode about to dispatch a discrete command arms this,
+# and the next edit through the proxy starts its own undo step.
+set ::undo_break 0
+proc undo_break {} { set ::undo_break 1 }
+
+# The coalesce flag for the edit being sent now, consuming any armed break.
+proc undo_coalesce {} {
+	if {!$::undo_break} { return 1 }
+	set ::undo_break 0
+	return 0
+}
+
 # The per-widget proxy: an insert/delete becomes a buffer.replace on THIS group's
 # active buffer; everything else passes straight through to the real widget command.
 proc editor_proxy {g args} {
@@ -6990,7 +7005,8 @@ proc editor_proxy {g args} {
 			set chars [lindex $args 2]
 			if {$chars ne ""} {
 				if {[dict get [rio_call buffer.replace \
-					[dict create buffer [gcur $g] start $idx end $idx text $chars]] ok]} {
+					[dict create buffer [gcur $g] start $idx end $idx text $chars \
+						coalesce [undo_coalesce]]] ok]} {
 					mark_modified 1
 				}
 			}
@@ -7009,7 +7025,8 @@ proc editor_proxy {g args} {
 			}
 			if {[$rc compare $i1 < $i2]} {
 				if {[dict get [rio_call buffer.replace \
-					[dict create buffer [gcur $g] start $i1 end $i2 text {}]] ok]} {
+					[dict create buffer [gcur $g] start $i1 end $i2 text {} \
+						coalesce [undo_coalesce]]] ok]} {
 					mark_modified 1
 				}
 			}
@@ -7023,7 +7040,8 @@ proc editor_proxy {g args} {
 			set chars [lindex $args 3]
 			if {[$rc compare $i1 < $i2] || $chars ne ""} {
 				if {[dict get [rio_call buffer.replace \
-					[dict create buffer [gcur $g] start $i1 end $i2 text $chars]] ok]} {
+					[dict create buffer [gcur $g] start $i1 end $i2 text $chars \
+						coalesce [undo_coalesce]]] ok]} {
 					mark_modified 1
 				}
 			}

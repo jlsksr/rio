@@ -135,6 +135,25 @@ ok "undo: edit reverted"        [rio::doc::text $::cur] "a\nb\n"
 do_redo
 ok "redo: edit reapplied"       [rio::doc::text $::cur] ">a\nb\n"
 
+# --- undo coalescing through the proxy (D90) ---------------------------------
+# Typing must not cost one undo step per keystroke: the core merges a run of
+# one-character edits into one, sealed at each blank, so undo takes back a word
+# at a time. The proxy also carries a one-shot break, which a mode dispatching a
+# discrete command arms to keep each repetition separately undoable.
+do_open [tmpbytes ""]
+foreach ch [split "two words" ""] { .ed.t insert insert $ch }
+ok "coalesce: typed text"        [rio::doc::text $::cur] "two words"
+do_undo
+ok "coalesce: one undo per word" [rio::doc::text $::cur] "two "
+do_undo
+ok "coalesce: the run undid whole" [rio::doc::text $::cur] ""
+undo_break
+ok "coalesce: break arms once"   [list [undo_coalesce] [undo_coalesce]] {0 1}
+foreach ch {a b} { undo_break ; .ed.t insert insert $ch }
+do_undo
+ok "coalesce: a break splits the run" [rio::doc::text $::cur] "a"
+do_save ; do_close
+
 # --- multi-buffer / tabs -----------------------------------------------------
 set start [llength [gorder $::focus]]
 set f1 [tmpbytes "FILE ONE\n"]

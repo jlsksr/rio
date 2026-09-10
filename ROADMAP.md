@@ -64,10 +64,14 @@ Each entry notes its state:
   read-only "view buffers"** (emacs-like modes for dired/git/log, re-backing the
   rich-list widget with the core) — is noted but *not taken*; today the pane is
   deliberately GUI-local chrome, not a buffer.
-- **Undo-coalescing in the doc model** — *deferred.* Typing currently records
-  fine-grained undo steps; batching a run of keystrokes into one undo unit is a
-  noted refinement in the core document model. (Also felt in vi mode: one
-  operator is one undo, but insert-state typing stays per-keystroke.)
+- **Undo-coalescing in the doc model** — *landed* (AGENTS.md **D90**). A run of
+  single-character edits now merges into one undo step in `rio::doc::edit`, sealed at
+  each blank, so undo takes back a word at a time (Enter always stands alone); vi's
+  insert-state typing is covered too, while each normal-state command stays separately
+  undoable via the additive `coalesce` flag on `buffer.replace`. Remaining candidate:
+  an **idle-timeout** break (a pause in typing seals the run) — deliberately left out to
+  keep the model free of a clock; adjacency and blanks cover the common cases, and it can
+  be added later without a protocol change.
 - **Editing-mode extensions** — *deferred* (AGENTS.md D38, D41). The core ships the
   Windows mode; emacs and vi now ship as installable extensions (`extensions/`,
   D41) so they can grow on their own cadence. Consciously left for later: vi ex
