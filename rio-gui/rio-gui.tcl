@@ -8960,6 +8960,70 @@ if {[info exists ::env(RIO_GUI_HEADLESS)]} {
 	wm withdraw .
 }
 
+# Headless means there is NO HUMAN at this display — so a blocking dialog has only two
+# ways to end, and both are wrong: it waits forever, or it lands on whichever screen the
+# suite happens to be running against and waits for a developer to click it. The second is
+# what actually happened: a test run asked jka "«zeta.txt» has been deleted on disk. Keep
+# it open in the editor?" and their answer silently decided the state the rest of the suite
+# then ran against. A suite that needs an answer must supply it itself.
+#
+# The line, and it is jka's: a dialog that REPORTS something is worth seeing — an error
+# message is a diagnostic — while one that ASKS YOU TO DECIDE must never reach a person who
+# cannot know whether their answer changes the result. Both halves are served by sending
+# the dialog to the test OUTPUT instead of the screen. So each of these writes what it was
+# about to ask to stderr (where it survives even a `catch`, and is copy-pasteable in a way
+# a screenshot never was) and then raises, failing the suite that reached it.
+#
+# No informational carve-out: a report_error reaching a test means an op failed where the
+# test did not expect it, which is worth failing on — and the message is preserved above.
+#
+# A suite that MEANS to exercise a dialog overrides these the way it always has
+# (`rename tk_messageBox _real_mb ; proc tk_messageBox {args} {...}`) — it now renames this
+# guard rather than the real dialog, which changes nothing for it.
+#
+# Not covered: rio's own tkwait-window modals (name_prompt, pick_dialog,
+# remote_browse_dialog, connect_remote_dialog, extw_sources_dialog, keybindings_dialog).
+# Each is reached only by an explicit call, so a suite that calls one meant to.
+set ::headless_dialogs {}   ;# what was asked, when nobody was there to answer
+if {[info exists ::env(RIO_GUI_HEADLESS)]} {
+	foreach _hl_dlg {tk_messageBox tk_getOpenFile tk_getSaveFile tk_chooseDirectory
+	                 tk_chooseColor tk_dialog} {
+		if {[info commands ::$_hl_dlg] eq ""} continue
+		rename ::$_hl_dlg ::_headless_real_$_hl_dlg
+		proc ::$_hl_dlg {args} [string map [list @N@ $_hl_dlg] {
+			lappend ::headless_dialogs "@N@ $args"
+			puts stderr "HEADLESS DIALOG: @N@ $args"
+			flush stderr
+			return -code error "@N@ reached with no stub under RIO_GUI_HEADLESS: $args"
+		}]
+	}
+	unset -nocomplain _hl_dlg
+
+	# Raising is not enough on its own. Most dialogs are reached from a timer or event
+	# callback, where Tcl hands the error to the background handler and carries on — so a
+	# suite can finish, print ALL CHECKS PASSED, and still have asked a question nobody
+	# answered. (Observed: exactly that, before the fixture teardown below was fixed.) The
+	# recorded list is therefore the authority: a run that asked anything fails, whatever
+	# happened to the error afterwards.
+	rename exit _headless_real_exit
+	proc exit {{code 0}} {
+		if {[llength $::headless_dialogs]} {
+			puts stderr "\nRUN FAILED — [llength $::headless_dialogs] dialog(s) reached with no stub; a headless run must never ask:"
+			foreach d $::headless_dialogs { puts stderr "  $d" }
+			flush stderr
+			if {$code == 0} { set code 1 }
+		}
+		_headless_real_exit $code
+	}
+
+	# wish's own background-error handler is itself a dialog. Print instead, so a stray
+	# error in a callback cannot stop a run either.
+	proc bgerror {msg} {
+		puts stderr "HEADLESS BGERROR: $msg\n$::errorInfo"
+		flush stderr
+	}
+}
+
 # If keys.json had entries we couldn't use, say so once — a silent skip would leave the
 # user's remap mysteriously ineffective. The editor still ran on the valid rest.
 if {[llength $::keymap_bad] && ![info exists ::env(RIO_GUI_HEADLESS)]} {

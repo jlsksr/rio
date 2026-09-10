@@ -4784,6 +4784,55 @@ and this rides on it when it lands.
 
 ---
 
+### D95 — A headless run must never ask a human anything
+
+D94's first real user was the test suite, and it found something worse than a bug in D94.
+`smoke.tcl` opens files out of fixture directories and later deletes those directories with the
+tabs still open (`$proj`, `$gdir`); the `project.replace` calls further down emit `fs.changed`,
+which runs the new stale check, which correctly asked *"«zeta.txt» has been deleted on disk.
+Keep it open in the editor?"* — **on jka's real display, once per orphaned buffer**. jka
+answered them. So `smoke.tcl`'s green runs during D94 were obtained with a human in the loop,
+and their answers set `gone_ack` on buffers the rest of the suite then ran against. rio was
+right to ask; the suite was wrong to be asked, and nothing prevented it.
+
+**The line (jka's).** A dialog that **reports** is worth seeing — jka has debugged rio from
+screenshots of error messages. A dialog that **asks you to decide** must never reach someone who
+cannot know whether their answer changes the result. Both are served by sending dialogs to the
+run's **output** rather than the screen: the message survives as copy-pasteable text (strictly
+better than a screenshot), and nothing waits for a click.
+
+**The guard** replaces `tk_messageBox` and the four `tk_get*`/`tk_choose*` choosers under
+`RIO_GUI_HEADLESS`: each prints what it was about to ask to stderr and raises. No informational
+carve-out — a `report_error` reaching a test means an op failed where the test did not expect it,
+which is worth failing on, and the message is preserved either way.
+
+**Raising alone is not enough, which the fix itself proved.** With only stderr+raise in place,
+the re-broken suite still printed `ALL CHECKS PASSED` and exited 0: most dialogs are reached from
+a timer or event callback, where Tcl hands the error to the background handler and carries on. So
+the guard **records** every dialog and an `exit` wrapper turns a non-empty list into a non-zero
+exit — the exit code is the verdict, not the summary line. `bgerror` is replaced too, since
+wish's own background-error handler is itself a modal.
+
+**Why `RIO_GUI_HEADLESS` and not `sandbox.tcl`**, despite this being test-shaped scaffolding in
+shipped code: `session.tcl` deliberately does **not** source `sandbox.tcl` (it manages its own XDG
+dirs) but does set the variable, as does every other suite and CONTRIBUTING's documented
+invocation. rio already gates the off-screen map and the keymap warning the same way, so
+"headless means no human at this display" is existing vocabulary. It is still opt-in — a suite
+that forgets the variable is exposed — but it is the widest net that already exists.
+
+**The fixture bug it found** is fixed with `sandbox_drop_fixture`, which closes any tab open on a
+path before deleting it — `close_buffers_under`, the same call rio's own fs Delete makes. Note
+what is **not** teardown: `pipe.tcl` and `remote.tcl` delete a file and deliberately keep using
+its buffer, so they keep the plain delete. Converting those was a mistake, caught by their suites
+failing.
+
+**Tests.** The guard is verified by breaking the thing it was built for: re-orphaning smoke's
+`$proj` makes the run print the exact dialog and exit 1 while its own checks still say passed —
+which is the whole point of the recorded tally. All 23 GUI suites then run clean, three
+consecutive `smoke.tcl` runs with zero dialogs and zero background errors, core 535 untouched.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

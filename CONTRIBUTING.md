@@ -374,6 +374,17 @@ display but stays off-screen:
 
     RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl
 
+**A headless run must never ask you anything.** Under `RIO_GUI_HEADLESS` there is no
+one at the display, so every blocking dialog (`tk_messageBox`, the file choosers) is
+replaced by one that prints what it was about to ask and fails the run — a suite that
+needs an answer has to supply it itself, the way `repos.tcl` and `reload.tcl` do. The
+run's **exit code** is the verdict, not the `ALL CHECKS PASSED` line: a dialog reached
+from a timer or event callback would otherwise let a suite finish and still have asked
+a question nobody answered. If a test of yours deletes a fixture, use
+`sandbox_drop_fixture` rather than `file delete -force` — it closes any tab still open
+on that path first, which is what rio itself does, and what stops the next run stopping
+on *"…has been deleted on disk. Keep it open in the editor?"*.
+
 (On Windows that `VAR=x cmd` prefix is POSIX shell syntax PowerShell can't parse —
 but no prefix is needed there, because the GUI test scripts set the variable
 themselves: just `wish rio-gui\tests\smoke.tcl`. Windows contributors should read

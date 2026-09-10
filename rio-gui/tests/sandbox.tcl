@@ -37,3 +37,15 @@ proc sandbox_install_mode {name} {
 # rio-gui.tcl has loaded) so every suite that sources this keeps working unchanged.
 proc ::rio_real_t {args} { [gw $::focus] {*}$args }        ;# the focused real widget
 proc .ed.t        {args} { [gget $::focus path] {*}$args } ;# the focused edit proxy
+
+# Throw away a fixture directory the way teardown MEANS it: close any tab still open on it
+# first, then delete. A plain `file delete -force` leaves buffers pointing at files that no
+# longer exist, and rio rightly asks the user about each one at the next stale check (D94) —
+# which in a test is a modal with nobody to answer it. close_buffers_under is the app's own
+# answer to the same situation (rio-gui.tcl, the fs Delete path); it clears `modified`
+# first, so there is no save-before-closing prompt either. Bodies run at call time, like the
+# two procs above, so this may be defined before rio-gui.tcl has loaded.
+proc sandbox_drop_fixture {dir} {
+	catch {close_buffers_under $dir}
+	file delete -force $dir
+}

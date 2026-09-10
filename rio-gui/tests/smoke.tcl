@@ -567,7 +567,11 @@ ok "vanish: a gone root closes to the placeholder" [list $::nav_root [nav_labels
 ok "vanish: no error dialog for a gone root"       $::_ed_errs 0
 ok "vanish: forgets the reopen pointer"            $::last_project ""
 
-file delete -force $proj
+# The root itself is already gone — the vanish test above deleted it. What is left is the
+# TABS still open on files inside it, and those are not harmless: every later stale check
+# (D94) rightly asks the user about each vanished file, which in a headless run is a modal
+# with nobody to answer it. Close them the way the app would.
+sandbox_drop_fixture $proj
 
 # --- dock sites (D35 c1b): host tab strips, pane switch, side switch ----------
 proc body_in {site} { pack slaves .site$site.body }         ;# the active body there
@@ -890,7 +894,7 @@ if {![catch {exec git --version}]} {
 	ok "discard-all: confirm no-ops at 0" [git_discard_all_confirm] {}
 
 	after cancel refresh_git   ;# drop the pending git_flash restore before teardown
-	file delete -force $gdir
+	sandbox_drop_fixture $gdir ;# b.txt is still open on it — close the tab, don't orphan it
 } else {
 	puts "SKIP  git pane checks (git not installed)"
 }
