@@ -82,18 +82,23 @@ ok "tabs: window set scroll"     $::tab_layout                         scroll
 prefs_show_cat .prefs
 ok "category: selects editor"    [.prefs.cats get [.prefs.cats curselection]] Editor
 
-# --- the theme dropdown is enumerated from the core and shows the current label ----
-ok "view: theme is a dropdown"   [winfo class .prefs.body.view.theme]  Menubutton
-ok "view: theme menu enumerated" [expr {[.prefs.body.view.theme.m index end] >= 0}] 1
-# The button text is the pretty label plus a ▾ chevron (so a bare menubutton reads as a
-# dropdown); it tracks ::theme_choice.
-ok "view: chevron on the label"  [string match "*▾" $::theme_choice_label] 1
+# --- the theme control is a button onto the shared picker, showing the current label ----
+# It was a dropdown until D92; a menu can't bound its own height and the theme list grows
+# with every installed theme, so both doors now go through pick_dialog.
+ok "view: theme is a button"     [winfo class .prefs.body.view.theme]  Button
+ok "view: no dropdown menu left" [winfo exists .prefs.body.view.theme.m] 0
+ok "view: it opens the picker"   [.prefs.body.view.theme cget -command] theme_pick_dialog
+ok "view: rows come from core"   [expr {[llength [theme_pick_rows]] > 1}] 1
+ok "view: row is {name label}"   [llength [lindex [theme_pick_rows] 0]]  2
+# The button text is the pretty label plus an ellipsis (the "opens a chooser" affordance);
+# it tracks ::theme_choice, so a switch from either door updates it.
+ok "view: ellipsis on the label" [string match "*…" $::theme_choice_label] 1
 ok "view: label tracks choice"   [string match "[theme_label $::theme_choice]*" $::theme_choice_label] 1
-# Picking from the dropdown drives ::theme_choice (same global the View menu binds) and
-# the tracked label follows — the two-door sync, dropdown edition.
-set _lbl [.prefs.body.view.theme.m entrycget 0 -label]
-.prefs.body.view.theme.m invoke 0
-ok "view: pick sets label"       [string match "$_lbl*" $::theme_choice_label] 1
+set _was $::theme_choice
+do_theme [lindex [lindex [theme_pick_rows] 0] 0]
+ok "view: pick sets label" \
+	[string match "[theme_label [lindex [lindex [theme_pick_rows] 0] 0]]*" $::theme_choice_label] 1
+do_theme $_was
 ok "view: Font has a heading"    [winfo exists .prefs.body.view.fontl]  1
 
 # --- editing-mode radios are enumerated (not hard-coded) ---------------------------

@@ -34,14 +34,14 @@ design limit that surprises, append it to the matching section.
   into submenus (AGENTS.md **D64** — the View menu dropped from ~30 rows to ~18). We do
   **not** patch Tk's menu grab/post/scroll internals: an earlier attempt to (AGENTS.md
   **D59**) caused its own intermittent click misfires and was reverted.
-- **At scale (planned).** Grouping bounds the *fixed* menus, but one menu is still
-  **data-driven and unbounded** — the **Theme** cascade (grows with installed themes, D39) —
-  and it can still outgrow the screen. The durable fix is to render it as rio's scrollable
-  `rl_*` rich-list picker (the same component the Files / Git / Extensions panes use), which
-  has a bounded height and a scrollbar and never posts a screen-tall menu. Tracked under
-  *Menu overflow at scale* in [ROADMAP.md](ROADMAP.md). (The other unbounded menu, the
-  per-buffer **Tabs** cascade, was already retired this way in **D74** — it became the
-  bounded **View ▸ Switch to Tab…** dialog.)
+- **At scale — settled.** Grouping bounds the *fixed* menus; the two menus that were
+  **data-driven and unbounded** (they grew with your data, so no amount of grouping could
+  cap them) are both gone. Each became a bounded **picker dialog** — a listbox that scrolls
+  inside a fixed frame instead of a menu that posts screen-tall: the per-buffer **Tabs**
+  cascade in **D74** (now **View ▸ Switch to Tab…**), and the **Theme** cascade in **D92**
+  (now **View ▸ Theme…**, with the Preferences dropdown onto the same dialog). No menu in
+  rio is unbounded today, and a new one should not be: a list that grows with installed
+  extensions, open buffers or project contents belongs in `pick_dialog`, not a cascade.
 
 ### A killed command's exit code differs on Windows (there are no signals)
 

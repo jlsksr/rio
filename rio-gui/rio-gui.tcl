@@ -168,7 +168,7 @@ set ::editmode_active ""  ;# the mode currently attached to the RioMode tag ("" 
 set ::editmode_status ""  ;# the mode's status-bar segment ("-- INSERT --" in vi; "" otherwise)
 set ::theme_name default ;# active colour theme — a persisted preference; do_theme records it (D31)
 set ::last_project ""    ;# last folder opened on a LOCAL core — persisted, reopened on next launch (D88)
-set ::theme_choice default ;# the View ▸ Theme radio: tracks theme_name, snaps back on a failed switch (D39)
+set ::theme_choice default ;# what the Preferences button shows: tracks theme_name, snaps back on a failed switch (D39)
 # Tab-strip overflow (D57). When a group has more tabs than fit its width, `scroll`
 # (the default) keeps them on ONE line and shows ◂ ▸ arrows to page the visible window;
 # `multi` wraps them onto as many rows as needed. A persisted View preference; the Tabs
@@ -2858,11 +2858,11 @@ proc compare_with_file_dialog {} {
 		"[tab_name $::cur] (buffer)" "[file tail $path] (file)"
 }
 
-# The open-buffer picker (D74). One modal dialog serves both "Compare With Another
-# Tab…" and View ▸ "Switch to Tab…" — each is just "pick an open buffer from a list".
-# It replaces the old unbounded .m.tabs cascade (a menu could grow screen-tall on X11;
-# a dialog is bounded and scrolls), and unlike the cascade it can show a path hint so
-# two same-named tabs are told apart.
+# The open-buffer picker (D74). One modal dialog (pick_dialog, below) serves both
+# "Compare With Another Tab…" and View ▸ "Switch to Tab…" — each is just "pick an open
+# buffer from a list". It replaces the old unbounded .m.tabs cascade (a menu could grow
+# screen-tall on X11; a dialog is bounded and scrolls), and unlike the cascade it can
+# show a path hint so two same-named tabs are told apart.
 #
 # The row list is built by a separate proc so it stays headless-testable the way
 # tabs_menu_fill was directly callable: walk every group's tab order (the same source),
@@ -2883,14 +2883,23 @@ proc buffer_pick_rows {{exclude ""}} {
 	return $rows
 }
 
-# Show the picker modally and return the chosen buffer id (or "" on cancel / nothing to
-# pick). Modelled on remote_browse_dialog: themed toplevel, listbox + auto-hiding
-# scrollbar, Double-click/Return choose, Escape/Cancel abort, grab + tkwait.
-proc buffer_pick_dialog {title {exclude ""}} {
-	set rows [buffer_pick_rows $exclude]
+# The bounded list picker — "pick one row from a list", the shape D74 introduced for
+# buffers and D92 generalised. The dialog knows nothing about what a row *means*: each
+# row is {payload label}, and the return is the chosen payload, or "" on cancel or an
+# empty list. Modelled on remote_browse_dialog: themed toplevel, listbox + auto-hiding
+# scrollbar, Double-click/Return choose, Escape/Cancel abort, grab + tkwait. It exists
+# because a Tk menu has no size bound (an unbounded cascade can post taller than the
+# screen and misbehave on X11, see CAVEATS.md) while a listbox scrolls inside a fixed
+# frame — so every data-driven, unbounded list in rio comes here instead of to a menu.
+#
+# `initial` preselects the row carrying that payload (the theme in use, say) rather than
+# row 0, so the dialog opens on the current value the way a Windows chooser does. The box
+# is sized to its content within bounds — a 5-theme list isn't a 14-row well, and a long
+# one still stops well short of the screen.
+proc pick_dialog {title rows {initial ""}} {
 	if {![llength $rows]} { bell ; return "" }   ;# nothing to pick — don't open an empty dialog
 
-	set w .bufpick
+	set w .pick
 	destroy $w
 	toplevel $w
 	wm title $w $title
@@ -2898,28 +2907,36 @@ proc buffer_pick_dialog {title {exclude ""}} {
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 
+	set wide 0
+	foreach r $rows { set wide [expr {max($wide, [string length [lindex $r 1]])}] }
+
 	frame $w.body -background [dict get $c ui.bg]
-	scrollbar $w.body.sb -command {.bufpick.body.list yview}
-	listbox $w.body.list -height 14 -width 54 -activestyle none -exportselection 0 \
+	scrollbar $w.body.sb -command {.pick.body.list yview}
+	listbox $w.body.list -activestyle none -exportselection 0 \
+		-height [expr {max(6, min(16, [llength $rows]))}] \
+		-width  [expr {max(28, min(72, $wide + 2))}] \
 		-borderwidth 0 -highlightthickness 0 -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-selectbackground [dict get $c accent] \
 		-selectforeground [dict get $c ui.bg] \
-		-yscrollcommand {autoscroll .bufpick.body.sb .bufpick.body.list}
+		-yscrollcommand {autoscroll .pick.body.sb .pick.body.list}
 	pack $w.body.list -side left -fill both -expand 1
 
-	set ::bufpick_ids {}
+	set ::pick_payloads {}
+	set at 0
 	foreach r $rows {
-		lappend ::bufpick_ids [lindex $r 0]
+		if {[lindex $r 0] eq $initial} { set at [llength $::pick_payloads] }
+		lappend ::pick_payloads [lindex $r 0]
 		$w.body.list insert end [lindex $r 1]
 	}
-	$w.body.list selection set 0
-	$w.body.list activate 0
+	$w.body.list selection set $at
+	$w.body.list activate $at
+	$w.body.list see $at
 
 	frame $w.btns -background [dict get $c ui.bg]
-	button $w.btns.ok     -text OK     -font RioUIFont -command bufpick_choose
+	button $w.btns.ok     -text OK     -font RioUIFont -command pick_choose
 	button $w.btns.cancel -text Cancel -font RioUIFont \
-		-command {set ::bufpick_result "" ; destroy .bufpick}
+		-command {set ::pick_result "" ; destroy .pick}
 	pack $w.btns.cancel $w.btns.ok -side right -padx 3
 
 	grid $w.body -row 0 -column 0 -sticky nsew -padx 8 -pady {8 4}
@@ -2927,22 +2944,27 @@ proc buffer_pick_dialog {title {exclude ""}} {
 	grid rowconfigure $w 0 -weight 1
 	grid columnconfigure $w 0 -weight 1
 
-	bind $w.body.list <Double-Button-1> bufpick_choose
-	bind $w.body.list <Return>          bufpick_choose
-	bind $w <Escape> {set ::bufpick_result "" ; destroy .bufpick}
+	bind $w.body.list <Double-Button-1> pick_choose
+	bind $w.body.list <Return>          pick_choose
+	bind $w <Escape> {set ::pick_result "" ; destroy .pick}
 
-	set ::bufpick_result ""
+	set ::pick_result ""
 	catch {grab $w}
 	focus $w.body.list
 	tkwait window $w
-	return $::bufpick_result
+	return $::pick_result
 }
-# Resolve the listbox selection to its buffer id and close the dialog.
-proc bufpick_choose {} {
-	set sel [.bufpick.body.list curselection]
+# Resolve the listbox selection to its row payload and close the dialog.
+proc pick_choose {} {
+	set sel [.pick.body.list curselection]
 	if {$sel eq ""} return
-	set ::bufpick_result [lindex $::bufpick_ids $sel]
-	destroy .bufpick
+	set ::pick_result [lindex $::pick_payloads $sel]
+	destroy .pick
+}
+
+# Show the buffer picker modally and return the chosen buffer id (or "" on cancel).
+proc buffer_pick_dialog {title {exclude ""}} {
+	return [pick_dialog $title [buffer_pick_rows $exclude]]
 }
 
 # Compare the active buffer against another open buffer `id` — both sides are live
@@ -3127,7 +3149,7 @@ proc adopt_agent_status {} {
 # proposed edits auto-apply or wait for review. A spot for context-window usage
 # later. Called on provider change and on the auto-accept toggle.
 # Fill the Settings ▸ Agent Provider picker from the core's provider list (mirrors
-# themes_menu_fill). Rebuilt on connect and reconnect (adopt_agent_status) so an
+# modes_menu_fill). Rebuilt on connect and reconnect (adopt_agent_status) so an
 # installed provider (milestone B) shows up with no code change. The provider radios
 # share ::agent_provider with the Preferences pane. Provider choice is the one agent
 # knob quick enough to belong in the menu; its key/prompts/allow-list are configured
@@ -5362,29 +5384,37 @@ proc do_theme {name} {
 		apply_theme [dict get $resp result]
 		prefs_save
 	} else {
-		# The menu radio moved before we knew (a radiobutton sets its variable,
-		# then runs its command): snap it back to the theme still applied, so the
-		# menu never claims a theme the editor isn't wearing.
+		# The switch failed, so snap the tracked choice back to the theme still
+		# applied — it drives the Preferences button's label, which must never
+		# claim a theme the editor isn't wearing.
 		set ::theme_choice $::theme_name
 		report_error "Theme '$name': [dict get $resp error message]" \
 			[dict get $resp error code]
 	}
 }
 
-# Fill the View ▸ Theme cascade from the core's theme.list — one radio per
-# loadable theme, so a theme installed from a repository (D39) appears with no
-# menu wiring of its own (the modes_menu_fill pattern). An older remote core
-# without theme.list keeps the shipped four.
-proc themes_menu_fill {} {
-	if {![winfo exists .m.view.theme]} return
+# The themes the core can load, as picker rows {name label} — so a theme installed from
+# a repository (D39) appears with no wiring of its own. Built on demand rather than
+# cached into a widget: this is the only reader, and an install/removal is then live
+# with nothing to refill. An older remote core without theme.list keeps the shipped four.
+proc theme_pick_rows {} {
 	set names {default solarized-dark solarized-light acme}
 	set resp [rio_call theme.list {}]
 	if {[dict get $resp ok]} { set names [dict get $resp result themes] }
-	.m.view.theme delete 0 end
-	foreach name $names {
-		.m.view.theme add radiobutton -label [theme_label $name] \
-			-variable ::theme_choice -value $name -command [list do_theme $name]
-	}
+	set rows {}
+	foreach name $names { lappend rows [list $name [theme_label $name]] }
+	return $rows
+}
+
+# View ▸ Theme… and the Preferences ▸ View theme button (D92): pick a theme from the
+# bounded list instead of a cascade that grows with every installed theme. This was the
+# last data-driven, unbounded menu in rio — the standing X11 over-tall-menu caveat — and
+# it retires the same way the Tabs cascade did in D74, through pick_dialog. Opening on
+# the theme in use makes the dialog show the current value, the job the cascade's radio
+# checkmark used to do.
+proc theme_pick_dialog {} {
+	set name [pick_dialog "Theme" [theme_pick_rows] $::theme_name]
+	if {$name ne "" && $name ne $::theme_name} { do_theme $name }
 }
 
 # "solarized-dark" -> "Solarized Dark": menu labels derive from theme file names.
@@ -6331,8 +6361,9 @@ proc ext_remove {kind name} {
 #   syntax — reload the scanner registry, re-pick and re-paint every group;
 #   mode   — reload, refill the menu, re-attach (apply_editmode falls back to
 #            windows if the active mode was just removed);
-#   theme  — refill the View menu; if the ACTIVE theme changed under us,
-#            re-apply it — or fall back to default if it was removed.
+#   theme  — nothing to refill (the picker lists theme.list on open, D92); if the
+#            ACTIVE theme changed under us, re-apply it — or fall back to default
+#            if it was removed.
 proc ext_reload {kind} {
 	switch -- $kind {
 		syntax {
@@ -6345,7 +6376,6 @@ proc ext_reload {kind} {
 			apply_editmode
 		}
 		theme {
-			themes_menu_fill
 			if {$::theme_name ne "default"} {
 				set resp [rio_call theme.get [dict create name $::theme_name]]
 				if {[dict get $resp ok]} {
@@ -7731,8 +7761,8 @@ proc prefs_hint {w text} {
 }
 
 # View category: the display cluster (the same controls as the View menu), the dock
-# side, the theme radios (enumerated from the core like themes_menu_fill, so installed
-# themes appear), and the Font… dialog button.
+# side, the theme button (onto the shared picker, which enumerates from the core so
+# installed themes appear), and the Font… dialog button.
 proc prefs_fill_view {f} {
 	set r 0
 	grid [prefs_check $f.wrap    "Wrap Lines"           ::wrap_lines  apply_wrap]        -row [incr r] -column 0 -sticky w -pady 1
@@ -7746,28 +7776,15 @@ proc prefs_fill_view {f} {
 	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_radio $f.dl "Left"  ::dock_side left  {dock_set_side left}]  -row [incr r] -column 0 -sticky w -padx {12 0}
 	grid [prefs_radio $f.dr "Right" ::dock_side right {dock_set_side right}] -row [incr r] -column 0 -sticky w -padx {12 0}
-	# A dropdown rather than a radio per theme: the list scales (a repository can install
-	# many, D39) and the collapsed button shows the current one by its pretty label
-	# (::theme_choice_label, kept live by a trace). Each entry is a radiobutton keyed on
-	# ::theme_choice — the same global the View ▸ Theme radios use — so the two doors and
-	# the checkmark stay in sync, and do_theme applies + persists the pick.
+	# A button carrying the current theme's pretty label (::theme_choice_label, kept live
+	# by a trace) and opening the shared picker — the same door as View ▸ Theme…, so the
+	# two stay in sync for free and do_theme applies + persists the pick. It was a
+	# dropdown until D92; a menu can't bound its own height, and the theme list grows with
+	# every installed theme (D39). Keeping the *value* on the button (not a bare "Theme…")
+	# is what the dropdown was for: Preferences is the config home, so it shows what is set.
 	grid [prefs_label $f.thl "Theme"] -row [incr r] -column 0 -sticky w -pady {8 0}
-	set c $::theme_colors
-	menubutton $f.theme -textvariable ::theme_choice_label -menu $f.theme.m -font RioUIFont \
-		-anchor w -relief raised -borderwidth 1 -highlightthickness 0 -padx 6 -pady 1 \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
-	menu $f.theme.m -tearoff 0 -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-activebackground [dict get $c editor.selection] -activeforeground [dict get $c ui.fg]
-	set names {default solarized-dark solarized-light acme}
-	set resp [rio_call theme.list {}]
-	if {[dict get $resp ok]} { set names [dict get $resp result themes] }
-	foreach name $names {
-		$f.theme.m add radiobutton -label [theme_label $name] -variable ::theme_choice \
-			-value $name -command [list do_theme $name]
-	}
-	grid $f.theme -row [incr r] -column 0 -sticky w -padx {12 0}
+	grid [prefs_button $f.theme "" theme_pick_dialog] -row [incr r] -column 0 -sticky w -padx {12 0}
+	$f.theme configure -textvariable ::theme_choice_label -anchor w
 	grid [prefs_label $f.fontl "Font"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -padx {12 0} -pady {0 2}
 }
@@ -8451,7 +8468,7 @@ menu .m.view -tearoff 0
 # on screen (D64). A Tk menu posted taller than the space below it misbehaves on X11 (it can
 # unpost on a mid-list hover); we keep it in check by grouping, not by patching Tk's menu
 # machinery (the D59 lesson). The display toggles above stay top-level — they are the ones
-# flicked often. Each cascade is built like the .m.view.theme one below.
+# flicked often. Each cascade below is built the same way.
 menu .m.view.dock -tearoff 0
 .m.view add cascade -label "Dock Side" -menu .m.view.dock
 .m.view.dock add radiobutton -label "Left"  -variable ::dock_side -value left  -command {dock_set_side left}
@@ -8468,10 +8485,9 @@ menu .m.view.layout -tearoff 0
 .m.view.layout add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
 .m.view.layout add command -label "Unsplit Editor"        -command unsplit_editor
 .m.view.layout add command -label "Move Tab to Other Group" -accelerator [key_accel move-tab-other] -command move_tab_other
-# The Theme cascade is filled from the core (themes_menu_fill) once the channel
-# is up — installed themes (D39) appear here like shipped ones.
-menu .m.view.theme -tearoff 0
-.m.view add cascade -label "Theme" -menu .m.view.theme
+# Theme… opens the bounded picker (D92), not a cascade: the theme list grows with every
+# installed theme (D39), so it was the one menu here with no size bound at all.
+.m.view add command -label "Theme…" -command theme_pick_dialog
 # Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
 # installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
 
@@ -8590,16 +8606,16 @@ if {![dict get $_boot_theme ok]} {
 }
 apply_theme [dict get $_boot_theme result]
 set ::theme_choice $::theme_name
-# The Preferences window's Theme dropdown (D58) shows the current theme by its pretty
-# label with a ▾ chevron so a bare menubutton reads as a dropdown (Tk gives it no arrow
-# of its own). Keep that display string tracking ::theme_choice so a switch from either
-# door (the View ▸ Theme radios or the dropdown) updates the button text. One trace, live
-# for the app's life — it writes only a variable, harmless whether the window is open.
-proc theme_choice_display {} { return "[theme_label $::theme_choice]  ▾" }
+# The Preferences window's Theme control (D58) shows the current theme by its pretty
+# label, with a trailing ellipsis — the standard "opens a chooser" affordance, since D92
+# turned it from a dropdown into a button onto the shared picker. Keep that display
+# string tracking ::theme_choice so a switch from either door (View ▸ Theme… or the
+# button) updates the text. One trace, live for the app's life — it writes only a
+# variable, harmless whether the window is open.
+proc theme_choice_display {} { return "[theme_label $::theme_choice]…" }
 set ::theme_choice_label [theme_choice_display]
 trace add variable ::theme_choice write \
 	{apply {{a b c} {set ::theme_choice_label [theme_choice_display]}}}
-themes_menu_fill           ;# View ▸ Theme radios from the core's theme.list (D39)
 
 # Adopt the core's existing buffer(s), then process the command line. In-process: a
 # directory argument opens as the project folder, a file opens in a tab. Remote: the

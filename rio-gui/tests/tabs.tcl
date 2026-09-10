@@ -144,6 +144,27 @@ ok "picker: exclude omits it" \
 	[expr {[lsearch -exact [lmap r [buffer_pick_rows $far] {lindex $r 0}] $far] < 0}] 1
 ok "toggle: lives in View menu"  [.m.view type "Multi-Line Tabs"] checkbutton
 
+# --- the picker dialog itself (D92: buffers and themes share one) -------------------
+# It knows nothing about what a row means — {payload label} in, the chosen payload out.
+# Drive it headless: schedule the click, then let its own tkwait run the event loop.
+set _rows {{a Alpha} {b Beta} {c Gamma}}
+after 1 {.pick.body.list selection clear 0 end
+         .pick.body.list selection set 1
+         pick_choose}
+ok "pick: returns the payload"   [pick_dialog "T" $_rows]     b
+# `initial` opens the dialog on the row already in use (the theme you're wearing), the
+# job a cascade's radio checkmark used to do — not on row 0.
+after 1 {set ::_pick_at [.pick.body.list curselection] ; pick_choose}
+ok "pick: opens on initial"      [pick_dialog "T" $_rows c]   c
+ok "pick: initial was selected"  $::_pick_at                  2
+# Cancel returns nothing, and Escape is bound to the very same script (a generated
+# <Escape> can't be delivered to a toplevel that was never mapped, so assert the wiring).
+after 1 {set ::_pick_esc [bind .pick <Escape>] ; .pick.btns.cancel invoke}
+ok "pick: Cancel returns none"   [pick_dialog "T" $_rows]     {}
+ok "pick: Escape cancels too"    $::_pick_esc  {set ::pick_result "" ; destroy .pick}
+ok "pick: empty list opens none" [pick_dialog "T" {}]         {}
+ok "pick: nothing left behind"   [winfo exists .pick]         0
+
 # --- the mode persists through prefs.json, and a bogus value is rejected -----------
 set ::tab_layout multi ; prefs_save
 set ::tab_layout scroll ; prefs_load

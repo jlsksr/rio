@@ -230,11 +230,11 @@ ok "theme: installs"          [ext_install [variant night $::A]] 1
 ok "theme: consent says data" [string match "*never executed*" [mb_last]] 1
 set resp [rio_call theme.list {}]
 ok "theme: core lists night"  [expr {"night" in [dict get $resp result themes]}] 1
-set found 0
-for {set i 0} {$i <= [.m.view.theme index end]} {incr i} {
-	if {[.m.view.theme entrycget $i -label] eq "Night"} { set found 1 }
-}
-ok "theme: menu radio filled" $found 1
+# The picker lists theme.list on open (D92), so an install is live with nothing to refill.
+ok "theme: in the picker rows" \
+	[expr {[lsearch -exact [lmap r [theme_pick_rows] {lindex $r 0}] night] >= 0}] 1
+ok "theme: row carries a label" \
+	[expr {[lsearch -exact [lmap r [theme_pick_rows] {lindex $r 1}] Night] >= 0}] 1
 do_theme night
 ok "theme: applies live"      [rio_real_t cget -background] #101018
 ok "theme: is the active one" $::theme_name night

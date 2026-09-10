@@ -109,9 +109,9 @@ in [docs/](docs/index.md).
   project prompt in a `.rio/agent.md` at the project root, so it travels with the code. The
   instructions live in rio, not the provider — so your general ones shape whichever model
   runs (Claude, ChatGPT, a local model), while the per-provider layer tunes just one.
-- **Theming** — live-switchable colour themes from the View menu: the plain
+- **Theming** — live-switchable colour themes from *View ▸ Theme…*: the plain
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
-  in yourself — the menu lists whatever the core can load. Themes are plain
+  in yourself — the list is whatever the core can load. Themes are plain
   data files, never executed.
 - **Editor font & zoom** — pick the document-view font family and size in *View ▸
   Font…*, or zoom on the fly with **Ctrl+scroll** and **Ctrl++**/**Ctrl+-**

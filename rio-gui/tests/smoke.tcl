@@ -1558,6 +1558,12 @@ proc _menu_has_label {m label} {
 }
 ok "menu: Extensions… under Settings"  [_menu_has_label .m.settings "Extensions…"] 1
 ok "menu: Extensions… gone from View"  [_menu_has_label .m.view "Extensions…"] 0
+# The Theme cascade was the last data-driven menu with no size bound — it grew with every
+# installed theme and could post taller than the screen (CAVEATS.md). D92 retired it into
+# the bounded picker, the way D74 retired the Tabs cascade: a command, never a cascade.
+ok "view: Theme… is a command"      [.m.view type "Theme…"] command
+ok "view: no Theme cascade left"    [winfo exists .m.view.theme] 0
+ok "view: Theme… opens the picker"  [.m.view entrycget "Theme…" -command] theme_pick_dialog
 # The Preferences window mirrors that with its own Extensions… button (D67).
 preferences_window
 ok "prefs: has an Extensions… button"  [expr {[winfo exists .prefs.btns.ext] \

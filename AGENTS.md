@@ -3651,7 +3651,8 @@ Extensions… sits **directly under Preferences…**: the two read as the pair o
 windows — Preferences the built-in settings, Extensions the installer for the providers / modes /
 themes / syntax those settings pick from. The Preferences window **mirrors** this with its own
 *Extensions…* button (bottom-left, beside Close), so the pairing holds whichever door you came in
-by. View ends on its Theme cascade; the move also shortens View, serving D64 (keep the View menu
+by. View ends on its Theme cascade (**a bounded Theme… dialog since D92**); the move also
+shortens View, serving D64 (keep the View menu
 within screen height). `smoke.tcl` guards assert Extensions… is in Settings (not View) and that the
 Preferences window carries the button, so neither can silently drift. (The window itself, the D39
 install machinery, and the D66 provider path are unchanged — only the entry points moved.)
@@ -3838,7 +3839,8 @@ was directly callable.
   trims to File · Edit · View · Compare · Settings.
 
 **Caveat retired, partly.** The bounded dialog removes **Tabs** from the pair of unbounded
-data-driven menus in [CAVEATS.md](CAVEATS.md); only the **Theme** cascade remains there. No
+data-driven menus in [CAVEATS.md](CAVEATS.md); only the **Theme** cascade remains there
+(**and it followed, through this same picker, in D92 — the caveat is now fully retired**). No
 new keyboard shortcut for Switch to Tab… (menu + dialog only) — a `goto-tab` chord is a
 possible later add. Pure GUI change; no core op touched. The **Multi-Line Tabs** view
 preference (D57) stays in the View menu — it was never part of the navigation list.
@@ -4547,6 +4549,57 @@ appears in `keyboard.md`** — the check that would have caught the stale INSTAL
 `prefs_save` actually writes, and its *Where everything lives* tables against the procs that
 build those paths. Both immediately found real drift: seven undocumented prefs keys and the
 missing provider store. The general rule they came from is §7's derived-facts register.)*
+
+### D92 — The Theme cascade retires into the shared picker; no unbounded menu remains
+
+**The gap.** A Tk menu has no size bound. Posted taller than the space below it, the X11 menu
+widget tries to reposition-and-scroll itself and can **unpost on a mid-list hover** — the
+standing caveat in [CAVEATS.md](CAVEATS.md), a Tk rough edge we deliberately do **not** patch
+(the D59 lesson: an attempt to caused its own click misfires and was reverted). D64 bounded the
+*fixed* menus by grouping, and D74 retired the per-buffer **Tabs** cascade into a dialog. That
+left exactly one **data-driven, unbounded** menu: the **Theme** cascade, which grows with every
+theme a repository installs (D39) and so has no ceiling at all. In fact it left *two* doors onto
+the same unbounded list — the cascade and the Preferences ▸ View theme **dropdown** (D58), a
+menubutton menu with the same problem. Fixing one would have left the caveat live.
+
+**The decision (jka, 2026-09-10).** Retire both into the **bounded picker**, the shape D74
+already proved — a themed modal with a listbox and an auto-hiding scrollbar, which scrolls
+*inside a fixed frame* and can never outgrow the screen. Deliberately **not** a live-preview or
+swatch-per-row picker: those want the `rl_*` rich-list (only a text widget can colour a row),
+and that would add a second dialog idiom for a control you touch rarely. One idiom, already
+tested, is worth more here than a richer one. (ROADMAP/CAVEATS had both promised an `rl_*`
+picker; the listbox is what actually fits, so those notes were corrected rather than obeyed.)
+
+- **`pick_dialog {title rows {initial ""}}`** — D74's `buffer_pick_dialog` generalised. The
+  dialog no longer knows what a row *means*: rows are `{payload label}`, the return is the
+  chosen payload or `""` on cancel or an empty list. `buffer_pick_dialog` is now a two-line
+  wrapper, so Switch to Tab… and Compare With Another Tab… are unchanged. Two additions the
+  generalisation paid for: the box is **sized to its content** within bounds (6–16 rows, 28–72
+  columns), so a five-theme list isn't a fourteen-row well; and **`initial`** preselects the row
+  already in use, which is the job the cascade's radio checkmark used to do.
+- **View ▸ Theme…** replaces the cascade — a command, not a submenu, so View also gets shorter.
+- **Preferences ▸ View** keeps showing the current theme, now on a **button** carrying
+  `::theme_choice_label` and opening the same picker. The label's `▾` chevron becomes an
+  **ellipsis**: it no longer drops down, it opens a chooser, and `…` is the affordance for that
+  (matching *Font…*, *Extensions…*). Keeping the *value* on the button rather than a bare
+  "Theme…" is the point of the control — Preferences is the config home (D85), so it shows what
+  is set.
+- **`themes_menu_fill` is gone.** The list is built on demand by **`theme_pick_rows`** when the
+  dialog opens, so there is nothing to refill: an install or removal (`ext_reload theme`) is
+  live for free, and one proc feeds both doors.
+
+**Tests.** `tabs.tcl` now drives the dialog itself headless — schedule the click, let its own
+`tkwait` run the event loop — covering the returned payload, `initial` preselection, Cancel, an
+empty list, and that nothing is left behind (a generated `<Escape>` can't reach a toplevel that
+was never mapped, so the binding is asserted against Cancel's script instead). `smoke.tcl` guards
+that *Theme…* is a **command** and that no `.m.view.theme` cascade exists; `repos.tcl` checks an
+installed theme through `theme_pick_rows` instead of scanning menu entries; `prefs_window.tcl`
+checks the button, its command, and the ellipsis label.
+
+**Caveat retired.** [CAVEATS.md](CAVEATS.md)'s over-tall-menu entry keeps its *symptom and
+cause* — it is still true of Tk, and still the reason menus stay grouped — but its "at scale"
+paragraph is closed: **no menu in rio is data-driven and unbounded any more.** The ROADMAP item
+*Menu overflow at scale* is removed. Pure GUI change; no core op touched.
 
 ---
 

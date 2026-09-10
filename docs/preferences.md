@@ -29,7 +29,7 @@ Neither ever holds your API key — that lives on its own, described below.
 separate "make this the default" step and no "save settings" button.
 
 - **From the UI** — the **View** menu (Wrap Lines, Indent Wrapped Lines, Line
-  Numbers, the themes, Dock Left/Right, the pane toggles), the **Settings** menu
+  Numbers, Theme…, Dock Left/Right, the pane toggles), the **Settings** menu
   (Column Editing, Editing Mode, the two agent toggles), and the shortcuts
   (`Ctrl+Shift+W` wrap, `Ctrl+Shift+A` agent pane, `Ctrl+L` line numbers). Each
   toggle rewrites `prefs.json` at once and is restored next launch.
