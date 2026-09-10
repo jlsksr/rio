@@ -507,16 +507,40 @@ proc dispatch_event {ev} {
 # pane's status is project-wide, so it always repaints.
 # The user's own Save needs nothing here: it refreshes locally via do_save and goes
 # through file.save, which emits no fs.changed — so there is no double repaint.
+# One op can announce many changed paths in one go — a discard-all rewrites every changed
+# file (D94), a rename announces both ends. A repaint is itself a nested core call, so
+# repainting per event would cost one round trip PER PATH — the very N-round-trip price D93
+# went to git to avoid. So collect the paths and repaint ONCE, a beat later.
+# A *timer*, not `after idle`: core_reader takes one line per readable event, and Tcl runs
+# idle handlers between two of those, so an idle callback splits a burst instead of
+# coalescing it (measured: 2 repaints for 3 paths). The delay has to clear the gap a socket
+# can put between two lines of the SAME burst — a delayed ACK inserts ~40ms, which is what
+# a 25ms window kept tripping over — while staying under the eye's notice.
+set ::fs_changed_paths {}   ;# paths announced since the last repaint
+set ::fs_changed_after  ""  ;# pending repaint timer; "" while none is armed
+set ::fs_changed_delay  60  ;# ms; > a socket's ~40ms delayed-ACK gap, < a noticeable lag
 proc on_fs_changed {p} {
 	if {![dict exists $p path]} return
+	lappend ::fs_changed_paths [dict get $p path]
+	if {$::fs_changed_after eq ""} {
+		set ::fs_changed_after [after $::fs_changed_delay fs_changed_settle]
+	}
+}
+proc fs_changed_settle {} {
+	set paths $::fs_changed_paths
+	set ::fs_changed_paths {}
+	set ::fs_changed_after ""
 	if {$::dock_pane eq "git"} {
 		refresh_git
+		return
+	}
+	if {$::nav_root eq ""} return
 	# Compare the core's paths as strings: both sides came FROM the core, already
 	# normalized there, so a client-side [file normalize] adds nothing — and on a
 	# Windows client against a POSIX core it rewrites "/home/jka" to "C:/home/jka".
 	# It matched only because both operands were mangled identically.
-	} elseif {$::nav_root ne "" && [nav_dir_visible [file dirname [dict get $p path]]]} {
-		populate_nav
+	foreach path $paths {
+		if {[nav_dir_visible [file dirname $path]]} { populate_nav ; return }
 	}
 }
 
@@ -1906,6 +1930,15 @@ proc git_commit {} {
 # branch line. Runs after refresh_dock, so the flash survives that repaint.
 proc git_flash {text} {
 	.pgit.hdr.branch configure -text $text
+	# The op that flashed here has usually just announced fs.changed as well (D94), and
+	# that idle repaint would wipe the message before anyone read it. Drop it while the
+	# git pane is the one showing — the scheduled refresh_git below repaints all the same,
+	# once the flash has had its 2.5s. With another pane shown the settle is left alone:
+	# it is repainting the file tree, which the flash has no claim on.
+	if {$::dock_pane eq "git" && $::fs_changed_after ne ""} {
+		after cancel $::fs_changed_after
+		set ::fs_changed_after "" ; set ::fs_changed_paths {}
+	}
 	after cancel refresh_git
 	after 2500 refresh_git
 }

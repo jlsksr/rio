@@ -134,12 +134,20 @@ proc rio::git::_has_head {cwd} {
 # additions among them. `:/` is git's repo-root pathspec, so the sweep covers the whole repo
 # however deep the cwd sits; no `-x`, so IGNORED files (build output, a local .env) survive:
 # discarding your edits must not cost you untracked state git was told to disregard.
-# Returns how many changed paths there were, for the frontend's confirmation. A repo with
-# nothing to discard is a bad_request, like the per-path op.
+# Returns {count N paths {...}}: N is how many changed ENTRIES the pane showed (what the
+# frontend's confirmation counted), and paths are the repo-relative files touched, which the
+# op turns into fs.changed events (D94). The two differ by renames — one entry, but BOTH
+# names change on disk when the rename is reverted, so both are listed. A repo with nothing
+# to discard is a bad_request, like the per-path op.
 proc rio::git::discard_all {cwd} {
-	set n [llength [dict get [status $cwd] changes]]
-	if {$n == 0} {
+	set changes [dict get [status $cwd] changes]
+	if {![llength $changes]} {
 		rio::error::raise bad_request "nothing to discard"
+	}
+	set paths {}
+	foreach c $changes {
+		lappend paths [dict get $c path]
+		if {[dict exists $c orig]} { lappend paths [dict get $c orig] }
 	}
 	if {[_has_head $cwd]} {
 		_run $cwd reset -q --hard
@@ -147,7 +155,7 @@ proc rio::git::discard_all {cwd} {
 		_run $cwd reset -q
 	}
 	_run $cwd clean -fd -- :/
-	return $n
+	return [dict create count [llength $changes] paths $paths]
 }
 
 # git.commit: record the staged index as a commit — `git commit -m <msg>`. The second

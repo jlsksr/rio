@@ -350,16 +350,34 @@ foreach seq {<B1-Motion> <Shift-Button-1> <Triple-Button-1> <Shift-Down>} {
 
 # fs.changed repaints the files pane when the write lands in the shown directory, so an
 # agent-created file appears without a manual reload (D47). Create a file on disk behind
-# the pane's back, then feed it the event the core would broadcast.
+# the pane's back, then feed it the event the core would broadcast. The repaint is debounced
+# (D94 — one op can announce many paths), so run the event loop long enough for its timer.
+proc drain_fs {} {
+	set ::_fsdrain 0 ; after [expr {$::fs_changed_delay * 3}] {set ::_fsdrain 1}
+	vwait ::_fsdrain
+}
 set nf [open [file join $proj gamma.txt] w] ; puts -nonewline $nf "G\n" ; close $nf
 ok "pane: new file absent pre-event"   [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 0
 dispatch_event [dict create event fs.changed params [dict create path [file join $proj gamma.txt]]]
+drain_fs
 ok "pane: fs.changed reveals new file" [expr {[lsearch -exact [nav_labels] gamma.txt] >= 0}] 1
+# A burst of events from ONE op costs ONE repaint, not one per path (D94): three paths in a
+# row arm a single timer, and the pane is up to date once it has run.
+set tf [open [file join $proj theta.txt] w] ; puts -nonewline $tf "T\n" ; close $tf
+foreach f {theta.txt gamma.txt theta.txt} {
+	dispatch_event [dict create event fs.changed params [dict create path [file join $proj $f]]]
+}
+ok "pane: a burst arms one repaint" [llength $::fs_changed_paths] 3
+drain_fs
+ok "pane: burst repaint drains"     [list $::fs_changed_paths $::fs_changed_after] {{} {}}
+ok "pane: burst reveals the file"   [expr {[lsearch -exact [nav_labels] theta.txt] >= 0}] 1
+file delete [file join $proj theta.txt] ; populate_nav
 # A write under a FOLDED directory does not repaint the pane (nav_dir_visible is false for
 # sub/, which we folded back above): create delta.txt in the root but signal a change under
 # sub/ — the guard skips the repaint, so delta.txt must stay hidden until a real refresh.
 set df [open [file join $proj delta.txt] w] ; puts -nonewline $df "D\n" ; close $df
 dispatch_event [dict create event fs.changed params [dict create path [file join $proj sub deep.txt]]]
+drain_fs
 ok "pane: out-of-dir change skips repaint" [expr {[lsearch -exact [nav_labels] delta.txt] >= 0}] 0
 # The ⟳ refresh control reloads the shown directory on demand — the manual path for
 # changes rio didn't make. delta.txt is on disk in the root but not yet shown (the
@@ -856,6 +874,13 @@ if {![catch {exec git --version}]} {
 	set _r [rio_call git.discard_all {}]
 	ok "discard-all: op reported ok"    [expr {[dict get $_r ok] ? 1 : 0}] 1
 	ok "discard-all: counted the same"  [dict get $_r result count] $_n
+	# The op announces every path it rewrote (D94), so the burst is sitting in the
+	# coalescer by the time the reply lands — this is what makes an open buffer able to
+	# notice. And a flash drops that idle repaint while the git pane is shown, so the
+	# "✓ discarded …" message survives long enough to be read.
+	ok "discard-all: announced the paths" [llength $::fs_changed_paths] $_n
+	set ::dock_pane git ; git_flash "✓ smoke"
+	ok "discard-all: flash drops settle"  [list $::fs_changed_paths $::fs_changed_after] {{} {}}
 	refresh_git
 	ok "discard-all: repo now clean"    [string trim [git_line 0]] "(clean)"
 	ok "discard-all: new file removed"  [file exists [file join $gdir fresh.txt]] 0

@@ -13,6 +13,20 @@ proc rio::ops::_git_cwd {params} {
 	return [rio::project::root]
 }
 
+# A git write that rewrote the worktree announces it exactly like an fs.* op does (D94):
+# one fs.changed per path, absolute, so the file pane repaints and open buffers can notice
+# they went stale. git names paths relative to the repo root, which IS the project root
+# (D43); the pwd fallback matches rio::git's own when no cwd is set.
+proc rio::ops::_git_changed_evs {cwd paths} {
+	if {$cwd eq ""} { set cwd [pwd] }
+	set evs {}
+	foreach p $paths {
+		lappend evs [dict create event fs.changed \
+			params [dict create path [file join $cwd $p]]]
+	}
+	return $evs
+}
+
 # git.status {?cwd?} -> {branch, changes:[{x,y,path,?orig?}]}
 proc rio::ops::git_status {params} {
 	return [dict create result [rio::git::status [_git_cwd $params]]]
@@ -43,20 +57,28 @@ rio::dispatch::register git.commit rio::ops::git_commit
 # git.discard {path, ?cwd?} -> {action revert|remove} ; discard a path's local changes
 # (D80). A tracked file reverts to its last committed version (staged AND worktree changes
 # dropped); a new file (untracked, or a staged addition) is removed. The GUI gates this
-# behind a confirm and words its outcome from `action`.
+# behind a confirm and words its outcome from `action`. Emits fs.changed for the path,
+# whether it was reverted or removed — both are disk writes rio itself caused (D94).
 proc rio::ops::git_discard {params} {
-	set action [rio::git::discard [_git_cwd $params] [dict get $params path]]
-	return [dict create result [dict create action $action]]
+	set cwd  [_git_cwd $params]
+	set path [dict get $params path]
+	set action [rio::git::discard $cwd $path]
+	return [dict create result [dict create action $action] \
+		events [_git_changed_evs $cwd [list $path]]]
 }
 rio::dispatch::register git.discard rio::ops::git_discard
 
 # git.discard_all {?cwd?} -> {count N} ; discard every local change in the repo at once
 # (D93) — the bulk form of git.discard, done in git rather than by looping the per-path op
 # over N paths. `count` is how many changed paths there were, for the frontend's
-# confirmation; nothing to discard is a bad_request, as it is per path.
+# confirmation; nothing to discard is a bad_request, as it is per path. Emits one fs.changed
+# per path rewritten (D94) — bounded by the change list the user just confirmed, and honest
+# in a way a single "the root changed" event would not be.
 proc rio::ops::git_discard_all {params} {
-	set n [rio::git::discard_all [_git_cwd $params]]
-	return [dict create result [dict create count $n]]
+	set cwd [_git_cwd $params]
+	set r [rio::git::discard_all $cwd]
+	return [dict create result [dict create count [dict get $r count]] \
+		events [_git_changed_evs $cwd [dict get $r paths]]]
 }
 rio::dispatch::register git.discard_all rio::ops::git_discard_all
 

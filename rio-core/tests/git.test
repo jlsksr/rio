@@ -285,11 +285,12 @@ test git-op-discard {git.discard op discards through the core and returns the ac
 
 test git-discard-all-mixed {discard_all reverts, removes and unstages the whole repo at once} \
 		-constraints hasgit -setup {set d [makerepo]} -body {
-	set n [rio::git::discard_all $d]
-	list $n [llength [dict get [rio::git::status $d] changes]] \
+	set r [rio::git::discard_all $d]
+	list [dict get $r count] [lsort [dict get $r paths]] \
+		[llength [dict get [rio::git::status $d] changes]] \
 		[string trim [slurp [file join $d a.txt]]] \
 		[file exists [file join $d b.txt]] [file exists [file join $d c.txt]]
-} -cleanup {file delete -force $d} -result {3 0 one 0 0}
+} -cleanup {file delete -force $d} -result {3 {a.txt b.txt c.txt} 0 one 0 0}
 
 test git-discard-all-restores-deletion {discard_all brings back a deleted tracked file} \
 		-constraints hasgit -setup {
@@ -320,8 +321,9 @@ test git-discard-all-unborn-head {discard_all works with no commits yet (nothing
 	writefile [file join $d s.txt] "staged\n" ; git_in $d add s.txt   ;# "A ", unborn HEAD
 	writefile [file join $d u.txt] "untracked\n"                      ;# "??"
 } -body {
-	set n [rio::git::discard_all $d]
-	list $n [file exists [file join $d s.txt]] [file exists [file join $d u.txt]] \
+	set r [rio::git::discard_all $d]
+	list [dict get $r count] [file exists [file join $d s.txt]] \
+		[file exists [file join $d u.txt]] \
 		[llength [dict get [rio::git::status $d] changes]]
 } -cleanup {file delete -force $d} -result {2 0 0 0}
 
@@ -341,6 +343,44 @@ test git-op-discard-all {git.discard_all op clears the repo through the core and
 	list [dict get $resp ok] [dict get $resp result count] \
 		[llength [dict get [rio::git::status $d] changes]]
 } -cleanup {file delete -force $d} -result {true 3 0}
+
+test git-discard-all-rename-both-ends {a reverted rename lists both names among the paths} \
+		-constraints hasgit -setup {
+	set d [makerepo]
+	git_in $d add -A ; git_in $d commit -q -m base              ;# clean tree first
+	git_in $d mv a.txt renamed.txt                              ;# one entry, two names
+} -body {
+	set r [rio::git::discard_all $d]
+	list [dict get $r count] [lsort [dict get $r paths]] \
+		[file exists [file join $d a.txt]] [file exists [file join $d renamed.txt]]
+} -cleanup {file delete -force $d} -result {1 {a.txt renamed.txt} 1 0}
+
+# --- D94: rio announces the disk writes it causes itself ---------------------
+# Until now git.discard/git.discard_all rewrote the worktree in silence — the file pane
+# would not repaint and an open buffer could not learn it had gone stale. They emit
+# fs.changed with an absolute path now, exactly as fs.write/create/rename/delete do.
+
+test git-op-discard-emits-fs-changed {git.discard emits fs.changed for the path it touched} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set r [rio::core::call git.discard [dict create cwd $d path a.txt]]
+	set evs [dict get $r events]
+	list [llength $evs] [dict get [lindex $evs 0] event] \
+		[expr {[dict get [lindex $evs 0] params path] eq [file join $d a.txt]}]
+} -cleanup {file delete -force $d} -result {1 fs.changed 1}
+
+test git-op-discard-all-emits-fs-changed {git.discard_all emits one fs.changed per path} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	set evs [dict get [rio::core::call git.discard_all [dict create cwd $d]] events]
+	set names {}
+	set kinds {}
+	foreach ev $evs {
+		lappend kinds [dict get $ev event]
+		set p [dict get $ev params path]
+		# absolute, and under the repo — record the tail so the result is stable
+		if {[file dirname $p] eq $d} { lappend names [file tail $p] }
+	}
+	list [lsort -unique $kinds] [lsort $names]
+} -cleanup {file delete -force $d} -result {fs.changed {a.txt b.txt c.txt}}
 
 test git-write-ops-registered {git.add, git.unstage, git.commit, git.discard, git.discard_all are in the live registry} -body {
 	expr {"git.add" in [rio::dispatch::opnames] \
