@@ -167,6 +167,19 @@ proc rio::doc::edit {id start end text {coalesce 1}} {
 	return $removed
 }
 
+# Replace a buffer's whole text — what a reload from disk does (D94). ONE undo step, so
+# Ctrl+Z after a reload gets the old text back: the file changing under you is an event
+# you can take back like any other edit, not a hole in the history. coalesce=0 also seals
+# the typing run behind it, so the reload can never merge into a word someone was typing.
+# Returns the {start end text removed} change record, exactly the shape buffer.changed
+# carries — a reload announces itself to frontends as the edit it is.
+proc rio::doc::settext {id text} {
+	set lines [lines $id]
+	set endpos "[llength $lines].[string length [lindex $lines end]]"
+	set removed [edit $id 1.0 $endpos $text 0]
+	return [dict create start 1.0 end $endpos text $text removed $removed]
+}
+
 # The undo stack with `rec` folded into the record on top, or "" when this edit
 # cannot extend that record and must become a step of its own.
 proc rio::doc::_coalesce {stack rec} {

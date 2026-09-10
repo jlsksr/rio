@@ -15,10 +15,17 @@ proc rio::ops::file_open {params} {
 		rio::error::raise io_error $info
 	}
 	set name [file tail $path]
+	# mtime/size ride in meta beside the encoding facts: the same "what was on disk when
+	# we last looked" record, and what buffers.stale compares a fresh stat against (D94).
 	set meta [dict create path $path \
 		encoding [dict get $info encoding] \
 		eol      [dict get $info eol] \
 		bom      [dict get $info bom]]
+	# Absent when the file went away between the read and the stat — the buffer then
+	# reads as "never stamped", which is the honest answer and not an error.
+	foreach k {mtime size} {
+		if {[dict exists $info $k]} { dict set meta $k [dict get $info $k] }
+	}
 	set id [rio::doc::new [dict get $info text] $name $meta]
 	return [dict create result [dict create \
 		buffer    $id \
@@ -47,7 +54,21 @@ proc rio::ops::file_save {params} {
 		rio::error::raise io_error $err
 	}
 	if {$stored ne $path} { rio::doc::setmeta $id path $path }
+	# Re-stamp: the buffer has just BECOME what is on disk, so this is the version it has
+	# seen. Without it every save would leave the buffer looking stale against its own
+	# write, and the next check would ask about a change the user made themselves (D94).
+	_restamp $id $path
 	return [dict create result [dict create path $path]]
+}
+
+# Record what is on disk right now as the version buffer $id has seen (D94). Called
+# wherever the buffer and the file are known to agree: after a save, after a reload.
+proc rio::ops::_restamp {id path} {
+	set st [rio::fs::stamp $path]
+	foreach k {mtime size} {
+		if {[dict exists $st $k]} { rio::doc::setmeta $id $k [dict get $st $k] }
+	}
+	return $st
 }
 rio::dispatch::register file.save rio::ops::file_save
 

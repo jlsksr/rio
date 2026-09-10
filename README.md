@@ -36,7 +36,11 @@ in [docs/](docs/index.md).
   word at a time (not a keystroke at a time), several
   buffers as tabs, scrollbars, a line-number gutter (with an optional relative mode),
   current-line highlighting, a cursor-position (line/column) readout in the status bar,
-  and optional line wrap.
+  and optional line wrap. A tab **notices when its file changes underneath it** — a
+  `git pull`, a build, a discard: with nothing unsaved it reloads quietly (one `Ctrl+Z`
+  puts back what you were looking at), with unsaved edits it asks and defaults to keeping
+  them, and if the file was **deleted** it asks whether to keep the buffer open, so saving
+  it later recreates the file.
 - **Find & Replace** — a find bar (`Ctrl+F`, `Ctrl+H` for the replace row) with
   live match highlighting and a match count, `F3`/`Shift+F3` stepping with
   wrap-around, match-case and whole-word toggles, two-step Replace (see it selected, then

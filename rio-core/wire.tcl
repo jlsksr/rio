@@ -101,6 +101,22 @@ proc rio::wire::_result_buffer_matches {result} {
 }
 rio::wire::result_encoder buffer.matches rio::wire::_result_buffer_matches
 
+# buffers.stale: result is {stale <array of flat objects>} (D94).
+proc rio::wire::_result_buffers_stale {result} {
+	set items {}
+	foreach s [dict get $result stale] { lappend items [obj $s] }
+	return "{\"stale\":[arr $items]}"
+}
+rio::wire::result_encoder buffers.stale rio::wire::_result_buffers_stale
+
+# buffers.reload: two arrays of flat objects — what reloaded, and what could not.
+proc rio::wire::_result_buffers_reload {result} {
+	set done {}   ; foreach r [dict get $result reloaded] { lappend done [obj $r] }
+	set failed {} ; foreach f [dict get $result failed]   { lappend failed [obj $f] }
+	return "{\"reloaded\":[arr $done],\"failed\":[arr $failed]}"
+}
+rio::wire::result_encoder buffers.reload rio::wire::_result_buffers_reload
+
 # The two-level search result (project.search / buffers.search, D51/D52) — the
 # only two-level shape in the protocol, so the encoder spells BOTH levels out
 # rather than guessing them from Tcl values (D25). The envelope (count / files /

@@ -1,0 +1,228 @@
+# Tests for staleness detection and reload — a buffer noticing the file changed under
+# it (AGENTS.md D94): rio::doc::settext plus the buffers.stale / buffers.reload /
+# buffers.stamp ops, driven through the in-process core so the events are asserted too.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# A throwaway file with `text` in it; returns its path.
+proc mkfile {text} {
+	set f [file tempfile path]
+	fconfigure $f -translation binary
+	puts -nonewline $f $text
+	close $f
+	return $path
+}
+proc rewrite {path text} {
+	set f [open $path wb] ; puts -nonewline $f $text ; close $f
+	# mtime is whole seconds on some filesystems and a rewrite can keep the same length,
+	# so a test rewrite that happens within the same second could look identical. Push the
+	# mtime back a second: every rewrite here is then unambiguously a different version,
+	# which is what these tests are about — not how fine the filesystem's clock is.
+	file mtime $path [expr {[file mtime $path] - 1}]
+}
+proc openbuf {path} {
+	return [dict get [callr file.open [dict create path $path]] result buffer]
+}
+proc callr {op params} {
+	return [dict get [rio::core::call $op $params] response]
+}
+# buffers.stale asks about EVERY open buffer, so each test starts from an empty set —
+# otherwise it would answer about fixtures the previous test left behind.
+proc reset_bufs {} {
+	foreach b [rio::doc::inventory] { rio::doc::close [dict get $b buffer] }
+}
+proc stale_all {} { dict get [callr buffers.stale {}] result stale }
+
+# --- rio::doc::settext: a whole-buffer replace, as one undo step -------------
+
+test settext-replaces-everything {settext swaps the whole text} -body {
+	set b [rio::doc::new "one\ntwo\nthree\n"]
+	rio::doc::settext $b "new\n"
+	list [rio::doc::text $b] [rio::doc::linecount $b]
+} -result "{new\n} 2"
+
+test settext-one-undo-step {one undo takes the whole reload back} -body {
+	set b [rio::doc::new "one\ntwo\n"]
+	rio::doc::settext $b "a\nb\nc\n"
+	rio::doc::undo $b
+	rio::doc::text $b
+} -result "one\ntwo\n"
+
+test settext-record-shape {settext returns the change record buffer.changed carries} -body {
+	set b [rio::doc::new "old"]
+	set ch [rio::doc::settext $b "new"]
+	list [lsort [dict keys $ch]] [dict get $ch start] [dict get $ch end] \
+		[dict get $ch text] [dict get $ch removed]
+} -result {{end removed start text} 1.0 1.3 new old}
+
+test settext-seals-the-typing-run {a reload never merges into the word being typed} -body {
+	set b [rio::doc::new ""]
+	rio::doc::edit $b 1.0 1.0 h
+	rio::doc::edit $b 1.1 1.1 i          ;# coalesces: "hi" is one open run
+	rio::doc::settext $b "from disk"
+	rio::doc::undo $b                    ;# takes back the reload, and only that
+	rio::doc::text $b
+} -result hi
+
+# --- buffers.stale: which open files no longer match what we stamped ---------
+
+test stale-unchanged-is-not-stale {an untouched file is not reported} -setup {reset_bufs} -body {
+	openbuf [mkfile "hello\n"]
+	llength [stale_all]
+} -result 0
+
+test stale-rewrite-is-stale {a file rewritten behind the buffer's back is reported} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rewrite $p "goodbye, at another length\n"
+	set s [lindex [stale_all] 0]
+	list [llength [stale_all]] [expr {[dict get $s buffer] == $b}] \
+		[dict get $s gone] [expr {[dict get $s path] eq $p}]
+} -result {1 1 0 1}
+
+test stale-same-length-rewrite-is-stale {a same-length rewrite is caught by mtime} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "aaaa\n"]
+	openbuf $p
+	rewrite $p "bbbb\n"
+	llength [stale_all]
+} -result 1
+
+test stale-deleted-is-gone {a file deleted on disk is reported with gone 1} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	file delete $p
+	set s [lindex [stale_all] 0]
+	list [expr {[dict get $s buffer] == $b}] [dict get $s gone]
+} -result {1 1}
+
+test stale-skips-scratch {a buffer with no file has no disk version to drift from} \
+		-setup {reset_bufs} -body {
+	rio::doc::new "scratch text"
+	llength [stale_all]
+} -result 0
+
+test stale-own-save-is-not-stale {saving re-stamps, so a buffer is never stale against itself} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.0 1.5 "changed here, and longer"
+	callr file.save [dict create buffer $b]
+	llength [stale_all]
+} -result 0
+
+# --- buffers.reload: take the new text ---------------------------------------
+
+test reload-brings-the-new-text {reload replaces the buffer from disk} -setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rewrite $p "brand new\n"
+	callr buffers.reload [dict create buffers [list $b]]
+	rio::doc::text $b
+} -result "brand new\n"
+
+test reload-clears-the-staleness {after a reload the buffer matches disk again} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rewrite $p "new\n"
+	callr buffers.reload [dict create buffers [list $b]]
+	llength [stale_all]
+} -result 0
+
+test reload-emits-buffer-changed {a reload announces itself as the edit it is} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rewrite $p "new\n"
+	set evs [dict get [rio::core::call buffers.reload [dict create buffers [list $b]]] events]
+	set ev [lindex $evs 0]
+	list [llength $evs] [dict get $ev event] \
+		[expr {[dict get $ev params buffer] == $b}] \
+		[dict get $ev params text] [dict get $ev params removed]
+} -result [list 1 buffer.changed 1 "new\n" "old\n"]
+
+test reload-is-one-undo-step {undo after a reload gets the old text back} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rewrite $p "new\n"
+	callr buffers.reload [dict create buffers [list $b]]
+	callr edit.undo [dict create buffer $b]
+	rio::doc::text $b
+} -result "old\n"
+
+test reload-takes-a-list {several buffers reload in ONE round trip} -setup {reset_bufs} -body {
+	set p1 [mkfile "a1\n"] ; set p2 [mkfile "b1\n"]
+	set b1 [openbuf $p1] ; set b2 [openbuf $p2]
+	rewrite $p1 "a2\n" ; rewrite $p2 "b2\n"
+	set r [rio::core::call buffers.reload [dict create buffers [list $b1 $b2]]]
+	list [llength [dict get $r events]] \
+		[llength [dict get $r response result reloaded]] \
+		[rio::doc::text $b1] [rio::doc::text $b2]
+} -result [list 2 2 "a2\n" "b2\n"]
+
+test reload-re-detects-the-conventions {a file rewritten as CRLF is recorded as CRLF} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "a\nb\n"]
+	set b [openbuf $p]
+	rewrite $p "a\r\nb\r\n"
+	callr buffers.reload [dict create buffers [list $b]]
+	list [dict get [rio::doc::meta $b] eol] [rio::doc::text $b]
+} -result [list crlf "a\nb\n"]
+
+test reload-failure-is-reported-not-raised {a gone file lands in failed, the rest reload} \
+		-setup {reset_bufs} -body {
+	set p1 [mkfile "a1\n"] ; set p2 [mkfile "b1\n"]
+	set b1 [openbuf $p1] ; set b2 [openbuf $p2]
+	file delete $p1 ; rewrite $p2 "b2\n"
+	set resp [callr buffers.reload [dict create buffers [list $b1 $b2]]]
+	set r [dict get $resp result]
+	list [dict get $resp ok] [llength [dict get $r failed]] \
+		[llength [dict get $r reloaded]] [rio::doc::text $b2]
+} -result [list true 1 1 "b2\n"]
+
+test reload-needs-buffers {buffers.reload without a list is a bad_request} -body {
+	set resp [callr buffers.reload {}]
+	list [dict get $resp ok] [dict get $resp error code]
+} -result {false bad_request}
+
+# --- buffers.stamp: "I have seen this version" -------------------------------
+
+test stamp-silences-without-changing-the-text {stamp clears staleness, text untouched} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.0 1.3 "my own unsaved edit"
+	rewrite $p "theirs\n"
+	set before [rio::doc::text $b]
+	set n [dict get [callr buffers.stamp [dict create buffers [list $b]]] result stamped]
+	list $n [llength [stale_all]] [expr {[rio::doc::text $b] eq $before}]
+} -result {1 0 1}
+
+test stamp-then-a-further-change-is-stale-again {a NEW change after a stamp is reported} \
+		-setup {reset_bufs} -body {
+	set p [mkfile "old\n"]
+	set b [openbuf $p]
+	rewrite $p "theirs\n"
+	callr buffers.stamp [dict create buffers [list $b]]
+	rewrite $p "theirs again, at a different length\n"
+	llength [stale_all]
+} -result 1
+
+test stamp-skips-what-has-no-file {a scratch buffer stamps nothing} -setup {reset_bufs} -body {
+	set b [rio::doc::new "scratch"]
+	dict get [callr buffers.stamp [dict create buffers [list $b]]] result stamped
+} -result 0
+
+test stale-ops-registered {the three staleness ops are in the live registry} -body {
+	expr {"buffers.stale" in [rio::dispatch::opnames] \
+		&& "buffers.reload" in [rio::dispatch::opnames] \
+		&& "buffers.stamp" in [rio::dispatch::opnames]}
+} -result 1
+
+::tcltest::cleanupTests

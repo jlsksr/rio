@@ -4683,7 +4683,104 @@ channel — last in its section, since it wipes the fixture's working tree by de
 gap this makes easier to notice: an **open buffer is not reloaded** when the file under it
 changes on disk, so after a discard the editor still shows the discarded text until you reopen
 the tab. That is not new — it is true of any external write — but discard-all is the first rio
-action that can trigger it across many buffers at once. ROADMAP.
+action that can trigger it across many buffers at once. ROADMAP. (**Closed in D94.**)
+
+---
+
+### D94 — A buffer notices the file changed under it
+
+The gap D93 made visible: `fs.changed` (D47) repainted the *panes* and never touched the
+**buffers**. After an external write — a `git pull`, an agent's `fs.write`, rio's own discard —
+the tab still showed the old text until you closed and reopened it, and a later Save wrote that
+stale text back over the new content. Silent data loss, one keystroke away.
+
+**Stage A: rio announces its own writes.** Every `fs.*` write op emitted `fs.changed`;
+`git.discard` and `git.discard_all` emitted nothing. The one class of disk write rio *causes*
+went unannounced. Both emit now, one event per path, absolute — so `rio::git::discard_all`
+returns `{count N paths {...}}` rather than a bare count. The two differ by **renames**: one
+change entry, but two names on disk when the rename is reverted, and the confirm quotes the
+entry count while the events cover both names.
+
+**Detection is core-side, and has to be.** Over a remote core the file lives on the server, so a
+frontend's own `[file mtime]` answers about the wrong machine (D29). The core holds the identity
+it stamped and is the process that can stat the file now.
+
+**The identity is mtime + size**, stamped into buffer meta on open and re-stamped on save, and
+stat'd **after** the read — a write landing mid-read then records as "not yet seen", so the
+buffer errs toward *asking* rather than toward silently accepting text it never held. Neither
+half suffices alone: mtime is whole seconds on some filesystems, and a length-preserving edit
+defeats size. Together they miss only a same-second, same-length rewrite; a content hash is the
+named upgrade path if that ever proves to matter.
+
+**Three ops, because there are three answers a frontend acts on**, and all three take **lists** —
+one external write can stale every open tab, and a round trip per tab is the cost D93 went to git
+to avoid:
+
+- `buffers.stale {} -> {stale:[{buffer, path, gone}]}` — what drifted. `gone` is answered
+  rather than inferred: "it vanished" is a different question to put to the user than "it
+  changed".
+- `buffers.reload {buffers:[...]}` — re-read, replace, re-stamp, and re-detect the
+  encoding/EOL (the file may have been rewritten with other conventions, and a save must
+  reproduce what is there *now*). A file that cannot be read lands in `failed`, never raised:
+  reloading ten buffers must not be an all-or-nothing bet on the worst of them.
+- `buffers.stamp {buffers:[...]}` — "I have seen this version", without touching the text.
+
+**The reload needed no frontend text code at all.** `rio::doc::settext` replaces the whole
+buffer through the ordinary `edit` path and the op emits one `buffer.changed`; a frontend
+already applies that event to whichever view shows the buffer, and the core writes events
+*before* the reply, so the text is on screen by the time the call returns. It is deliberately
+**one undo step** (`coalesce 0`): the file changing under you is an event you can take back like
+any other edit, not a hole in the history — and it seals the typing run behind it, so a reload
+can never merge into a word someone was mid-way through.
+
+**What to DO about it is the frontend's call**, because it turns on `modified` — view-local
+state the core does not have (D22). One rule sets every default: **the default button is
+whichever choice loses nothing.**
+
+- **clean, still there** → reload silently. Nothing to lose, so nothing to ask.
+- **modified, changed** → ask, defaulting to **No** (keep my edits). One dialog for the whole
+  set — discard-all can stale every open tab, and twelve modals is not an answer. *No* calls
+  `buffers.stamp`, so the same change is not re-raised on every focus return; a **later** change
+  stales it again, which is right — that is a version they have not seen.
+- **gone from disk** → **jka's call**, and Notepad++'s shape: *"…has been deleted on disk. Keep
+  it open in the editor? Saving it later will recreate the file."* Default **Yes** — the buffer
+  is the only copy left. Keeping marks it **modified**, which is what makes a later Save
+  recreate the file; declining force-closes the tab (the D48 idiom, no second "save first?"
+  prompt). The ack (`gone_ack`) is GUI-side because a deleted file **cannot** be re-stamped
+  core-side — there is nothing to stat — and because it is exactly the kind of view-local answer
+  `modified` already is. A save clears it.
+
+**Two triggers, no watcher**: the `fs.changed` burst (writes rio's core made) and regaining OS
+focus (everything it did not) — the file pane's own two triggers, for the same reason. rio still
+does not watch the filesystem; those are the two moments it can honestly re-ask.
+
+**Never mid-op.** Both triggers can land inside another op's round trip, and the op in flight may
+be the very thing that settles the buffer — `fs_apply_delete` closes the tabs of the file it just
+deleted, *after* the op returns. Asking first reported rio's own deliberate delete as a surprise
+(smoke caught it as a hang: a modal with nobody to answer it). So a check with a call in flight
+defers, one retry at a time, and lands between ops. A second guard, `::stale_checking`, stops
+re-entry through a modal's own event loop.
+
+**A burst is one repaint, not N.** `on_fs_changed` used to repaint per event, and a repaint is
+itself a nested core call — so a discard-all cost one round trip per path. It debounces now. Not
+`after idle`: `core_reader` takes one line per readable event and Tcl runs idle handlers between
+two of those, so an idle callback *splits* a burst (measured: 2 repaints for 3 paths). The 60ms
+timer clears the ~40ms a socket's delayed ACK can insert between two lines of the same burst.
+`git_flash` cancels a pending repaint while the git pane is shown, so its "✓ discarded N changes"
+survives long enough to be read.
+
+**Tests.** `reload.test` (core, 22) covers `settext` as one undo step, the three ops against real
+temp files — unchanged is not stale, a same-length rewrite still is, deleted reports `gone`,
+reload brings the text and clears staleness, undo restores it, several buffers in one call, CRLF
+re-detected, a failure reported not raised, stamp silencing without touching the text and going
+stale again on a *further* change. `wire.test` pins both new encoders. `reload.tcl` (GUI, 44)
+drives the whole loop with only the two prompts stubbed: silent reload, the conflict wording and
+both answers, keep-vs-drop for a deleted file, save recreating it, a bulk change producing **one**
+dialog listing the files, the mid-op deferral, and re-entrancy. Core 535, all 23 GUI suites green.
+
+**Not covered.** There is still **no live watching** — change a file and rio learns about it at
+the next `fs.changed` or focus return, not immediately. A filesystem watcher is D47's open item,
+and this rides on it when it lands.
 
 ---
 

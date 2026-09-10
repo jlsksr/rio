@@ -27,10 +27,18 @@ namespace eval rio::fs {}
 #   bom      — "" | utf-8   (a detected/preserved byte-order mark)
 #   eol      — lf | crlf    (the dominant convention to restore on save)
 #   mixed    — 0 | 1        (both conventions present; dominant chosen, surfaced)
+#   mtime    — the file's modification time, and
+#   size     — its size in bytes, both AS OF THE END OF THE READ (D94). This pair is
+#              the buffer's disk identity: stamped into meta on open and on save, it
+#              is what a later stat is compared against to ask "did this change under
+#              us?". Stat'd AFTER the read on purpose — a write landing mid-read then
+#              records as "not yet seen", so the buffer errs toward ASKING rather than
+#              toward silently accepting text it never actually held.
 proc rio::fs::read {path} {
 	set f [open $path rb]
 	set bytes [::read $f]          ;# ::read — rio::fs::read would shadow it here
 	close $f
+	set st [stamp $path]
 
 	set bom ""
 	if {[string range $bytes 0 2] eq "\xEF\xBB\xBF"} {
@@ -53,7 +61,22 @@ proc rio::fs::read {path} {
 	set eol [expr {$crlf > 0 && $crlf >= $lf ? "crlf" : "lf"}]
 	set text [string map [list "\r\n" "\n"] $text]
 
-	return [dict create text $text encoding $encoding bom $bom eol $eol mixed $mixed]
+	return [dict merge [dict create \
+		text $text encoding $encoding bom $bom eol $eol mixed $mixed] $st]
+}
+
+# A file's disk identity as rio records it (D94): {mtime <epoch seconds> size <bytes>}.
+# mtime alone is not enough — a same-second rewrite of a different length is common (a
+# script rewriting a config, `git restore` putting back a shorter version), and mtime
+# alone is coarse on filesystems that keep whole seconds. Size alone misses an edit that
+# preserves length. Together they catch everything short of a same-second, same-length
+# rewrite; a content hash is the upgrade path if that ever proves to matter.
+# A path that is gone (or unreadable) has NO identity: an empty dict, which reads as
+# "never stamped" everywhere it is compared.
+proc rio::fs::stamp {path} {
+	if {[catch {file mtime $path} mt]} { return {} }
+	if {[catch {file size $path} sz]}  { return {} }
+	return [dict create mtime $mt size $sz]
 }
 
 # Write `text` (\n-separated, from the model) to `path`, restoring the encoding,

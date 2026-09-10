@@ -519,6 +519,8 @@ proc dispatch_event {ev} {
 set ::fs_changed_paths {}   ;# paths announced since the last repaint
 set ::fs_changed_after  ""  ;# pending repaint timer; "" while none is armed
 set ::fs_changed_delay  60  ;# ms; > a socket's ~40ms delayed-ACK gap, < a noticeable lag
+set ::stale_checking    0   ;# a stale check is running (its modals run the event loop)
+set ::stale_retry       ""  ;# a deferred stale check, waiting for the channel to go quiet
 proc on_fs_changed {p} {
 	if {![dict exists $p path]} return
 	lappend ::fs_changed_paths [dict get $p path]
@@ -527,9 +529,21 @@ proc on_fs_changed {p} {
 	}
 }
 proc fs_changed_settle {} {
+	# Never land in the middle of another op's round trip: a repaint is itself a core call,
+	# and nesting one inside another's vwait buys nothing — the op in flight may well
+	# change what we would paint. Re-arm and land between ops. (check_stale_buffers below
+	# defers for its own, sharper reason.)
+	if {[array size ::pending]} {
+		set ::fs_changed_after [after $::fs_changed_delay fs_changed_settle]
+		return
+	}
 	set paths $::fs_changed_paths
 	set ::fs_changed_paths {}
 	set ::fs_changed_after ""
+	# An open tab may be looking at one of those paths (D94). Asked once for the whole
+	# burst, and before the repaint, so a reload's own buffer.changed events are applied
+	# while the pane work is still ahead of us rather than interleaved with it.
+	check_stale_buffers
 	if {$::dock_pane eq "git"} {
 		refresh_git
 		return
@@ -798,8 +812,12 @@ proc buf_text {id} {
 # facts, ::grp the group's tab order.
 proc register_buffer {id path meta {g ""}} {
 	if {$g eq ""} { set g $::focus }
+	# gone_ack: "the user said to keep this buffer though the file is gone" (D94). It lives
+	# here rather than in the core because a deleted file cannot be re-stamped core-side —
+	# there is nothing to stat — and because it is exactly the kind of view-local answer
+	# `modified` already is (D22).
 	dict set ::buffers $id \
-		[dict create path $path meta $meta modified 0 cursor 1.0 yview 0.0]
+		[dict create path $path meta $meta modified 0 cursor 1.0 yview 0.0 gone_ack 0]
 	gset $g order [linsert [gorder $g] end $id]
 }
 
@@ -985,11 +1003,155 @@ proc app_focus_settle {} {
 # on a live core so a refresh never runs while disconnected.
 proc note_app_focus {has} {
 	if {$has} {
-		if {!$::app_focused && [info exists ::core_chan]} { refresh_dock }
+		if {!$::app_focused && [info exists ::core_chan]} {
+			refresh_dock
+			check_stale_buffers
+		}
 		set ::app_focused 1
 	} else {
 		set ::app_focused 0
 	}
+}
+
+# ---------------------------------------------------------------------------
+# Stale buffers: the file changed under an open tab (AGENTS.md D94).
+#
+# Two triggers, and between them they cover both kinds of change. fs.changed is the write
+# rio's own core made — an agent's fs.write, a discard, a rename; regaining OS focus is
+# everything rio did NOT do — a `git pull`, a build, an editor in another window. Same as
+# the file pane's two triggers (D47), and for the same reason: rio does not watch the
+# filesystem, so these are the two moments it can honestly re-ask.
+#
+# The DETECTION is core-side (buffers.stale): over a remote core the file is on the
+# server, so a GUI-side [file mtime] would answer about the wrong machine (D29). The GUI
+# decides only what to DO about it, because that turns on `modified` — view-local state
+# the core does not have (D22).
+#
+# Three outcomes, one rule behind the wording: the default button is whichever choice
+# loses nothing.
+#   clean, still there  -> reload silently. There is nothing to lose and nothing to ask.
+#   modified, changed   -> ASK. Reloading would throw away unsaved edits, so No is the
+#                          default, and No re-stamps ("I have seen this") so the same
+#                          conflict is not raised again on every focus return.
+#   gone from disk      -> ASK, Notepad++'s question: keep it in the editor? Yes is the
+#                          default (it is the only copy left) and marks the buffer
+#                          modified, so a later Save recreates the file.
+proc check_stale_buffers {} {
+	# A modal runs the event loop, so a second trigger can arrive while one is up.
+	if {$::stale_checking} return
+	# And never ask in the middle of another op's round trip. Both triggers can land
+	# there — a settled fs.changed burst, or an idle focus callback firing inside a
+	# vwait — and the op still in flight may be the very thing that settles these
+	# buffers: fs_apply_delete closes the tabs of the file it just deleted, right after
+	# the op returns. Asking first would report rio's own deliberate change as a surprise
+	# ("deleted on disk, keep it?" about a file the user just chose to delete). One
+	# pending retry at a time, so repeated triggers don't stack up callbacks.
+	if {[array size ::pending]} {
+		if {$::stale_retry eq ""} {
+			set ::stale_retry [after $::fs_changed_delay \
+				{set ::stale_retry "" ; check_stale_buffers}]
+		}
+		return
+	}
+	set ::stale_checking 1
+	if {[catch {_check_stale_buffers} err opts]} {
+		set ::stale_checking 0
+		return -options $opts $err
+	}
+	set ::stale_checking 0
+}
+proc _check_stale_buffers {} {
+	set resp [rio_call buffers.stale {}]
+	if {![dict get $resp ok]} return
+	set reload {} ; set conflict {} ; set gone {}
+	foreach s [dict get $resp result stale] {
+		set id [dict get $s buffer]
+		if {![dict exists $::buffers $id]} continue   ;# not a buffer this GUI shows
+		if {[dict get $s gone]} {
+			if {![bufget $id gone_ack]} { lappend gone $id }
+		} elseif {[bufget $id modified]} {
+			lappend conflict $id
+		} else {
+			lappend reload $id
+		}
+	}
+	if {[llength $reload]}   { stale_reload $reload }
+	if {[llength $conflict]} { stale_conflict $conflict }
+	foreach id $gone { stale_deleted $id }
+}
+
+# Take the new text for these buffers — one op for the whole set, because a discard-all
+# or a `git pull` stales many tabs at once and a round trip per tab over a socket is the
+# cost D93 went to git to avoid. The TEXT needs no work here: the core emits one
+# buffer.changed per buffer and dispatch_event already applies that to whichever group
+# shows it — and the events land before this reply, so by the time we set the flags the
+# text is already on screen.
+proc stale_reload {ids} {
+	set resp [rio_call buffers.reload [dict create buffers $ids]]
+	if {![dict get $resp ok]} return
+	foreach r [dict get $resp result reloaded] {
+		set id [dict get $r buffer]
+		if {![dict exists $::buffers $id]} continue
+		bufset $id modified 0
+		bufset $id gone_ack 0
+		bufset $id meta [dict merge [bufget $id meta] \
+			[dict create encoding [dict get $r encoding] eol [dict get $r eol]]]
+	}
+	refresh_all
+}
+
+# The unsaved-edits conflict. ONE dialog for the whole set: discard-all can stale every
+# open tab, and twelve modals in a row is not an answer to anything.
+proc stale_conflict {ids} {
+	set names {}
+	foreach id $ids { lappend names "    [tab_name $id]" }
+	if {[llength $ids] == 1} {
+		set q "“[tab_name [lindex $ids 0]]” has changed on disk, and you have unsaved edits here.\n\nReload it from disk? Your unsaved edits will be lost."
+	} else {
+		set q "[llength $ids] open files have changed on disk, and you have unsaved edits in them:\n\n[join $names \n]\n\nReload them from disk? Your unsaved edits will be lost."
+	}
+	if {[stale_ask $q] eq "yes"} {
+		stale_reload $ids
+	} else {
+		# "I have seen this version" — so the same change is not raised again every time
+		# rio regains focus. A LATER change stales it again, which is right: that is a
+		# version they have not seen.
+		rio_call buffers.stamp [dict create buffers $ids]
+	}
+}
+
+# The file is gone. jka's call, and Notepad++'s shape: ask rather than decide. Keeping it
+# marks the buffer modified — the text now exists only here, so Save must offer to write
+# it back, which is exactly how the file gets recreated.
+proc stale_deleted {id} {
+	set q "“[tab_name $id]” has been deleted on disk.\n\nKeep it open in the editor? Saving it later will recreate the file."
+	if {[stale_ask_deleted $q] eq "yes"} {
+		bufset $id gone_ack 1
+		mark_buffer_modified $id 1
+	} else {
+		bufset $id modified 0     ;# the D48 force-close idiom: no "save before closing?"
+		close_tab $id
+	}
+}
+
+# The two prompts, each in its own one-line proc so a headless test can stub them — the
+# idiom split.tcl already uses for maybe_discard. They differ only in their default
+# button, and that difference is the whole rule: default to the choice that loses nothing.
+proc stale_ask {q} {
+	return [tk_messageBox -icon warning -type yesno -default no \
+		-title "rio — changed on disk" -message $q]
+}
+proc stale_ask_deleted {q} {
+	return [tk_messageBox -icon warning -type yesno -default yes \
+		-title "rio — deleted on disk" -message $q]
+}
+
+# mark_modified works on the CURRENT buffer; a stale check speaks about any of them.
+proc mark_buffer_modified {id m} {
+	if {![dict exists $::buffers $id]} return
+	if {$id eq $::cur} { mark_modified $m ; return }
+	bufset $id modified $m
+	refresh_tabs
 }
 
 # ---------------------------------------------------------------------------
@@ -3628,6 +3790,7 @@ proc do_save_as {path} {
 		return 0
 	}
 	bufset $::cur path $path
+	bufset $::cur gone_ack 0   ;# it is on disk again (D94)
 	clear_modified
 	refresh_dock   ;# the new/renamed file (and its git flag) now shows in the pane
 	return 1
@@ -3641,6 +3804,7 @@ proc do_save {} {
 			-message "Could not save:\n[dict get $resp error message]"
 		return 0
 	}
+	bufset $::cur gone_ack 0   ;# a kept-open deleted file has just been recreated (D94)
 	clear_modified
 	refresh_dock   ;# saved edits are now on disk — repaint so the git flag appears
 	return 1

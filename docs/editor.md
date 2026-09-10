@@ -139,6 +139,27 @@ whole-file rewrites are the thing this behaviour exists to prevent, so the
 conversion will arrive as an explicit action rather than as a side effect of
 saving.
 
+## When a file changes underneath you
+
+Files move under an editor all the time — a `git pull`, a build, a discard from the
+[git pane](git.md), another window. rio checks its open tabs when one of its own
+writes lands and again when you switch back to the rio window, and then does the
+least surprising thing:
+
+- **You had no unsaved edits.** The tab reloads from disk, quietly. Nothing was
+  yours to lose. It is a single undo step, so `Ctrl+Z` puts back what you were
+  looking at.
+- **You had unsaved edits.** rio asks before touching them, and the default answer
+  is *no* — keep what you typed. Answer no and rio stops asking about that
+  version; if the file changes again afterwards, it asks again.
+- **The file was deleted.** rio asks whether to keep it open in the editor. Keep it
+  and the tab stays, marked unsaved, because your copy is now the only one — saving
+  it recreates the file. Decline and the tab closes.
+
+rio does not watch the filesystem continuously, so a change made while you are
+sitting in rio is noticed the next time rio writes something itself or you leave
+and come back — not the instant it happens.
+
 ## Further reading
 
 - [Keyboard shortcuts](keyboard.md) — the full default chord list, and remapping.

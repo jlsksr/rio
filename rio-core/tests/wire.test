@@ -90,6 +90,24 @@ test wire-result-buffer-matches-empty {zero matches encode as an empty array} -b
 		result [dict create count 0 matches {}]]
 } -result {{"id":"7","ok":true,"result":{"count":"0","matches":[]}}}
 
+test wire-result-buffers-stale {buffers.stale shapes an array of flat objects (D94)} -body {
+	rio::wire::response [dict create id 8 ok true op buffers.stale \
+		result [dict create stale [list \
+			[dict create buffer 1 path /x/a.txt gone 0] \
+			[dict create buffer 2 path /x/b.txt gone 1]]]]
+} -result {{"id":"8","ok":true,"result":{"stale":[{"buffer":"1","path":"/x/a.txt","gone":"0"},{"buffer":"2","path":"/x/b.txt","gone":"1"}]}}}
+
+test wire-result-buffers-stale-empty {nothing stale encodes as an empty array} -body {
+	rio::wire::response [dict create id 9 ok true op buffers.stale result [dict create stale {}]]
+} -result {{"id":"9","ok":true,"result":{"stale":[]}}}
+
+test wire-result-buffers-reload {buffers.reload shapes both arrays, reloaded and failed} -body {
+	rio::wire::response [dict create id 10 ok true op buffers.reload \
+		result [dict create \
+			reloaded [list [dict create buffer 1 path /x/a.txt encoding utf-8 eol lf linecount 3]] \
+			failed   [list [dict create buffer 2 message {no such file}]]]]
+} -result {{"id":"10","ok":true,"result":{"reloaded":[{"buffer":"1","path":"/x/a.txt","encoding":"utf-8","eol":"lf","linecount":"3"}],"failed":[{"buffer":"2","message":"no such file"}]}}}
+
 test wire-result-flat-default {an op without a registered shape stays a flat object} -body {
 	rio::wire::response {id 4 ok true op buffer.text result {text hi}}
 } -result {{"id":"4","ok":true,"result":{"text":"hi"}}}

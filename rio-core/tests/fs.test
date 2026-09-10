@@ -71,6 +71,38 @@ test fs-read-mixed {mixed endings: dominant chosen and surfaced} -body {
 	list [dict get $d eol] [dict get $d mixed]
 } -result {crlf 1}
 
+# --- disk identity: mtime + size (D94) ---------------------------------------
+# What a buffer stamps at open/save and a later stat is compared against, so it can ask
+# "did this file change under us?" — the pair, because mtime alone misses a same-second
+# rewrite and size alone misses a same-length edit.
+
+test fs-read-reports-identity {read returns the file's mtime and size} -body {
+	set p [tmpbytes "alpha\nbeta\n"]
+	set d [rio::fs::read $p]
+	list [expr {[dict get $d size] == [file size $p]}] \
+		[expr {[dict get $d mtime] == [file mtime $p]}]
+} -result {1 1}
+
+test fs-stamp-pair {stamp is exactly {mtime size} for a file that is there} -body {
+	set p [tmpbytes "x\n"]
+	set st [rio::fs::stamp $p]
+	list [lsort [dict keys $st]] [dict get $st size]
+} -result {{mtime size} 2}
+
+test fs-stamp-gone {a path that is not there has no identity at all} -body {
+	set p [tmpbytes "x\n"]
+	file delete $p
+	rio::fs::stamp $p
+} -result {}
+
+test fs-stamp-follows-a-rewrite {a rewrite of a different length changes the stamp} -body {
+	set p [tmpbytes "short\n"]
+	set before [rio::fs::stamp $p]
+	set f [open $p wb] ; puts -nonewline $f "a rather longer line\n" ; close $f
+	set after [rio::fs::stamp $p]
+	expr {$before ne $after}
+} -result 1
+
 # --- round-trips (read -> write reproduces the original bytes) ---------------
 
 test fs-roundtrip-crlf {CRLF bytes survive read+write unchanged} -body {

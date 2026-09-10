@@ -26,23 +26,14 @@ Each entry notes its state:
   its cost: Tcl has no built-in inotify, so it means a C extension or shelling to
   per-platform watchers — a dependency plus a platform matrix — against the no-heavy-deps
   grain. The focus-return refresh is the cheap 90% stand-in until then.
-- **An open buffer never notices the file changed under it** — *gap.* `fs.changed` (D47)
-  repaints the *panes*; it does not touch the buffers. So after an external write — a
-  `git pull`, an agent's `fs.write`, or rio's own **discard** (D80/D93) — the tab still
-  shows the old text until you close and reopen it, and a later Save writes it back over
-  the new content. What's wanted is the ordinary editor answer: on `fs.changed` (and on
-  focus return) compare the file against what the buffer was loaded from, then reload a
-  **clean** buffer silently and ask about a **modified** one. Three pieces are missing, in
-  this order: a buffer's `meta` records `path`/`encoding`/`eol`/`bom` but **no mtime or
-  size**, so `file.open` and `file.save` must stamp one; the comparison has to run
-  **core-side** (`buffers.stale`), because in remote mode the file is on the server and a
-  GUI-side `[file mtime]` would be answering about the wrong machine (D29); and a
-  `buffers.reload` to re-read into the same buffer id, taking a **list** so a bulk change
-  doesn't cost one round trip per tab. Only the clean/modified *policy* is GUI-side, where
-  the modified flag lives (D22). rio's own tree-writing ops should also emit `fs.changed` —
-  `git.discard` / `git.discard_all` don't today, so the one case rio causes itself goes
-  unannounced. *Discard all* (D93) is the first action that can stale several buffers at
-  once, which is what surfaced this.
+- **A buffer notices the file changed under it** — *landed* (AGENTS.md D94). `file.open` /
+  `file.save` stamp mtime+size into buffer meta; `buffers.stale` / `buffers.reload` /
+  `buffers.stamp` answer core-side (in remote mode the file is on the server, D29) and take
+  **lists**, so a bulk change is one round trip. A clean buffer reloads silently, a modified
+  one asks, and a file deleted on disk asks Notepad++'s question — keep it in the editor, and
+  a later Save recreates it. `git.discard` / `git.discard_all` emit `fs.changed` now too.
+  Still missing: **live** watching — the triggers remain `fs.changed` and focus return, so
+  this rides on the watcher above when it lands.
 - **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
   New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
   Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45

@@ -131,3 +131,23 @@ design limit that surprises, append it to the matching section.
 - **Planned.** A per-instance or last-folder resume pointer would let several no-project
   windows resume independently; noted as the deferred follow-up in AGENTS.md **D72**, not
   yet scheduled.
+
+### A same-second, same-length rewrite can go unnoticed
+
+- **Symptom.** A file rewritten under an open tab is normally noticed and reloaded (or asked
+  about — see *When a file changes underneath you* in [docs/editor.md](docs/editor.md)). In one
+  narrow case it is not: the rewrite lands **within the same second** as the version rio last
+  read **and** leaves the file **exactly the same length**. The tab keeps showing the old text.
+- **Cause.** rio identifies a file's on-disk version by its **modification time plus its size**
+  (AGENTS.md **D94**). Size alone misses a length-preserving edit; mtime alone is coarse —
+  some filesystems (and network mounts) record whole seconds only, so two writes a few
+  milliseconds apart are indistinguishable by time. Together they miss only the intersection:
+  same second *and* same length.
+- **Where it's fine.** Ordinary editing never hits it — a human edit changes the length, and
+  a `git pull`, a build, or a discard is separated from your last read by far more than a
+  second. It is reachable mainly by a script rewriting a fixed-width file in a tight loop.
+- **Mitigation in rio.** Re-open the tab, which always re-reads. On a filesystem with
+  sub-second timestamps (ext4, APFS, NTFS) the window is milliseconds wide, not a second.
+- **Planned.** Comparing a **content hash** instead of the mtime/size pair closes it
+  completely; named as the upgrade path in **D94**, deliberately not paid for up front since
+  it costs a full re-read of every open file on every check.
