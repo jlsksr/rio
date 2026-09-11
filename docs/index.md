@@ -59,12 +59,13 @@ rather than repeating them:
 ## About these pages
 
 The manual is plain Markdown, kept in the source tree alongside the code it
-describes — so a feature and its page land together, and so rio can one day show
-these pages itself, from disk, with no network. That intent shapes how they are
-written:
+describes — so a feature and its page land together, and so rio can show these
+pages itself, from disk, with no network. It does: ***Help ▸ Contents…***, or
+`F1`, opens this contents page and every topic in it. That intent shapes how they
+are written:
 
 - **One topic per file, and the filename is the topic's name.** Filenames are
-  stable: they are how a page is linked to, and one day how rio will jump to it.
+  stable: they are how a page is linked to, and how rio finds a topic to show you.
 - **The first heading is the topic title**, matching its line in this contents
   page, and the first sentence says what the topic covers.
 - **Links between topics are relative** — `[the editor](editor.md)` — so they

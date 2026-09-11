@@ -4980,6 +4980,64 @@ match would sprout a Track item on every clean row in the tree.
 
 ---
 
+### D99 — rio shows its own manual (Help ▸ Contents…, F1)
+
+D91 put the manual in `docs/`, one Markdown topic per file, and said the filename **is** the
+topic id. That was not a filing convention for its own sake: it is the whole index a help
+viewer needs, so the viewer arrives owing almost nothing. `index.md` **is** the contents,
+the files **are** the topics, `.m.help` already existed with one lonely entry, and `F1` was
+unbound. What was missing was a window.
+
+**v0 is the WinHelp shape minus the renderer**: contents on the left as a rich list (the same
+`rl_*` component the file and git panes use, so it selects, hovers and arrows like every other
+list in rio), the selected topic's text on the right. The text is the Markdown **source** — the
+step ROADMAP describes — shown in the editor font with no wrap, because these pages are
+hand-wrapped already and their tables only line up in a fixed pitch. A renderer (headings,
+tables, clickable jumps between topics) is the next step and the only thing between this and
+the ROADMAP entry; nothing here prejudges it.
+
+**The GUI reads `docs/` off its own tree, not through `file.open`.** This is the decision that
+matters. Help is the GUI's chrome, not project content: over a remote core (D29) the project
+lives on another machine, so routing help through the core would open the *server's* manual —
+another rio's documentation, for whatever version happens to be installed there — or, far more
+likely, nothing at all. So `help_dir` resolves beside `rio-gui.tcl`, exactly as `hl_load`
+resolves `syntax/` and the core resolves `themes/`.
+
+**A tool window, and that is not an answer to the dock question.** ROADMAP asks whether help
+should be a dock-site panel (D35 makes that cheap) or its own window. It still asks: this ships
+as a non-modal single-instance toplevel, which is precisely what the Extensions window (D39)
+does while it waits to re-host into a dock site. Choosing that shape costs nothing later —
+re-hosting is moving the widgets, not rewriting them — and answering the question now, before
+anyone has used it, would be guessing.
+
+**F1 is a keymap command, not a binding.** `help` joins `::keymap_default` like every other
+chord (D23), so it is remappable, appears in the shortcuts editor, and — the part that matters
+— is *covered by docs.tcl's keymap check*, which promptly failed until `keyboard.md` had its
+row. A hard-coded `bind . <F1>` would have been two lines shorter and invisible to every guard
+rio owns.
+
+**What the guards hold.** `docs.tcl` gains check 8 (+5): the code's idea of where `docs/` lives
+must be the real `docs/`, and the topics the viewer offers must be exactly the pages `index.md`
+lists — check 1's both-directions rule, one layer up. Two things can silently empty this window
+while every page stays perfect: the directory moves out from under `help_dir`, or `index.md`
+grows a contents shape the parser cannot read (turn that list into a table and it returns
+nothing). A new `help.tcl` (27 checks) holds the window itself: the menu entry and the keymap
+command, that opening lands on the front page read-only, that the list's rows and lines stay in
+step (`rl_*` indexes by line, so a section heading that forgot its row would slide every topic
+below it onto the wrong payload), that picking a topic loads it and syncs the selection either
+way round, that a missing topic is *reported in the page* rather than thrown — a partial install
+must not break the one window that would explain it — and that a second open raises the window
+instead of stacking another. Each was proven by injection: a wrong `help_dir`, a broken heading
+regex, and a heading line inserted without its row each fail by name.
+
+**Still not shipped, and honest about it.** `docs/` does not install: rio runs from a checkout
+today, and both deploy scripts install a *toolchain*, not rio's files. So this works exactly as
+far as rio itself does, and the packaging story (ROADMAP, "Install / packaging path") must move
+`docs/` with `themes/` and `syntax/` — one rule for all three, which is the reason to keep them
+resolved the same way.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

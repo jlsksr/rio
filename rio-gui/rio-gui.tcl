@@ -3378,6 +3378,179 @@ proc about_dialog {} {
 	focus $w.ok
 }
 
+# ---------------------------------------------------------------------------
+# The help viewer — Help ▸ Contents…, F1 (AGENTS.md D99). rio showing its own manual.
+#
+# The manual is `docs/`, one Markdown topic per file, and the filename IS the topic id
+# (D91) — which is why this needs no index of its own: index.md is the contents, and the
+# files are the topics. v0 is the WinHelp shape minus the renderer: the contents on the
+# left, the selected topic's text on the right, as the Markdown SOURCE. A real renderer
+# (headings, tables, clickable jumps between topics) is the step after and is the only
+# thing standing between this and the ROADMAP entry.
+#
+# The GUI reads these files ITSELF, off its own tree, rather than through `file.open`.
+# Help is the GUI's own chrome, not project content: over a remote core (D29) the project
+# lives on another machine, so asking the core for a manual page would open the SERVER's
+# copy — a different rio's documentation — or nothing at all. The same reasoning that puts
+# syntax/ and themes/ beside the code puts docs/ there, and a packaging story that
+# installs one installs all three (ROADMAP, "Install / packaging path").
+# ---------------------------------------------------------------------------
+
+# Where the shipped manual lives: beside the code, like syntax/ (hl_load) and themes/.
+proc help_dir {} { return [file normalize [file join $::rio_dir .. docs]] }
+
+# Read one manual file as UTF-8 whatever the system encoding is — these pages are full of
+# the arrows and dashes a cp1252 read would mangle, and the manual is UTF-8 by rule (D21).
+proc help_slurp {path} {
+	set f [open $path r] ; fconfigure $f -encoding utf-8
+	set t [read $f] ; close $f
+	return $t
+}
+
+# The contents, read from index.md as {section title file} in document order. index.md's
+# shape is the contract — `### Section` headings and `- [Title](topic.md)` entries under
+# `## Contents` — the same shape docs.tcl already holds the page to, so the viewer and the
+# guard agree on what a contents entry is. Links that leave docs/ (`../README.md`) are not
+# topics: this window shows the manual, and the manual says where else to look.
+proc help_contents {} {
+	set idx [file join [help_dir] index.md]
+	if {![file exists $idx]} { return {} }
+	set out {} ; set inside 0 ; set section ""
+	foreach line [split [help_slurp $idx] \n] {
+		if {[regexp {^##\s+(.+?)\s*$} $line -> h]} {
+			set inside [string equal $h "Contents"] ; continue
+		}
+		if {!$inside} continue
+		if {[regexp {^###\s+(.+?)\s*$} $line -> s]} { set section $s ; continue }
+		if {[regexp {^\s*-\s+\[([^\]]+)\]\(([^)#]+)\)} $line -> title target]} {
+			if {[string match */* $target]} continue
+			lappend out [list $section $title $target]
+		}
+	}
+	return $out
+}
+
+set ::help_topic ""   ;# the topic the viewer is showing, "" while it is closed
+
+# Open the viewer (or raise it) and show TOPIC, a docs/ filename. Non-modal and
+# single-instance, the Extensions window's idiom (D39) — which is also what makes a later
+# move into a dock site a re-host rather than a rewrite, if that is where help ends up.
+proc help_window {{topic ""}} {
+	set w .help
+	if {[winfo exists $w]} {
+		raise $w ; focus $w.nav.list
+		if {$topic ne ""} { help_show $topic }
+		return
+	}
+	toplevel $w
+	wm title $w "rio Help"
+
+	# Contents: a rich list (D42) like the file and git panes, so it selects, hovers and
+	# arrows exactly as the rest of rio's lists do. Section headings are rows too — not
+	# selectable — because rl_* indexes rows by line, so every line must be one.
+	frame $w.nav -borderwidth 2 -relief sunken
+	text $w.nav.list -width 24 -height 26 -wrap none -state disabled -cursor arrow \
+		-insertwidth 0 -takefocus 1 -borderwidth 0 -highlightthickness 0 -padx 2 -pady 2
+	pack $w.nav.list -side left -fill both -expand 1
+	rl_init $w.nav.list help_pick {} {}
+
+	# The topic. v0 shows the Markdown SOURCE, so it takes the editor font and no wrap:
+	# the pages are hand-wrapped already, and their tables only line up in a fixed pitch.
+	frame $w.page -borderwidth 2 -relief sunken
+	scrollbar $w.page.sb -command {.help.page.text yview}
+	text $w.page.text -width 80 -height 26 -wrap none -state disabled -cursor arrow \
+		-insertwidth 0 -borderwidth 0 -highlightthickness 0 -padx 8 -pady 4 \
+		-yscrollcommand {autoscroll .help.page.sb .help.page.text}
+	pack $w.page.text -side left -fill both -expand 1
+
+	frame $w.foot
+	label $w.foot.where -anchor w -font RioUIFont   ;# the file being shown, so a reader
+	button $w.foot.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.foot.close -side right                  ;# can go find it on disk
+	pack $w.foot.where -side left -fill x -expand 1
+
+	grid $w.nav  -row 0 -column 0 -sticky nsew -padx {8 4} -pady {8 4}
+	grid $w.page -row 0 -column 1 -sticky nsew -padx {0 8} -pady {8 4}
+	grid $w.foot -row 1 -column 0 -columnspan 2 -sticky we -padx 8 -pady {0 8}
+	grid rowconfigure    $w 0 -weight 1
+	grid columnconfigure $w 1 -weight 1
+	bind $w <Escape> [list destroy $w]
+	bind $w <Destroy> {if {"%W" eq ".help"} {set ::help_topic ""}}
+
+	help_restyle
+	help_fill_contents
+	help_show [expr {$topic ne "" ? $topic : "index.md"}]
+	focus $w.nav.list
+}
+
+# Paint the contents list. index.md leads it under its own title: it is a topic like any
+# other (the manual's front page), and the viewer would otherwise be the one reader who
+# can never see it.
+proc help_fill_contents {} {
+	set b .help.nav.list
+	rl_begin $b
+	$b insert end "The rio manual\n" ; rl_row $b 1 index.md
+	set section ""
+	foreach e [help_contents] {
+		lassign $e s title file
+		if {$s ne $section} {
+			set section $s
+			$b insert end "$s\n" helpsect ; rl_row $b 0 ""
+		}
+		$b insert end "  $title\n" ; rl_row $b 1 $file
+	}
+	rl_end $b
+}
+
+# Selecting a contents row shows its topic (rl_* hands the row's payload straight over).
+proc help_pick {file} { if {$file ne ""} { help_show $file } }
+
+# Show one topic, and put the contents selection on it so the two halves never disagree —
+# including when the topic was reached any way other than clicking its row. A file that
+# cannot be read is reported IN the window: a partial install should say what is missing,
+# not break the one window that would explain it.
+proc help_show {file} {
+	set t .help.page.text
+	set path [file join [help_dir] $file]
+	if {[catch {help_slurp $path} text]} {
+		set text "This topic could not be read:\n\n    $path\n\n$text"
+	}
+	$t configure -state normal
+	$t delete 1.0 end
+	$t insert end $text
+	$t configure -state disabled
+	$t yview moveto 0
+	.help.foot.where configure -text [file join docs $file]
+	set ::help_topic $file
+	set b .help.nav.list
+	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
+		if {[rl_payload $b $i] eq $file} { rl_select $b $i 0 ; break }
+	}
+}
+
+# Colours: at open, and again from apply_theme while the window is up — help can stay open
+# across a theme change, unlike the modal dialogs that read the palette once. The list is a
+# rich-list well like the file/git panes; the page is source text, so it takes the editor
+# surface it is written in.
+proc help_restyle {} {
+	if {![winfo exists .help]} return
+	set c $::theme_colors
+	set bg [dict get $c editor.bg]
+	.help configure -background [dict get $c ui.bg]
+	.help.foot configure -background [dict get $c ui.bg]
+	.help.foot.where configure -background [dict get $c ui.bg] \
+		-foreground [blend_hex [dict get $c ui.fg] [dict get $c ui.bg] 45]
+	foreach f {.help.nav .help.page} { $f configure -background $bg }
+	set b .help.nav.list
+	$b configure -font RioUIFont -background $bg -foreground [dict get $c ui.fg]
+	$b tag configure selrow   -background [dict get $c editor.selection]
+	$b tag configure hoverrow -background [blend_hex $bg [dict get $c editor.selection] 25]
+	$b tag configure helpsect -foreground [blend_hex [dict get $c ui.fg] $bg 35]
+	$b tag raise selrow
+	.help.page.text configure -font RioEditorFont \
+		-background $bg -foreground [dict get $c editor.fg]
+}
+
 
 # ---------------------------------------------------------------------------
 # Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
@@ -5679,6 +5852,7 @@ proc apply_theme {theme} {
 	.cmp.bar.close configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	restyle_tabs
+	help_restyle   ;# the help viewer, if it is open — it outlives a theme change (D99)
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
@@ -7787,6 +7961,7 @@ set ::keymap_default {
 	split-editor   {Control-backslash    toggle_split                                                  "Toggle editor split"}
 	move-tab-other {Control-bracketright move_tab_other                                                "Move tab to other group"}
 	preferences    {{}                   preferences_window                                            "Preferences…"}
+	help           {F1                   help_window                                                   "Help contents…"}
 }
 set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); keymap_resolve fills it
 set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
@@ -7966,6 +8141,7 @@ proc keymap_refresh_menus {} {
 	.m.view.layout entryconfigure "Split Editor" -accelerator [key_accel split-editor]
 	.m.view.layout entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]
 	.m.settings entryconfigure "Preferences…" -accelerator [key_accel preferences]
+	.m.help entryconfigure "Contents…"        -accelerator [key_accel help]
 }
 
 # One entry point after the keymap changes at runtime: re-read keys.json, then push the
@@ -8873,11 +9049,14 @@ menu .m.settings.editmode -tearoff 0
 .m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
-# Help is the last (rightmost) menu, the Windows/VSCode convention (D76). Just About rio for
-# now — the modal names the build so a tester can say which rio they're running (there is no
-# release version yet; RELEASING.md Gate 2 will git-tag one, which About then shows instead).
+# Help is the last (rightmost) menu, the Windows/VSCode convention (D76). Contents… opens the
+# manual in rio itself (D99) and About names the build, so a tester can say which rio they're
+# running (there is no release version yet; RELEASING.md Gate 2 will git-tag one, which About
+# then shows instead). Contents first, About last — the Windows order.
 menu .m.help -tearoff 0
 .m add cascade -label Help -menu .m.help
+.m.help add command -label "Contents…" -command help_window
+.m.help add separator
 .m.help add command -label "About rio" -command about_dialog
 
 # The editor keyboard shortcuts and the edit-proxy are installed per group by

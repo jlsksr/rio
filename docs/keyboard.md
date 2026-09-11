@@ -69,6 +69,7 @@ A bad `keys.json` never stops the editor.
 | `split-editor` | `Ctrl+\` | Toggle the editor split |
 | `move-tab-other` | `Ctrl+]` | Move the tab to the other editor group |
 | `preferences` | *(unbound)* | Open the Preferences window |
+| `help` | `F1` | Open this manual inside rio (***Help ▸ Contents…***) |
 
 `preferences` ships with no chord — the command exists and sits on the *Settings*
 menu, and you can give it one like any other.

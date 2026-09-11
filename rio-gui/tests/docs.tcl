@@ -406,5 +406,43 @@ foreach p $::menu_docs {
 }
 ok "every menu the docs name exists" $gone {}
 
+# --- 8. the help viewer can actually reach the manual ------------------------
+#
+# Checks 1 and 2 hold the manual together as FILES; this one holds the code that reads it
+# (D99). Two things can silently break the viewer while every page stays perfect: the
+# directory moves out from under `help_dir` (a packaging change), or index.md grows a
+# contents shape `help_contents` cannot parse — turn that list into a table and the parser
+# returns nothing, the window opens empty, and no other check notices.
+#
+# So: the code's idea of where docs/ is must be the real docs/, and the topics it offers
+# must be exactly the pages index.md lists — the same both-directions rule as check 1, one
+# layer up.
+
+ok "the viewer looks where the manual is" [help_dir] $::docs
+
+set offered {}
+foreach e [help_contents] { lappend offered [lindex $e 2] }
+ok "the viewer's contents is not empty" [expr {[llength $offered] > 1}] 1
+
+set unreachable {}   ;# a page index.md lists that the viewer never offers
+foreach t $listed {
+	if {[lsearch -exact $offered $t] < 0} { lappend unreachable $t }
+}
+ok "the viewer offers every listed page" $unreachable {}
+
+set invented {}      ;# a topic the viewer offers that isn't a page
+foreach t $offered {
+	if {![file exists [file join [help_dir] $t]]} { lappend invented $t }
+}
+ok "every topic the viewer offers exists" $invented {}
+
+# Every entry carries the section it sits under, so the window can group them the way the
+# contents page does — an entry parsed out of its heading would land in the wrong group.
+set unsectioned {}
+foreach e [help_contents] {
+	if {[lindex $e 0] eq "" || [lindex $e 1] eq ""} { lappend unsectioned $e }
+}
+ok "every topic has a section and a title" $unsectioned {}
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

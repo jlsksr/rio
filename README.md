@@ -239,7 +239,8 @@ as untested rather than claimed.
 - **[docs/](docs/index.md)** — **the user manual**: how to actually use rio, one
   topic per page — the editor, files & projects, find & replace, git, the agent,
   preferences, keyboard shortcuts, extensions, and working over a remote core.
-  Start here if you have rio running and want to know what it can do.
+  Start here if you have rio running and want to know what it can do — or press
+  **`F1`** (*Help ▸ Contents…*) and read it inside rio.
 - **[INSTALL.md](INSTALL.md)** — install & deployment: requirements, the deploy
   scripts, local vs. remote (server mode over SSH), the agent/Claude key, and
   troubleshooting. rio keeps **no single `~/.riorc`** — one file per concern under

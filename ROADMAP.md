@@ -160,19 +160,24 @@ Each entry notes its state:
   make the boundary a shared **git-status service** (git publishes status; the
   navigator subscribes if the extension is present, degrading to no-flags exactly like
   the current no-repo case) rather than a clean lift-out of "the git pane".
-- **In-app help viewer (Help ▸ Contents…)** — *planned* (the manual it renders landed as
-  AGENTS.md **D91**: `docs/`, one Markdown topic per file). The WinHelp shape: a contents
-  list, topic pages, jumps between them, `F1`. Everything it needs already exists —
-  **the home**: `.m.help` carries only *About rio*, so *Contents…* slots in beside it with
-  no new menu; **navigation**: topic ids *are* the filenames, `index.md` *is* the contents,
-  and inter-topic links are already relative; **search**: the core greps
-  (`project.search` / `rio::doc::grep_lines`), so help search is that engine pointed at
-  `docs/`; **rendering**: v0 can be a read-only buffer through rio's own Markdown
-  highlighter in `syntax/`, with a real renderer (headings, tables, clickable links) as the
-  step after. The one *shipping* change it forces: `docs/` must install alongside
-  `themes/`/`syntax/` (INSTALL.md + the deploy scripts), which is why that wasn't done
-  with D91. Open design question: whether help is a dock-site panel (D35 makes that cheap)
-  or its own tool window.
+- **In-app help viewer (Help ▸ Contents…)** — *v0 landed* (**D99**): the window exists and shows
+  the manual — contents parsed from `index.md` on the left (an `rl_*` rich list), the selected
+  topic's Markdown **source** on the right, opened from ***Help ▸ Contents…*** or `F1` (a keymap
+  command, so it is remappable). The GUI reads `docs/` off its own tree, never through the core,
+  so a remote session shows *this* rio's manual. Two things remain, and the entry below is still
+  the description of them: a **renderer** (headings, tables, clickable jumps between topics —
+  v0 shows the source, which is what makes tables and hand-wrapped prose legible in the
+  meantime), and **`docs/` installing** alongside `themes/`/`syntax/`, without which none of this
+  survives leaving the checkout. The panel-vs-window question is still open and deliberately
+  unanswered: it ships as a non-modal tool window, the Extensions-window shape, which re-hosts
+  into a dock site if that is where it lands.
+  Consciously left, each an addition to the window rather than a change to it:
+  **a renderer** — headings, tables, bold/italic, and links a reader can click to jump
+  between topics (inter-topic links are already relative, so the jump is a filename lookup);
+  **help search**, which is the core's own grep (`project.search` / `rio::doc::grep_lines`)
+  pointed at `docs/`; and **`docs/` installing** alongside `themes/`/`syntax/` (INSTALL.md +
+  the deploy scripts) — the *shipping* prerequisite, unchanged since D91, without which the
+  viewer works only from a checkout.
 
 ## Syntax highlighting
 
