@@ -5452,7 +5452,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
-| the menubar widgets | `Menu ▸ Item` paths quoted in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING | `docs.tcl` — walks the real menus |
+| the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
@@ -5471,9 +5471,17 @@ removed one; an unmarked path runs into its sentence and is reported. And the
 **design logs are exempt** — AGENTS, ROADMAP, PITCH, CAVEATS name retired menus
 (D74's Tabs cascade, D92's theme dropdown) and unbuilt ones (`Help ▸ Contents…`) on
 purpose, and holding them to today's menubar would make them lie about their own
-history. Its blind spot is a menu named as prose rather than as a path: "the **Tabs**
-menu" survived in WINDOWS.md three decisions after D74 removed it, and nothing but a
-reader was going to catch that.
+history.
+
+**A menu can be named two ways, so the row guards both.** The path check reads `▸`,
+and the drift that actually shipped had none: "the **Tabs** menu" survived in
+WINDOWS.md three decisions after D74 removed it, caught in the end by a reader and
+not by the suite. A row that guards the quotable half and leaves the readable half to
+luck is the backlog wearing a guard's clothes, so the second check takes the other
+grammar — a **capitalised** word before *menu*, *submenu* or *cascade* is a name and
+must be one rio has. It stays narrow by leaning on the same distinction English
+already makes: a name is capitalised, a description is not, so "the row menu" and "a
+right-click menu" are never even looked at.
 
 The last two rows are the honest backlog. Where a fact is genuinely prose —
 README's status section — accept that it has no guard and re-read it when the

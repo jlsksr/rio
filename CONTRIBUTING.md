@@ -417,7 +417,11 @@ involved.
 - **Write menu paths in emphasis** — `***View ▸ Theme…***`, with ` ▸ ` between the
   levels. `docs.tcl` checks every such path against the real menubar, and the emphasis
   is what tells it where the label stops and your sentence starts. A path written
-  bare is reported as if it were wrong, which is the nudge to mark it up.
+  bare is reported as if it were wrong, which is the nudge to mark it up. Naming a
+  menu in a sentence is checked the same way — a prose mention of a menu retired two
+  releases earlier is how the last stale one got past everybody — so a capitalised
+  word in front of *menu*, *submenu* or *cascade* has to name one that exists.
+  Describing one is still free: "the row menu" is not a name.
 - **Say why.** A short explanation of the reasoning — especially for anything
   touching the core's protocol — makes review much easier.
 

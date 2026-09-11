@@ -269,7 +269,8 @@ set ::notrio {
 proc menu_words {s} {
 	set out {}
 	foreach w [split $s] {
-		set w [string trimright $w ".,;:)"]
+		set w [string trimleft $w "(\"“"]
+		set w [string trimright $w ".,;:)\"”"]
 		if {$w ne ""} { lappend out $w }
 	}
 	return $out
@@ -354,6 +355,56 @@ foreach p $::menu_docs {
 	}
 }
 ok "every menu path in the docs exists" $stale {}
+
+# --- 7. every menu the docs NAME exists too -----------------------------------
+#
+# Check 6's blind spot, and the one that actually bit: a menu named as prose carries no
+# `▸` for it to see. "The **Tabs** menu" outlived the menu itself by three decisions in
+# WINDOWS.md, and nothing but a reader was going to catch it — so the same register row
+# has to cover both ways a document can name a menu, or half of it is unguarded.
+#
+# The rule is narrow on purpose: a **capitalised** word before "menu"/"submenu"/
+# "cascade" is a name, and must be one rio has. Everything else is English and is left
+# alone — "the row menu", "its pane's menu", "a right-click menu" never reach the check,
+# because a name is capitalised and a description is not.
+set ::prose_not {
+	The A An This That These Those Its Their Each Every Same Other Both
+	Right-click Context Pop-up
+}
+# ...and the compounds where "menu" is the adjective rather than the thing.
+set ::prose_tail {path paths bar entry entries item items label labels}
+
+proc menu_prose {text} {
+	set ws [menu_words [string map [list * " " ` " " \n " "] $text]]
+	set out {}
+	for {set i 1} {$i < [llength $ws]} {incr i} {
+		if {[lsearch -exact {menu submenu cascade} \
+			[string tolower [lindex $ws $i]]] < 0} continue
+		if {[lsearch -exact $::prose_tail \
+			[string tolower [lindex $ws [expr {$i + 1}]]]] >= 0} continue
+		if {[lindex $ws [expr {$i - 2}]] eq "▸"} continue ;# a path — check 6 owns it
+		set name [lindex $ws [expr {$i - 1}]]
+		if {![string match {[A-Z]*} $name]} continue
+		if {[lsearch -exact $::prose_not $name] >= 0} continue
+		# Longest name first, so "Font & Zoom" wins over a bare "Zoom".
+		for {set n 4} {$n >= 2} {incr n -1} {
+			if {$i < $n} continue
+			set cand [join [lrange $ws [expr {$i - $n}] [expr {$i - 1}]]]
+			if {[info exists ::menus($cand)]} { set name $cand ; break }
+		}
+		if {![info exists ::menus($name)]} { lappend out $name }
+	}
+	return $out
+}
+
+set gone {}
+foreach p $::menu_docs {
+	set page [file tail $p]
+	foreach name [menu_prose [slurp $p]] {
+		lappend gone "$page: the “$name” menu (rio has no such menu)"
+	}
+}
+ok "every menu the docs name exists" $gone {}
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]
