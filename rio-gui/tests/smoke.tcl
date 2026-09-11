@@ -1570,6 +1570,61 @@ agent_prompt_open provider $::agent_prompt_provider
 ok "prompts: provider dialog closed"      [winfo exists .agentprompts] 0
 ok "prompts: providers/openai.md in a tab" [string match {*providers/openai.md} [bufget $::cur path]] 1
 
+# rio's OWN two layers are on the same list, and readable (D105). The dialog lists every
+# layer in composition order — including the shipped base and plan-mode prompts, which
+# have a View door rather than an Edit one — plus the composed whole. The state word comes
+# from the core's inventory: system.md was created empty by the block above, so it exists
+# and says nothing, which is a different state from "not created yet".
+agent_prompts_dialog
+ok "prompts: base row present"            [winfo exists .agentprompts.base] 1
+ok "prompts: plan row present"            [winfo exists .agentprompts.plan] 1
+ok "prompts: whole-prompt row present"    [winfo exists .agentprompts.full] 1
+ok "prompts: base reads as rio's"         [.agentprompts.base cget -text] "View rio's instructions…"
+ok "prompts: base layer is shipped"       [prompt_layer_field base origin] shipped
+ok "prompts: base layer is in effect"     [prompt_state_word base] "in effect now"
+ok "prompts: empty system layer says so"  [prompt_state_word system] "empty"
+ok "prompts: plan layer waits for plan mode" [prompt_state_word plan] "not in effect now"
+
+# The viewer: rendered, read-only, and honest about where the text came from.
+prompt_view base
+ok "promptview: opens"                    [winfo exists .promptview] 1
+ok "promptview: read-only"                [.promptview.body.t cget -state] disabled
+set ::pv_text [.promptview.body.t get 1.0 end]
+ok "promptview: shows rio's instructions" [string match {*rio's coding agent*} $::pv_text] 1
+ok "promptview: rendered, not dumped"     [string match {*#*} $::pv_text] 0
+ok "promptview: names the shipped file"   [string match {Shipped with rio: *prompt.md*} \
+	[.promptview.where cget -text]] 1
+ok "promptview: offers a copy"            [winfo exists .promptview.btns.copy] 1
+destroy .promptview
+
+# The composed view is the one that cannot mislead: the joined text, and nothing to copy.
+prompt_view composed
+ok "promptview: composed has no copy"     [winfo exists .promptview.btns.copy] 0
+ok "promptview: composed joins the base"  [string match {*rio's coding agent*} \
+	[.promptview.body.t get 1.0 end]] 1
+destroy .promptview
+
+# Making your own copy: the core seeds the override with the text that was in effect, it
+# opens as an ordinary tab, and the list then describes the new truth.
+set ::nbuf_before3 [dict size $::buffers]
+prompt_view base
+prompt_view_copy base
+ok "promptview: copy closed the viewer"   [winfo exists .promptview] 0
+ok "promptview: copy opened a tab"        [expr {[dict size $::buffers] > $::nbuf_before3}] 1
+ok "promptview: the tab is the override"  [string match {*agent/prompt.md} [bufget $::cur path]] 1
+set ::pv_override [bufget $::cur path]
+ok "promptview: the copy is seeded"       [string match {*rio's coding agent*} [buf_text $::cur]] 1
+agent_prompts_dialog
+ok "prompts: override reads as mine"      [prompt_layer_field base origin] user
+ok "prompts: base row becomes an editor"  [.agentprompts.base cget -text] "Edit your copy…"
+destroy .agentprompts
+# Put the sandbox back to shipped, so nothing later in the run reads a forked base.
+close_buffers_under [file dirname $::pv_override]
+file delete -force $::pv_override
+agent_prompts_dialog
+ok "prompts: deleting the copy restores rio's" [prompt_layer_field base origin] shipped
+destroy .agentprompts
+
 # The Extensions window's detail must WORD-WRAP a long description, not stretch the
 # auto-sized window. No repository is configured in the sandbox, so the window opens
 # on an empty scan; drive extw_select with a synthetic long-description row and check

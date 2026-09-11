@@ -189,22 +189,21 @@ proc rio::ops::agent_providers {params} {
 }
 rio::dispatch::register agent.providers rio::ops::agent_providers
 
-# agent.prompt.edit {which ?name?} -> {path, created} ; resolve a user-editable
-# system-prompt file (D70/D79) and ensure it exists so a frontend can open it in the
-# editor. `which` is `system` (the user's standing prompt for all projects, in the XDG
-# agent dir), `provider` (that provider's own prompt, `providers/<name>.md` in the same
-# dir — `name` required, must be a registered provider and not echo), or `project`
-# (`.rio/agent.md` at the open project root). The core owns the path — a remote core
-# resolves it on its OWN disk (D30) — and creates an empty file if absent (`created`
-# says which). `project` with no open project, and `provider` with a missing/unknown/
-# echo name, are bad_request. Flat result, so the default wire encoder applies.
-proc rio::ops::agent_prompt_edit {params} {
+# The prompt layers a frontend may name (D34/D70/D79/D101/D105), in composition order.
+# `base` and `plan` are rio's own shipped layers; the other three are the user's.
+namespace eval rio::ops { variable prompt_layers {base system provider project plan} }
+
+# Validate a {which ?name?} pair for the three prompt ops and return the provider name
+# ("" unless `which` is provider). One gate for all three, because "which prompt do you
+# mean" has exactly one right answer whether you are listing, reading or editing it.
+# `allow` narrows the acceptable set (agent.prompt.get also takes `composed`).
+proc rio::ops::_prompt_which {params allow op} {
 	if {![dict exists $params which]} {
-		rio::error::raise bad_request "agent.prompt.edit requires which"
+		rio::error::raise bad_request "$op requires which"
 	}
 	set which [dict get $params which]
-	if {$which ni {system provider project}} {
-		rio::error::raise bad_request "agent.prompt.edit: unknown prompt '$which'"
+	if {$which ni $allow} {
+		rio::error::raise bad_request "$op: unknown prompt '$which'"
 	}
 	if {$which eq "project" && [rio::project::root] eq ""} {
 		rio::error::raise bad_request "no project is open"
@@ -212,7 +211,7 @@ proc rio::ops::agent_prompt_edit {params} {
 	set name ""
 	if {$which eq "provider"} {
 		if {![dict exists $params name]} {
-			rio::error::raise bad_request "agent.prompt.edit provider requires name"
+			rio::error::raise bad_request "$op provider requires name"
 		}
 		set name [dict get $params name]
 		if {$name eq "echo"} {
@@ -222,6 +221,64 @@ proc rio::ops::agent_prompt_edit {params} {
 			rio::error::raise bad_request "unknown agent provider: $name"
 		}
 	}
+	return $name
+}
+
+# agent.prompt.list {} -> {prompts: [{which,name,path,origin,exists,builtin,active,chars}]} ;
+# the whole system prompt laid out layer by layer, in the order they are composed (D105).
+# `origin` says where each layer's file actually comes from — `shipped` (rio's own copy),
+# `user` (the XDG agent dir, including an override of a shipped layer), `project`, or
+# `none` — and `active` says whether that layer is contributing to what the provider is
+# being sent RIGHT NOW, for the live provider and the live mode. This is the op behind
+# Preferences ▸ Agent ▸ Agent Prompts…: the point is that nothing about the agent's
+# instructions is hidden from the person whose project they act on. Non-flat result — the
+# wire layer registers a shape encoder (D25).
+proc rio::ops::agent_prompt_list {params} {
+	set ls [rio::agent::prompt::layers [rio::agent::provider_name] [rio::agent::mode]]
+	return [dict create result [dict create prompts $ls]]
+}
+rio::dispatch::register agent.prompt.list rio::ops::agent_prompt_list
+
+# agent.prompt.get {which ?name?} -> {which, path, origin, text} ; one layer's text, for
+# READING (D105) — including rio's shipped `base` and `plan`, which have no editable file
+# of their own, and `composed`, the finished string the provider would be sent right now.
+# The core reads it on its own disk, so a remote core shows the prompts that are really in
+# effect there (D30). `plan` comes back whatever the current mode is: being asked to read
+# it is a different question from whether it is live. A layer with no file yields empty
+# `text` and `origin none` — absent is a normal state, not an error.
+proc rio::ops::agent_prompt_get {params} {
+	variable prompt_layers
+	set name [_prompt_which $params [concat $prompt_layers composed] agent.prompt.get]
+	set which [dict get $params which]
+	set path ""
+	set origin composed
+	if {$which ne "composed"} {
+		set l [rio::agent::prompt::layer $which $name [rio::agent::mode]]
+		set path [dict get $l path] ; set origin [dict get $l origin]
+	}
+	set txt [rio::agent::prompt::text $which $name \
+		[rio::agent::provider_name] [rio::agent::mode]]
+	return [dict create result [dict create \
+		which $which path $path origin $origin text $txt]]
+}
+rio::dispatch::register agent.prompt.get rio::ops::agent_prompt_get
+
+# agent.prompt.edit {which ?name?} -> {path, created} ; resolve a WRITABLE prompt file
+# (D70/D79/D105) and ensure it exists so a frontend can open it in the editor. `which` is
+# `system` (the user's standing prompt for all projects, in the XDG agent dir), `provider`
+# (that provider's own prompt, `providers/<name>.md` in the same dir — `name` required,
+# must be a registered provider and not echo), `project` (`.rio/agent.md` at the open
+# project root), or one of rio's shipped layers, `base` / `plan` — for which the writable
+# file is the OVERRIDE in the user's agent dir, seeded with a copy of the text it
+# overrides (rio's own copy is never edited in place: an upgrade would take the edit
+# away, and on a packaged install it may not even be writable). The core owns the path —
+# a remote core resolves it on its OWN disk (D30) — and creates the file if absent
+# (`created` says which). `project` with no open project, and `provider` with a missing/
+# unknown/echo name, are bad_request. Flat result, so the default wire encoder applies.
+proc rio::ops::agent_prompt_edit {params} {
+	variable prompt_layers
+	set name [_prompt_which $params $prompt_layers agent.prompt.edit]
+	set which [dict get $params which]
 	set r [rio::agent::prompt::ensure $which $name]
 	if {$r eq ""} {
 		rio::error::raise bad_request "cannot resolve the $which prompt path"

@@ -424,4 +424,264 @@ test op-provider-unknown {agent.prompt.edit provider with an unregistered name i
 	set e
 } -cleanup { reset_prompt } -match glob -result {*unknown agent provider*}
 
+# --- the inventory: every layer, where it comes from, whether it is saying anything (D105)
+#
+# Two search dirs stand in for the real pair: the first IS the user's agent dir (it is what
+# _userdir returns under an override), the second plays rio's shipped copy — so a file in
+# the first reads as an override and a file in the second as shipped, exactly as on a real
+# installation.
+
+test layers-order {the inventory lists every layer in composition order} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set out {}
+	foreach l [rio::agent::prompt::layers] { lappend out [dict get $l which] }
+	set out
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {base system provider project plan}
+
+test layers-origin-shipped {rio's own copy is reported as shipped, and is active} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set l [rio::agent::prompt::layer base]
+	list [dict get $l origin] [dict get $l exists] [dict get $l builtin] \
+		[dict get $l active] [dict get $l chars] \
+		[string equal [dict get $l path] [file join $::s prompt.md]]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {shipped 1 1 1 12 1}
+
+test layers-origin-user {an override is reported as the user's, and is what is read} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	writefile [file join $::u prompt.md] "MY BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set l [rio::agent::prompt::layer base]
+	list [dict get $l origin] [string equal [dict get $l path] [file join $::u prompt.md]] \
+		[rio::agent::prompt::text base]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {user 1 {MY BASE}}
+
+test layers-missing-file {a layer with no file exists 0, origin none, inactive} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set l [rio::agent::prompt::layer system]
+	list [dict get $l exists] [dict get $l origin] [dict get $l active] [dict get $l chars]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {0 none 0 0}
+
+test layers-empty-file {an empty file exists but is inactive — the honest middle state} -setup {
+	reset_prompt
+	set ::u [mkdir]
+	writefile [file join $::u system.md] "   \n"
+	rio::agent::prompt::override_dirs [list $::u]
+} -body {
+	set l [rio::agent::prompt::layer system]
+	list [dict get $l exists] [dict get $l origin] [dict get $l active] [dict get $l chars]
+} -cleanup { reset_prompt ; file delete -force $::u } -result {1 user 0 0}
+
+test layers-plan-mode {the plan layer is inactive in build mode and active in plan mode} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s plan.md] "PLAN RULES"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	list [dict get [rio::agent::prompt::layer plan "" build] active] \
+		[dict get [rio::agent::prompt::layer plan "" plan] active] \
+		[dict get [rio::agent::prompt::layer plan "" build] exists]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {0 1 1}
+
+# `chars` is what the FILE says; `active` is whether it is being sent. A plan layer full
+# of text that build mode is not using must not report itself as empty — a frontend that
+# turns chars into a word would then tell the user the file is blank.
+test layers-inactive-keeps-chars {an inactive layer still reports its size} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s plan.md] "PLAN RULES"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set l [rio::agent::prompt::layer plan "" build]
+	list [dict get $l active] [dict get $l chars] [dict get $l exists]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {0 10 1}
+
+test layers-project {the project layer reports the open project's file} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "PROJECT RULES"
+	rio::agent::prompt::override_dirs [list $::u]
+	rio::project::open $::proj
+} -body {
+	set l [rio::agent::prompt::layer project]
+	list [dict get $l origin] [dict get $l active] \
+		[string equal [dict get $l path] [file join $::proj .rio agent.md]]
+} -cleanup { reset_prompt ; file delete -force $::u $::proj } -result {project 1 1}
+
+test layers-provider-echo {echo gets no provider file at all — it ignores the prompt} -setup {
+	reset_prompt
+	set ::u [mkdir]
+	rio::agent::prompt::override_dirs [list $::u]
+} -body {
+	list [rio::agent::prompt::path provider echo] \
+		[dict get [rio::agent::prompt::layer provider echo] path]
+} -cleanup { reset_prompt ; file delete -force $::u } -result {{} {}}
+
+# --- reading a layer: text, including the shipped ones and the composed whole ----
+
+test text-each-layer {text returns each layer's own contents} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "BASE"
+	writefile [file join $::u system.md] "SYSTEM"
+	writefile [file join $::s plan.md]   "PLAN"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+	set ::proj [mkdir]
+	writefile [file join $::proj .rio agent.md] "PROJECT"
+	rio::project::open $::proj
+} -body {
+	list [rio::agent::prompt::text base] [rio::agent::prompt::text system] \
+		[rio::agent::prompt::text project] [rio::agent::prompt::text plan]
+} -cleanup { reset_prompt ; file delete -force $::u $::s $::proj } -result {BASE SYSTEM PROJECT PLAN}
+
+test text-plan-ignores-mode {the plan layer can be READ in build mode — reading is not the same question as being live} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s plan.md] "PLAN"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	list [rio::agent::prompt::text plan] [rio::agent::prompt::compose "" build]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {PLAN {}}
+
+test text-composed {composed is exactly what compose would send} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "BASE"
+	writefile [file join $::u system.md] "SYSTEM"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	string equal [rio::agent::prompt::text composed "" "" build] \
+		[rio::agent::prompt::compose "" build]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {1}
+
+test text-unknown {an unknown layer reads as empty rather than raising} -setup {
+	reset_prompt
+} -body {
+	rio::agent::prompt::text bogus
+} -cleanup { reset_prompt } -result {}
+
+# --- overriding a shipped layer: the copy is seeded, not blank --------------------
+
+test ensure-base-seeds {ensure base writes the override as a COPY of the shipped text} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set r [rio::agent::prompt::ensure base]
+	list [dict get $r created] \
+		[string equal [dict get $r path] [file join $::u prompt.md]] \
+		[rio::agent::prompt::_read [dict get $r path]] \
+		[rio::agent::prompt::text base]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {1 1 {SHIPPED BASE} {SHIPPED BASE}}
+
+test ensure-plan-seeds {ensure plan seeds the plan-mode override the same way} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s plan.md] "SHIPPED PLAN"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set r [rio::agent::prompt::ensure plan]
+	list [string equal [dict get $r path] [file join $::u plan.md]] \
+		[rio::agent::prompt::_read [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {1 {SHIPPED PLAN}}
+
+test ensure-base-idempotent {an existing override is opened, not overwritten by the shipped text} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	writefile [file join $::u prompt.md] "MINE, EDITED"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set r [rio::agent::prompt::ensure base]
+	list [dict get $r created] [rio::agent::prompt::_read [dict get $r path]]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {0 {MINE, EDITED}}
+
+test ensure-user-layer-still-empty {a USER layer still starts empty — only overrides are seeded} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set r [rio::agent::prompt::ensure system]
+	file size [dict get $r path]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {0}
+
+# --- the three prompt ops --------------------------------------------------------
+
+test op-list {agent.prompt.list inventories every layer for the live provider and mode} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set ls [dict get [rio::ops::agent_prompt_list {}] result prompts]
+	set base [lindex $ls 0]
+	list [llength $ls] [dict get $base which] [dict get $base origin] [dict get $base builtin]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {5 base shipped 1}
+
+test op-get-base {agent.prompt.get base returns the shipped text and where it lives} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set res [dict get [rio::ops::agent_prompt_get {which base}] result]
+	list [dict get $res which] [dict get $res origin] [dict get $res text] \
+		[string equal [dict get $res path] [file join $::s prompt.md]]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {base shipped {SHIPPED BASE} 1}
+
+test op-get-composed {agent.prompt.get composed returns the joined prompt with no file} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "BASE"
+	writefile [file join $::u system.md] "SYSTEM"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set res [dict get [rio::ops::agent_prompt_get {which composed}] result]
+	list [dict get $res origin] [dict get $res path] [dict get $res text]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {composed {} {BASE
+
+SYSTEM}}
+
+test op-get-missing {agent.prompt.get on a layer with no file is empty, not an error} -setup {
+	reset_prompt
+	set ::u [mkdir]
+	rio::agent::prompt::override_dirs [list $::u]
+} -body {
+	set res [dict get [rio::ops::agent_prompt_get {which system}] result]
+	list [dict get $res origin] [dict get $res text]
+} -cleanup { reset_prompt ; file delete -force $::u } -result {none {}}
+
+test op-get-bad-which {agent.prompt.get rejects an unknown layer} -setup {
+	reset_prompt
+} -body {
+	catch {rio::ops::agent_prompt_get {which bogus}} e
+	set e
+} -cleanup { reset_prompt } -match glob -result {*unknown prompt*}
+
+test op-edit-base {agent.prompt.edit base creates the seeded override} -setup {
+	reset_prompt
+	set ::u [mkdir] ; set ::s [mkdir]
+	writefile [file join $::s prompt.md] "SHIPPED BASE"
+	rio::agent::prompt::override_dirs [list $::u $::s]
+} -body {
+	set res [dict get [rio::ops::agent_prompt_edit {which base}] result]
+	list [dict get $res created] \
+		[string equal [dict get $res path] [file join $::u prompt.md]] \
+		[rio::agent::prompt::_read [dict get $res path]]
+} -cleanup { reset_prompt ; file delete -force $::u $::s } -result {1 1 {SHIPPED BASE}}
+
 cleanupTests

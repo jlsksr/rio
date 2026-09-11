@@ -143,7 +143,11 @@ and never executed** — and a malformed one is skipped with a note, never fatal
 
 The four `agent/` prompt files and the three allow-lists have friendly front doors
 in *Preferences ▸ Agent* (*Agent Prompts…* and *Allowed commands…*); editing them
-by hand and through the dialog are the same thing. See [the agent](agent.md).
+by hand and through the dialog are the same thing. The first two — the overrides —
+exist only if you ask for them: *Agent Prompts… ▸ **Make my own copy…*** writes rio's
+own shipped text here as your file, and rio then reads yours instead. Delete it and
+rio's version comes back; you can read rio's version in that dialog either way. See
+[the agent](agent.md).
 
 ## Further reading
 

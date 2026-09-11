@@ -157,24 +157,51 @@ command ask again.
 
 ## Telling the agent how you work
 
-***Preferences ▸ Agent ▸ Agent Prompts…*** opens three prompts, each plain
-Markdown, each optional:
+***Preferences ▸ Agent ▸ Agent Prompts…*** lists **everything the agent is told**,
+in the order it is composed. Five layers, all plain Markdown, all optional except
+the first:
 
-| Prompt | Applies to | Lives |
-| ------ | ---------- | ----- |
-| System | every project, every provider | with your rio settings |
-| Project | the folder you have open | `.rio/agent.md` in the project |
-| Per-provider | only while one chosen provider is running | with your rio settings |
+| Layer | Applies to | Lives | Yours? |
+| ----- | ---------- | ----- | ------ |
+| rio's instructions | every turn | ships with rio | read it; replace it if you want |
+| System | every project, every provider | with your rio settings | yes |
+| Per-provider | only while one chosen provider is running | with your rio settings | yes |
+| Project | the folder you have open | `.rio/agent.md` in the project | yes |
+| Plan mode | only while the agent is in Plan mode | ships with rio | read it; replace it if you want |
 
-They open in rio's own editor and are **added on top of** rio's built-in
-instructions — they never replace them, so an empty prompt is a perfectly normal
-state and a badly worded one cannot break the agent's tool contract.
+Your three open in rio's own editor and are **added on top of** rio's — they never
+replace them, so an empty prompt is a perfectly normal state and a badly worded one
+cannot break the agent's tool contract.
 
 The split is about reach. General standing instructions ("prefer small commits",
 "this codebase is POSIX shell") belong in the **system** prompt, where they shape
 whichever model runs. Facts about one codebase belong in the **project** prompt,
 which travels with the code in git. Quirks of one model belong in the
 **per-provider** prompt, so switching models doesn't drag them along.
+
+Beside each layer the list says what it is doing right now — *in effect now*,
+*empty*, *not created yet*, *not in effect now* — so you can see at a glance which
+of your instructions are actually reaching the model.
+
+### Reading rio's own instructions
+
+The first and last layers are rio's, and they are **not hidden from you**. They are
+what makes the agent behave the same whichever provider you install: the tool
+contract (reads are free, writes are proposed), how to work in someone else's
+codebase, how to run commands, what to verify before saying it works — and, in Plan
+mode, how to investigate and what a plan should contain.
+
+- **View rio's instructions…** opens the shipped text, rendered, read-only. The line
+  above it names the file, so you can also open it in any editor you like.
+- **Show the whole prompt…** renders every active layer joined together — the exact
+  string the provider is sent, with nothing summarised or paraphrased.
+- **Make my own copy…** writes that text to your own settings as an editable file
+  and opens it. From then on your copy *replaces* rio's for that layer, and rio's
+  later improvements no longer reach it — delete the file to go back.
+
+Because the agent runs in the core, these are the files on the **core's** machine.
+With a [remote core](remote.md) the dialog shows that machine's paths, which are the
+ones that matter.
 
 ## What the agent cannot do
 

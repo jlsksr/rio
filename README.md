@@ -125,6 +125,11 @@ in [docs/](docs/index.md).
   project prompt in a `.rio/agent.md` at the project root, so it travels with the code. The
   instructions live in rio, not the provider — so your general ones shape whichever model
   runs (Claude, ChatGPT, a local model), while the per-provider layer tunes just one.
+  **rio's own instructions are on that same list, and you can read them** — the shipped
+  base prompt and the plan-mode one, as files on disk and rendered in the app, with *Show
+  the whole prompt…* for the composed text exactly as the model receives it. Nothing the
+  agent is told about your project is hidden from you, and one click makes any of it your
+  own editable copy.
 - **Theming** — live-switchable colour themes from *View ▸ Theme…*: the plain
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
   in yourself — the list is whatever the core can load. Themes are plain

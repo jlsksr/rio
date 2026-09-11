@@ -257,6 +257,15 @@ proc rio::wire::_result_agent_providers {result} {
 }
 rio::wire::result_encoder agent.providers rio::wire::_result_agent_providers
 
+# agent.prompt.list: `prompts` is an array of flat {which,name,path,origin,exists,
+# builtin,active,chars} objects — the system prompt's layers in composition order (D105).
+proc rio::wire::_result_agent_prompt_list {result} {
+	set items {}
+	foreach p [dict get $result prompts] { lappend items [obj $p] }
+	return "{\"prompts\":[arr $items]}"
+}
+rio::wire::result_encoder agent.prompt.list rio::wire::_result_agent_prompt_list
+
 # agent.allow.list: `rules` is an array of rules, each rule an array of argv-prefix
 # token strings (D84) — a nested string array, declared here rather than inferred.
 proc rio::wire::_result_agent_allow_list {result} {

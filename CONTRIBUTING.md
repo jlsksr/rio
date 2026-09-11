@@ -61,6 +61,13 @@ the core. Keep the frontends dumb.
 - **Headless code stays Tk-free and exits explicitly.** The core, the tests, the
   server — anything without a window — must not `package require Tk` (it makes a
   bare `tclsh` hang at EOF) and should `exit` rather than fall into the event loop.
+- **The agent's instructions ship with rio — keep them in step with its tools.**
+  `agent/prompt.md` (and `agent/plan.md` for plan mode) is what every provider is
+  told, composed in the core so one file shapes Claude, an OpenAI-compatible model
+  and a local one alike. Give the agent a new tool, a new gate or a new mode, and
+  that file is part of the change; it is plain Markdown, and users can read it —
+  and replace it — from *Preferences ▸ Agent ▸ Agent Prompts…*, so write it for
+  them too.
 - **Match the style of the code around you.**
 
 The *why* behind all of these is in [AGENTS.md](AGENTS.md) if you're curious.
