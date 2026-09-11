@@ -64,7 +64,7 @@ rio::agent::tools::_def run_command exec "" \
 	{{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"description":"The command as an argument vector: the program followed by each argument as a separate string. Not a shell string."},"cwd":{"type":"string","description":"Working directory relative to the project root (omit for the root). Must stay within the project."},"timeout":{"type":"integer","description":"Seconds before the command is killed (default 120, max 600)."}},"required":["command"]}}
 
 rio::agent::tools::_def present_plan plan "" \
-	"Present your plan for the work, for the user to read and approve BEFORE anything changes. Investigate first with the read tools, then call this ONCE with the whole plan. `plan` is Markdown — headings, lists, tables, fenced code — and the user reads it RENDERED, not as source, so write it for a person: what you understood the task to be, what you will change (file by file), and how it will be verified. Say what you are deliberately NOT doing. The user approves or rejects; on approval you carry the plan out, one reviewed edit at a time." \
+	"Present your plan for the work, for the user to read and approve BEFORE anything changes. Use this whenever the user ASKS for a plan (\"plan this\", \"what would you do\", \"show me the plan first\"), and on your own judgement before a large, ambiguous or hard-to-reverse change — not for a small, obvious fix. Investigate first with the read tools, then call this ONCE with the whole plan. `plan` is Markdown — headings, lists, tables, fenced code — and the user reads it RENDERED, not as source, so write it for a person: what you understood the task to be, what you will change (file by file), and how it will be verified. Say what you are deliberately NOT doing. The user approves or rejects; on approval you carry the plan out, one reviewed edit at a time." \
 	{{"type":"object","properties":{"title":{"type":"string","description":"A short name for the plan — one line, no Markdown."},"plan":{"type":"string","description":"The plan itself, as Markdown."}},"required":["title","plan"]}}
 
 # The tool specs handed to a provider: {name, description, input_schema} per tool.
@@ -73,18 +73,20 @@ rio::agent::tools::_def present_plan plan "" \
 # The set depends on the agent's MODE (D101): in `plan` mode the model gets the reads
 # plus present_plan and NOTHING that changes anything — the restriction is real, not a
 # request in the prompt, and it is provider-agnostic because the core composes this list
-# for every provider. In `build` mode present_plan is withheld instead: a plan is what
-# plan mode is for, and offering it everywhere invites a plan nobody asked for.
+# for every provider.
+#
+# present_plan is offered in EVERY mode (D103). D101 withheld it outside plan mode, on the
+# theory that a plan is what plan mode is for; the first live test showed what that costs —
+# asked in plain words for a plan, the model had no plan tool to reach for and wrote a text
+# file instead. Planning is a thing the user asks for, not a mode they must remember to
+# enter first. Plan mode still has all its teeth: it is the mode that withholds every
+# changing tool, which is a different guarantee from being able to present a plan.
 proc rio::agent::tools::specs {{mode build}} {
 	variable specs
 	set out {}
 	dict for {name s} $specs {
 		set kind [dict get $s kind]
-		if {$mode eq "plan"} {
-			if {$kind ni {read plan}} continue
-		} elseif {$kind eq "plan"} {
-			continue
-		}
+		if {$mode eq "plan" && $kind ni {read plan}} continue
 		lappend out [dict create name $name \
 			description [dict get $s description] \
 			input_schema [dict get $s schema]]

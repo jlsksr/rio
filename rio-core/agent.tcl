@@ -527,9 +527,16 @@ proc rio::agent::_do_plan {turn id name input emit co} {
 			content "The user rejected this plan. Do not start work — ask what they want changed about it, or present a revised plan." \
 			summary "rejected by user"]
 	}
-	set_mode build
-	{*}$emit [dict create event agent.mode params [dict create mode build]]
-	set content "The user approved this plan. Plan mode is off and the editing tools are available again — carry the plan out now, step by step; each edit and command still waits for the user's approval."
+	# Leaving plan mode is news only if we were in it (D103: a plan can be presented from
+	# any mode). Announcing a flip that did not happen would relabel the frontend's mode
+	# control for nothing.
+	if {[mode] eq "plan"} {
+		set_mode build
+		{*}$emit [dict create event agent.mode params [dict create mode build]]
+		set content "The user approved this plan. Plan mode is off and the editing tools are available again — carry the plan out now, step by step; each edit and command still waits for the user's approval."
+	} else {
+		set content "The user approved this plan. Carry it out now, step by step; each edit and command still waits for the user's approval."
+	}
 	set summary "plan approved"
 	set now [rio::agent::tools::read_plan [dict get $prep path]]
 	if {$now ne "" && [string trimright $now] ne [string trimright [dict get $prep markdown]]} {

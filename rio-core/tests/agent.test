@@ -624,12 +624,15 @@ test agent-plan-specs-filtered {plan mode offers reads + present_plan and nothin
 		[expr {"run_command" in $names}] [expr {"fs_read" in $names}]
 } -result {1 0 0 0 1}
 
-test agent-plan-specs-build {build mode offers the working tools and withholds present_plan} -body {
+test agent-plan-specs-build {build mode offers the working tools AND present_plan (D103)} -body {
+	# A plan is something the user asks for, not a mode they must enter first: the model
+	# can always reach for present_plan. What plan mode withholds is everything that
+	# CHANGES something — a different guarantee, and still enforced above.
 	set names {}
 	foreach t [rio::agent::tools::specs build] { lappend names [dict get $t name] }
 	list [expr {"present_plan" in $names}] \
 		[expr {"propose_edit" in $names}] [expr {"run_command" in $names}]
-} -result {0 1 1}
+} -result {1 1 1}
 
 test agent-plan-gated {present_plan is a gated plan-kind tool} -body {
 	list [rio::agent::tools::kind_of present_plan] [rio::agent::tools::is_gated present_plan]
@@ -732,13 +735,15 @@ test agent-plan-tools-return-on-approval {after approval the SAME turn is handed
 	set s1 [start_write turn]
 	rio::core::call agent.approve [dict create turn $turn decision approve]
 	set s2 [wait_done]
-	# Pass 1 was composed in plan mode, pass 2 after the approval flipped it.
+	# Pass 1 was composed in plan mode, pass 2 after the approval flipped it. The editing
+	# tools arrive on that second pass — the point of the per-step recompute. present_plan
+	# is in BOTH lists now (D103): it is not the thing plan mode gates.
 	list $s1 $s2 [llength $::seen] \
 		[expr {"propose_edit" in [lindex $::seen 0]}] \
 		[expr {"present_plan" in [lindex $::seen 0]}] \
 		[expr {"propose_edit" in [lindex $::seen 1]}] \
 		[expr {"present_plan" in [lindex $::seen 1]}]
-} -cleanup { rio::agent::set_mode build ; rio::project::close } -result {propose done 2 0 1 1 0}
+} -cleanup { rio::agent::set_mode build ; rio::project::close } -result {propose done 2 0 1 1 1}
 
 # --- the plan is re-read at approval (D102) ----------------------------------
 # The filed plan IS the plan, so the user may open it and change it before saying yes. What
@@ -763,13 +768,13 @@ proc capture_provider {conversation tools system post} {
 }
 # Present a plan, run `body` while the turn is parked at the gate, then approve it.
 # Returns the tool_result the model was handed.
-proc plan_then {body} {
+proc plan_then {body {mode plan}} {
 	set ::wt_name present_plan
 	set ::wt_input [dict create title "Add a cache" plan "## Changes\n\n- memoize it\n"]
 	set ::wt_raw {{"title":"Add a cache","plan":"## Changes"}}
 	set ::wt_result ""
 	rio::core::call agent.reset {}
-	rio::agent::set_mode plan
+	rio::agent::set_mode $mode
 	rio::agent::set_provider capture_provider
 	set stop [start_write turn]
 	if {$stop ne "propose"} { return "did not reach the gate: $stop" }
@@ -829,6 +834,23 @@ test agent-plan-reread-file-gone {a deleted plan file falls back to the plan as 
 	list [string match "*carry the plan out now*" $c] [string match "*EDITED*" $c] \
 		[ev_summary w1]
 } -cleanup { rio::agent::set_mode build ; rio::project::close } -result {1 0 {plan approved}}
+
+test agent-plan-from-build-mode {a plan asked for in build mode is presented, gated, and approved without a mode flip} -setup {
+	plan_test_setup agprb
+	rio::agent::set_auto_accept 1   ;# and still gated: auto-accept is edits-only (D83)
+} -body {
+	set c [plan_then {} build]
+	set modes {}
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.mode"} { lappend modes [dict get $ev params mode] }
+	}
+	# Presented (so it reached the gate), the mode never announced a flip it did not make,
+	# and the result does not tell the model that plan mode "is off" — it never was on.
+	list [dict get [ev_propose w1] kind] [rio::agent::mode] $modes \
+		[string match "*Plan mode is off*" $c] [string match "*Carry it out now*" $c]
+} -cleanup {
+	rio::agent::set_auto_accept 0 ; rio::agent::set_mode build ; rio::project::close
+} -result {plan build {} 0 1}
 
 test agent-plan-read-plan-nowhere {read_plan is empty for an unfiled plan, and never raises} -setup {
 	plan_test_setup agprr5

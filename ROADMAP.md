@@ -308,6 +308,14 @@ for later:
   beforehand. **`Edit plan`** opens the filed `.rio/plans/` file as an ordinary buffer, and
   the core re-reads it at approval through the live buffer — so an unsaved edit is what the
   agent is handed. Closes D101's "editing a plan" item.
+- **A plan on request, in any mode** — *landed* (AGENTS.md D103). `present_plan` is offered in
+  every mode, so "plan this first" works without setting the mode; plan mode remains the
+  stronger guarantee (it withholds every changing tool). Found by the first live test, where
+  asking for a plan in Review produced a text file instead.
+- **The turn's step budget** — *planned.* `maxsteps` is a hard-coded 8 covering a whole turn,
+  and plan approval continues the same turn — so investigation, the plan, and the entire
+  implementation share eight steps. A live test turn died at `tool_limit` on reads alone. Needs
+  a bigger budget, a boundary at plan approval, or a stop-and-continue model rather than a cap.
 
 ## Frontends
 

@@ -72,14 +72,21 @@ it may do three kinds of thing:
 
 ## Planning before building
 
-For anything bigger than a small fix, you can ask to see the plan first. Set the
-agent's mode to **Plan** — the menu at the top of the chat pane, also
-***Settings ▸ Agent Mode*** and *Preferences ▸ Agent* — and describe the job as
-usual.
+For anything bigger than a small fix, you can ask to see the plan first.
+
+**Just ask.** "Plan this first", "what would you do?", "show me the plan before you
+touch anything" — the agent can present a plan in any mode, and will offer one
+unprompted before a large or hard-to-reverse change. You do not have to remember to
+flip a switch to get one.
+
+**Plan mode** is the stronger version, for when you want a guarantee rather than a
+habit. Set the agent's mode to **Plan** — the menu at the top of the chat pane, also
+***Settings ▸ Agent Mode*** and *Preferences ▸ Agent* — and describe the job as usual.
 
 While plan mode is on the agent **cannot change anything** — not as a promise it
 makes, but because it is handed no editing and no command tools at all. It can only
-read your project and then do one thing: present a plan.
+read your project and then do one thing: present a plan. That is the difference
+between the two: asking for a plan is a request, plan mode is a restriction.
 
 The plan opens **in the middle of the window**, where the editor sits, formatted
 the way the manual is — headings, lists, tables — because it is meant to be read
@@ -91,7 +98,8 @@ rather than skimmed. The chat pane keeps the decision:
 - **Edit plan** opens the plan as an ordinary file, so you can change it before you
   approve it. Rewrite a step, delete one, add a constraint; then approve. The agent
   is given **your** version, edited or not — you do not have to save it first.
-- **Reject** leaves plan mode on. Say what you want different and let it try again.
+- **Reject** starts nothing, and leaves plan mode on if that is where you were. Say
+  what you want different and let it try again.
 - **Plan** reopens the plan if you closed it; `Esc` or **× Close plan** puts the
   editor back while you think.
 

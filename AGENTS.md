@@ -5318,6 +5318,47 @@ in a 340-pixel column is something only a human at a display can judge.
 
 ---
 
+### D103 — A plan is something you ask for, not a mode you must remember
+
+The first live test of D101/D102 found the honest limit at the end of D101 immediately. jka
+asked, in plain words, for a plan: *"present me a lorem ipsum plan to test this feature"*. The
+pane was in Review, where D101 withholds `present_plan` from the model — so the model had no
+plan tool to reach for and did the next best thing it was equipped to do: `propose_create` of
+`plans/lorem_ipsum_plan.txt`. A text file. The feature was never entered, and nothing in the
+UI suggested why.
+
+D101's reasoning for withholding it was "a plan is what plan mode is for, and offering it
+everywhere invites a plan nobody asked for". That is a real risk, but it is the model's
+judgement to exercise, not a capability to remove — and the cost of removing it is that the
+most natural way to ask for the feature silently produces something else. **jka's call: offer
+it in every mode; the VSCode Claude plugin is the bar.**
+
+So `tools::specs` now filters on one rule instead of two — plan mode withholds everything that
+**changes** something — and `present_plan` is in every mode's list. The tool's own description
+carries the judgement (call it when the user asks, or before a large, ambiguous or
+hard-to-reverse change; not for a small obvious fix), which keeps the guidance provider-
+agnostic and core-owned like the rest of D20. Plan mode loses nothing: it was never the thing
+that made a plan *possible*, it is the thing that makes editing *impossible* until one is
+approved. Those are different guarantees, and conflating them was the error.
+
+One consequence in `_do_plan`: approval only flips the mode and emits `agent.mode` **if the
+mode was plan**. Otherwise the frontend's mode control would relabel itself over a flip that
+never happened, and the model would be told "plan mode is off" about a mode it was never in —
+so the approved-plan result now has two wordings.
+
+**Guards:** the two tests that encoded the old rule were flipped to the new one (build mode's
+spec list now carries `present_plan`; the post-approval list carries it too), plus a new one
+(core 562 → 563): a plan presented from build mode is still gated — even with `auto_accept`
+on, since that is edits-only (D83) — is approved without any `agent.mode` event, and gets the
+wording that does not claim plan mode ended.
+
+**Still open from the same test run,** and not fixed here: the turn's step budget
+(`maxsteps 8`) is shared by investigation, the plan call, and the whole implementation, since
+approval continues the same turn. jka's second test turn died at `tool_limit` on reads alone.
+The cap predates tools that propose, plan and build in one turn.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
