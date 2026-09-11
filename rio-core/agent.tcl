@@ -20,7 +20,9 @@
 # (rio::agent::tools — fs/buffer reads), feeds their results back as a follow-up
 # user turn, and re-invokes the provider, repeating until the model finishes.
 # Reads happen (they are not proposals); the approval gate is reserved for the
-# write/run slice (O4). A step cap bounds the read->think->read loop.
+# write/run slice (O4). The loop runs until the model is done: a job worth doing
+# takes the steps it takes, and the bound is the user's Stop, not a number the core
+# guessed in advance (agent.stop, D104).
 #
 # Modes (D101): the loop runs in `build` (the normal working set) or `plan`, where the
 # tool list handed to the provider holds only the reads and `present_plan` and the prompt
@@ -37,8 +39,8 @@
 namespace eval rio::agent {
 	variable conversation {}                       ;# list of {role, content} dicts
 	variable turnseq      0                         ;# monotonic turn-id source
-	variable maxsteps     8                         ;# max tool round-trips per turn
 	variable provider     [namespace current]::echo_provider
+	variable live                                   ;# array: turn -> coro of a turn in flight (D104)
 	variable pending                                ;# array: turn -> {coro id} awaiting approval
 	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
 	variable auto_accept       0                    ;# skip the approval gate (opt-in; EDITS only, D83)
@@ -186,23 +188,48 @@ proc rio::agent::key_status {{name ""}} {
 # cleared conversation will never produce.
 proc rio::agent::reset {} {
 	variable conversation
+	_abort_all
+	set conversation {}
+	return
+}
+
+# Abort ONE turn: cancel a command it has running, delete its coroutine, forget its
+# bookkeeping. Returns 1 only if a turn was actually live — a registration whose coroutine
+# has already finished is pruned, not counted, so Stop cannot report a phantom (D104).
+# The three abort paths — reset, a new message, and Stop — all go through here, because
+# "forget this turn" means the same thing in each.
+proc rio::agent::_abort {t} {
+	variable live
 	variable pending
 	variable proposals
 	variable running
-	set conversation {}
-	foreach turn [array names pending] {
-		lassign $pending($turn) co id
-		catch {rename $co {}}
-	}
-	foreach turn [array names running] {
-		lassign $running($turn) co token
+	set was 0
+	if {[info exists running($t)]} {
+		lassign $running($t) rco token
 		catch {rio::exec::cancel $token}
-		catch {rename $co {}}
 	}
-	array unset pending
-	array unset proposals
-	array unset running
-	return
+	if {[info exists live($t)] && [llength [info commands $live($t)]]} {
+		catch {rename $live($t) {}}
+		set was 1
+	}
+	unset -nocomplain live($t) pending($t) proposals($t) running($t)
+	return $was
+}
+
+# Abort every turn the core is carrying. Before D104 this reached only turns parked at the
+# approval gate or running a command; a turn waiting on the PROVIDER was left alone, and
+# would wake up later to stream into a conversation that had been cleared or replaced. The
+# live registry makes that reachable, and turns now run long enough for it to matter.
+proc rio::agent::_abort_all {} {
+	variable live
+	variable pending
+	variable running
+	set n 0
+	foreach t [lsort -unique [concat [array names live] [array names pending] \
+			[array names running]]] {
+		incr n [_abort $t]
+	}
+	return $n
 }
 
 # The conversation so far (agent.history) — a readable {role, text} list. Text is
@@ -230,21 +257,7 @@ proc rio::agent::history {} {
 # (one user turn carrying both the results and the new text — roles still alternate).
 proc rio::agent::_seal_dangling {} {
 	variable conversation
-	variable pending
-	variable proposals
-	variable running
-	foreach turn [array names pending] {
-		lassign $pending($turn) co id
-		catch {rename $co {}}
-	}
-	foreach turn [array names running] {
-		lassign $running($turn) co token
-		catch {rio::exec::cancel $token}
-		catch {rename $co {}}
-	}
-	array unset pending
-	array unset proposals
-	array unset running
+	_abort_all
 	set last [lindex $conversation end]
 	set results {}
 	if {[llength $last] && [dict get $last role] eq "assistant"} {
@@ -266,12 +279,67 @@ proc rio::agent::send {text emit} {
 	variable conversation
 	variable turnseq
 	set seal [_seal_dangling]
+	variable live
 	set turn [incr turnseq]
 	lappend conversation [dict create role user \
 		content [concat $seal [list [dict create type text text $text]]]]
-	coroutine [namespace current]::_turn_$turn \
-		[namespace current]::_run $turn $emit
+	# Registered BEFORE the coroutine runs: `coroutine` executes the body up to its first
+	# yield, and a turn that finishes without yielding would otherwise clear an entry that
+	# had not been made yet.
+	set co [namespace current]::_turn_$turn
+	set live($turn) $co
+	coroutine $co [namespace current]::_run_guarded $turn $emit
 	return [dict create result [dict create started true turn $turn]]
+}
+
+# _run under a registration guard: the turn is "live" from the moment it starts until it
+# returns, however it returns (D104). Stopping a turn deletes its coroutine, so this is not
+# the only thing that clears the entry — `stop` unsets it too, and both are idempotent.
+proc rio::agent::_run_guarded {turn emit} {
+	variable live
+	try {
+		_run $turn $emit
+	} finally {
+		unset -nocomplain live($turn)
+	}
+}
+
+# Stop a turn in flight (agent.stop, D104) — the frontend's Stop button, and the only way
+# out of a long turn now that there is no step cap. `turn` omitted stops every live turn.
+#
+# Mechanically it is the abort the reset/seal paths already use: cancel a command if one is
+# running, delete the coroutine. Deleting it is enough to stop the provider from driving the
+# turn any further — _resume drops a post whose coroutine is gone — though a request already
+# on the wire is not recalled: it finishes into the void and is still billed. The user asked
+# for the work to stop, and it stops; we do not pretend the tokens come back.
+#
+# Returns the turns actually stopped (a turn that had already finished is not an error —
+# the click raced the last event, which is not the user's problem).
+proc rio::agent::stop {{turn ""}} {
+	variable live
+	set turns [expr {$turn eq "" ? [array names live] : [list $turn]}]
+	set stopped {}
+	foreach t $turns {
+		if {[_abort $t]} { lappend stopped $t }
+	}
+	if {[llength $stopped]} { _close_interrupted }
+	return $stopped
+}
+
+# Leave the conversation extendable after a turn was cut off mid-flight. A turn killed while
+# the provider was still working has recorded nothing — the assistant entry is written only
+# once the provider says `done` — so the last entry is the user's message, and the next
+# `send` would append a second user entry in a row, which the Messages API rejects. A short
+# assistant note restores the alternation and is honest about what happened; anything the
+# model had already streamed is lost with its coroutine, which is why the note says only
+# that it was stopped. A turn killed at the approval gate needs nothing here: its assistant
+# turn IS recorded, and _seal_dangling answers its dangling tool_use on the next send.
+proc rio::agent::_close_interrupted {} {
+	variable conversation
+	set last [lindex $conversation end]
+	if {![llength $last] || [dict get $last role] ne "user"} return
+	lappend conversation [dict create role assistant \
+		content [list [dict create type text text "(Stopped by the user.)"]]]
 }
 
 # The orchestration coroutine. Each pass invokes the provider, yields to collect
@@ -295,9 +363,8 @@ proc rio::agent::send {text emit} {
 proc rio::agent::_run {turn emit} {
 	variable conversation
 	variable provider
-	variable maxsteps
 	set co [info coroutine]
-	for {set step 0} {1} {incr step} {
+	while {1} {
 		# Recomputed EVERY step, not once per turn: approving a plan flips the mode
 		# mid-turn (D101), and the model has to see the tools it just earned on the very
 		# next call — otherwise it goes on planning with a stale list. The system prompt
@@ -356,14 +423,6 @@ proc rio::agent::_run {turn emit} {
 		if {$stop ne "tool_use" || ![llength $calls]} {
 			{*}$emit [dict create event agent.message \
 				params [dict create turn $turn role assistant text $acc]]
-			return
-		}
-
-		# Runaway guard before the next round-trip (cost + liveness).
-		if {$step + 1 >= $maxsteps} {
-			{*}$emit [dict create event agent.error \
-				params [dict create turn $turn code tool_limit \
-					message "Agent stopped after $maxsteps tool steps without finishing"]]
 			return
 		}
 

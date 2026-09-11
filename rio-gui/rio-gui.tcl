@@ -2828,6 +2828,16 @@ proc chat_event {ev} {
 			chat_label error-label "Error"
 			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
 		}
+		agent.stopped {
+			# The user stopped the turn (D104) — here or in another frontend attached to
+			# the same core. Not an error: it did what it was told, so it gets the muted
+			# tool styling rather than the red error label. Any review UI the turn had put
+			# up is asking about a decision nothing waits for now.
+			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
+			chat_busy_stop
+			approve_bar 0 ; compare_close ; plan_close
+			chat_log "· stopped\n" tool
+		}
 		agent.tool {
 			# A read-only tool the agent is running (D26 slice 4) — auto-executed, so
 			# this is transparency, not a prompt. Shown on its own line, mid-turn.
@@ -4381,6 +4391,7 @@ proc chat_busy_start {} {
 	set ::chat_busy_word [lindex $::chat_busy_words \
 		[expr {int(rand() * [llength $::chat_busy_words])}]]
 	chat_busy_render
+	chat_send_button
 	set ::chat_busy_after [after 400 chat_busy_tick]
 }
 # One animation frame: advance the dots every tick and the phrase every ~2.4 s, then
@@ -4401,12 +4412,43 @@ proc chat_busy_render {} {
 	set dots [string repeat "." [expr {$::chat_busy_frame % 3 + 1}]]
 	catch {.chat.status configure -text "$::chat_busy_word$dots"}
 }
-# Stop animating and hand the strip back to its idle "Provider · mode" text.
+# Stop animating and hand the strip back to its idle provider text.
 proc chat_busy_stop {} {
 	after cancel $::chat_busy_after
 	set ::chat_busy_after ""
 	set ::chat_busy 0
+	chat_send_button
 	chat_status_update
+}
+
+# The composer's button follows the turn (D104): ▶ Send while it is yours to type into,
+# ■ Stop while the agent is working. One button, because the two are never both available —
+# and because a turn now runs until it is finished or stopped, so Stop must never be more
+# than one click away. At the approval gate the animation stops and the button goes back to
+# Send: the turn is parked, waiting on the bar, and there is nothing running to stop.
+proc chat_send_button {} {
+	if {![winfo exists .chat.send]} return
+	if {$::chat_busy} {
+		.chat.send configure -text "■" -command chat_stop
+		tooltip .chat.send "Stop the agent"
+	} else {
+		.chat.send configure -text "▶" -command chat_send
+		tooltip .chat.send "Send this message"
+	}
+}
+
+# Stop the turn in flight. The core kills it and announces agent.stopped, which every
+# attached frontend adopts (D3/D30) — including this one, so the transcript line and the
+# indicator are written by the event, not here, and a stop from another window looks the
+# same as a stop from this one.
+proc chat_stop {} {
+	set r [rio_call agent.stop {}]
+	if {![dict get $r ok]} {
+		report_error [dict get $r error message] [dict get $r error code]
+		return
+	}
+	# Nothing was running: the click raced the turn's last event. Put the button back.
+	if {[dict get $r result stopped] == 0} { chat_busy_stop }
 }
 
 # The status strip names the live agent, and nothing else: the mode is stated once, by the
@@ -9516,6 +9558,9 @@ text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
 	-background white -foreground black -insertbackground black
 button .chat.send -text "▶" -font {monospace 9} -command chat_send  ;# ▶ send (D27)
+# …and ■ stop while a turn is working (D104): the same button, because "send" and "stop"
+# are never both available — the turn is either yours to type into or the agent's to run.
+tooltip .chat.send "Send this message"
 # Status strip at the pane's very bottom: live agent + edit mode (filled by
 # chat_status_update; room for context-window usage later).
 label .chat.status -anchor w -font {monospace 9} -padx 4 -pady 2 \

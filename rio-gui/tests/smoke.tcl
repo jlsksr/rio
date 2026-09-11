@@ -1295,6 +1295,28 @@ chat_busy_start ; chat_event {event agent.message params {turn 20 role assistant
 ok "busy: message ends it"            $::chat_busy 0
 chat_busy_start ; chat_event {event agent.error params {turn 21 code x message y}}
 ok "busy: error ends it"              $::chat_busy 0
+
+# Stop (D104). There is no step cap any more, so the button that ends a runaway turn is the
+# composer's own: ▶ while the turn is yours to type into, ■ while the agent is working.
+ok "stop: the idle button sends"      [list [.chat.send cget -text] [.chat.send cget -command]] {▶ chat_send}
+chat_busy_start
+ok "stop: a working turn offers Stop" [list [.chat.send cget -text] [.chat.send cget -command]] {■ chat_stop}
+ok "stop: and says so"                [string match "*Stop*" $::tt_text(.chat.send)] 1
+chat_busy_stop
+ok "stop: and back to Send"           [.chat.send cget -text] ▶
+# The core announces the stop; the transcript line and the indicator come from the EVENT,
+# so a stop from another frontend on the same core looks exactly like one from this window.
+chat_clear ; chat_busy_start
+chat_event {event agent.propose params {turn 23 id s1 name propose_edit path z.txt diff "+ a"}}
+set ::pending_turn 23 ; chat_busy_start
+chat_event {event agent.stopped params {turn 23}}
+ok "stop: the event ends the turn"    $::chat_busy 0
+ok "stop: the button is Send again"   [.chat.send cget -text] ▶
+ok "stop: the review UI goes with it" [expr {[lsearch [pack slaves .chat] .chat.approve] >= 0}] 0
+ok "stop: the transcript says so"     [expr {[string first "· stopped" [.chat.log get 1.0 end]] >= 0}] 1
+# Clicking Stop with nothing running is not an error — the click raced the last event.
+chat_clear ; chat_busy_start ; chat_stop
+ok "stop: a raced click just resets"  $::chat_busy 0
 # An approval waiting on the user pauses it; auto-accept keeps it running.
 chat_clear ; set ::agent_auto_accept 0 ; chat_busy_start
 chat_event {event agent.propose params {turn 22 id p1 name propose_edit path z.txt diff "+ a"}}

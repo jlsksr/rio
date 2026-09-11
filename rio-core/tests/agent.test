@@ -859,6 +859,124 @@ test agent-plan-read-plan-nowhere {read_plan is empty for an unfiled plan, and n
 		[rio::agent::tools::read_plan .rio/plans/never-written.md]
 } -cleanup { rio::project::close } -result {{} {}}
 
+# --- stopping a turn (D104) --------------------------------------------------
+# There is no step cap any more: a turn runs until the model is done, and the bound is the
+# user's Stop. So Stop has to actually work from every state a turn can be in, and has to
+# leave the conversation extendable — the next message must not meet a broken alternation.
+
+# A provider that starts working and never reports back: the state a long turn spends most
+# of its time in, and the one a step cap never helped with.
+proc hang_provider {conversation tools system post} { set ::hang_post $post }
+# A provider that keeps calling a read tool `::pp_steps` times before finishing — more
+# round-trips than the old cap of 8 allowed.
+proc counting_provider {conversation tools system post} {
+	incr ::pp_seen
+	if {$::pp_seen > $::pp_steps} {
+		{*}$post delta "done" ; {*}$post done end_turn
+	} else {
+		{*}$post tool t$::pp_seen fs_list [dict create path ""] {{"path":""}}
+		{*}$post done tool_use
+	}
+}
+# Do the conversation's roles strictly alternate? The thing Claude rejects a request over.
+proc roles_alternate {} {
+	set prev ""
+	foreach m $::rio::agent::conversation {
+		if {[dict get $m role] eq $prev} { return 0 }
+		set prev [dict get $m role]
+	}
+	return 1
+}
+
+test agent-stop-in-flight {a turn waiting on the provider stops, and announces it} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_provider hang_provider
+	set ::evs {}
+} -body {
+	set turn [dict get [rio::core::call_stream agent.send {text go} ev_until_stop] result turn]
+	set was [info exists ::rio::agent::live($turn)]
+	set call [rio::core::call agent.stop {}]
+	set evs {} ; foreach e [dict get $call events] { lappend evs [dict get $e event] }
+	list $was [dict get [dict get $call response] result stopped] $evs \
+		[info exists ::rio::agent::live($turn)] \
+		[llength [info commands ::rio::agent::_turn_$turn]]
+} -result {1 1 agent.stopped 0 0}
+
+test agent-stop-then-send {after a stop the conversation still alternates and takes a new turn} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_provider hang_provider
+	set ::evs {}
+} -body {
+	rio::core::call_stream agent.send {text first} ev_until_stop
+	rio::core::call agent.stop {}
+	set a [roles_alternate]
+	# The stopped turn left a note where the assistant's answer would have been, so the
+	# next user message is not a second user entry in a row.
+	set roles {} ; foreach m [rio::agent::history] { lappend roles [dict get $m role] }
+	rio::agent::set_provider [namespace which -command ::rio::agent::echo_provider]
+	set out [run_turn "second"]
+	list $a $roles [dict get $out fin] [roles_alternate]
+} -result {1 {user assistant} done 1}
+
+test agent-stop-at-the-gate {a turn parked at the approval gate can be stopped too} -setup {
+	set ::pdir [makeDirectory agstop]
+	rio::project::open $::pdir
+	set fh [open [file join $::pdir a.txt] w] ; puts -nonewline $fh "one\n" ; close $fh
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider write_provider
+	set ::wt_name propose_edit
+	set ::wt_input [dict create path a.txt old_string one new_string two]
+	set ::wt_raw {{"path":"a.txt"}}
+} -body {
+	set s1 [start_write turn]
+	set call [rio::core::call agent.stop {}]
+	set r [dict get [rio::core::call agent.approve [dict create turn $turn decision approve]] response]
+	# Stopped, forgotten, and the file never changed — a stopped proposal is not applied.
+	list $s1 [dict get [dict get $call response] result stopped] \
+		[dict get $r ok] [dict get $r error code] \
+		[dict get [rio::fs::read [file join $::pdir a.txt]] text]
+} -cleanup { rio::project::close } -result {propose 1 false bad_request {one
+}}
+
+test agent-stop-nothing-running {stopping when nothing is running is not an error} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	set call [rio::core::call agent.stop {}]
+	set r [dict get $call response]
+	list [dict get $r ok] [dict get $r result stopped] [llength [dict get $call events]]
+} -result {true 0 0}
+
+test agent-stop-prunes-dead {a registration whose turn has finished is pruned, not "stopped"} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	# The registry is bookkeeping, and bookkeeping can outlive what it describes. Stop asks
+	# the coroutine itself whether it is still there, so a raced or stale entry reports
+	# honestly instead of telling the user it stopped something it did not.
+	set ::rio::agent::live(9999) ::rio::agent::_turn_9999_gone
+	set r [dict get [rio::core::call agent.stop {}] response]
+	list [dict get $r ok] [dict get $r result stopped] \
+		[info exists ::rio::agent::live(9999)]
+} -result {true 0 0}
+
+test agent-no-step-cap {a turn runs as many tool steps as the model asks for} -setup {
+	set ::pdir [makeDirectory agsteps]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_provider counting_provider
+	set ::pp_steps 12 ; set ::pp_seen 0   ;# the old cap stopped the turn at 8
+	set ::evs {}
+} -body {
+	set ::stop {}
+	rio::core::call_stream agent.send {text go} ev_until_stop
+	set tm [after 5000 {set ::stop timeout}] ; vwait ::stop ; after cancel $tm
+	set errs {}
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.error"} { lappend errs [dict get $ev params code] }
+	}
+	list $::stop $::pp_seen $errs
+} -cleanup { rio::project::close } -result {done 13 {}}
+
 # --- allow-list: standing approval (D84) -------------------------------------
 # A command covered by an allow-list rule runs WITHOUT an agent.approve — the propose
 # event carries auto=1 and the turn completes on its own. The allow-list is pinned to a

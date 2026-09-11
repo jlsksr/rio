@@ -5352,10 +5352,73 @@ spec list now carries `present_plan`; the post-approval list carries it too), pl
 on, since that is edits-only (D83) — is approved without any `agent.mode` event, and gets the
 wording that does not claim plan mode ended.
 
-**Still open from the same test run,** and not fixed here: the turn's step budget
+**Still open from the same test run,** and fixed next, in D104: the turn's step budget
 (`maxsteps 8`) is shared by investigation, the plan call, and the whole implementation, since
 approval continues the same turn. jka's second test turn died at `tool_limit` on reads alone.
 The cap predates tools that propose, plan and build in one turn.
+
+---
+
+### D104 — No step cap; a Stop button instead
+
+The same live test killed a turn at `tool_limit` after eight steps of reading. `maxsteps 8`
+was sized for D26's read→think→read loop; since then a turn can propose edits, run commands,
+present a plan and — because approval continues the same turn (D101) — carry that plan out,
+all on the one budget. Investigation alone can spend it.
+
+I offered jka four sizes of a better number. **jka rejected the shape of the question: the
+VSCode Claude plugin is the bar, and it has no step cap — it runs until the work is done and
+gives you a Stop button.** That is the right answer, and it is why "pick a bigger number" was
+never going to be: a cap is the core guessing, in advance and in ignorance, how much work the
+user's request deserves. The person who knows is watching it happen.
+
+So the cap is gone, and `agent.stop` takes its place. Mechanically it is the abort the
+reset/seal paths already performed — cancel a running command, delete the turn's coroutine —
+and `_resume` already drops a post whose coroutine has gone, so a provider still mid-request
+simply finishes into the void. **It is not a refund:** a request on the wire is billed, and
+the doc says so rather than implying Stop saves tokens.
+
+**The registry the cap let us do without.** Stopping a turn means naming it, and the core only
+tracked turns parked at the approval gate or running a command — a turn waiting on the
+*provider*, which is where a long turn spends most of its life, was tracked nowhere. The new
+`live` array (turn → coroutine, registered in `send` before the coroutine runs, cleared by a
+`finally` in `_run_guarded`) closes that, and **fixes a pre-existing defect on the way**:
+`reset` and `_seal_dangling` could not reach an in-flight turn either, so clearing the
+conversation or sending a new message left it running — to wake later and stream into a
+conversation that had been cleared or replaced. Rare when turns were capped at eight steps;
+not rare now. All three paths share `_abort` / `_abort_all`, because "forget this turn" means
+the same thing in each. `_abort` asks the coroutine whether it still exists, so a stale or
+raced registration is pruned rather than reported as a stop that did not happen.
+
+**Keeping the conversation extendable.** A turn killed mid-provider has recorded nothing —
+the assistant entry is written only once the provider says `done` — so the last entry is the
+user's message, and the next `send` would append a second user entry in a row, which the
+Messages API rejects. `_close_interrupted` appends a short assistant note (*"Stopped by the
+user."*). A turn killed at the gate needs none: its assistant turn is recorded, and
+`_seal_dangling` answers the dangling `tool_use` on the next send, as before. What the model
+had already streamed is lost with its coroutine — the user saw it, the transcript keeps it,
+the conversation does not. Stated, not hidden.
+
+**One button, because the two are never both available.** `.chat.send` is `▶ Send` while the
+turn is yours to type into and `■ Stop` while the agent works, driven by D82's existing
+`chat_busy_start`/`chat_busy_stop` — which means it correctly goes back to Send at the
+approval gate, where the turn is parked and there is nothing running to stop. The stop is
+announced as `agent.stopped`, and the transcript line and the indicator are written by the
+**event**, not by the click, so a stop from a second frontend on the same core looks exactly
+like a stop from this one (D3/D30).
+
+**Guards** (core 563 → 569, smoke +8): a turn waiting on the provider stops and announces it;
+the conversation still alternates afterwards and takes a new turn; a turn parked at the gate
+stops, is forgotten, and its proposed edit is never applied; stopping nothing is not an error;
+a stale registration is pruned rather than counted; and a turn now runs twelve tool steps
+where the old cap allowed eight. In the GUI: the button is Send when idle and Stop when
+working, an `agent.stopped` event takes down the indicator *and* the review UI, and a raced
+click just resets. Four injections, each failing by name: the cap put back, the interruption
+note removed, dead registrations counted as stops, and the button never becoming Stop.
+
+**The token risk is real and accepted:** with no ceiling, a model that loops forever burns
+money until someone presses Stop. jka was offered a high safety ceiling and chose the
+uncapped version. Worth revisiting if a provider ever loops unattended.
 
 ---
 

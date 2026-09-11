@@ -54,8 +54,8 @@ that machine isn't yours. rio says so plainly when you connect. See
 
 ## A turn, step by step
 
-You type a request. The agent streams its reply into the pane, and along the way
-it may do three kinds of thing:
+You type a request and press **▶** (or `Enter`). The agent streams its reply into
+the pane, and along the way it may do three kinds of thing:
 
 1. **Read** — "listing `src/`", "reading `parser.tcl`". These happen immediately
    and are shown as they go.
@@ -69,6 +69,13 @@ it may do three kinds of thing:
    command** before anything happens, and approve or reject it. Approved commands
    run confined to your project and are time-boxed, so a runaway process cannot sit
    there forever.
+
+A turn runs until the agent is finished — there is no step limit, because a job
+worth doing takes the steps it takes. While it works, the **▶** button becomes
+**■ Stop**: press it and the turn ends where it stands. Nothing half-applied is
+left behind, since every change had to pass the gate first; the request already
+sent to the provider is still paid for, so stop it because you changed your mind,
+not to save a fraction of a cent.
 
 ## Planning before building
 

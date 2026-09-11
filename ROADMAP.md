@@ -312,10 +312,13 @@ for later:
   every mode, so "plan this first" works without setting the mode; plan mode remains the
   stronger guarantee (it withholds every changing tool). Found by the first live test, where
   asking for a plan in Review produced a text file instead.
-- **The turn's step budget** — *planned.* `maxsteps` is a hard-coded 8 covering a whole turn,
-  and plan approval continues the same turn — so investigation, the plan, and the entire
-  implementation share eight steps. A live test turn died at `tool_limit` on reads alone. Needs
-  a bigger budget, a boundary at plan approval, or a stop-and-continue model rather than a cap.
+- **No step cap; Stop instead** — *landed* (AGENTS.md D104). A turn runs until the model is
+  done; the composer's **▶** becomes **■ Stop** while it works, and `agent.stop` kills the turn
+  wherever it is — waiting on the provider, parked at the gate, or running a command — leaving
+  the conversation extendable. Replaces the hard-coded `maxsteps 8` that a live test turn died
+  on. Also reaches a turn that `agent.reset` and a new message previously could not.
+  Still wanted: a **safety ceiling** for an unattended runaway (deliberately not added — jka
+  chose the uncapped version), and **streaming a command's output** as it runs.
 
 ## Frontends
 

@@ -43,6 +43,22 @@ proc rio::ops::agent_proposal {params} {
 }
 rio::dispatch::register agent.proposal rio::ops::agent_proposal
 
+# agent.stop {?turn?} -> {stopped N} ; stop a turn in flight (D104). Omit `turn` to stop
+# whatever is running — which is what a frontend's Stop button means. Each stopped turn is
+# announced as an `agent.stopped` event so EVERY attached frontend takes its working
+# indicator down, not just the one that clicked (D3/D30). Stopping nothing is not an error:
+# the click may have raced the turn's last event.
+proc rio::ops::agent_stop {params} {
+	set turn [expr {[dict exists $params turn] ? [dict get $params turn] : ""}]
+	set stopped [rio::agent::stop $turn]
+	set evs {}
+	foreach t $stopped {
+		lappend evs [dict create event agent.stopped params [dict create turn $t]]
+	}
+	return [dict create result [dict create stopped [llength $stopped]] events $evs]
+}
+rio::dispatch::register agent.stop rio::ops::agent_stop
+
 # agent.reset -> {} ; clears the conversation.
 proc rio::ops::agent_reset {params} {
 	rio::agent::reset
