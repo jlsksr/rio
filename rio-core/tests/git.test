@@ -68,6 +68,44 @@ test git-diff-staged {diff --cached shows the staged add} -constraints hasgit -b
 	string match {*c.txt*} [rio::git::diff $::repo "" 1]
 } -result 1
 
+# A rename's diff must say "rename", not "new file". Asked for by the new name alone, git
+# cannot see the source inside the pathspec and prints the whole file as an addition — so
+# the diff described the change as the one thing it is not (the D97 lesson, one op over).
+test git-diff-rename {a staged rename diffs as a rename, not a whole-file add} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	git_in $d mv a.txt r.txt        ;# ONE change, two names -> "R "
+	set out [rio::git::diff $d r.txt 1]
+	list [string match {*rename from a.txt*} $out] [string match {*rename to r.txt*} $out] \
+		[string match {*new file*} $out]
+} -cleanup {file delete -force $d} -result {1 1 0}
+
+test git-diff-rename-edited {a rename carrying edits shows the rename AND the edit} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	# Its own committed file, several lines long: git calls a move a rename only while the
+	# two sides stay similar enough (50% by default), and makerepo's one-line a.txt drops
+	# under that threshold the moment an edit rides along.
+	writefile [file join $d big.txt] "1\n2\n3\n4\n5\n6\n7\n8\n"
+	git_in $d add big.txt ; git_in $d commit -q -m big
+	git_in $d mv big.txt r.txt
+	writefile [file join $d r.txt] "1\n2\n3\n4\n5\n6\n7\n8\nnine\n"
+	git_in $d add r.txt             ;# edits staged too, still one "R " entry
+	set out [rio::git::diff $d r.txt 1]
+	list [string match {*rename from big.txt*} $out] [string match {*+nine*} $out]
+} -cleanup {file delete -force $d} -result {1 1}
+
+# The other half of an `RM`. The index and the worktree hold the file under the SAME name,
+# so this diff is an ordinary edit and must read as one — no rename framing, and the edit
+# still visible. (It does not prove the widening is skipped here: handing git the old name
+# too changes nothing when that name is in neither side. The reason to skip it is the status
+# call it would cost on every ordinary row click.)
+test git-diff-rename-worktree {the unstaged half of an RM is a plain edit diff} \
+		-constraints hasgit -setup {set d [makerepo]} -body {
+	git_in $d mv a.txt r.txt
+	writefile [file join $d r.txt] "one\nlater\n"    ;# edit AFTER the mv -> "RM"
+	set out [rio::git::diff $d r.txt 0]
+	list [string match {*+later*} $out] [string match {*rename*} $out]
+} -cleanup {file delete -force $d} -result {1 0}
+
 test git-status-not-a-repo {status on a non-repo dir is a bad_request} -constraints hasgit -setup {
 	set ::bare [file join [::tcltest::temporaryDirectory] riogit-bare-[clock clicks]]
 	file mkdir $::bare

@@ -43,6 +43,12 @@ clean shows the staged diff (`--cached`); anything else shows the working-tree
 diff — in both cases, the change the row's status is actually describing. An
 untracked file has no diff to show and says so.
 
+A **rename** — from `git mv`, or from moving a tracked file any other way — is one
+change with two names, and git stages it as `R`. The pane's row can only show the
+new name, so the diff is where you see the whole of it: it names the file the
+change came from (`rename from old.txt`), and shows the edits too if the move
+carried any.
+
 The same status flags appear in the **file tree**, one character in front of each
 row, so you can see which files changed without switching panes. A folder carries
 a `·` when something beneath it has changed.

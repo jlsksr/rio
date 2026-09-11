@@ -4923,6 +4923,26 @@ the sentence is worth.
 Core 539 (+4: a clean rename, a rename carrying edits, both names reported for `fs.changed`, and
 a copy left alone); smoke +2 on the menu. ROADMAP's git entry loses its last "still wanted".
 
+**Refinement — the diff had the same narrow pathspec.** D97 widened `discard`'s lookup and stopped
+there, so clicking a rename row still showed `git diff --cached -- new.txt`, which reports
+**`new file mode`** and re-prints the entire file as added. The row said `R`, the diff below it
+said "brand-new file", and the confirm named an old name the user had seen nowhere. Same cause,
+one op over: rename detection needs both ends *inside the pathspec*, and with only the new name
+there git cannot see where the file came from, so it describes the change as the one thing it is
+not. `rio::git::diff` now asks `_entry` (the status lookup `discard` already used, lifted to a
+shared proc) and hands git **both names** for an `R`.
+
+**Only the staged side.** An unstaged diff compares the index with the worktree, which hold the
+file under the same name — `RM`'s worktree half was always right — so widening there would buy
+nothing and cost a `status` on every ordinary row click. A rename is always staged, so the test
+is free: `if {$staged}`.
+
+Core 542 (+3: a clean rename diffs as a rename and not an add, a rename carrying edits shows
+both, and the unstaged half stays a plain edit). The fix is core-side rather than plumbing the
+original name through `git.diff` from the GUI payload that already has it: the core is the
+authority on what a change *is*, and a second frontend must not have to know this to get a
+truthful answer.
+
 ---
 
 ### D98 — A file inside an untracked folder gets its own door

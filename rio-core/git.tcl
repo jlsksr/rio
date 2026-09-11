@@ -104,10 +104,7 @@ proc rio::git::unstage {cwd path} {
 # detection needs BOTH ends of the rename in the same diff, so narrowing the pathspec to the
 # new name alone makes git report a plain `A` and the rename would be invisible here.
 proc rio::git::discard {cwd path} {
-	set entry ""
-	foreach c [dict get [status $cwd] changes] {
-		if {[dict get $c path] eq $path} { set entry $c ; break }
-	}
+	set entry [_entry $cwd $path]
 	if {$entry eq ""} {
 		rio::error::raise bad_request "nothing to discard for $path"
 	}
@@ -134,6 +131,17 @@ proc rio::git::discard {cwd path} {
 	}
 	_run $cwd restore --staged --worktree -- $path
 	return [dict create action revert paths [list $path]]
+}
+
+# The status entry for PATH, or "" when git reports no change under that name. Every caller
+# that needs to know WHAT a path's change is shares this, and they all need the wide lookup
+# described above: `status -- <path>` cannot see a rename, so the one question worth asking
+# has to be asked of the whole status.
+proc rio::git::_entry {cwd path} {
+	foreach c [dict get [status $cwd] changes] {
+		if {[dict get $c path] eq $path} { return $c }
+	}
+	return ""
 }
 
 # Has this repo a commit yet? A non-zero exit is the ANSWER here ("unborn HEAD"), not a
@@ -193,10 +201,26 @@ proc rio::git::commit {cwd msg} {
 
 # git.diff: the unified diff text. `staged` selects the index (--cached); `path`
 # limits it to one file. Returned raw for the caller to render.
+#
+# A RENAME has to be asked for by BOTH of its names, for the same reason discard's lookup is
+# wide (D97): rename detection needs both ends inside the pathspec, so `diff --cached -- new`
+# makes git report a whole-file ADDITION — it cannot see where the file came from, so it
+# describes the change as the one thing it is not. Only the staged side needs this: an
+# unstaged diff compares the index and the worktree, which hold the file under the same name,
+# so `RM`'s worktree half is already right. That also keeps the extra status off every
+# ordinary row click.
 proc rio::git::diff {cwd path staged} {
 	set args diff
 	if {$staged} { lappend args --cached }
-	if {$path ne ""} { lappend args -- $path }
+	if {$path ne ""} {
+		lappend args -- $path
+		if {$staged} {
+			set entry [_entry $cwd $path]
+			if {$entry ne "" && [dict get $entry x] eq "R"} {
+				lappend args [dict get $entry orig]
+			}
+		}
+	}
 	return [_run $cwd {*}$args]
 }
 
