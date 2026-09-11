@@ -408,7 +408,9 @@ involved.
   [AGENTS.md](AGENTS.md); if it changes what a *user* does or sees, update the
   matching topic in [docs/](docs/index.md) — the user manual — in the same commit,
   so the feature and its page never drift apart. The README stays the overview: a
-  one-line entry there, the how-to in `docs/`.
+  one-line entry there, the how-to in `docs/`. The manual has rules of its own —
+  what each page owes the reader, what the test suite enforces, and the facts about
+  rio that documentation routinely gets wrong — collected in [DOCS.md](DOCS.md).
 - **A doc that restates the code needs a guard.** If your change makes a page repeat
   something the code decides — a list of keys, of paths, of commands — add a check to
   `rio-gui/tests/docs.tcl` and a row to AGENTS.md §7's *derived-facts register*. Every
