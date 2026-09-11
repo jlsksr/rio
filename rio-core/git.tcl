@@ -88,29 +88,52 @@ proc rio::git::unstage {cwd path} {
 # on the path's own porcelain staged char X:
 #   ?  (untracked)       -> remove the new file:   `git clean -fd -- <path>`
 #   A  (staged addition) -> unstage, then remove:  `git reset` then `git clean -fd`
+#   C  (staged copy)     -> the same: a copy IS a new file, and its source is untouched by
+#                           the copy, so there is nothing to put back there
+#   R  (staged rename)   -> put the file back under its OLD name (D97), see below
 #   else (tracked M/D/…) -> revert to the last commit, dropping BOTH the staged and the
 #                           worktree change:  `git restore --staged --worktree -- <path>`
 # The restore branch only runs for a file with a committed baseline, so HEAD always
 # exists there — the unborn-HEAD case (no commits) is only ?/A, handled above — so unlike
-# unstage this can safely use `restore`. Returns "remove" or "revert" (what it did), for
-# the frontend's confirmation wording. A path with no changes is a bad_request.
+# unstage this can safely use `restore`. Returns {action revert|remove, paths {...}}:
+# `action` words the frontend's confirmation, `paths` is every file the call rewrote, which
+# the op turns into fs.changed events (D94) — two of them for a rename. A path with no
+# changes is a bad_request.
+#
+# The status lookup goes through the full `status` rather than `status -- <path>`: rename
+# detection needs BOTH ends of the rename in the same diff, so narrowing the pathspec to the
+# new name alone makes git report a plain `A` and the rename would be invisible here.
 proc rio::git::discard {cwd path} {
-	set out [_run $cwd status --porcelain=v1 -z -- $path]
-	set rec [lindex [split $out \0] 0]
-	if {$rec eq ""} {
+	set entry ""
+	foreach c [dict get [status $cwd] changes] {
+		if {[dict get $c path] eq $path} { set entry $c ; break }
+	}
+	if {$entry eq ""} {
 		rio::error::raise bad_request "nothing to discard for $path"
 	}
-	set x [string index $rec 0]
+	set x [dict get $entry x]
 	if {$x eq "?"} {
 		_run $cwd clean -fd -- $path
-		return remove
-	} elseif {$x eq "A"} {
+		return [dict create action remove paths [list $path]]
+	} elseif {$x eq "A" || $x eq "C"} {
 		_run $cwd reset -q -- $path
 		_run $cwd clean -fd -- $path
-		return remove
+		return [dict create action remove paths [list $path]]
+	} elseif {$x eq "R"} {
+		# A rename is one change with two names, so undoing it takes both: empty the index
+		# of each (back to HEAD — the old name returns to it, the new name leaves it), write
+		# the old name back to disk from that index, and clean away the new name, which the
+		# unstage has just turned into an ordinary untracked file. `restore --worktree` on
+		# the new name would be wrong (it is not in HEAD, so there is nothing to write) and
+		# leaving it would turn a rename into a copy.
+		set orig [dict get $entry orig]
+		_run $cwd restore --staged -- $path $orig
+		_run $cwd restore --worktree -- $orig
+		_run $cwd clean -fd -- $path
+		return [dict create action revert paths [list $path $orig]]
 	}
 	_run $cwd restore --staged --worktree -- $path
-	return revert
+	return [dict create action revert paths [list $path]]
 }
 
 # Has this repo a commit yet? A non-zero exit is the ANSWER here ("unborn HEAD"), not a

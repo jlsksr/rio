@@ -1921,6 +1921,12 @@ proc git_menu_build {m payload} {
 	$m add separator
 	if {$x eq "?" || $x eq "A"} {
 		$m add command -label "Delete…"          -command [list git_discard_confirm $path 1]
+	} elseif {$x eq "R"} {
+		# A rename discards back to the OLD name (D97), which is a different promise from
+		# "reverts its contents" — so hand the confirm the name it will reappear under.
+		# Only this door can: porcelain carries the original path, the file tree doesn't.
+		$m add command -label "Discard Changes…" \
+			-command [list git_discard_confirm $path 0 [dict get $payload orig]]
 	} else {
 		$m add command -label "Discard Changes…" -command [list git_discard_confirm $path 0]
 	}
@@ -1940,12 +1946,16 @@ proc do_git {op path} {
 
 # Confirm, then discard a change row's local changes (git.discard, D80). `isnew` picks the
 # wording — a new file is DELETED (nothing committed to fall back to); a tracked file
-# REVERTS to the last commit. Both are irreversible, so the default button is No (mirrors
-# the file Delete confirm, D48). On success the pane repaints and the header flashes the
-# outcome.
-proc git_discard_confirm {path isnew} {
+# REVERTS to the last commit. `orig` is a rename's original path (D97), where reverting
+# also moves the file back under that name — say so, because the file vanishing from the
+# tree under the name you right-clicked would otherwise read as a deletion. Both are
+# irreversible, so the default button is No (mirrors the file Delete confirm, D48). On
+# success the pane repaints and the header flashes the outcome.
+proc git_discard_confirm {path isnew {orig ""}} {
 	if {$isnew} {
 		set q "Delete “$path”?\n\nThis is a new file, not in the last commit — deleting it can't be undone."
+	} elseif {$orig ne ""} {
+		set q "Discard the rename of “$orig”?\n\nIt will go back to its old name and its last committed contents. This can't be undone."
 	} else {
 		set q "Discard changes to “$path”?\n\nIt will return to the last committed version. This can't be undone."
 	}
@@ -1958,7 +1968,13 @@ proc git_discard_confirm {path isnew} {
 		return
 	}
 	refresh_dock
-	git_flash [expr {[dict get $resp result action] eq "remove" ? "✓ deleted" : "✓ discarded changes"}]
+	if {[dict get $resp result action] eq "remove"} {
+		git_flash "✓ deleted"
+	} elseif {$orig ne ""} {
+		git_flash "✓ rename undone"
+	} else {
+		git_flash "✓ discarded changes"
+	}
 }
 
 # Show or hide the header's ↩ button — "discard all" (D93) — and stash the change count the

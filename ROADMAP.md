@@ -234,7 +234,7 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93). Stage / unstage /
+- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93, D97). Stage / unstage /
   track landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
   driven from an auto-showing commit bar in the git pane — rio's first inline pane
   text-input — now with an optional **multi-line description body** behind a `＋` toggle
@@ -244,9 +244,10 @@ for later:
   since D93, on the file-tree row menu** (tracked rows there; a new file is what the tree's own
   *Delete…* already removes). **Discard all** landed with it as `git.discard_all`, a single core
   op — `reset --hard` + `clean -fd -- :/`, ignored files untouched — behind a `↩` button that
-  rides the git pane header only while the repo has changes. Still wanted: **rename-aware
-  discard** — a rename (`R`) carries its original path in porcelain, so discarding one should put
-  the file back under its old name; today it goes through the plain tracked-change branch.
+  rides the git pane header only while the repo has changes. **Rename-aware discard** landed as
+  **D97**: a rename is one change with two names, so discarding one now restores the original name
+  and removes the new one (a copy `C` keeps the addition treatment — its source was never touched),
+  and the op emits `fs.changed` for both names. Nothing outstanding in this entry.
 
 ## Agent
 

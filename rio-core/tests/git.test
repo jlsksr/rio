@@ -235,33 +235,78 @@ test git-op-commit {git.commit op commits through the core and returns the hash}
 # --- write layer: discard (D80) ---------------------------------------------
 # Discard throws away a path's local changes: a tracked file reverts to its last commit
 # (both staged and worktree edits dropped); a new file (untracked or staged-add) is
-# removed. Same makerepo states (a.txt " M", c.txt "A ", b.txt "??"); a.txt's committed
-# baseline is "one\n".
+# removed; a rename goes back to its old name (D97). Same makerepo states (a.txt " M",
+# c.txt "A ", b.txt "??"); a.txt's committed baseline is "one\n". The proc returns
+# {action ..., paths ...} — `paths` is what the op turns into fs.changed (D94).
 proc slurp {path} { set fh [open $path] ; set c [read $fh] ; close $fh ; return $c }
+proc discard_action {dir path} { dict get [rio::git::discard $dir $path] action }
 
 test git-discard-modified {discard reverts a modified tracked file to HEAD (returns revert)} \
 		-constraints hasgit -setup {set d [makerepo]} -body {
-	set act [rio::git::discard $d a.txt]
+	set act [discard_action $d a.txt]
 	list $act [string trim [slurp [file join $d a.txt]]] [xy_of $d a.txt]
 } -cleanup {file delete -force $d} -result {revert one {}}
 
 test git-discard-staged-modification {discard reverts AND unstages a staged modification} \
 		-constraints hasgit -setup {set d [makerepo] ; rio::git::add $d a.txt} -body {
-	set act [rio::git::discard $d a.txt]
+	set act [discard_action $d a.txt]
 	list $act [string trim [slurp [file join $d a.txt]]] [xy_of $d a.txt]
 } -cleanup {file delete -force $d} -result {revert one {}}
 
 test git-discard-untracked {discard removes an untracked new file (returns remove)} \
 		-constraints hasgit -setup {set d [makerepo]} -body {
-	set act [rio::git::discard $d b.txt]
+	set act [discard_action $d b.txt]
 	list $act [file exists [file join $d b.txt]] [xy_of $d b.txt]
 } -cleanup {file delete -force $d} -result {remove 0 {}}
 
 test git-discard-staged-add {discard removes a staged-add file (returns remove)} \
 		-constraints hasgit -setup {set d [makerepo]} -body {
-	set act [rio::git::discard $d c.txt]
+	set act [discard_action $d c.txt]
 	list $act [file exists [file join $d c.txt]] [xy_of $d c.txt]
 } -cleanup {file delete -force $d} -result {remove 0 {}}
+
+# Rename-aware discard (D97). `git mv a.txt r.txt` is ONE change with two names, so undoing
+# it has to put a.txt back — with its committed content — and take r.txt away. Before D97
+# the plain tracked branch ran and left r.txt behind as an untracked file: the rename was
+# unstaged, not undone.
+test git-discard-rename {discard undoes a rename — the file returns under its old name} \
+		-constraints hasgit -setup {
+	set d [makerepo]
+	writefile [file join $d a.txt] "one\n"      ;# back to the committed content: a CLEAN "R "
+	git_in $d mv a.txt r.txt
+} -body {
+	set r [rio::git::discard $d r.txt]
+	list [dict get $r action] [file exists [file join $d r.txt]] \
+		[string trim [slurp [file join $d a.txt]]] [xy_of $d a.txt] [xy_of $d r.txt]
+} -cleanup {file delete -force $d} -result {revert 0 one {} {}}
+
+test git-discard-rename-paths {a discarded rename reports BOTH names, so both get fs.changed} \
+		-constraints hasgit -setup {set d [makerepo] ; git_in $d mv a.txt r.txt} -body {
+	lsort [dict get [rio::git::discard $d r.txt] paths]
+} -cleanup {file delete -force $d} -result {a.txt r.txt}
+
+test git-discard-rename-edited {a rename WITH edits discards the edits too, under the old name} \
+		-constraints hasgit -setup {
+	set d [makerepo]
+	git_in $d mv a.txt r.txt
+	writefile [file join $d r.txt] "one\nedited\n"
+} -body {
+	list [discard_action $d r.txt] [file exists [file join $d r.txt]] \
+		[string trim [slurp [file join $d a.txt]]]
+} -cleanup {file delete -force $d} -result {revert 0 one}
+
+# A COPY is not a rename: the new file is an addition and the source was never touched, so
+# discarding it removes the copy and must leave the source exactly as it was.
+test git-discard-copy {discard removes a staged copy and leaves its source alone} \
+		-constraints hasgit -setup {
+	set d [makerepo]
+	git_in $d config status.renames copies
+	file copy [file join $d a.txt] [file join $d cp.txt]
+	git_in $d add cp.txt
+} -body {
+	set act [discard_action $d cp.txt]
+	list $act [file exists [file join $d cp.txt]] [file exists [file join $d a.txt]]
+} -cleanup {file delete -force $d} -result {remove 0 1}
 
 test git-discard-nothing {discard on a path with no changes is a bad_request} \
 		-constraints hasgit -setup {

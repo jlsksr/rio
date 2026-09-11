@@ -4876,6 +4876,54 @@ that is the shape to restore, not to re-derive.
 
 ---
 
+### D97 — Discarding a rename puts the file back under its old name
+
+D80's discard, and D93 after it, left one honest hole and named it in ROADMAP: *rename-aware
+discard*. A rename is the one change git records as **one entry with two names** — porcelain
+prints `R` with the original path alongside the new one — and discard handled it as if it had
+only the new one. `git restore --staged --worktree -- new.txt` on a file that is not in HEAD
+under that name does the only thing it can: it drops the index entry and leaves the file sitting
+there untracked. The old name stays deleted. **The rename was unstaged, not undone** — and the
+git pane then showed a `D old.txt` / `?? new.txt` pair where the user had asked for their change
+to go away.
+
+**The fix is that both names are the change.** `rio::git::discard` now branches on `R`:
+unstage *both* paths (`restore --staged -- new old` — the index goes back to HEAD, so the old
+name returns to it and the new one leaves), write the old name back from that index
+(`restore --worktree -- old`), then `clean -fd -- new`, which is now removing an ordinary
+untracked file. Not `restore --worktree` on the new name: it is not in HEAD, so there is nothing
+to write — and leaving the file would turn a rename into a copy.
+
+**A copy (`C`) is not a rename**, and takes the *addition* branch instead: the new file is
+removed and the source is untouched, because a copy never touched the source. One character
+apart in porcelain, opposite treatment of the second path.
+
+**The lookup had to widen to see any of this.** The old code asked
+`git status --porcelain -z -- <path>`, and rename detection needs **both ends of the rename in
+the same diff** — narrow the pathspec to the new name and git honestly reports a plain `A`,
+because from inside that pathspec that is all it can see. So discard now reads the full
+`status` and finds its entry. That is the *reason* the gap existed: the bug was not in the
+branch that was missing, it was in the question being asked.
+
+**The return shape follows discard_all.** `rio::git::discard` returns
+`{action revert|remove, paths {...}}` instead of a bare action string, because the op must emit
+**two** `fs.changed` events for a rename (D94) and only the git layer knows the second name. The
+GUI's `action` wording is unchanged.
+
+**The confirm had to stop under-promising.** "It will return to the last committed version" is
+true of a rename but hides the part the user will actually see: the file disappears from the
+tree under the name they right-clicked. The git pane — the only door whose payload carries the
+original path — now asks *"Discard the rename of "old.txt"? It will go back to its old name and
+its last committed contents"*, and flashes **✓ rename undone**. The file-tree door (D93) keeps
+the generic wording: `::nav_git` stashes each row's XY, not porcelain's second path, and
+plumbing the original name through the tree's stash to sharpen one dialog is more mechanism than
+the sentence is worth.
+
+Core 539 (+4: a clean rename, a rename carrying edits, both names reported for `fs.changed`, and
+a copy left alone); smoke +2 on the menu. ROADMAP's git entry loses its last "still wanted".
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

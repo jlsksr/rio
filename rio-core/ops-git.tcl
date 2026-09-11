@@ -56,15 +56,16 @@ rio::dispatch::register git.commit rio::ops::git_commit
 
 # git.discard {path, ?cwd?} -> {action revert|remove} ; discard a path's local changes
 # (D80). A tracked file reverts to its last committed version (staged AND worktree changes
-# dropped); a new file (untracked, or a staged addition) is removed. The GUI gates this
-# behind a confirm and words its outcome from `action`. Emits fs.changed for the path,
-# whether it was reverted or removed — both are disk writes rio itself caused (D94).
+# dropped); a new file (untracked, or a staged addition) is removed; a rename goes back to
+# its old name (D97). The GUI gates this behind a confirm and words its outcome from
+# `action`. Emits fs.changed for every path the discard rewrote — TWO for a rename, both
+# names — since these are disk writes rio itself caused (D94).
 proc rio::ops::git_discard {params} {
 	set cwd  [_git_cwd $params]
 	set path [dict get $params path]
-	set action [rio::git::discard $cwd $path]
-	return [dict create result [dict create action $action] \
-		events [_git_changed_evs $cwd [list $path]]]
+	set r [rio::git::discard $cwd $path]
+	return [dict create result [dict create action [dict get $r action]] \
+		events [_git_changed_evs $cwd [dict get $r paths]]]
 }
 rio::dispatch::register git.discard rio::ops::git_discard
 

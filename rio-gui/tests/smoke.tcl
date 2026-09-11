@@ -790,6 +790,13 @@ if {![catch {exec git --version}]} {
 	.tm delete 0 end ; git_menu_build .tm [dict create x ? y ? path b.txt]
 	ok "menu: git untracked offers Delete" [menu_labels .tm] \
 		{Open {Copy Path} --- Stage --- Delete…}
+	# A rename row still offers Discard, but hands the confirm the ORIGINAL name (D97) —
+	# this door is the only one that has it, and the wording promises the old name back.
+	.tm delete 0 end ; git_menu_build .tm [dict create x R y { } path r.txt orig a.txt]
+	ok "menu: git rename offers Discard" [menu_labels .tm] \
+		{Open {Copy Path} --- Unstage --- {Discard Changes…}}
+	ok "menu: git rename passes the original name" \
+		[.tm entrycget [expr {[.tm index end]}] -command] {git_discard_confirm r.txt 0 a.txt}
 	# In the TREE a staged addition offers no discard: discarding a never-committed file
 	# removes it, which the fs "Delete…" three entries up already does (D93). ::nav_git is
 	# the builder's only input, so drive it directly rather than restage the fixture.
