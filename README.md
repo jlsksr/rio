@@ -64,7 +64,7 @@ in [docs/](docs/index.md).
   group or move one across to the other group** (or use the View menu, `Ctrl+]`, or a
   tab's right-click menu). Drag the divider to resize; closing a group's last tab
   unsplits. When a window is too narrow to show every tab, **◂ ▸ arrows** page through
-  them, **View ▸ *Switch to Tab…*** lists them all by name in a picker (with a path hint, so same‑named files are easy to tell apart), and **View ▸ *Multi‑Line Tabs***
+  them, **View ▸ *Switch to Tab…*** lists them all by name in a picker (with a path hint, so same‑named files are easy to tell apart), and **View ▸ *Multi-Line Tabs***
   wraps them onto several rows instead.
 - **Files & git** — open a project folder and browse it in a side pane as an **unfoldable
   tree** — click a folder's arrow (or double-click its name) to unfold it in place and see the
@@ -77,8 +77,9 @@ in [docs/](docs/index.md).
   commit left it, **name included** (discard a rename and the file returns under its old
   name), from either pane's row menu, or the whole project at once via the **↩**
   button that appears in the git header while anything is changed (both confirm first, and
-  neither touches files git ignores). The file pane keeps itself current — it updates on the
-  agent's own writes, when rio regains focus, and on a manual refresh (⟳). Files
+  neither touches files git ignores). The file pane keeps itself current — it updates whenever
+  rio itself writes to disk (an agent edit, a discard, a project-wide replace), when rio
+  regains focus, and on a manual refresh (⟳). Files
   and git share one dockable, resizable side panel. **Drag a file (or folder) from your OS
   file manager onto the window to open it** — a convenience that needs the optional `tkdnd`
   extension and a local core (see [INSTALL.md](INSTALL.md)); without it every other way to
@@ -102,7 +103,7 @@ in [docs/](docs/index.md).
   build): it proposes the exact command, you see it and **Approve or Reject**, then
   it runs, confined to your project and time-boxed. A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. Reads run freely;
-  every write waits for you (or opt into *Settings ▸ Auto-accept edits*) — and **every
+  every write waits for you (or opt into *Settings ▸ Agent: Auto-accept edits*) — and **every
   command always waits for you**, unless you mark it **trusted**: an **Always allow**
   button on the command remembers it (the program, or that exact command) so it stops
   asking — for **all projects**, **this project only**, or **only while a chosen
@@ -122,7 +123,7 @@ in [docs/](docs/index.md).
   in yourself — the list is whatever the core can load. Themes are plain
   data files, never executed.
 - **Editor font & zoom** — pick the document-view font family and size in *View ▸
-  Font…*, or zoom on the fly with **Ctrl+scroll** and **Ctrl++**/**Ctrl+-**
+  Font & Zoom ▸ Font…*, or zoom on the fly with **Ctrl+scroll** and **Ctrl++**/**Ctrl+-**
   (**Ctrl+0** resets). Your choice persists and overrides the theme's default.
 - **Editing modes** — the text area edits like **Windows** (Notepad/VSCode:
   Ctrl+A selects all, Ctrl+V pastes) — the mode the core ships with. Two more

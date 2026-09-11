@@ -22,7 +22,7 @@ jump to the topic you need.
 
 - [Find & replace](find-and-replace.md) — the find bar, the Search panel, and
   the scopes each one covers.
-- [Git](git.md) — the git pane: status, diffs, staging, committing.
+- [Git](git.md) — the git pane: status, diffs, staging, committing, discarding.
 - [The agent](agent.md) — providers and keys, what the agent may do on its own,
   and what waits for your approval.
 

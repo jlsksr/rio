@@ -32,7 +32,8 @@
 Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
 preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
-tree, a git read pane, a side-by-side compare view, live theming, and a working
+tree, a git pane that both reads and **writes** (stage, unstage, commit, discard —
+D44/D45/D80/D93/D97), a side-by-side compare view, live theming, and a working
 **agent** (read + propose-edit + gated run-command with an opt-in trusted-command
 allow-list, Claude over the official
 Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
@@ -5451,7 +5452,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
-| the menu cascades | menu paths quoted throughout `docs/` | **none** |
+| the menubar widgets | `Menu ▸ Item` paths quoted in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING | `docs.tcl` — walks the real menus |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
@@ -5461,7 +5462,20 @@ the file it produced, so it cannot be fooled by a refactor that moves the key li
 And **check both directions**: a doc that invents a setting or a path that no longer
 exists is the same drift, and it is the direction a human reviewer never notices.
 
-The last three rows are the honest backlog. Where a fact is genuinely prose —
+The menu row is the one row where **one direction is right**: a menu has no
+counterpart list to be complete against, and "every entry is documented somewhere"
+would demand a page mention for every checkbutton in View. It cost two conventions,
+both worth having anyway. **Menu paths are written in emphasis** (`***View ▸
+Theme…***`) — that is what bounds the label so a *renamed* entry fails, not merely a
+removed one; an unmarked path runs into its sentence and is reported. And the
+**design logs are exempt** — AGENTS, ROADMAP, PITCH, CAVEATS name retired menus
+(D74's Tabs cascade, D92's theme dropdown) and unbuilt ones (`Help ▸ Contents…`) on
+purpose, and holding them to today's menubar would make them lie about their own
+history. Its blind spot is a menu named as prose rather than as a path: "the **Tabs**
+menu" survived in WINDOWS.md three decisions after D74 removed it, and nothing but a
+reader was going to catch that.
+
+The last two rows are the honest backlog. Where a fact is genuinely prose —
 README's status section — accept that it has no guard and re-read it when the
 status changes, rather than pretending a test could hold it.
 

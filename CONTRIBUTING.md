@@ -96,17 +96,21 @@ to a palette.
 
 **Editing modes are the second stable extension point** (design:
 [AGENTS.md](AGENTS.md) D38). A mode decides what the keyboard does inside the text
-area — rio ships `windows`, `emacs`, and `vi` in `modes/`, and yours works the same
-way: one self-registering Tcl file. Write an `attach` that installs `bind <tag> …`
-bindings (end a binding in `break` to beat Tk's Text defaults; leave it off to fall
-through to them) and a `detach` that clears any state you keep, then
+area — the core ships only `windows` in `modes/`; `emacs` and `vi` ride the same
+contract as **installable extensions** (D41, `extensions/`), which is the proof that
+the seam holds. Yours works the way all three do: one self-registering Tcl file.
+Write an `attach` that installs `bind <tag> …` bindings (end a binding in `break` to
+beat Tk's Text defaults; leave it off to fall through to them) and a `detach` that
+clears any state you keep, then
 `rio::modes::register name label attach detach` at the bottom. Drop the file in
 `~/.config/rio/modes/` — it appears in *Settings ▸ Editing Mode* automatically, and
 registering an existing name replaces the shipped mode. Two rules of the road: the
 app shortcuts always fire before your mode's keys, and edits must go through the
 widget your binding receives (`%W`, the group's proxy) — that's what keeps a mode
-working against local and remote cores alike. `modes/vi.tcl` is the worked example
-of per-editor state; `modes/emacs.tcl` is the minimal one.
+working against local and remote cores alike. [extensions/vi/vi.tcl](extensions/vi/vi.tcl)
+is the worked example of per-editor state; [extensions/emacs/emacs.tcl](extensions/emacs/emacs.tcl)
+is the minimal one — and each sits beside the `rio-extension.conf` that publishes it,
+so they double as worked examples of the next section.
 
 And once you've written a highlighter, a mode, or a theme, you can **publish
 it from your own web server** — no store, no account. That's the next section.
@@ -345,11 +349,11 @@ else to start:
 
 Open files with Ctrl+O (each lands in its own tab), New with Ctrl+N, switch tabs
 with Ctrl+Tab, close one with Ctrl+W, save with Ctrl+S, undo/redo with Ctrl+Z /
-Ctrl+Shift+Z — all remappable in `keys.json` (a single table; see INSTALL.md).
-The View menu switches the colour theme live (default or the
-shipped examples in `themes/` — Solarized Dark/Light and Plan 9 Acme). The
-terminal version (Ck) doesn't exist yet; build-and-run steps for it will land
-here when it does.
+Ctrl+Shift+Z — all remappable in `keys.json` (a single table; see
+[docs/keyboard.md](docs/keyboard.md)). *View ▸ Theme…* switches the colour theme
+live (default or the shipped examples in `themes/` — Solarized Dark/Light and Plan 9
+Acme). The terminal version (Ck) doesn't exist yet; build-and-run steps for it will
+land here when it does.
 
 ## Tests
 
@@ -410,6 +414,10 @@ involved.
   `rio-gui/tests/docs.tcl` and a row to AGENTS.md §7's *derived-facts register*. Every
   copy that nothing tests has drifted eventually; assert against what the code *does*,
   and check both directions, so an invented entry fails too.
+- **Write menu paths in emphasis** — `***View ▸ Theme…***`, with ` ▸ ` between the
+  levels. `docs.tcl` checks every such path against the real menubar, and the emphasis
+  is what tells it where the label stops and your sentence starts. A path written
+  bare is reported as if it were wrong, which is the nudge to mark it up.
 - **Say why.** A short explanation of the reasoning — especially for anything
   touching the core's protocol — makes review much easier.
 
