@@ -103,12 +103,14 @@ in [docs/](docs/index.md).
   build): it proposes the exact command, you see it and **Approve or Reject**, then
   it runs, confined to your project and time-boxed. A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. For bigger jobs there is
-  **plan mode** (*Settings ▸ Agent: Plan mode*): the agent is handed no changing tools at
-  all — it reads, then presents a **plan**, rendered as a document where the editor sits.
-  Approve it and it starts work (each edit still gated); reject it and say what you want
-  different. Plans are kept in the project's `.rio/plans/`. It is rio's own mechanism, so it
+  **plan mode** (*Settings ▸ Agent Mode*, or the menu atop the chat pane): the agent is
+  handed no changing tools at all — it reads, then presents a **plan**, rendered as a
+  document where the editor sits. **Edit** it if you want it different, then approve —
+  choosing there and then whether to review each edit or auto-accept from that point. Or
+  reject it and say what you want changed. Plans are kept in the project's `.rio/plans/`,
+  and that file *is* the plan you approve. It is rio's own mechanism, so it
   works with whichever provider you installed. Reads run freely;
-  every write waits for you (or opt into *Settings ▸ Agent: Auto-accept edits*) — and **every
+  every write waits for you (or pick *Auto-accept edits* as the mode) — and **every
   command always waits for you**, unless you mark it **trusted**: an **Always allow**
   button on the command remembers it (the program, or that exact command) so it stops
   asking — for **all projects**, **this project only**, or **only while a chosen

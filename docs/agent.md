@@ -72,9 +72,10 @@ it may do three kinds of thing:
 
 ## Planning before building
 
-For anything bigger than a small fix, you can ask to see the plan first. Turn on
-***Settings ▸ Agent: Plan mode*** (also in *Preferences ▸ Agent*) and describe the
-job as usual.
+For anything bigger than a small fix, you can ask to see the plan first. Set the
+agent's mode to **Plan** — the menu at the top of the chat pane, also
+***Settings ▸ Agent Mode*** and *Preferences ▸ Agent* — and describe the job as
+usual.
 
 While plan mode is on the agent **cannot change anything** — not as a promise it
 makes, but because it is handed no editing and no command tools at all. It can only
@@ -84,8 +85,12 @@ The plan opens **in the middle of the window**, where the editor sits, formatted
 the way the manual is — headings, lists, tables — because it is meant to be read
 rather than skimmed. The chat pane keeps the decision:
 
-- **Approve** ends plan mode and the agent starts work, proposing each edit and
-  each command for your approval exactly as before.
+- **Approve ▾** starts the work, and asks how you want it to go — *review each
+  edit*, or *auto-accept edits* from here on. You choose once you have read the
+  plan, rather than setting a switch beforehand.
+- **Edit plan** opens the plan as an ordinary file, so you can change it before you
+  approve it. Rewrite a step, delete one, add a constraint; then approve. The agent
+  is given **your** version, edited or not — you do not have to save it first.
 - **Reject** leaves plan mode on. Say what you want different and let it try again.
 - **Plan** reopens the plan if you closed it; `Esc` or **× Close plan** puts the
   editor back while you think.
@@ -94,7 +99,8 @@ Every plan is also saved in your project, under `.rio/plans/`, with the date and
 its title in the filename — including the ones you reject. They are plain Markdown:
 keep them, read them later, or delete the folder; nothing in rio depends on them.
 (Add `.rio/plans/` to your `.gitignore` if you would rather they didn't travel with
-the code.)
+the code.) That file is not a copy — it *is* the plan, which is why **Edit plan**
+simply opens it.
 
 Plan mode is part of rio, not of one model's API, so it works the same whichever
 provider you have installed.
@@ -103,9 +109,15 @@ provider you have installed.
 
 Two escape hatches exist, and they are separate on purpose.
 
-**Auto-accept edits** (*Preferences ▸ Agent*, or *Settings ▸ Agent: Auto-accept
-edits*) applies proposed **edits** without asking. Useful when you are watching a
-long refactor and reviewing in git afterwards. It never covers commands.
+**Auto-accept edits** is the agent's third mode, beside *Plan* and *Review*: it
+applies proposed **edits** without asking. Useful when you are watching a long
+refactor and reviewing in git afterwards. It never covers commands. Set it from the
+menu at the top of the chat pane, from ***Settings ▸ Agent Mode***, or in
+*Preferences ▸ Agent* — and, when you have just read a plan, from the plan's own
+**Approve ▾** button.
+
+The three modes are exclusive, and the menu always shows which one is live, so the
+agent can never be quietly auto-accepting while the pane says it is planning.
 
 **Allowed commands** is standing approval for **specific commands**, which you
 author yourself. When the agent proposes a command, the approval bar carries an

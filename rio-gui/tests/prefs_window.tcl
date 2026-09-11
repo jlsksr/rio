@@ -117,6 +117,22 @@ ok "agent: echo-only hint present" [winfo exists .prefs.body.agent.hint]    1
 ok "agent: prompts button opens it" [winfo exists .agentprompts]            1
 destroy .agentprompts
 
+# The mode is three exclusive states, not two independent checkboxes (D102) — two
+# checkboxes could show "plan mode" with auto-accept quietly armed behind it. Same
+# variable and same writer as the chat header's control and the Settings cascade.
+foreach v {plan review auto} {
+	ok "agent: $v is a radio"        [winfo class .prefs.body.agent.m$v]     Radiobutton
+	ok "agent: $v shares the state"  [.prefs.body.agent.m$v cget -variable]  ::agent_mode_ui
+	ok "agent: $v uses the writer"   [.prefs.body.agent.m$v cget -command]   agent_mode_set
+}
+ok "agent: no plan-mode checkbox"   [winfo exists .prefs.body.agent.pm]      0
+ok "agent: no auto-accept checkbox" [winfo exists .prefs.body.agent.aa]      0
+# Picking one here reaches the core, like every other control in this window (live-apply).
+.prefs.body.agent.mplan invoke
+ok "agent: the core is planning"    [dict get [rio_result agent.status {}] mode] plan
+.prefs.body.agent.mreview invoke
+ok "agent: and back to building"    [dict get [rio_result agent.status {}] mode] build
+
 # --- opening twice reuses the window rather than erroring --------------------------
 ok "reopen: no second toplevel"  [catch {preferences_window}]          0
 ok "reopen: window still there"  [winfo exists .prefs]                 1
@@ -130,6 +146,10 @@ ok "menu: no Agent API Key cascade"  [catch {.m.settings index "Agent API Key"}]
 ok "menu: no Agent Prompts entry"    [catch {.m.settings index "Agent Prompts…"}] 1
 ok "menu: no Allowed commands entry" [catch {.m.settings index "Agent: Allowed commands…"}] 1
 ok "menu: provider picker stays"     [.m.settings type "Agent Provider"]   cascade
+# The mode is a cascade of the same three states, not the old pair of checkbuttons (D102).
+ok "menu: Agent Mode is a cascade"   [.m.settings type "Agent Mode"]        cascade
+ok "menu: no Plan mode checkbutton"  [catch {.m.settings index "Agent: Plan mode"}] 1
+ok "menu: no auto-accept checkbutton" [catch {.m.settings index "Agent: Auto-accept edits"}] 1
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

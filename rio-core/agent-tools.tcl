@@ -303,6 +303,18 @@ proc rio::agent::tools::_plan_save {title md} {
 	return $rel
 }
 
+# Read a filed plan back, as the user has it NOW: the live buffer when the file is open
+# (so a plan edited and not yet saved still counts — nobody should have to remember to
+# save before approving), else the disk copy. Returns "" for no path, no project, or an
+# unreadable file; the caller falls back to the plan as presented (D102).
+proc rio::agent::tools::read_plan {path} {
+	if {$path eq ""} { return "" }
+	if {[catch {rio::project::resolve $path} abs]} { return "" }
+	set cur [_current_text $abs]
+	if {![dict get $cur ok]} { return "" }
+	return [dict get $cur text]
+}
+
 # A title as a filename fragment: lowercase, runs of anything else collapsed to one
 # dash, trimmed and length-capped. Never empty — a title of pure punctuation still
 # needs a name.

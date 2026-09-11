@@ -740,6 +740,103 @@ test agent-plan-tools-return-on-approval {after approval the SAME turn is handed
 		[expr {"present_plan" in [lindex $::seen 1]}]
 } -cleanup { rio::agent::set_mode build ; rio::project::close } -result {propose done 2 0 1 1 0}
 
+# --- the plan is re-read at approval (D102) ----------------------------------
+# The filed plan IS the plan, so the user may open it and change it before saying yes. What
+# comes back to the model is what they approved, not what it wrote. These tests read the
+# tool_result CONTENT (the model's side of the gate), which the summary does not carry.
+proc capture_provider {conversation tools system post} {
+	set last [lindex $conversation end]
+	set sawtool 0
+	if {[dict exists $last content]} {
+		foreach b [dict get $last content] {
+			if {[dict get $b type] eq "tool_result"} {
+				set sawtool 1
+				set ::wt_result [dict get $b content]
+			}
+		}
+	}
+	if {$sawtool} {
+		{*}$post delta "done" ; {*}$post done end_turn
+	} else {
+		{*}$post tool w1 $::wt_name $::wt_input $::wt_raw ; {*}$post done tool_use
+	}
+}
+# Present a plan, run `body` while the turn is parked at the gate, then approve it.
+# Returns the tool_result the model was handed.
+proc plan_then {body} {
+	set ::wt_name present_plan
+	set ::wt_input [dict create title "Add a cache" plan "## Changes\n\n- memoize it\n"]
+	set ::wt_raw {{"title":"Add a cache","plan":"## Changes"}}
+	set ::wt_result ""
+	rio::core::call agent.reset {}
+	rio::agent::set_mode plan
+	rio::agent::set_provider capture_provider
+	set stop [start_write turn]
+	if {$stop ne "propose"} { return "did not reach the gate: $stop" }
+	set ::plan_file [file join [rio::project::root] [dict get [ev_propose w1] path]]
+	uplevel 1 $body
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	wait_done
+	return $::wt_result
+}
+proc plan_test_setup {name} {
+	set ::pdir [makeDirectory $name]
+	rio::project::open $::pdir
+}
+
+test agent-plan-reread-unchanged {an untouched plan gets the short result, not its own words back} -setup {
+	plan_test_setup agprr1
+} -body {
+	set c [plan_then {}]
+	list [string match "*carry the plan out now*" $c] [string match "*EDITED*" $c] \
+		[ev_summary w1]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } -result {1 0 {plan approved}}
+
+test agent-plan-reread-edited {a plan edited on disk before approval is what comes back} -setup {
+	plan_test_setup agprr2
+} -body {
+	set c [plan_then {
+		set fh [open $::plan_file w] ; fconfigure $fh -encoding utf-8
+		puts $fh "# Add a cache\n\n- memoize it\n- AND invalidate on fs.changed"
+		close $fh
+	}]
+	list [string match "*EDITED*" $c] [string match "*AND invalidate on fs.changed*" $c] \
+		[ev_summary w1]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } \
+	-result {1 1 {plan approved (edited)}}
+
+test agent-plan-reread-live-buffer {an OPEN, unsaved plan beats the disk copy} -setup {
+	plan_test_setup agprr3
+} -body {
+	set c [plan_then {
+		set b [dict get [dict get [rio::core::call file.open \
+			[dict create path $::plan_file]] response] result buffer]
+		set lines [rio::doc::lines $b]
+		rio::doc::edit $b 1.0 "[llength $lines].[string length [lindex $lines end]]" \
+			"# Add a cache\n\nnever saved, still approved\n"
+	}]
+	# The disk copy is untouched — so a disk read would have missed the edit entirely.
+	list [string match "*never saved, still approved*" $c] \
+		[string match "*never saved*" [dict get [rio::fs::read $::plan_file] text]] \
+		[ev_summary w1]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } \
+	-result {1 0 {plan approved (edited)}}
+
+test agent-plan-reread-file-gone {a deleted plan file falls back to the plan as presented} -setup {
+	plan_test_setup agprr4
+} -body {
+	set c [plan_then { file delete -force $::plan_file }]
+	list [string match "*carry the plan out now*" $c] [string match "*EDITED*" $c] \
+		[ev_summary w1]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } -result {1 0 {plan approved}}
+
+test agent-plan-read-plan-nowhere {read_plan is empty for an unfiled plan, and never raises} -setup {
+	plan_test_setup agprr5
+} -body {
+	list [rio::agent::tools::read_plan ""] \
+		[rio::agent::tools::read_plan .rio/plans/never-written.md]
+} -cleanup { rio::project::close } -result {{} {}}
+
 # --- allow-list: standing approval (D84) -------------------------------------
 # A command covered by an allow-list rule runs WITHOUT an agent.approve — the propose
 # event carries auto=1 and the turn completes on its own. The allow-list is pinned to a

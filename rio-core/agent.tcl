@@ -499,6 +499,11 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 # the plan out — the loop's per-step spec recompute then hands it the tools to do it with,
 # each edit still stopped by the ordinary gate. Rejection leaves the mode alone: the user
 # is still planning, and the model should plan again.
+#
+# The plan is re-read at approval (D102). Its file in the project IS the plan, so the user
+# can open it and change it before approving, and what they approved — not what the model
+# wrote — is what comes back in the tool_result. Unchanged, the short result stands: there
+# is no point echoing the model's own words at it.
 proc rio::agent::_do_plan {turn id name input emit co} {
 	variable pending
 	set prep [rio::agent::tools::prepare_plan $input]
@@ -524,11 +529,16 @@ proc rio::agent::_do_plan {turn id name input emit co} {
 	}
 	set_mode build
 	{*}$emit [dict create event agent.mode params [dict create mode build]]
+	set content "The user approved this plan. Plan mode is off and the editing tools are available again — carry the plan out now, step by step; each edit and command still waits for the user's approval."
+	set summary "plan approved"
+	set now [rio::agent::tools::read_plan [dict get $prep path]]
+	if {$now ne "" && [string trimright $now] ne [string trimright [dict get $prep markdown]]} {
+		append content "\n\nThe user EDITED the plan before approving it. What they approved is the text below, not what you wrote — follow this version:\n\n$now"
+		set summary "plan approved (edited)"
+	}
 	{*}$emit [dict create event agent.tool_result \
-		params [dict create turn $turn id $id name $name ok 1 summary "plan approved"]]
-	return [dict create ok 1 \
-		content "The user approved this plan. Plan mode is off and the editing tools are available again — carry the plan out now, step by step; each edit and command still waits for the user's approval." \
-		summary "plan approved"]
+		params [dict create turn $turn id $id name $name ok 1 summary $summary]]
+	return [dict create ok 1 content $content summary $summary]
 }
 
 # rio::exec::start's completion bridge: resume the suspended turn with the capture.

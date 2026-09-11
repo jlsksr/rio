@@ -203,7 +203,9 @@ set ::chat_busy_words {
 	"Warming up the CRT" "Rendering clip art"
 }
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
-set ::agent_plan_mode 0   ;# plan mode: the agent may read and plan, not change (Settings; D101)
+set ::agent_plan_mode 0   ;# plan mode: the agent may read and plan, not change (D101)
+set ::agent_mode_ui review ;# plan|review|auto — the two flags above as the three states the
+                           ;# UI offers; DERIVED by agent_mode_sync, never a truth of its own (D102)
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
@@ -2894,10 +2896,10 @@ proc chat_event {ev} {
 		}
 		agent.mode {
 			# The core changed the mode itself — approving a plan turns plan mode off
-			# (D101). Mirror it, or the menu would go on claiming the agent is planning
+			# (D101). Mirror it, or the control would go on claiming the agent is planning
 			# while it edits.
 			set ::agent_plan_mode [expr {[dict get $ev params mode] eq "plan"}]
-			chat_status_update
+			agent_mode_sync
 		}
 		agent.tool_result {
 			# The outcome of a read or an applied/rejected edit (red if it failed).
@@ -2934,28 +2936,27 @@ proc chat_diff {diff} {
 # closed while thinking about it (D101). The extra buttons default off, so an edit shows
 # just Approve/Reject.
 proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0} {plan 0}} {
-	if {$show} {
-		.chat.approve.lbl configure -text $prompt
-		if {$compare} {
-			pack .chat.approve.cmp -side right -after .chat.approve.no
-		} else {
-			catch {pack forget .chat.approve.cmp}
-		}
-		if {$always} {
-			pack .chat.approve.always -side right -after .chat.approve.no
-		} else {
-			catch {pack forget .chat.approve.always}
-		}
-		if {$plan} {
-			pack .chat.approve.plan -side right -after .chat.approve.no
-		} else {
-			catch {pack forget .chat.approve.plan}
-		}
-		pack .chat.approve -side bottom -fill x -before .chat.input
-	} else {
+	if {!$show} {
 		catch {pack forget .chat.approve}
 		set ::pending_turn ""
+		return
 	}
+	.chat.approve.lbl configure -text $prompt
+	foreach w {yes appr edit no cmp always plan} { catch {pack forget .chat.approve.$w} }
+	if {$plan} {
+		# Approve ▾ | Edit plan | Reject | Plan, right to left (D102). A plan with no
+		# project behind it was filed nowhere, so there is no file to edit.
+		pack .chat.approve.appr -side right
+		if {$::plan_path ne ""} { pack .chat.approve.edit -side right }
+		pack .chat.approve.no   -side right
+		pack .chat.approve.plan -side right
+	} else {
+		pack .chat.approve.yes -side right
+		pack .chat.approve.no  -side right
+		if {$always}  { pack .chat.approve.always -side right }
+		if {$compare} { pack .chat.approve.cmp    -side right }
+	}
+	pack .chat.approve -side bottom -fill x -before .chat.input
 }
 
 # Rebuild the "Always allow" menu for the currently proposed command (D84). Two
@@ -3008,6 +3009,24 @@ proc agent_allow_always {rule scope name} {
 
 # The user's decision on the pending edit → agent.approve resumes the turn, whose
 # remaining events stream back as broadcast agent.* events (dispatch_event → chat).
+# Approve a plan, saying how the work it starts should go (D102). The policy is decided
+# HERE, on the plan, rather than inherited from a flag set before the user knew what would
+# be proposed — which is what let auto-accept sit armed behind "plan mode". Set the flag
+# first, so a failed write leaves the plan still awaiting a decision instead of starting
+# work under a policy the core never accepted.
+proc agent_decide_plan {policy} {
+	if {$::pending_turn eq ""} return
+	set on [expr {$policy eq "auto"}]
+	set r [rio_call agent.autoaccept.set [dict create on $on]]
+	if {![dict get $r ok]} {
+		report_error [dict get $r error message] [dict get $r error code]
+		return
+	}
+	set ::agent_auto_accept $on
+	agent_mode_sync
+	agent_decide approve
+}
+
 proc agent_decide {decision} {
 	if {$::pending_turn eq ""} return
 	set t $::pending_turn
@@ -3227,6 +3246,13 @@ set ::plan_path  ""  ;# where the core filed this plan, project-relative ("" = n
 proc plan_open {title md path} {
 	set ::plan_title $title
 	set ::plan_path  $path
+	plan_paint $md
+	plan_show
+}
+
+# Render one Markdown document into the plan pane, from the top. Read-only: the pane is a
+# view of the plan, and the place to CHANGE a plan is its file (plan_edit).
+proc plan_paint {md} {
 	.plan.hdr configure -text [plan_header]
 	set t .plan.text
 	$t configure -state normal
@@ -3235,17 +3261,58 @@ proc plan_open {title md path} {
 	$t configure -state disabled
 	$t yview moveto 0
 	plan_restyle
-	plan_reopen
 }
 
-# Put the plan back in the center after the user closed it — the pane still holds the
-# painted plan, so this costs nothing and keeps where they had scrolled to. Mutually
-# exclusive with the compare view: there is one center, and one thing being reviewed.
+# Put the plan back in the center after the user closed it. Repainted from the plan as it
+# stands NOW, because the user may have opened and changed it in between (D102) — a view
+# that still showed the model's draft would be showing a plan nobody is about to approve.
+# Mutually exclusive with the compare view: there is one center, one thing being reviewed.
 proc plan_reopen {} {
 	if {$::plan_title eq ""} return
+	set md [plan_current_text]
+	if {$md ne ""} { plan_paint $md }
+	plan_show
+}
+
+# Give the plan the center. Mutually exclusive with the compare view: there is one center,
+# and whichever proposal arrived last is the one being read.
+proc plan_show {} {
 	set ::compare_shown 0
 	set ::plan_shown 1
 	apply_layout
+}
+
+# The plan's absolute path, or "" when it was filed nowhere (no project) or the core has
+# no project to resolve it against.
+proc plan_abs {} {
+	if {$::plan_path eq ""} { return "" }
+	set pr [rio_result project.get {}]
+	if {$pr eq "" || [dict get $pr root] eq ""} { return "" }
+	return [file join [dict get $pr root] $::plan_path]
+}
+
+# The filed plan as it stands: the open buffer's text when the user has it open (so an
+# unsaved edit shows, matching what the core will read at approval), else the disk copy,
+# else "" — the caller then keeps what is already painted.
+proc plan_current_text {} {
+	set abs [plan_abs]
+	if {$abs eq ""} { return "" }
+	foreach id [dict keys $::buffers] {
+		if {[bufget $id path] eq $abs} { return [buf_text $id] }
+	}
+	set r [rio_result fs.read [dict create path $::plan_path]]
+	if {$r eq ""} { return "" }
+	return [dict get $r text]
+}
+
+# Open the filed plan as an ordinary buffer so the user can change it before approving
+# (D102). The plan view and the editor both want the center, so the view steps aside; the
+# turn stays pending and the bar stays up, because approving is still the next thing.
+proc plan_edit {} {
+	set abs [plan_abs]
+	if {$abs eq ""} return
+	plan_close
+	do_open $abs
 }
 
 # The header line: the plan's title, and where it was filed so the reader can go back to
@@ -4281,7 +4348,7 @@ proc adopt_agent_status {} {
 	set ::agent_auto_accept [dict get $st auto_accept]
 	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
 	providers_menu_fill     ;# refresh the cache + the provider/key menus from the core
-	chat_status_update
+	agent_mode_sync         ;# and the mode control, which repaints the strip
 }
 
 # The chat status strip (under the Send button): which agent is live and whether
@@ -4342,30 +4409,71 @@ proc chat_busy_stop {} {
 	chat_status_update
 }
 
+# The status strip names the live agent, and nothing else: the mode is stated once, by the
+# header control that sets it (D102). Two places saying it was how the old strip came to lie
+# — it showed "plan mode" over an armed auto-accept flag it had no room for.
 proc chat_status_update {} {
 	if {$::chat_busy} return   ;# the working indicator owns the strip while a turn runs
-	set agent [agent_provider_label $::agent_provider]
-	# Plan mode outranks the edit policy in the strip: while it is on, no edit is being
-	# proposed at all, so saying how edits would be handled would be saying nothing (D101).
-	if {$::agent_plan_mode} {
-		set mode "plan mode"
-	} else {
-		set mode [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
-	}
-	catch {.chat.status configure -text "$agent   ·   $mode"}
+	catch {.chat.status configure -text [agent_provider_label $::agent_provider]}
 }
 
-# Switch the agent between planning and building (the Settings checkbutton and the
-# Preferences checkbox share this). The core holds the mode — this only asks it to change,
-# and puts the menu back if it refuses, so the checkmark never claims a state the agent is
-# not in.
-proc apply_plan_mode {} {
-	set r [rio_call agent.mode.set [dict create mode [expr {$::agent_plan_mode ? "plan" : "build"}]]]
-	if {![dict get $r ok]} {
-		set ::agent_plan_mode [expr {!$::agent_plan_mode}]
-		report_error [dict get $r error message] [dict get $r error code]
+# --- the agent's mode, as one control (D102) ---------------------------------
+# The core keeps two independent flags — `mode` (build|plan, D101) and `auto_accept`
+# (edits-only, D26 s5/D83) — because they answer different questions and a TUI may spell
+# them differently. The UI offers the three states a user actually chooses between, derived
+# from those flags, never a third source of truth: ::agent_mode_ui is computed, never
+# stored. Every door (the header menubutton, Settings, Preferences) writes through
+# agent_mode_set and reads through agent_mode_sync, so two doors cannot disagree.
+proc agent_mode_label {m} {
+	return [dict get {plan Plan review Review auto Auto} $m]
+}
+proc agent_mode_hint {m} {
+	return [dict get {
+		plan   "Plan mode: the agent reads and plans; it changes nothing until you approve a plan"
+		review "Every proposed edit waits for your approval"
+		auto   "Proposed edits apply as they come; commands still ask"
+	} $m]
+}
+
+# Re-derive the control from the flags and relabel it. Called after every write, when the
+# core announces a mode change (agent.mode), and on attach (adopt_agent_status).
+proc agent_mode_sync {} {
+	set ::agent_mode_ui [expr {$::agent_plan_mode ? "plan" :
+		($::agent_auto_accept ? "auto" : "review")}]
+	if {[winfo exists .chat.hdr.mode]} {
+		.chat.hdr.mode configure -text "[agent_mode_label $::agent_mode_ui] ▾"
+		tooltip .chat.hdr.mode [agent_mode_hint $::agent_mode_ui]
 	}
 	chat_status_update
+}
+
+# The single writer: push ::agent_mode_ui (just set by whichever radiobutton the user
+# picked) to the core, mirroring only what the core accepted. Picking Plan LEAVES
+# auto-accept alone — while planning, "Plan" is the whole truth about what the agent may do,
+# and how the work goes afterwards is asked on the plan's own approval bar, where the user
+# has just read what is proposed (jka, D102). On a refusal the flags are untouched, so
+# agent_mode_sync puts the control back rather than leave it claiming a state the agent is
+# not in.
+proc agent_mode_set {} {
+	set want $::agent_mode_ui
+	set r [rio_call agent.mode.set [dict create mode [expr {$want eq "plan" ? "plan" : "build"}]]]
+	if {![dict get $r ok]} {
+		report_error [dict get $r error message] [dict get $r error code]
+		agent_mode_sync
+		return
+	}
+	set ::agent_plan_mode [expr {$want eq "plan"}]
+	if {$want ne "plan"} {
+		set on [expr {$want eq "auto"}]
+		set r [rio_call agent.autoaccept.set [dict create on $on]]
+		if {![dict get $r ok]} {
+			report_error [dict get $r error message] [dict get $r error code]
+			agent_mode_sync
+			return
+		}
+		set ::agent_auto_accept $on
+	}
+	agent_mode_sync
 }
 
 # The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
@@ -6426,6 +6534,10 @@ proc apply_theme {theme} {
 		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
 	.chat.hdr.clear configure -font RioUIFont \
 		-background [dict get $c chat.bg] -foreground [dict get $c accent]
+	.chat.hdr.mode configure -font RioUIFont \
+		-background [dict get $c chat.bg] -foreground [dict get $c accent]
+	.chat.hdr.mode.m configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	.chat.log configure -font RioChatFont \
 		-background [dict get $c chat.bg] -foreground [dict get $c chat.fg]
 	.chat.input configure -font RioChatFont \
@@ -9002,11 +9114,15 @@ proc prefs_fill_agent {f} {
 		grid [prefs_hint $f.hint "Echo is a built-in stub. Install Claude or an OpenAI-compatible provider from Extensions… to use a real model."] \
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	}
-	grid [prefs_check $f.pm "Plan mode (no changes until you approve a plan)" \
-		::agent_plan_mode apply_plan_mode] -row [incr r] -column 0 -sticky w -pady {8 1}
-	grid [prefs_check $f.aa "Auto-accept edits" ::agent_auto_accept \
-		{rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}] \
-		-row [incr r] -column 0 -sticky w -pady 1
+	# The mode: three exclusive states over the core's two flags (D102), the same
+	# ::agent_mode_ui and the same writer the chat header's control and the Settings
+	# cascade use — three doors, one answer.
+	grid [prefs_label $f.ml "Mode"] -row [incr r] -column 0 -sticky w -pady {8 1}
+	foreach {v lbl} {plan "Plan — read and plan, change nothing until you approve a plan" \
+			review "Review each edit" auto "Auto-accept edits"} {
+		grid [prefs_radio $f.m$v $lbl ::agent_mode_ui $v agent_mode_set] \
+			-row [incr r] -column 0 -sticky w -padx {12 0} -pady 1
+	}
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
 	set i 0
 	foreach p $::agent_providers {
@@ -9378,7 +9494,21 @@ label .chat.hdr.title -text "Agent" -anchor w -font {monospace 9} -padx 4 -pady 
 	-background white -foreground black
 label .chat.hdr.clear -text "Clear" -font {monospace 9} -padx 6 -cursor hand2 \
 	-background white -foreground black
+# The agent's mode, where it was already being displayed — but as a control (D102). Three
+# exclusive states over the core's two flags: Plan (may read, may not change), Review (each
+# edit waits), Auto (edits apply as they come). The header is the pane's control strip
+# already (Clear lives here, as ⟳ and the hidden toggle do in the Files and Git headers),
+# and a one-word label needs the tooltip to say what it means.
+menubutton .chat.hdr.mode -text "Review ▾" -font {monospace 9} -menu .chat.hdr.mode.m \
+	-padx 4 -cursor hand2 -background white -foreground black
+menu .chat.hdr.mode.m -tearoff 0
+foreach {v lbl} {plan "Plan — read and plan, change nothing" \
+		review "Review each edit" auto "Auto-accept edits"} {
+	.chat.hdr.mode.m add radiobutton -label $lbl -variable ::agent_mode_ui -value $v \
+		-command agent_mode_set
+}
 pack .chat.hdr.clear -side right
+pack .chat.hdr.mode  -side right
 pack .chat.hdr.title -side left -fill x -expand 1
 bind .chat.hdr.clear <Button-1> chat_clear
 # Composer: a few-line input + a Send button. Enter sends; Shift+Enter newlines.
@@ -9408,6 +9538,19 @@ button .chat.approve.cmp -text "Compare" -font {monospace 9} -command {compare_p
 # "Plan" (plan proposals only, D101): reopen the plan the user closed while thinking. The
 # plan is already in hand — nothing is fetched, it is only shown again.
 button .chat.approve.plan -text "Plan" -font {monospace 9} -command plan_reopen
+# A plan is approved WITH a policy for the work it starts (D102): the two items are the two
+# ways to say yes, so "approve" never silently means one of them. A menubutton rather than
+# two buttons because the choice is the approval, not a setting beside it.
+menubutton .chat.approve.appr -text "Approve ▾" -font {monospace 9} \
+	-menu .chat.approve.appr.m -relief raised -borderwidth 1 -padx 4
+menu .chat.approve.appr.m -tearoff 0
+.chat.approve.appr.m add command -label "Approve — review each edit" \
+	-command {agent_decide_plan review}
+.chat.approve.appr.m add command -label "Approve — auto-accept edits" \
+	-command {agent_decide_plan auto}
+# "Edit plan" (plan proposals only, D102): the plan is a file in the project, so changing it
+# is rio's ordinary edit path. Packed only when the plan was filed.
+button .chat.approve.edit -text "Edit plan" -font {monospace 9} -command plan_edit
 # "Always allow" (command proposals only, D84): remember a trust rule so this command
 # stops asking. Packed on demand by approve_bar; its menu is rebuilt per proposal by
 # chat_allow_menu_populate. tearoff off — a floating menu makes no sense here.
@@ -9740,14 +9883,19 @@ menu .m.settings -tearoff 0
 # 2026-09-09), keeping this menu to fast toggles.
 menu .m.settings.provider -tearoff 0
 .m.settings add cascade -label "Agent Provider" -menu .m.settings.provider
-# Plan mode, auto-accept and compare-complex are the agent toggles flipped often enough
+# The agent's mode and compare-complex are the agent settings flipped often enough
 # mid-session to keep here alongside the provider (their twins live in Preferences too).
-# Plan mode leads: it is the one that decides whether the agent may change anything at all,
-# and it is flipped at the START of a piece of work, which is when this menu is open (D101).
-.m.settings add checkbutton -label "Agent: Plan mode" -variable ::agent_plan_mode \
-	-command apply_plan_mode
-.m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
-	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}
+# The mode leads: it decides whether the agent may change anything at all, and it is chosen
+# at the START of a piece of work, which is when this menu is open (D101). Three exclusive
+# states, not two checkboxes, so the menu cannot show a combination the pane cannot (D102);
+# same variable and same writer as the chat header's control.
+menu .m.settings.agentmode -tearoff 0
+foreach {v lbl} {plan "Plan — read and plan, change nothing" \
+		review "Review each edit" auto "Auto-accept edits"} {
+	.m.settings.agentmode add radiobutton -label $lbl -variable ::agent_mode_ui -value $v \
+		-command agent_mode_set
+}
+.m.settings add cascade -label "Agent Mode" -menu .m.settings.agentmode
 .m.settings add checkbutton -label "Agent: Compare complex edits" \
 	-variable ::agent_compare_complex
 .m.settings add separator

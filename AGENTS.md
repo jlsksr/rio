@@ -5236,6 +5236,88 @@ something a synthetic event can prove — that takes a live turn against a real 
 
 ---
 
+### D102 — The plan is where you decide how the work goes
+
+jka asked whether the agent pane has controls for switching between manual, auto-accept and
+plan. It did not: the pane's only mode surface was `.chat.status`, a plain label. The
+switches were two checkbuttons in Settings, twinned in Preferences.
+
+**Asking exposed a defect behind the missing control.** Those are **two independent flags** —
+the core's `mode` (`build|plan`, D101) and `auto_accept` (edits-only, D26 s5 / D83) — and the
+strip faked three states by letting plan mode outrank the edit policy. So **auto-accept could
+sit armed while the pane read "plan mode"**, invisibly, until a plan was approved and edits
+began applying unreviewed. The display was not true, which is worse than a missing control.
+
+My first fix was to make picking *Plan* clear auto-accept, so a plan always landed in Review.
+**jka overruled it: let the user decide.** Present the plan, then the user says how the work
+should go from there — review each edit, or auto-accept from here on — **or edits the plan
+first**. That is the better answer, and it dissolves the defect instead of papering over it:
+the edit policy is no longer a stale flag inherited from before the plan, it is a question
+asked at the moment it matters, when the user has just read what the agent intends to do.
+
+**The decision lives on the plan's bar.** `Approve ▾` is a menubutton with the two ways to say
+yes (*review each edit* / *auto-accept edits*), because the choice **is** the approval — a
+plain `Approve` would have to mean one of them silently, which is the thing being fixed. The
+idiom is already on this bar (`Always allow ▾`, D84). Approving with auto-accept is two
+existing ops in order, `agent.autoaccept.set` then `agent.approve`: no new op, and the flag is
+the one the menus always wrote. The flag is set **first**, so a refused write leaves the plan
+still awaiting a decision rather than starting work under a policy the core never accepted.
+
+**Editing a plan is free, because the plan is already a file.** D101 filed every plan at
+`.rio/plans/<stamp>-<slug>.md` and listed editing as out of scope; it is in scope now, and it
+took no new representation. `Edit plan` is `plan_close` + `do_open` on that path — rio's
+ordinary edit path, over a remote core too. The core then **re-reads the plan at approval**
+through `tools::read_plan`, a thin wrapper over `_current_text`, the same helper
+`prepare_write` uses: it returns the **live buffer** when the file is open and the disk copy
+otherwise, so an unsaved edit counts and nobody has to remember to save. Unchanged text keeps
+D101's short result — there is no point echoing the model's own words back at it; changed text
+makes the result say the user **edited** the plan and carries the approved version verbatim,
+because that, not what the model wrote, is what was agreed; a deleted file falls back to the
+plan as presented, since a plan is not lost because its copy was. This is the payoff for
+filing plans at all: the file *is* the plan, with no second representation to keep in step.
+
+**One state, one statement.** `.chat.hdr.mode` is a menubutton in the chat header, left of
+`Clear`, labelled with the live state — `Plan ▾` / `Review ▾` / `Auto ▾` — with a tooltip
+(D63) spelling it out, since the label is one word. Placement follows the existing idiom: the
+Files and Git headers carry their controls in the header, `Clear` already lived there, and the
+mode was already *displayed* in this pane. `::agent_mode_ui` is **derived** from the two flags
+by `agent_mode_sync` and never stored as a third truth; `agent_mode_set` is the single writer
+and re-syncs on a refusal rather than leave a control claiming a state the agent is not in.
+The **status strip stops repeating the mode** and keeps the provider and the busy animation:
+saying it twice is how it came to lie. Every door now speaks the same three names — Settings'
+two checkbuttons became one `Agent Mode` cascade (D85 holds: still a fast switch, spelled as
+three exclusive states), Preferences' two checkboxes became three radios on the same variable
+and the same writer.
+
+**Picking Plan leaves auto-accept alone** — jka's point, and the reason the label stays honest
+without clearing anything behind the user's back: while planning, `Plan` is the whole truth
+about what the agent may do *right now*, and what happens afterwards is asked on the plan's own
+bar. The core keeps two flags while the UI offers three names deliberately: the flags answer
+different questions (*may it change anything* vs *does a change wait for me*), and a TUI may
+spell the three names differently. The three-state UI is a view, not a schema change.
+
+**What the guards hold.** `agent.test` +5 (core 557 → 562): an untouched plan keeps the short
+result, a plan edited on disk comes back in the tool_result marked as the user's, an **open,
+unsaved** buffer beats the disk copy, a deleted file falls back to the presented Markdown, and
+`read_plan` is empty — never an error — for a plan filed nowhere. `plan.tcl` 49 → 80: the
+plan bar's shape (`Approve ▾` with two items, `Edit plan`, no plain `Approve`) and that an edit
+proposal's bar is unchanged; `Edit plan` closing the view and opening the file while the turn
+stays pending; a reopened plan rendering the user's own edit; approving with each policy
+reaching the core; picking `Plan` leaving auto-accept alone; and every door on the same
+variable and writer. `prefs_window.tcl` 37 → 53 for the radios and the cascade, and
+`smoke.tcl`'s strip assertions now expect the provider alone. Five injections, each failing by
+name: no re-read at approval, `read_plan` reading disk instead of the live buffer, the auto
+item approving without setting the flag, the `agent.mode` event without a re-sync, and the
+Settings radios on their own variable.
+
+**Not built:** a browser over `.rio/plans/`; a keyboard chord for the mode (D23 data, addable
+later); remembering the mode per project; collapsing the core's two flags into one enum.
+
+**Honest limit:** headless again. How a four-control bar and a header menubutton actually sit
+in a 340-pixel column is something only a human at a display can judge.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

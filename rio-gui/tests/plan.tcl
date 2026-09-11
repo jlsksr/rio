@@ -156,20 +156,101 @@ do_theme default
 ok "theme: and back"                    [$t cget -background] [dict get $::theme_colors editor.bg]
 plan_close
 
-# --- the mode toggle mirrors the core --------------------------------------------------
-set ::agent_plan_mode 1 ; apply_plan_mode
-ok "mode: the core is in plan mode"     [dict get [rio_result agent.status {}] mode] plan
-ok "mode: the strip says so"            [.chat.status cget -text] "Echo   ·   plan mode"
-set ::agent_plan_mode 0 ; apply_plan_mode
-ok "mode: and back to build"            [dict get [rio_result agent.status {}] mode] build
-ok "mode: the strip says how edits go"  [.chat.status cget -text] "Echo   ·   review edits"
+# --- the bar is where the user says how the work goes (D102) ---------------------------
+# A plan is not approved into a policy set before it was written: the two ways to say yes
+# are on the bar, under the plan the user has just read.
+proc bar_slaves {} { return [pack slaves .chat.approve] }
+plan_event 7 p7
+ok "bar: Approve is a menubutton"       [winfo class .chat.approve.appr] Menubutton
+ok "bar: with two ways to say yes"      [expr {[.chat.approve.appr.m index end] + 1}] 2
+ok "bar: the plain Approve is not shown" [expr {[lsearch [bar_slaves] .chat.approve.yes] >= 0}] 0
+ok "bar: offers Edit plan"              [expr {[lsearch [bar_slaves] .chat.approve.edit] >= 0}] 1
+ok "bar: still offers Reject"           [expr {[lsearch [bar_slaves] .chat.approve.no] >= 0}] 1
+# A plan with no project behind it was filed nowhere — there is no file to edit.
+plan_event 8 p8 "Nowhere to file it" ""
+ok "bar: an unfiled plan has nothing to edit" [expr {[lsearch [bar_slaves] .chat.approve.edit] >= 0}] 0
+# An edit proposal is unchanged by all this: Approve/Reject/Compare, no plan controls.
+approve_bar 1
+ok "bar: an edit keeps its plain Approve" [expr {[lsearch [bar_slaves] .chat.approve.yes] >= 0}] 1
+ok "bar: and shows no Approve menu"       [expr {[lsearch [bar_slaves] .chat.approve.appr] >= 0}] 0
+ok "bar: and its Compare"                 [expr {[lsearch [bar_slaves] .chat.approve.cmp] >= 0}] 1
+approve_bar 0
 
-# The core flips the mode itself when a plan is approved, and announces it — the menu has
-# to follow, or it would claim the agent is planning while it edits.
-set ::agent_plan_mode 1 ; chat_status_update
+# Approving with a policy is two things in order: the core's auto-accept flag, then the
+# decision. Picking "review each edit" is just as explicit — it turns auto-accept OFF.
+rio_result agent.autoaccept.set {on 0}
+plan_event 9 p9
+agent_decide_plan auto
+ok "approve auto: the core is auto-accepting" [dict get [rio_result agent.status {}] auto_accept] 1
+ok "approve auto: the GUI agrees"             $::agent_auto_accept 1
+ok "approve auto: the turn was decided"       $::pending_turn ""
+ok "approve auto: the plan view is gone"      $::plan_shown 0
+plan_event 10 p10
+agent_decide_plan review
+ok "approve review: auto-accept is off"       [dict get [rio_result agent.status {}] auto_accept] 0
+ok "approve review: the GUI agrees"           $::agent_auto_accept 0
+
+# --- editing a plan ---------------------------------------------------------------------
+# The plan is a file in the project, so "edit it" is rio's ordinary edit path: the view
+# steps out of the center and the plan opens as a buffer. The turn stays pending — the
+# next thing is still to approve.
+set ::tf [file tempfile ::tpath] ; close $::tf
+set ::proj [file join [file dirname $::tpath] riogui-plan-[clock clicks]]
+file mkdir [file join $::proj .rio plans]
+set ::pfile [file join $::proj .rio plans 20260911-120000-edit-me.md]
+set fh [open $::pfile w] ; puts $fh "# Edit me\n\n- as written by the model" ; close $fh
+open_folder $::proj
+plan_event 11 p11 "Edit me" .rio/plans/20260911-120000-edit-me.md
+plan_edit
+ok "edit: the plan view steps aside"    $::plan_shown 0
+ok "edit: the plan is open as a buffer" [bufget $::cur path] [file normalize $::pfile]
+ok "edit: the turn is still pending"    $::pending_turn 11
+ok "edit: and the bar is still up"      [expr {[lsearch [pack slaves .chat] .chat.approve] >= 0}] 1
+# Reopening repaints from the plan as it stands now — the edit is what gets approved, so
+# the edit is what the view must show.
+.ed.t insert "end-1c" "\n## Added by the user\n"
+plan_reopen
+ok "reopen: the user's edit is rendered" \
+	[expr {[string first "Added by the user" [$t get 1.0 end]] >= 0}] 1
+ok "reopen: rendered, not dumped"       [expr {[llength [$t tag ranges h2]] > 0}] 1
+agent_decide reject
+chat_busy_stop   ;# agent_decide restarts the working animation, which owns the strip
+sandbox_drop_fixture $::proj
+
+# --- the mode is one control, and it mirrors the core -----------------------------------
+# ::agent_mode_ui is DERIVED from the core's two flags; every door writes through
+# agent_mode_set, so no two doors can disagree.
+set ::agent_mode_ui plan ; agent_mode_set
+ok "mode: the core is in plan mode"     [dict get [rio_result agent.status {}] mode] plan
+ok "mode: the control says Plan"        [.chat.hdr.mode cget -text] "Plan ▾"
+ok "mode: the strip names the provider only" [.chat.status cget -text] "Echo"
+set ::agent_mode_ui auto ; agent_mode_set
+ok "mode: auto turns the core's flag on" [dict get [rio_result agent.status {}] auto_accept] 1
+ok "mode: and leaves build mode"         [dict get [rio_result agent.status {}] mode] build
+ok "mode: the control says Auto"         [.chat.hdr.mode cget -text] "Auto ▾"
+# jka's ruling: picking Plan does NOT clear auto-accept behind the user's back. The label
+# is honest without it — while planning, nothing is being edited at all, and how the work
+# goes afterwards is asked on the plan's own bar.
+set ::agent_mode_ui plan ; agent_mode_set
+ok "mode: plan leaves auto-accept alone" [dict get [rio_result agent.status {}] auto_accept] 1
+ok "mode: and still reads Plan"          [.chat.hdr.mode cget -text] "Plan ▾"
+set ::agent_mode_ui review ; agent_mode_set
+ok "mode: review turns the flag off"     [dict get [rio_result agent.status {}] auto_accept] 0
+ok "mode: and the control says Review"   [.chat.hdr.mode cget -text] "Review ▾"
+
+# Every door is the same door: the Settings cascade and the Preferences radios drive the
+# same variable through the same writer as the header control.
+ok "doors: Settings drives ::agent_mode_ui" \
+	[.m.settings.agentmode entrycget 0 -variable] ::agent_mode_ui
+ok "doors: through the same writer"      [.m.settings.agentmode entrycget 0 -command] agent_mode_set
+ok "doors: three states, not two toggles" [expr {[.m.settings.agentmode index end] + 1}] 3
+
+# The core flips the mode itself when a plan is approved, and announces it — the control
+# has to follow, or it would claim the agent is planning while it edits.
+set ::agent_plan_mode 1 ; agent_mode_sync
 chat_event {event agent.mode params {mode build}}
 ok "mode: an agent.mode event is adopted" $::agent_plan_mode 0
-ok "mode: and the strip repainted"        [.chat.status cget -text] "Echo   ·   review edits"
+ok "mode: and the control relabelled"     [.chat.hdr.mode cget -text] "Review ▾"
 
 # adopt_agent_status reads the mode back from whatever core the GUI attached to (D30) —
 # a daemon someone else put in plan mode must not be silently switched by our boot default.
@@ -177,6 +258,7 @@ rio_result agent.mode.set {mode plan}
 set ::agent_plan_mode 0
 adopt_agent_status
 ok "adopt: the core's mode wins"        $::agent_plan_mode 1
+ok "adopt: and the control with it"     [.chat.hdr.mode cget -text] "Plan ▾"
 rio_result agent.mode.set {mode build}
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]

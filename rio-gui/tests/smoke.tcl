@@ -1284,7 +1284,7 @@ ok "busy: start sets the flag"        $::chat_busy 1
 ok "busy: a real phrase is chosen"    [expr {$::chat_busy_word in $::chat_busy_words}] 1
 chat_busy_stop
 ok "busy: stop clears the flag"       $::chat_busy 0
-ok "busy: idle status restored"       [string match "*·*" [.chat.status cget -text]] 1
+ok "busy: idle status restored"       [.chat.status cget -text] [agent_provider_label $::agent_provider]
 # render is a pure function of frame+word: a 1→2→3 "Please wait…" dot cycle.
 set ::chat_busy_word "Reticulating splines" ; set ::chat_busy_frame 0 ; chat_busy_render
 ok "busy: one dot at frame 0"         [.chat.status cget -text] "Reticulating splines."
@@ -1384,13 +1384,17 @@ adopt_agent_status
 ok "provider: default is echo"        $::agent_provider echo
 apply_provider
 ok "provider: echo selected in core"  [rio::agent::provider_name] echo
-ok "status: names echo agent"         [.chat.status cget -text] "Echo   ·   review edits"
+ok "status: names echo agent"         [.chat.status cget -text] "Echo"
 set ::agent_provider claude ; apply_provider
 ok "provider: claude selected in core" [rio::agent::provider_name] claude
-ok "status: names claude agent"       [.chat.status cget -text] "Claude   ·   review edits"
-set ::agent_auto_accept 1 ; chat_status_update
-ok "status: shows auto-accept mode"   [.chat.status cget -text] "Claude   ·   auto-accept edits"
-set ::agent_auto_accept 0 ; chat_status_update
+ok "status: names claude agent"       [.chat.status cget -text] "Claude"
+# The mode is NOT in the strip: it is stated once, by the control that sets it (D102).
+# Saying it twice was how the old strip came to lie — it showed "plan mode" over an armed
+# auto-accept flag it had no room for.
+set ::agent_auto_accept 1 ; agent_mode_sync
+ok "status: the mode is not repeated here" [.chat.status cget -text] "Claude"
+ok "status: the control carries it"        [.chat.hdr.mode cget -text] "Auto ▾"
+set ::agent_auto_accept 0 ; agent_mode_sync
 
 # adopt_agent_status MIRRORS the core's live settings into the menus without
 # writing back — attaching to an already-configured core must not reset it (D30).
@@ -1501,7 +1505,7 @@ ok "provider: openai now in the picker cache" \
 	[expr {[agent_provider_entry openai] ne ""}] 1
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai
-ok "status: names ChatGPT agent"       [.chat.status cget -text] "ChatGPT   ·   review edits"
+ok "status: names ChatGPT agent"       [.chat.status cget -text] "ChatGPT"
 provider_key_dialog openai
 ok "keydlg: titled for openai"         [wm title .providerkey] "ChatGPT API key"
 .providerkey.e insert end "sk-oai-smoke-123"
