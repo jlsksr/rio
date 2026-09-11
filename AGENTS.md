@@ -1307,10 +1307,9 @@ headless testing, covered by `rio-gui/tests/browse.tcl` (the fs.list walk, the
 navigate/choose logic per mode, and a real-modal build/teardown). *(Later hardened:
 `rbrowse_go` / `remote_browse_dialog` now bail cleanly if the dialog is cancelled while
 its `fs.list` is in flight — an Escape during a slow remote listing no longer crashes
-the proc.)* *Pending:* a
-`--ssh host [path]` convenience wrapper (P4) —
-today the remote path is `--connect` over a hand-made `ssh -L` tunnel, or
-`ssh host … server.tcl --stdio` by hand.
+the proc.)* *(P4, the `--ssh host [path]` wrapper, was **refused** — see **D96**. The
+channel-transport plan is closed at P3; the remote path is `--connect` to a host:port
+you have made reachable by whatever means you like, and rio does not care which.)*
 
 *(Follow-on — a bounded handshake, so a stale tunnel can't hang the window.)* A dead
 `ssh -L` forward is worse than a refused connection: `socket` **succeeds** (the local
@@ -4830,6 +4829,50 @@ failing.
 `$proj` makes the run print the exact dialog and exit 1 while its own checks still say passed —
 which is the whole point of the recorded tally. All 23 GUI suites then run clean, three
 consecutive `smoke.tcl` runs with zero dialogs and zero background errors, core 535 untouched.
+
+### D96 — rio speaks the protocol; it does not dial
+
+The channel-transport plan (D30) ended with a pending P4: an **`--ssh host [path]` wrapper** that
+would spawn a tunnel and attach in one step. It is **refused — as a category, not deferred**, and
+the plan is closed at P3.
+
+**jka's argument, which settles it:** *"People have hundreds of ways to establish a connection to
+a rio core. Maybe they use tailscale or whatever. I don't want to predict. Why should rio think
+about how to reach a core network-wise? It should be network transparent — like X11!"*
+
+The analogy is exact. **X11 does not know what ssh is.** `ssh -X` is *ssh's* feature: ssh opens a
+listener and rewrites `DISPLAY`. X's half of the contract is only *"a display string names an
+endpoint; I speak the protocol over whatever byte stream you hand me."* An `--ssh` flag in rio
+would be X.Org shipping an ssh client, and it would bless one tunnel out of the many (`ssh -L`,
+tailscale, WireGuard, a corporate VPN, a bastion) that rio has no business ranking.
+
+**Nothing had to be built, because rio was already right.** `--connect host:port` *is*
+`DISPLAY=host:0`. Every tunnel, overlay and VPN terminates as a host and a port; rio takes one and
+needs to know which mechanism produced it exactly as much as X does — not at all. Network
+transparency here means *the user does not think about it*, and that was true before this decision
+and stays true after it. **The rule for future proposals:** anything shaped like "rio helps you
+reach a core" — a tunnel helper, a connection manager, an `--ssh`, a discovery protocol — is out
+of scope by decision, not by priority. Reaching the core is the operator's business.
+
+**The alternative that was built and reverted**, recorded so it is not re-proposed blind: a
+**`--core-cmd <command>`** flag, where the operator names a command (`ssh host … --stdio`,
+`kubectl exec -i`, socat) and its stdio *is* the channel — git's `ext::` / `GIT_SSH_COMMAND` /
+LSP `command` shape. It worked, with a test suite, and was dropped anyway on jka's call: rio
+already has exactly one way to reach a remote core, and a second mechanism for a job the first
+one does is what KISS forbids — the same argument that killed `--ssh`, applied one step further
+than the first draft of this decision applied it. What it would have bought, and what rio
+therefore does **not** have, is remote use with **no listening daemon** — D30's "no socket,
+process ownership is the access control" property, at a distance. That is a real gap, not an
+imaginary one; it stays open until someone actually wants it, and this paragraph is the design if
+they do.
+
+**One invariant it leaves standing.** Because a socket is once again the *only* remote path,
+`::core_remote` may keep fusing two facts — *the transport is a socket* and *the core's filesystem
+is not mine*. They are the same fact only by that coincidence. Anything that ever makes a pipe
+remote must split them first: the D37 stale-link watchdog is armed on `if {$::core_remote}` but
+means *socket only* (a pipe EOFs the moment the core dies), so it would arm a half-open-socket
+watchdog against a pipe. The reverted branch split it as `::core_transport` (`pipe` | `socket`);
+that is the shape to restore, not to re-derive.
 
 ---
 

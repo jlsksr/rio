@@ -163,6 +163,11 @@ Notes:
 - If the tunnel maps a different remote port (e.g. `-L 7711:127.0.0.1:7712`), the
   **core listens on `7712`** on the server; the GUI still connects to your local
   `7711`.
+- **The tunnel is one way in, not the way in.** rio speaks the protocol but never
+  dials: it only ever sees the `host:port` at your end, so tailscale, WireGuard, a
+  corporate VPN or a trusted LAN all work with no support from rio and no flag of
+  their own. SSH is documented here because it needs nothing installed, not because
+  it is privileged (AGENTS.md D96).
 - `RIO_CONNECT=host:port` is an alternative to `--connect`.
 - You can also connect from an **already-running GUI**: **File ▸ Connect to Remote
   Core…**, enter the `host:port`. By default it rewires that window to the remote

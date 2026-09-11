@@ -165,7 +165,10 @@ in [docs/](docs/index.md).
   `tcl-tls`, then `tclsh rio-core/server.tcl 7711`, loopback by default), tunnel in
   (`ssh -L 7711:127.0.0.1:7711 host`), and attach:
   `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server` — or, from an
-  already-open GUI, **File ▸ Connect to Remote Core…**. Files open and save on
+  already-open GUI, **File ▸ Connect to Remote Core…**. That tunnel is **one way in,
+  not the way in**: rio speaks the protocol but never dials, so tailscale, a VPN or a
+  private LAN need no support from rio — it only ever sees a `host:port`.
+  Files open and save on
   whichever box the core runs on; browse them from the file tree or the point-and-click
   Open/Save dialogs, which follow the core onto the remote disk. A **stale tunnel is
   noticed within seconds** (not minutes): the GUI watches the link at the protocol

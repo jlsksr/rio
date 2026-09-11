@@ -281,12 +281,6 @@ for later:
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
   **own dock panel** rather than inline in the chat; a richer rules editor.
 
-## Remote / transport
-
-- **`--ssh` wrapper** — *planned.* A convenience front for the manual
-  SSH-tunnel-then-`--connect` recipe (channel-transport plan, P4): spawn the tunnel
-  and attach in one step. The underlying remote-core path already works.
-
 ## Frontends
 
 - **Ck terminal frontend (TUI)** — *deferred.* A spike proved Ck can carry it

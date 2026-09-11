@@ -20,7 +20,9 @@ Two things worth knowing before you connect:
 - **The agent runs where the core runs.** Over a remote core, the turn is made on
   that machine and your API key is stored there. rio tells you so when you connect;
   it matters if the box isn't yours. See [the agent](agent.md).
-- **rio never exposes a core to the network for you.** The core listens on
-  loopback, and you reach it through an SSH tunnel you make yourself.
+- **rio never exposes a core to the network for you, and never dials out either.**
+  The core listens on loopback; you reach it over whatever you already trust — an
+  SSH tunnel, tailscale, a VPN, a private LAN. rio only ever sees the `host:port`
+  at your end, and has no opinion about how it got there.
 
 - [Troubleshooting](troubleshooting.md) — when a connection misbehaves.
