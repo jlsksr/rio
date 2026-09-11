@@ -33,7 +33,8 @@ Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
 preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
 tree, a git pane that both reads and **writes** (stage, unstage, commit, discard —
-D44/D45/D80/D93/D97/D98), a side-by-side compare view, live theming, and a working
+D44/D45/D80/D93/D97/D98), a side-by-side compare view, live theming, rio's own
+manual rendered inside it (D99/D100), and a working
 **agent** (read + propose-edit + gated run-command with an opt-in trusted-command
 allow-list, Claude over the official
 Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
@@ -5035,6 +5036,82 @@ today, and both deploy scripts install a *toolchain*, not rio's files. So this w
 far as rio itself does, and the packaging story (ROADMAP, "Install / packaging path") must move
 `docs/` with `themes/` and `syntax/` — one rule for all three, which is the reason to keep them
 resolved the same way.
+
+**Refinement — the renderer landed as D100.** The "v0 minus the renderer" above describes one
+commit's worth of this window. Everything structural in it still stands; what the right-hand
+pane holds changed.
+
+---
+
+### D100 — The manual renders, and its cross-references are doors
+
+D99 put the manual in the window and the Markdown **source** in the right-hand pane. That was
+defensible for a first cut and wrong to leave: the manual's two most information-dense pages are
+almost entirely **tables** (`keyboard.md`'s chord table, `preferences.md`'s settings tables), and
+`index.md` — the page the viewer opens on — is *nothing but links*. A reader could see
+`[the editor](editor.md)` and not follow it. rio's own manual read worse inside rio than in any
+text editor, which is an odd thing for an editor to ship.
+
+**Two halves, deliberately separate.** `help_blocks` turns a page into a list of block
+descriptors — `{heading LEVEL text}`, `{para text}`, `{item DEPTH MARKER text}`, `{code text}`,
+`{table ROWS}`, `{quote text}`, `{rule}` — with no widget anywhere in it; `help_paint` puts those
+blocks on screen. The split is not ceremony. It makes the parser a **function** a test can call
+with a string and compare against a value (which is how most of this is guarded), and it is the
+seam help *search* will need later: grep wants the blocks, not the painting.
+
+**It re-wraps.** The pages are hand-wrapped at 80 columns for someone reading them in an editor;
+this window has its own width, and inheriting somebody else's margin in a proportional font
+produces the ragged right edge that makes rendered Markdown look broken. So prose blocks arrive
+as one string with their source line breaks joined out, and the widget wraps by word. The two
+block kinds that must **not** reflow — fenced code and tables — opt out per tag (`-wrap none`),
+which is also the only reason the page has a horizontal scrollbar, so it auto-hides.
+
+**Tables are laid out in the fixed-pitch font, measured on what a reader sees.** Column widths
+come from `help_plain` — the text with its markup taken off — not from the source, or a cell
+holding `` `code` `` would reserve two columns for backticks nobody will see. Bold inside a
+table uses the *monospace* bold, not the proportional one, so a bold cell still measures the
+same as a plain one and the columns stay lined up. The Markdown alignment row (`| --- |`) is
+dropped: rio renders every column left-aligned, so it carries nothing here.
+
+**Links are doors, with a way back.** A link's target rides on a per-link `L<n>` tag, so a click
+resolves by asking which tags sit under the pointer — no parallel table of coordinates to keep in
+step with the text. `topic.md`, `topic.md#heading` and a bare `#heading` all go through one
+`help_goto`. **Anchors are slugs**, GitHub's rule, derived from the heading text — the author
+writes `preferences.md#where-everything-lives` and rio has to arrive at the same string from
+`## Where everything lives`. Back/Forward exist because following a link is the one way to end up
+somewhere the contents list cannot bring you back from: an anchor inside a page, or a document
+outside the manual.
+
+**A link out of `docs/` is still followed — but nothing outside rio's directory is.** `index.md`'s
+own "Where else to look" table points at `../README.md`, `../INSTALL.md`, `../AGENTS.md`. Those
+are rio's files too, sitting one level up, and a table that exists to send you somewhere should
+send you there. So `help_path` resolves relative to the manual and refuses anything that is
+absolute or that climbs out of the rio directory — a rule about the *tree*, not a list of allowed
+names. A document with no contents row clears the selection (new `rl_clear`) rather than leaving
+the last topic looking current.
+
+**What the guards hold.** `help.tcl` goes 27 → 59 checks: `help_blocks` against a hand-written
+page (headings, hand-wrapped prose rejoining, list items, verbatim code, a table minus its rule,
+a blockquote), `help_inline` on the three star widths, the painting through the tags the widget
+ends up carrying, link-tag → target → `help_goto`, Back/Forward, an anchor that scrolls and an
+unknown one that holds still, the sibling-document path and the two escapes it refuses.
+`docs.tcl` gains check 9: **every `#anchor` in the manual names a real heading**, computed with
+`help_slug` and `help_blocks` — the code's own slugs, not a second copy of GitHub's rule — so it
+catches an anchor that never matched *and* a heading whose wording was later edited, which
+changes its slug and silently drops every link into it. Proven by injection in both directions: a
+`help_slug` that stops stripping punctuation, the glob bug below, anchors that all point at the
+top, and a renamed heading in `preferences.md` (four stranded links, named).
+
+**One bug worth recording, because it shipped for a run.** The inline scanner first told the
+three star widths apart with `switch -glob`, whose patterns were `***\**` and `**\**`. Every `*`
+in a glob is a wildcard, so both read as "contains an asterisk", `**topics**` matched the
+*triple* branch, and `string range $tok 3 end-3` ate a character off each end — "topics" became
+"opic". It is invisible in a diff and obvious on screen, which is exactly the class of defect a
+rendering test catches and a code review does not. Markers are compared with `string range` now,
+and `inline: markers by width` is its guard.
+
+**Still not shipped, unchanged.** `docs/` still does not install. The renderer makes the viewer
+good; it does not make it survive leaving the checkout.
 
 ---
 

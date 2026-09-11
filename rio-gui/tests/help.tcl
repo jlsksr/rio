@@ -97,7 +97,7 @@ set gi [row_of $b git.md]
 ok "pick: git.md has a row"         [expr {$gi >= 0}] 1
 rl_select $b $gi
 ok "pick: the topic loaded"         $::help_topic git.md
-ok "pick: its text is showing"      [string match "*# Git*" [.help.page.text get 1.0 end]] 1
+ok "pick: its text is showing"      [.help.page.text get 1.0 1.end] "Git"
 ok "pick: the footer followed"      [.help.foot.where cget -text] [file join docs git.md]
 ok "pick: the row is selected"      $::rl_sel($b) $gi
 
@@ -105,6 +105,79 @@ ok "pick: the row is selected"      $::rl_sel($b) $gi
 # window can never disagree about what is on screen.
 help_show keyboard.md
 ok "show: selection follows"        $::rl_sel($b) [row_of $b keyboard.md]
+
+# --- the renderer, as a function (D100) -------------------------------------------------
+#
+# help_blocks is pure — Markdown in, block descriptors out, no widget — so it is checked as
+# a function. Hand-wrapped prose rejoining into one block is the load-bearing case: the
+# manual is wrapped for an 80-column editor and this window has its own width.
+set md "# Title\n\nA **bold** and *soft* line\nwrapped by hand.\n\n- one\n- two\n\n"
+append md "```\nx=1\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n> quoted\n"
+set blocks [help_blocks $md]
+ok "blocks: a heading knows its level" [lindex $blocks 0] {heading 1 Title}
+ok "blocks: hand wraps rejoin"      [lindex $blocks 1 1] "A **bold** and *soft* line wrapped by hand."
+ok "blocks: list items"             [lrange $blocks 2 3] {{item 0 • one} {item 0 • two}}
+ok "blocks: fenced code is verbatim" [lindex $blocks 4] {code x=1}
+ok "blocks: a table drops its rule" [lindex $blocks 5] {table {{A B} {1 2}}}
+ok "blocks: a blockquote"           [lindex $blocks 6] {quote quoted}
+
+proc styles {s} { set o {} ; foreach r [help_inline $s] { lappend o [lindex $r 1] } ; return $o }
+proc texts  {s} { set o {} ; foreach r [help_inline $s] { lappend o [lindex $r 0] } ; return $o }
+# The three star widths have to be told apart by their MARKER, not by a glob — every `*` in
+# a glob pattern is a wildcard, so a glob reads `**s**` as the triple and eats a character
+# off each end of the word. That bug shipped for exactly one run; this is its guard.
+ok "inline: markers by width"       [styles {*i* **s** ***x***}] {em {} strong {} strongem}
+ok "inline: and the text survives"  [texts  {*i* **s** ***x***}] {i { } s { } x}
+ok "inline: code is literal"        [texts {`a *b* c`}] {{a *b* c}}
+ok "inline: a link's title and target" \
+	[lindex [help_inline {see [the editor](editor.md).}] 1] {{the editor} link editor.md}
+ok "plain: markup measured off"     [help_plain {a **b** `c`}] {a b c}
+ok "slug: GitHub's rule"            [help_slug {Where **everything** lives?}] where-everything-lives
+
+# --- the renderer, on screen -------------------------------------------------------------
+
+set t .help.page.text
+help_show git.md
+ok "paint: the title is a heading"  [llength [$t tag ranges h1]] 2   ;# one range, two indices
+ok "paint: and lost its hashes"     [string match *#* [$t get 1.0 1.end]] 0
+help_show keyboard.md
+ok "paint: the chord table is one"  [expr {[llength [$t tag ranges table]] > 0}] 1
+ok "paint: tables do not reflow"    [$t tag cget table -wrap] none
+help_show getting-started.md
+ok "paint: fenced code is marked"   [expr {[llength [$t tag ranges code]] > 0}] 1
+
+# --- links a reader can follow ------------------------------------------------------------
+#
+# A click resolves through the L<n> tag sitting under the pointer, so that mapping — not a
+# synthetic click, which needs a mapped window — is what is checked.
+help_show index.md
+ok "links: the contents page is full of them" [expr {$::help_link_n > 15}] 1
+set ltag [lsearch -inline -glob [$t tag names [lindex [$t tag ranges link] 0]] L*]
+ok "links: the tag carries a target" [info exists ::help_link($ltag)] 1
+help_goto $::help_link($ltag)
+ok "links: following one lands"     $::help_topic getting-started.md
+help_history back
+ok "history: back returns"          $::help_topic index.md
+help_history forward
+ok "history: and forward again"     $::help_topic getting-started.md
+ok "history: the back button is live" [.help.foot.back cget -state] normal
+
+# An anchor scrolls within the page it names; one rio cannot place leaves the reader where
+# they are rather than guessing at a line.
+help_goto preferences.md#where-everything-lives
+ok "anchor: the right page"         $::help_topic preferences.md
+ok "anchor: scrolled into it"       [expr {[lindex [$t yview] 0] > 0}] 1
+ok "anchor: an unknown one holds still" [help_anchor_see no-such-heading] 0
+
+# index.md's own table points at rio's other documents. They are rio's files too, so they
+# open — but nothing outside the rio directory does, whatever a page asks for.
+help_goto ../README.md
+ok "outside docs/: a sibling opens" $::help_topic ../README.md
+ok "outside docs/: named plainly"   [.help.foot.where cget -text] README.md
+ok "outside docs/: no row is current" $::rl_sel($b) -1
+ok "escape: an absolute path is refused" [help_path /etc/passwd] ""
+ok "escape: climbing out is refused"     [help_path ../../../../etc/passwd] ""
+ok "escape: a topic is not"              [help_path git.md] [file join [help_dir] git.md]
 
 # --- a topic that isn't there ---------------------------------------------------------
 #

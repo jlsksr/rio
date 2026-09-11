@@ -444,5 +444,46 @@ foreach e [help_contents] {
 }
 ok "every topic has a section and a title" $unsectioned {}
 
+# --- 9. every #anchor a page links to is a heading rio can find ---------------
+#
+# Check 2 stops at the filename, because until D100 an anchor was decoration — the viewer
+# showed the source and scrolled nowhere. Now it is a destination, and it is reached by
+# slug: the author writes `preferences.md#where-everything-lives` and rio derives that
+# string back out of the heading text. Two ways for that to rot, and this catches both —
+# an anchor that never named a heading, and a heading whose wording was edited afterwards
+# (which changes its slug and silently drops the link on the floor).
+#
+# It checks the CODE's slugs, not a second copy of GitHub's rule: help_slug and help_blocks
+# are what the viewer will use, so a change in either shows up here.
+
+proc doc_anchors {path} {
+	set out {}
+	foreach blk [help_blocks [slurp $path]] {
+		if {[lindex $blk 0] eq "heading"} { lappend out [help_slug [lindex $blk 2]] }
+	}
+	return $out
+}
+
+set anchored {}   ;# {page link target-file slug}
+foreach p $pages {
+	set text [slurp [file join $::docs $p]]
+	foreach {_ target} [regexp -all -inline {\]\(([^)]+)\)} $text] {
+		if {[regexp {^[a-z][a-z0-9+.-]*:} $target]} continue
+		if {![regexp {^([^#]*)#(.+)$} $target -> file slug]} continue
+		if {$file eq ""} { set file $p }
+		lappend anchored [list $p $target $file $slug]
+	}
+}
+ok "the manual links to headings at all" [expr {[llength $anchored] > 3}] 1
+
+set lost {}
+foreach a $anchored {
+	lassign $a page link file slug
+	set path [file join $::docs $file]
+	if {![file exists $path]} continue       ;# check 2 owns a missing file
+	if {[lsearch -exact [doc_anchors $path] $slug] < 0} { lappend lost "$page -> $link" }
+}
+ok "every #anchor names a real heading" $lost {}
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

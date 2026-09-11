@@ -61,8 +61,10 @@ rather than repeating them:
 The manual is plain Markdown, kept in the source tree alongside the code it
 describes — so a feature and its page land together, and so rio can show these
 pages itself, from disk, with no network. It does: ***Help ▸ Contents…***, or
-`F1`, opens this contents page and every topic in it. That intent shapes how they
-are written:
+`F1`, opens this contents page and every topic in it, formatted rather than as
+source. Links are live in there — click one to jump to the topic (or the heading)
+it names, and `Alt+←` / `Alt+→` walk back and forward through where you have
+been. That intent shapes how they are written:
 
 - **One topic per file, and the filename is the topic's name.** Filenames are
   stable: they are how a page is linked to, and how rio finds a topic to show you.
