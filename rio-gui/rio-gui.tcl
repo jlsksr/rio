@@ -1437,6 +1437,17 @@ proc nav_dir_status {git path} {
 	}
 	return ""
 }
+# Does PATH sit inside a directory git reports as untracked? Porcelain names such a
+# directory once and nothing below it, so its files never appear in the status map and
+# the row menu has to ask this instead of a lookup. Walks up to the project root: the
+# untracked directory can be any ancestor, not just the immediate parent.
+proc nav_untracked_parent {git path} {
+	for {set d [file dirname $path]} {$d ne [file dirname $d]} {set d [file dirname $d]} {
+		if {[dict exists $git $d] && [string index [dict get $git $d] 0] eq "?"} { return 1 }
+		if {$d eq $::nav_root} break
+	}
+	return 0
+}
 
 # Append one navigator row: a 2-char status gutter (the flag glyph + a space, or two
 # spaces when clean) — kept in a fixed left column so flags stay aligned across depths —
@@ -1572,7 +1583,19 @@ proc nav_menu_git {m type path} {
 		}
 		return
 	}
-	if {![dict exists $::nav_git $path]} return   ;# clean / no repo — no git items
+	if {![dict exists $::nav_git $path]} {
+		# Not a change of its own — but git collapses a WHOLLY untracked directory into a
+		# single `dir/` entry and reports nothing beneath it, so every file inside one is
+		# invisible to status: the git pane has no row for it, and this menu would have no
+		# item. The tree is the only place those files are named, and `git add` takes one
+		# happily (git then de-collapses the folder and lists the rest individually), so
+		# the file's own door belongs here.
+		if {[nav_untracked_parent $::nav_git $path]} {
+			$m add separator
+			$m add command -label "Track (git add)" -command [list do_git add $path]
+		}
+		return                                    ;# otherwise clean / no repo — no git items
+	}
 	set xy [dict get $::nav_git $path]
 	set x [string index $xy 0] ; set y [string index $xy 1]
 	$m add separator
@@ -1892,9 +1915,10 @@ proc git_pick {row} {
 	git_show_diff [expr {$d eq "" ? "(no textual diff)" : $d}]
 }
 
-# Right-click a change row (oncontext): Open the file, Copy Path, and Stage/Unstage
-# from its X/Y (D44). The porcelain path is repo-root-relative and the project root is
-# the repo root, so it doubles as git's cwd-relative path; Open needs the abspath.
+# Right-click a change row (oncontext): Open the file (file rows only — see below), Copy
+# Path, and Stage/Unstage from its X/Y (D44). The porcelain path is repo-root-relative and
+# the project root is the repo root, so it doubles as git's cwd-relative path; Open needs
+# the abspath.
 # git_menu_build fills the menu (separated for headless inspection); the wrapper posts.
 proc git_context_menu {payload X Y} {
 	catch {destroy .gitmenu}
@@ -1904,13 +1928,22 @@ proc git_context_menu {payload X Y} {
 }
 proc git_menu_build {m payload} {
 	set path [dict get $payload path]
+	# A wholly untracked DIRECTORY is one porcelain row, marked only by its trailing slash
+	# — which survives here, though `file join` strips it from the tree's map. It is a
+	# folder, so it has no text to open and staging it stages everything under it: drop
+	# Open, and say "folder" where the act is the folder's. Reaching one file inside it is
+	# the file tree's job (nav_menu_git), since only the tree lists them.
+	set isdir [string match "*/" $path]
 	set root [dict get [rio_call project.get {}] result root]
 	set abs  [file join $root $path]
-	$m add command -label "Open"      -command [list do_open $abs]
+	if {!$isdir} { $m add command -label "Open" -command [list do_open $abs] }
 	$m add command -label "Copy Path" -command [list rio_copy_clip $abs]
 	set x [dict get $payload x] ; set y [dict get $payload y]
 	$m add separator
-	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
+	if {$y ne " "} {
+		$m add command -label [expr {$isdir ? "Stage folder" : "Stage"}] \
+			-command [list do_git add $path]
+	}
 	if {$x ne " " && $x ne "?"} {
 		$m add command -label "Unstage" -command [list do_git unstage $path]
 	}

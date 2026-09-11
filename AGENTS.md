@@ -33,7 +33,7 @@ Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
 preservation, range-based editing, undo/redo, multiple buffers as tabs, a file
 tree, a git pane that both reads and **writes** (stage, unstage, commit, discard —
-D44/D45/D80/D93/D97), a side-by-side compare view, live theming, and a working
+D44/D45/D80/D93/D97/D98), a side-by-side compare view, live theming, and a working
 **agent** (read + propose-edit + gated run-command with an opt-in trusted-command
 allow-list, Claude over the official
 Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
@@ -4922,6 +4922,41 @@ the sentence is worth.
 
 Core 539 (+4: a clean rename, a rename carrying edits, both names reported for `fs.changed`, and
 a copy left alone); smoke +2 on the menu. ROADMAP's git entry loses its last "still wanted".
+
+---
+
+### D98 — A file inside an untracked folder gets its own door
+
+jka went to stage one new file that lived in a new folder, and found no menu item for it
+anywhere. The item was not missing: **the row was.** `git status --porcelain` collapses a
+*wholly* untracked directory into a single `sub/` entry and reports nothing beneath it — a
+deliberate economy on git's part, since a freshly-copied tree would otherwise print ten
+thousand lines. So the file existed, `git add` would have taken it, and neither pane could
+name it: the git pane had no row, and the file tree's row menu took "not in the status map"
+to mean "clean" and returned with no git items at all (D43's map is built from those same
+porcelain paths).
+
+**The door belongs in the file tree**, because that is the only pane that lists the file.
+`nav_menu_git` now falls back to `nav_untracked_parent` — does some ancestor appear in the map
+as untracked? — and offers **Track (git add)** on the file itself. `git add sub/new.txt` works
+against a collapsed folder, and afterwards git *de-collapses* it: the entry becomes
+`A sub/new.txt` plus one row per remaining untracked file. So the first add is the only one
+that needs this fallback, and the panes correct themselves.
+
+**The git pane stays a mirror of porcelain.** It was tempting to list the folder's files there
+too, but the pane's contract is "what git says has changed", and inventing rows git did not
+print would make its count, its `↩` and its diff pane all describe something git doesn't
+believe. What that row *did* need was honesty about being a folder: porcelain's trailing slash
+is the only mark of it (`file join` strips it, which is why the tree's map cannot tell), so the
+menu now drops **Open** — `file.open` on a directory can only raise an error dialog — and names
+the act **Stage folder**, matching the tree's wording for the same thing.
+
+**The register lesson repeats**: the bug was a lookup that answered a different question than
+the one asked. "Is this path in the status map?" is not "does git consider this path clean" —
+the same shape as D97's narrowed pathspec. Both directions are now guarded: smoke +3 asserts
+the Track item appears with the *file's* path (not the folder's) and that the folder row names
+itself, and +1 asserts a file under tracked ancestors still matches nothing, since an eager
+match would sprout a Track item on every clean row in the tree.
 
 ---
 

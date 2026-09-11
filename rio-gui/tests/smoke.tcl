@@ -778,6 +778,19 @@ if {![catch {exec git --version}]} {
 	ok "menu: untracked file offers Track" [menu_labels .tm] [list Open {Copy Path} --- {*}$fsv --- {Track (git add)}]
 	.tm delete 0 end ; nav_menu_build .tm [list dir [file join $gdir sub]]
 	ok "menu: dir with changes offers Stage folder" [menu_labels .tm] [list Open --- {*}$fsv --- {Stage folder}]
+	# A file inside a WHOLLY untracked directory: porcelain names only `sub/`, so n.txt is
+	# in no status map and the git pane has no row for it. The tree lists it, so the tree
+	# is where it gets its door — without this, "add just this one file" was unreachable
+	# from either pane.
+	.tm delete 0 end ; nav_menu_build .tm [list file [file join $gdir sub n.txt]]
+	ok "menu: file under an untracked dir offers Track" [menu_labels .tm] \
+		[list Open {Copy Path} --- {*}$fsv --- {Track (git add)}]
+	ok "menu: Track adds the file, not its folder" [.tm entrycget end -command] \
+		[list do_git add [file join $gdir sub n.txt]]
+	# ...and the other direction: a file whose ancestors are all tracked must NOT match, or
+	# every clean file in the tree would sprout a Track item.
+	ok "menu: a tracked parent is not an untracked one" \
+		[nav_untracked_parent $::nav_git [file join $gdir b.txt]] 0
 	.tm delete 0 end ; git_menu_build .tm [dict create x { } y M path a.txt]
 	ok "menu: git unstaged offers Stage + Discard" [menu_labels .tm] \
 		{Open {Copy Path} --- Stage --- {Discard Changes…}}
@@ -790,6 +803,12 @@ if {![catch {exec git --version}]} {
 	.tm delete 0 end ; git_menu_build .tm [dict create x ? y ? path b.txt]
 	ok "menu: git untracked offers Delete" [menu_labels .tm] \
 		{Open {Copy Path} --- Stage --- Delete…}
+	# The same row for an untracked DIRECTORY — porcelain's trailing slash is the only tell.
+	# No Open (file.open on a directory can only error) and the stage item names the folder,
+	# because that is what it stages.
+	.tm delete 0 end ; git_menu_build .tm [dict create x ? y ? path sub/]
+	ok "menu: git untracked dir names the folder" [menu_labels .tm] \
+		{{Copy Path} --- {Stage folder} --- Delete…}
 	# A rename row still offers Discard, but hands the confirm the ORIGINAL name (D97) —
 	# this door is the only one that has it, and the wording promises the old name back.
 	.tm delete 0 end ; git_menu_build .tm [dict create x R y { } path r.txt orig a.txt]

@@ -49,8 +49,8 @@ a `·` when something beneath it has changed.
 
 ## Staging and unstaging
 
-Right-click a row. It opens with **Open** and **Copy Path** — the row is a file, and
-the menu treats it as one — and then the git verbs that its status actually allows:
+Right-click a row. It opens with **Open** and **Copy Path**, and then the git verbs
+that its status actually allows:
 
 - **Stage** — `git add` on that path. Offered when there is an unstaged change.
 - **Unstage** — takes it back out of the index, leaving your edit alone. Offered
@@ -60,6 +60,17 @@ the menu treats it as one — and then the git verbs that its status actually al
 
 The file tree's row menu carries the same three, plus **Stage folder** on a
 directory that contains changes.
+
+**A brand-new folder is listed as one row.** git reports a folder none of whose
+files are tracked as a single entry — `sub/` — rather than listing everything
+inside it, so the git pane shows one row for the whole folder. That row has no
+**Open** (it is not a file) and its stage item reads **Stage folder**, because it
+stages everything under it.
+
+To add just *one* file out of such a folder, right-click the file in the **file
+tree**, which lists it: it offers **Track (git add)**. After that first add, git
+starts listing the folder's remaining files individually, and they appear in the
+git pane like any other change.
 
 ## Committing
 

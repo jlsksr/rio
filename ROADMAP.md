@@ -234,7 +234,7 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93, D97). Stage / unstage /
+- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93, D97, D98). Stage / unstage /
   track landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
   driven from an auto-showing commit bar in the git pane — rio's first inline pane
   text-input — now with an optional **multi-line description body** behind a `＋` toggle
@@ -247,7 +247,10 @@ for later:
   rides the git pane header only while the repo has changes. **Rename-aware discard** landed as
   **D97**: a rename is one change with two names, so discarding one now restores the original name
   and removes the new one (a copy `C` keeps the addition treatment — its source was never touched),
-  and the op emits `fs.changed` for both names. Nothing outstanding in this entry.
+  and the op emits `fs.changed` for both names. **D98** closed the last blind spot in the doors:
+  git collapses a wholly untracked folder into one `sub/` row, so a file inside one could not be
+  staged from either pane — the file tree now offers **Track (git add)** on it, and the git pane's
+  folder row admits to being a folder. Nothing outstanding in this entry.
 
 ## Agent
 
