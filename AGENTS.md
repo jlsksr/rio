@@ -5056,8 +5056,9 @@ text editor, which is an odd thing for an editor to ship.
 descriptors — `{heading LEVEL text}`, `{para text}`, `{item DEPTH MARKER text}`, `{code text}`,
 `{table ROWS}`, `{quote text}`, `{rule}` — with no widget anywhere in it; `help_paint` puts those
 blocks on screen. The split is not ceremony. It makes the parser a **function** a test can call
-with a string and compare against a value (which is how most of this is guarded), and it is the
-seam help *search* will need later: grep wants the blocks, not the painting.
+with a string and compare against a value (which is how most of this is guarded). It was also
+meant to be the seam help *search* would need later — see the refinement below, where that turned
+out not to be true.
 
 **It re-wraps.** The pages are hand-wrapped at 80 columns for someone reading them in an editor;
 this window has its own width, and inheriting somebody else's margin in a proportional font
@@ -5110,8 +5111,37 @@ in a glob is a wildcard, so both read as "contains an asterisk", `**topics**` ma
 rendering test catches and a code review does not. Markers are compared with `string range` now,
 and `inline: markers by width` is its guard.
 
-**Still not shipped, unchanged.** `docs/` still does not install. The renderer makes the viewer
-good; it does not make it survive leaving the checkout.
+**Refinement — searching the manual, and two predictions that were wrong.** A **Find** box sits
+above the contents list (the Extensions window's filter idiom): type a word and the list becomes
+the *sections* that mention it, one row per heading with its hit count; pick one and the page
+opens at that heading with every occurrence banded in the find bar's own `editor.findmatch`
+colour. Landing on the right heading is only half an answer — the band is the half that says
+where in it. Empty the box and the contents come back; `Escape` clears the search, and only once
+it is empty does a second `Escape` close the window.
+
+Two things this entry predicted turned out to be wrong, and saying so is cheaper than leaving
+them to be believed:
+
+- **It does not use the core's grep.** ROADMAP proposed `project.search` / `rio::doc::grep_lines`
+  pointed at `docs/`. But the argument at the top of this section — help is the GUI's own chrome,
+  read off the GUI's own tree — applies to searching it too: over a remote core the grep would
+  run against the *server's* files, which are a different rio's manual or none. The search is
+  fourteen `read`s in the GUI, in Tcl. The manual is about 50 KB, so every keystroke re-reads all
+  of it: no index to build, and nothing that can go stale.
+- **It does not use `help_blocks` either.** Matching happens line by line, because a result needs
+  the **heading a match sits under** — which the lines still know and the joined blocks no longer
+  do. What the blocks *did* give is `help_plain`: matching the stripped line is what lets a reader
+  searching `wrap lines` find `**Wrap Lines**`, so the markup they never see cannot hide a word
+  from them. `help.tcl` goes 59 → 74, with the needles taken **from the manual at run time**
+  rather than quoted into the test — the prose belongs to whoever maintains it, and a check that
+  quotes a sentence goes stale the first time that sentence is reworded.
+
+**And `docs/` installing is dropped, not done.** That item sat here since D91, written against a
+packaging path that does not exist: rio is deployed by cloning it (INSTALL.md — the deploy
+scripts install *system packages*, they never move rio's own files), so `docs/` is already beside
+the code wherever rio runs, and `help_dir` already finds it. A tree that is missing a page is
+already handled: `help_show` reports it *in the window*, rather than breaking the one window that
+would explain it.
 
 ---
 

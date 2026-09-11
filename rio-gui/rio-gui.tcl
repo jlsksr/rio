@@ -3391,14 +3391,14 @@ proc about_dialog {} {
 # selected topic on the right. D99 put the Markdown SOURCE in that right pane; D100
 # renders it — headings, tables, code, and links a reader can follow, with Back/Forward
 # behind them, which is what makes the manual's own cross-references work as doors
-# rather than as text describing a door.
+# rather than as text describing a door. The Find box searches it (D100).
 #
 # The GUI reads these files ITSELF, off its own tree, rather than through `file.open`.
 # Help is the GUI's own chrome, not project content: over a remote core (D29) the project
 # lives on another machine, so asking the core for a manual page would open the SERVER's
 # copy — a different rio's documentation — or nothing at all. The same reasoning that puts
-# syntax/ and themes/ beside the code puts docs/ there, and a packaging story that
-# installs one installs all three (ROADMAP, "Install / packaging path").
+# syntax/ and themes/ beside the code puts docs/ there — and since rio is deployed by
+# cloning it, docs/ is already wherever the code is, with nothing to install separately.
 # ---------------------------------------------------------------------------
 
 # Where the shipped manual lives: beside the code, like syntax/ (hl_load) and themes/.
@@ -3450,6 +3450,21 @@ proc help_window {{topic ""}} {
 	toplevel $w
 	wm title $w "rio Help"
 
+	# Find: the Extensions window's header idiom — a filter entry that repaints the list
+	# below it as you type (D39). The contents list answers "what is in the manual"; this
+	# answers "where is the word", which is the other way a reader arrives at a page.
+	frame $w.find
+	label $w.find.l -text "Find:" -font RioUIFont
+	entry $w.find.e -font RioUIFont -width 18
+	pack $w.find.l -side left -padx {0 4}
+	pack $w.find.e -side left
+	bind $w.find.e <KeyRelease> help_find_changed
+	# Escape clears the search rather than closing the window — but only while there IS
+	# one, so a second Escape still leaves, which is what the key means everywhere else.
+	bind $w.find.e <Escape> {
+		if {[.help.find.e get] ne ""} { .help.find.e delete 0 end ; help_find_changed ; break }
+	}
+
 	# Contents: a rich list (D42) like the file and git panes, so it selects, hovers and
 	# arrows exactly as the rest of rio's lists do. Section headings are rows too — not
 	# selectable — because rl_* indexes rows by line, so every line must be one.
@@ -3490,17 +3505,19 @@ proc help_window {{topic ""}} {
 	pack $w.foot.close -side right                  ;# can go find it on disk
 	pack $w.foot.where -side left -fill x -expand 1
 
-	grid $w.nav  -row 0 -column 0 -sticky nsew -padx {8 4} -pady {8 4}
-	grid $w.page -row 0 -column 1 -sticky nsew -padx {0 8} -pady {8 4}
-	grid $w.foot -row 1 -column 0 -columnspan 2 -sticky we -padx 8 -pady {0 8}
-	grid rowconfigure    $w 0 -weight 1
+	grid $w.find -row 0 -column 0 -columnspan 2 -sticky we   -padx 8 -pady {8 0}
+	grid $w.nav  -row 1 -column 0 -sticky nsew -padx {8 4} -pady {8 4}
+	grid $w.page -row 1 -column 1 -sticky nsew -padx {0 8} -pady {8 4}
+	grid $w.foot -row 2 -column 0 -columnspan 2 -sticky we -padx 8 -pady {0 8}
+	grid rowconfigure    $w 1 -weight 1
 	grid columnconfigure $w 1 -weight 1
 	bind $w <Escape> [list destroy $w]
 	bind $w <Alt-Left>  {help_history back}
 	bind $w <Alt-Right> {help_history forward}
-	bind $w <Destroy> {if {"%W" eq ".help"} {set ::help_topic ""}}
+	bind $w <Control-f> {focus .help.find.e ; .help.find.e selection range 0 end}
+	bind $w <Destroy> {if {"%W" eq ".help"} {set ::help_topic "" ; set ::help_needle ""}}
 
-	set ::help_back {} ; set ::help_fwd {}
+	set ::help_back {} ; set ::help_fwd {} ; set ::help_needle ""
 	help_restyle
 	help_fill_contents
 	help_show [expr {$topic ne "" ? $topic : "index.md"}]
@@ -3526,8 +3543,101 @@ proc help_fill_contents {} {
 	rl_end $b
 }
 
-# Selecting a contents row shows its topic (rl_* hands the row's payload straight over).
-proc help_pick {file} { if {$file ne ""} { help_show $file } }
+# Selecting a row shows what it points at. A contents row's payload is a filename; a search
+# result's is {file slug} — lassign reads both, since a one-element payload leaves the anchor
+# empty, which is exactly "show this topic from the top".
+proc help_pick {payload} {
+	lassign $payload file anchor
+	if {$file ne ""} { help_show $file $anchor }
+}
+
+# ---------------------------------------------------------------------------
+# Searching the manual. This runs HERE, in the GUI, over the same files the viewer reads —
+# not through the core's project.search. The core may be on another machine (D29), where
+# docs/ is a different rio's manual or absent entirely; the reasoning that makes the viewer
+# read its own tree makes the search read it too.
+#
+# It is deliberately small. The manual is fourteen files and about 50 KB, so a search is a
+# re-read of all of them — no index to build, and nothing that can go stale. Matching is
+# line by line rather than over help_blocks, because a result needs the HEADING a match sits
+# under, which the lines still know and the joined blocks no longer do.
+# ---------------------------------------------------------------------------
+
+set ::help_needle ""   ;# the live search, "" when the contents list is showing
+
+# Every heading with a match, as {file title slug heading hits}, in document order.
+proc help_search {needle} {
+	set needle [string tolower [string trim $needle]]
+	if {$needle eq ""} { return {} }
+	set out {}
+	# index.md is a topic like any other here, and leads, exactly as it does in the contents.
+	foreach e [linsert [help_contents] 0 [list "" "The rio manual" index.md]] {
+		lassign $e -> title file
+		set path [help_path $file]
+		if {$path eq "" || [catch {help_slurp $path} md]} continue
+		set sect $title ; set slug "" ; set hits 0
+		foreach line [split [string map {\r ""} $md] \n] {
+			if {[regexp {^#{1,6}[ \t]+(.+?)[ \t]*$} $line -> h]} {
+				if {$hits} { lappend out [list $file $title $slug $sect $hits] }
+				set sect [help_plain $h] ; set slug [help_slug $h] ; set hits 0
+			}
+			# Matched against the STRIPPED line, so markup the reader never sees cannot hide a
+			# word from them: searching "wrap lines" finds `**Wrap Lines**`.
+			if {[string first $needle [string tolower [help_plain $line]]] >= 0} { incr hits }
+		}
+		if {$hits} { lappend out [list $file $title $slug $sect $hits] }
+	}
+	return $out
+}
+
+# The results, in the contents list's own two-level shape: the topic's title as a heading
+# row, its matching sections under it. The pane is narrow, so a row names its section and
+# its count rather than quoting the line — the highlight on the page does that job.
+proc help_fill_results {needle} {
+	set b .help.nav.list
+	rl_begin $b
+	set hits [help_search $needle]
+	if {![llength $hits]} {
+		# Never a blank pane: a search that found nothing says so.
+		$b insert end "No matches\n" helpsect ; rl_row $b 0 ""
+		rl_end $b
+		return
+	}
+	set last ""
+	foreach h $hits {
+		lassign $h file title slug sect n
+		if {$file ne $last} {
+			set last $file
+			$b insert end "$title\n" helpsect ; rl_row $b 0 ""
+		}
+		$b insert end "  $sect  ($n)\n" ; rl_row $b 1 [list $file $slug]
+	}
+	rl_end $b
+}
+
+# The entry changed: swap the list between contents and results, and re-show the current
+# topic so its highlight follows the needle. Unchanged text is ignored, so arrowing around
+# inside the entry does not repaint anything.
+proc help_find_changed {} {
+	if {![winfo exists .help]} return
+	set needle [string trim [.help.find.e get]]
+	if {$needle eq $::help_needle} return
+	set ::help_needle $needle
+	if {$needle eq ""} { help_fill_contents } else { help_fill_results $needle }
+	if {$::help_topic ne ""} { help_show $::help_topic $::help_anchor_now 0 }
+}
+
+# Band every occurrence of the needle in the rendered page. Landing on the right heading is
+# only half an answer — this is the half that says where in it.
+proc help_mark_hits {t needle} {
+	$t tag remove hit 1.0 end
+	if {$needle eq ""} return
+	set n 0 ; set i 1.0
+	while {[set i [$t search -nocase -count n -- $needle $i end]] ne "" && $n > 0} {
+		$t tag add hit $i "$i + $n chars"
+		set i "$i + $n chars"
+	}
+}
 
 # ---------------------------------------------------------------------------
 # The renderer (D100). Markdown in, a painted text widget out, in two halves that are
@@ -3866,6 +3976,7 @@ proc help_show {file {anchor ""} {push 1}} {
 	$t configure -state normal
 	$t delete 1.0 end
 	help_paint $t [help_blocks $text]
+	help_mark_hits $t $::help_needle
 	$t configure -state disabled
 	$t yview moveto 0
 	.help.foot.where configure -text [help_label $file]
@@ -3873,11 +3984,17 @@ proc help_show {file {anchor ""} {push 1}} {
 	set ::help_anchor_now $anchor
 	if {$anchor ne ""} { help_anchor_see $anchor }
 	help_history_buttons
+	# Which row is this page? A search result names a file AND a heading, so the exact pair
+	# wins where it exists — otherwise the reader clicks one section and the list marks that
+	# topic's first. A contents row is the file alone, which the loose match covers.
 	set b .help.nav.list
-	set row -1
+	set row -1 ; set loose -1
 	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
-		if {[rl_payload $b $i] eq $file} { set row $i ; break }
+		set p [rl_payload $b $i]
+		if {$p eq [list $file $anchor]} { set row $i ; break }
+		if {$loose < 0 && [lindex $p 0] eq $file} { set loose $i }
 	}
+	if {$row < 0} { set row $loose }
 	# A document outside the contents (README.md, reached from index.md's own table) has no
 	# row — so nothing is current, rather than the last topic still looking current.
 	if {$row >= 0} { rl_select $b $row 0 } else { rl_clear $b }
@@ -3904,6 +4021,11 @@ proc help_restyle {} {
 	set fg [dict get $c editor.fg]
 	set mute [blend_hex $fg $bg 45]
 	.help configure -background [dict get $c ui.bg]
+	.help.find configure -background [dict get $c ui.bg]
+	.help.find.l configure -background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.help.find.e configure -background $bg -foreground $fg \
+		-insertbackground [dict get $c editor.cursor] \
+		-selectbackground [dict get $c editor.selection]
 	.help.foot configure -background [dict get $c ui.bg]
 	.help.foot.where configure -background [dict get $c ui.bg] \
 		-foreground [blend_hex [dict get $c ui.fg] [dict get $c ui.bg] 45]
@@ -3953,6 +4075,13 @@ proc help_restyle {} {
 	# where the heading's size has to win. Raising the headings settles only -font; a link in
 	# one keeps its colour, since no heading sets a foreground.
 	foreach h {h1 h2 h3} { $t tag raise $h }
+
+	# Search hits, last and raised: this one has to win -background over the block that
+	# happens to be under it (a match inside a code block or a table is still a match). The
+	# find bar's own role, falling back the way it does when a theme omits it.
+	$t tag configure hit -background [expr {[dict exists $c editor.findmatch] \
+		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
+	$t tag raise hit
 }
 
 

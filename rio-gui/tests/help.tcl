@@ -179,6 +179,62 @@ ok "escape: an absolute path is refused" [help_path /etc/passwd] ""
 ok "escape: climbing out is refused"     [help_path ../../../../etc/passwd] ""
 ok "escape: a topic is not"              [help_path git.md] [file join [help_dir] git.md]
 
+# --- searching the manual --------------------------------------------------------------
+#
+# help_search is a function over the real docs/ tree, so the needles here are taken FROM the
+# manual at run time rather than typed in: the prose belongs to whoever maintains it, and a
+# check that quotes a sentence goes stale the first time that sentence is reworded.
+
+# A heading deep in a page — deep so that landing on it has to scroll.
+set hd ""
+foreach blk [help_blocks [help_slurp [file join [help_dir] preferences.md]]] {
+	if {[lindex $blk 0] eq "heading" && [lindex $blk 1] == 2} { set hd [lindex $blk 2] }
+}
+set res [help_search $hd]
+set slugs {}
+foreach e $res { if {[lindex $e 0] eq "preferences.md"} { lappend slugs [lindex $e 2] } }
+ok "search: a heading finds its own section" [expr {[help_slug $hd] in $slugs}] 1
+ok "search: case folds"              [llength [help_search [string toupper $hd]]] [llength $res]
+ok "search: index.md leads"          [lindex [lindex [help_search rio] 0] 0] index.md
+ok "search: a needle nobody wrote"   [help_search zzqq-not-in-the-manual] {}
+ok "search: an empty needle is none" [help_search "   "] {}
+
+# Matching is done on the STRIPPED line, so markup the reader never sees cannot hide a word
+# from them. The needle is one real line of the manual that carries bold in its middle; the
+# second check is the proof, since that same needle is NOT in the source line.
+set marked ""
+foreach f [lsort [glob [file join [help_dir] *.md]]] {
+	foreach line [split [help_slurp $f] \n] {
+		if {[regexp {^[A-Za-z][^*`|]*\*\*[^*]+\*\*[^*]+$} $line]} { set marked $line ; break }
+	}
+	if {$marked ne ""} break
+}
+set needle [string trim [help_plain $marked]]
+ok "search: markup does not hide a word" [expr {[llength [help_search $needle]] > 0}] 1
+ok "search: the source line lacks it"    \
+	[string first [string tolower $needle] [string tolower $marked]] -1
+
+# And through the entry: results replace the contents, a row carries file AND heading,
+# activating one lands there, and the page bands what was searched for.
+.help.find.e delete 0 end ; .help.find.e insert end $hd ; help_find_changed
+set found -1
+for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
+	if {[rl_payload $b $i] eq [list preferences.md [help_slug $hd]]} { set found $i ; break }
+}
+ok "find: a result row names file and heading" [expr {$found >= 0}] 1
+rl_select $b $found
+ok "find: activating it lands on the topic"    $::help_topic preferences.md
+ok "find: and scrolls to the heading"          [expr {[lindex [$t yview] 0] > 0}] 1
+ok "find: the page bands the matches"          [expr {[llength [$t tag ranges hit]] > 0}] 1
+
+.help.find.e delete 0 end ; .help.find.e insert end zzqq-not-in-the-manual ; help_find_changed
+ok "find: no matches says so"        [string match "No matches*" [$b get 1.0 1.end]] 1
+ok "find: and that row is inert"     [rl_selectable $b 0] 0
+
+.help.find.e delete 0 end ; help_find_changed
+ok "find: clearing restores contents" [rl_payload $b 0] index.md
+ok "find: and the bands are gone"     [llength [$t tag ranges hit]] 0
+
 # --- a topic that isn't there ---------------------------------------------------------
 #
 # A partial install must not break the one window that would explain it: the failure is

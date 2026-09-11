@@ -64,7 +64,9 @@ pages itself, from disk, with no network. It does: ***Help ▸ Contents…***, o
 `F1`, opens this contents page and every topic in it, formatted rather than as
 source. Links are live in there — click one to jump to the topic (or the heading)
 it names, and `Alt+←` / `Alt+→` walk back and forward through where you have
-been. That intent shapes how they are written:
+been. The **Find** box searches the whole manual: type a word and the contents
+list becomes the sections that mention it, so picking one takes you straight to
+that heading with the word highlighted. That intent shapes how they are written:
 
 - **One topic per file, and the filename is the topic's name.** Filenames are
   stable: they are how a page is linked to, and how rio finds a topic to show you.
