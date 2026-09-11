@@ -203,6 +203,7 @@ set ::chat_busy_words {
 	"Warming up the CRT" "Rendering clip art"
 }
 set ::agent_auto_accept 0 ;# skip the approval gate for proposed edits (Settings)
+set ::agent_plan_mode 0   ;# plan mode: the agent may read and plan, not change (Settings; D101)
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
@@ -2308,7 +2309,7 @@ proc apply_layout {} {
 	# Per-pane shown mirrors for the View-menu toggle checkmarks (has a tab / not hidden).
 	foreach _p {files git chat search} { set ::shown_$_p [rio::layout::shown $_p] }
 
-	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .bsash .groups .cmp}
+	catch {pack forget .siteleft .siteright .sitebottom .sash .csash .bsash .groups .cmp .plan}
 	foreach id [rio::panel::ids] { catch {pack forget [rio::panel::field $id body]} }
 
 	set showL [expr {[rio::layout::get left   visible] && [llength [rio::layout::get left   panels]]}]
@@ -2331,7 +2332,9 @@ proc apply_layout {} {
 		pack .siteright -side right -fill y ; pack .csash -side right -fill y
 		.siteright configure -width [rio::layout::get right size]
 	}
-	if {$::compare_shown} {
+	if {$::plan_shown} {
+		pack .plan -side left -fill both -expand 1
+	} elseif {$::compare_shown} {
 		pack .cmp -side left -fill both -expand 1
 	} else {
 		pack .groups -side left -fill both -expand 1
@@ -2785,7 +2788,7 @@ proc chat_send {} {
 	.chat.input delete 1.0 end
 	# Sending a new message abandons any proposal still awaiting a decision; the core
 	# seals the dangling tool call, so dismiss its review UI here to match (D28).
-	if {$::pending_turn ne ""} { approve_bar 0 ; compare_close }
+	if {$::pending_turn ne ""} { approve_bar 0 ; compare_close ; plan_close }
 	chat_label you-label "You"
 	chat_log "$text\n"
 	set ::chat_turn_open 0
@@ -2838,7 +2841,20 @@ proc chat_event {ev} {
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
 			set turn [dict get $ev params turn]
 			set kind [expr {[dict exists $ev params kind] ? [dict get $ev params kind] : "edit"}]
-			if {$kind eq "command"} {
+			if {$kind eq "plan"} {
+				# A plan (D101): always gated, and always opened — a plan the user has to
+				# go looking for is a plan they will approve unread. The chat keeps the
+				# one-line trace and the decision; the plan itself gets the center.
+				chat_log "· presents a plan: [dict get $ev params title]\n" tool
+				if {[dict get $ev params path] ne ""} {
+					chat_log "  saved as [dict get $ev params path]\n" tool
+				}
+				plan_open [dict get $ev params title] [dict get $ev params plan] \
+					[dict get $ev params path]
+				set ::pending_turn $turn
+				approve_bar 1 "Start work on this plan?" 0 0 1
+				chat_busy_stop   ;# now waiting on the user, not the model (D82)
+			} elseif {$kind eq "command"} {
 				set argv [expr {[dict exists $ev params command] ? [dict get $ev params command] : {}}]
 				set disp [dict get $ev params display]
 				set auto [expr {[dict exists $ev params auto] ? [dict get $ev params auto] : 0}]
@@ -2876,6 +2892,13 @@ proc chat_event {ev} {
 				}
 			}
 		}
+		agent.mode {
+			# The core changed the mode itself — approving a plan turns plan mode off
+			# (D101). Mirror it, or the menu would go on claiming the agent is planning
+			# while it edits.
+			set ::agent_plan_mode [expr {[dict get $ev params mode] eq "plan"}]
+			chat_status_update
+		}
 		agent.tool_result {
 			# The outcome of a read or an applied/rejected edit (red if it failed).
 			approve_bar 0
@@ -2904,11 +2927,13 @@ proc chat_diff {diff} {
 }
 
 # Show/hide the Approve/Reject bar for a pending proposal. `prompt` is the bar's
-# question (an edit vs. a command asks differently); `compare` shows the edit-only
-# Compare button (a command has no diff to compare, D83); `always` shows the
+# question (an edit vs. a command vs. a plan each ask differently); `compare` shows the
+# edit-only Compare button (a command has no diff to compare, D83); `always` shows the
 # command-only "Always allow" menubutton (standing approval, D84 — an edit has no
-# allow-list). Both extra buttons default off, so an edit shows just Approve/Reject.
-proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0}} {
+# allow-list); `plan` shows the plan-only Plan button, which reopens a plan the user
+# closed while thinking about it (D101). The extra buttons default off, so an edit shows
+# just Approve/Reject.
+proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0} {plan 0}} {
 	if {$show} {
 		.chat.approve.lbl configure -text $prompt
 		if {$compare} {
@@ -2920,6 +2945,11 @@ proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0}} {
 			pack .chat.approve.always -side right -after .chat.approve.no
 		} else {
 			catch {pack forget .chat.approve.always}
+		}
+		if {$plan} {
+			pack .chat.approve.plan -side right -after .chat.approve.no
+		} else {
+			catch {pack forget .chat.approve.plan}
 		}
 		pack .chat.approve -side bottom -fill x -before .chat.input
 	} else {
@@ -2983,6 +3013,7 @@ proc agent_decide {decision} {
 	set t $::pending_turn
 	approve_bar 0
 	compare_close
+	plan_close
 	catch {rio_call agent.approve [dict create turn $t decision $decision]}
 	chat_busy_start   ;# the turn resumes; the next message/error stops it (D82)
 }
@@ -2991,6 +3022,10 @@ proc agent_decide {decision} {
 proc chat_clear {} {
 	rio_call agent.reset {}
 	chat_busy_stop   ;# abort any working animation (D82)
+	# agent.reset aborts any turn suspended at the approval gate, so the review UI is now
+	# asking about a decision nothing is waiting for — take it down with the conversation
+	# it belonged to. Most visible with a plan (D101), which holds the whole center.
+	approve_bar 0 ; compare_close ; plan_close
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
 	.chat.log configure -state disabled
@@ -3167,6 +3202,80 @@ proc compare_with_file_dialog {} {
 	}
 	compare_open [buf_text $::cur] [dict get $resp result text] \
 		"[tab_name $::cur] (buffer)" "[file tail $path] (file)"
+}
+
+# ---------------------------------------------------------------------------
+# The plan view (AGENTS.md D101). In plan mode the agent may not change anything; what
+# it may do is say what it WOULD do, through the core's `present_plan` tool. The plan
+# arrives as an `agent.propose` of kind `plan` carrying Markdown, and lands here — in the
+# center, instead of the editor, exactly as a complex proposed edit lands in the compare
+# view (D28). The two views are the same idea: a proposal too big to read in the chat
+# column gets the width of the document area, while the decision stays on the chat's
+# Approve/Reject bar where every other agent decision is made.
+#
+# It renders with the manual's renderer (help_blocks → help_paint, D100), so a plan reads
+# like a page of the manual rather than like a text dump. Links inside a plan are STYLED
+# BUT INERT: the renderer's click binding follows a manual topic, which is not what a path
+# in a plan means — a wrong door is worse than no door.
+# ---------------------------------------------------------------------------
+set ::plan_shown 0   ;# plan view active? (.plan shown instead of .ed)
+set ::plan_title ""
+set ::plan_path  ""  ;# where the core filed this plan, project-relative ("" = nowhere)
+
+# Show a plan, replacing the editor as the center. Mutually exclusive with the compare
+# view — there is one center, and whichever proposal arrived last is the one being read.
+proc plan_open {title md path} {
+	set ::plan_title $title
+	set ::plan_path  $path
+	.plan.hdr configure -text [plan_header]
+	set t .plan.text
+	$t configure -state normal
+	$t delete 1.0 end
+	help_paint $t [help_blocks $md]
+	$t configure -state disabled
+	$t yview moveto 0
+	plan_restyle
+	plan_reopen
+}
+
+# Put the plan back in the center after the user closed it — the pane still holds the
+# painted plan, so this costs nothing and keeps where they had scrolled to. Mutually
+# exclusive with the compare view: there is one center, and one thing being reviewed.
+proc plan_reopen {} {
+	if {$::plan_title eq ""} return
+	set ::compare_shown 0
+	set ::plan_shown 1
+	apply_layout
+}
+
+# The header line: the plan's title, and where it was filed so the reader can go back to
+# it after the window is closed (a plan with no project behind it names no file).
+proc plan_header {} {
+	set h "Plan — $::plan_title"
+	if {$::plan_path ne ""} { append h "   ·   $::plan_path" }
+	return $h
+}
+
+# Leave the plan view, restoring the editor as the center.
+proc plan_close {} {
+	if {!$::plan_shown} return
+	set ::plan_shown 0
+	apply_layout
+	focus [gget $::focus path]
+}
+
+# Colour the plan view from the live theme: its own chrome, then the renderer's tags.
+proc plan_restyle {} {
+	if {![winfo exists .plan]} return
+	set c $::theme_colors
+	.plan configure -background [dict get $c ui.bg]
+	.plan.bar configure -background [dict get $c ui.bg]
+	.plan.bar.close configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.plan.hdr configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.plan.sb configure -background [dict get $c ui.bg]
+	help_style .plan.text
 }
 
 # The open-buffer picker (D74). One modal dialog (pick_dialog, below) serves both
@@ -3802,8 +3911,8 @@ proc help_spans {t s blocktags {mono 0}} {
 			em       { lappend tags [expr {$mono ? "mem" : "em"}] }
 			strongem { lappend tags [expr {$mono ? "mstrongem" : "strongem"}] }
 			code     { lappend tags tt }
-			link     { set tag L[incr ::help_link_n]
-			           set ::help_link($tag) $target
+			link     { set tag L[incr ::help_link_n($t)]
+			           set ::help_link($t,$tag) $target
 			           lappend tags link $tag }
 		}
 		$t insert end $text $tags
@@ -3812,16 +3921,18 @@ proc help_spans {t s blocktags {mono 0}} {
 
 # Put a page on screen. Records where each heading landed (::help_anchor) so a `#slug` link
 # can scroll to it, and what each link points at (::help_link) so a click can follow it.
+# Both are keyed by WIDGET: the plan view (D101) paints with the same renderer, and painting
+# a plan must not cost an open manual page its anchors.
 proc help_paint {t blocks} {
-	array unset ::help_anchor
-	array unset ::help_link
-	set ::help_link_n 0
+	array unset ::help_anchor "$t,*"
+	array unset ::help_link "$t,*"
+	set ::help_link_n($t) 0
 	foreach blk $blocks {
 		set kind [lindex $blk 0]
 		switch $kind {
 			heading {
 				lassign $blk -> level htext
-				set ::help_anchor([help_slug $htext]) [$t index "end-1c"]
+				set ::help_anchor($t,[help_slug $htext]) [$t index "end-1c"]
 				help_spans $t $htext [list h[expr {$level > 3 ? 3 : $level}]]
 				$t insert end "\n"
 			}
@@ -3883,7 +3994,7 @@ proc help_link_binds {t} {
 # Which link was clicked: the L<n> tag under the pointer names it.
 proc help_link_click {t x y} {
 	foreach tag [$t tag names [$t index @$x,$y]] {
-		if {[info exists ::help_link($tag)]} { help_goto $::help_link($tag) ; return }
+		if {[info exists ::help_link($t,$tag)]} { help_goto $::help_link($t,$tag) ; return }
 	}
 }
 
@@ -3898,8 +4009,9 @@ proc help_goto {target} {
 # Scroll a heading to the top of the page. A slug rio cannot place is left alone rather than
 # guessed at — the reader is on the right page, just not moved.
 proc help_anchor_see {slug} {
-	if {![info exists ::help_anchor($slug)]} { return 0 }
-	.help.page.text yview $::help_anchor($slug)
+	set t .help.page.text
+	if {![info exists ::help_anchor($t,$slug)]} { return 0 }
+	$t yview $::help_anchor($t,$slug)
 	return 1
 }
 
@@ -4038,10 +4150,30 @@ proc help_restyle {} {
 	$b tag configure helpsect -foreground [blend_hex [dict get $c ui.fg] $bg 35]
 	$b tag raise selrow
 
+	help_style .help.page.text
+
+	# Search hits, last and raised: this one has to win -background over the block that
+	# happens to be under it (a match inside a code block or a table is still a match). The
+	# find bar's own role, falling back the way it does when a theme omits it. Help-only —
+	# the plan view has nothing to search.
+	set t .help.page.text
+	$t tag configure hit -background [expr {[dict exists $c editor.findmatch] \
+		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
+	$t tag raise hit
+}
+
+# Dress a text widget to be painted by help_paint: every tag the renderer uses, from the
+# current theme and UI font. Separate from help_restyle because the renderer has a second
+# consumer — the plan view (D101) — and a plan should read exactly like a manual page; the
+# window's own chrome is what stays in help_restyle.
+proc help_style {t} {
+	set c $::theme_colors
+	set bg [dict get $c editor.bg]
+	set fg [dict get $c editor.fg]
+	set mute [blend_hex $fg $bg 45]
 	set fam  [font configure RioUIFont -family]
 	set sz   [font configure RioUIFont -size]
 	set mfam [font configure RioEditorFont -family]
-	set t .help.page.text
 	$t configure -font [list $fam $sz] -background $bg -foreground $fg
 
 	# Blocks.
@@ -4075,13 +4207,6 @@ proc help_restyle {} {
 	# where the heading's size has to win. Raising the headings settles only -font; a link in
 	# one keeps its colour, since no heading sets a foreground.
 	foreach h {h1 h2 h3} { $t tag raise $h }
-
-	# Search hits, last and raised: this one has to win -background over the block that
-	# happens to be under it (a match inside a code block or a table is still a match). The
-	# find bar's own role, falling back the way it does when a theme omits it.
-	$t tag configure hit -background [expr {[dict exists $c editor.findmatch] \
-		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
-	$t tag raise hit
 }
 
 
@@ -4154,6 +4279,7 @@ proc adopt_agent_status {} {
 	if {$st eq ""} return   ;# error already surfaced; keep the current menu state
 	set ::agent_provider    [dict get $st provider]
 	set ::agent_auto_accept [dict get $st auto_accept]
+	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
 	providers_menu_fill     ;# refresh the cache + the provider/key menus from the core
 	chat_status_update
 }
@@ -4219,8 +4345,27 @@ proc chat_busy_stop {} {
 proc chat_status_update {} {
 	if {$::chat_busy} return   ;# the working indicator owns the strip while a turn runs
 	set agent [agent_provider_label $::agent_provider]
-	set mode  [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
+	# Plan mode outranks the edit policy in the strip: while it is on, no edit is being
+	# proposed at all, so saying how edits would be handled would be saying nothing (D101).
+	if {$::agent_plan_mode} {
+		set mode "plan mode"
+	} else {
+		set mode [expr {$::agent_auto_accept ? "auto-accept edits" : "review edits"}]
+	}
 	catch {.chat.status configure -text "$agent   ·   $mode"}
+}
+
+# Switch the agent between planning and building (the Settings checkbutton and the
+# Preferences checkbox share this). The core holds the mode — this only asks it to change,
+# and puts the menu back if it refuses, so the checkmark never claims a state the agent is
+# not in.
+proc apply_plan_mode {} {
+	set r [rio_call agent.mode.set [dict create mode [expr {$::agent_plan_mode ? "plan" : "build"}]]]
+	if {![dict get $r ok]} {
+		set ::agent_plan_mode [expr {!$::agent_plan_mode}]
+		report_error [dict get $r error message] [dict get $r error code]
+	}
+	chat_status_update
 }
 
 # The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
@@ -6308,6 +6453,7 @@ proc apply_theme {theme} {
 	.chat.approve.yes configure -font RioUIFont
 	.chat.approve.no  configure -font RioUIFont
 	.chat.approve.cmp configure -font RioUIFont
+	.chat.approve.plan configure -font RioUIFont
 	.chat.approve.always configure -font RioUIFont
 	.chat.approve.always.m configure -font RioUIFont
 	.csash configure -background [dict get $c tab.bar.bg]
@@ -6386,6 +6532,7 @@ proc apply_theme {theme} {
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	restyle_tabs
 	help_restyle   ;# the help viewer, if it is open — it outlives a theme change (D99)
+	plan_restyle   ;# and the plan view, which outlives one the same way (D101)
 	# Named-font defaults for widgets created later (dialogs, the future chat pane).
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
@@ -8855,9 +9002,11 @@ proc prefs_fill_agent {f} {
 		grid [prefs_hint $f.hint "Echo is a built-in stub. Install Claude or an OpenAI-compatible provider from Extensions… to use a real model."] \
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	}
+	grid [prefs_check $f.pm "Plan mode (no changes until you approve a plan)" \
+		::agent_plan_mode apply_plan_mode] -row [incr r] -column 0 -sticky w -pady {8 1}
 	grid [prefs_check $f.aa "Auto-accept edits" ::agent_auto_accept \
 		{rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}] \
-		-row [incr r] -column 0 -sticky w -pady {8 1}
+		-row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
 	set i 0
 	foreach p $::agent_providers {
@@ -9198,6 +9347,26 @@ foreach w {.cmp.l.t .cmp.r.t} {
 	bind $w <Escape>     {compare_close ; break}
 }
 
+# The plan view (AGENTS.md D101): one read-only pane in the center, rendering the agent's
+# plan with the manual's renderer (plan_open). Same chrome as the compare view — a titled
+# header and a bottom bar whose button names the Esc shortcut — because it is the same kind
+# of thing: a proposal being read before it is decided. Wrapped, not scrolled sideways:
+# this is prose, and help_paint's own code/table tags handle what must not reflow.
+frame .plan
+label .plan.hdr -anchor w -font {monospace 9} -padx 4 -pady 2 -background "#dddddd" -foreground black
+text .plan.text -wrap word -state disabled -font {monospace 12} -width 80 -height 28 \
+	-borderwidth 0 -highlightthickness 0 -padx 12 -pady 8 \
+	-background white -foreground black -yscrollcommand {.plan.sb set}
+scrollbar .plan.sb -orient vertical -command {.plan.text yview}
+frame .plan.bar
+button .plan.bar.close -text "× Close plan (Esc)" -font {monospace 9} -command plan_close
+pack .plan.bar.close -side right -padx 2 -pady 1
+pack .plan.bar -side bottom -fill x
+pack .plan.hdr -side top -fill x
+pack .plan.sb -side right -fill y
+pack .plan.text -side left -fill both -expand 1
+bind .plan.text <Escape> {plan_close ; break}
+
 # The agent chat pane (built here; apply_layout packs it on the right when shown,
 # apply_theme colours it via the chat.* roles + RioChatFont). propagate off so a
 # fixed -width holds across content, like the dock. A header (Agent + Clear) on
@@ -9236,6 +9405,9 @@ label .chat.approve.lbl -text "Apply this edit?" -anchor w -font {monospace 9} \
 button .chat.approve.yes -text "Approve" -font {monospace 9} -command {agent_decide approve}
 button .chat.approve.no  -text "Reject"  -font {monospace 9} -command {agent_decide reject}
 button .chat.approve.cmp -text "Compare" -font {monospace 9} -command {compare_proposal $::pending_turn}
+# "Plan" (plan proposals only, D101): reopen the plan the user closed while thinking. The
+# plan is already in hand — nothing is fetched, it is only shown again.
+button .chat.approve.plan -text "Plan" -font {monospace 9} -command plan_reopen
 # "Always allow" (command proposals only, D84): remember a trust rule so this command
 # stops asking. Packed on demand by approve_bar; its menu is rebuilt per proposal by
 # chat_allow_menu_populate. tearoff off — a floating menu makes no sense here.
@@ -9568,8 +9740,12 @@ menu .m.settings -tearoff 0
 # 2026-09-09), keeping this menu to fast toggles.
 menu .m.settings.provider -tearoff 0
 .m.settings add cascade -label "Agent Provider" -menu .m.settings.provider
-# Auto-accept and compare-complex are the two agent toggles flipped often enough mid-
-# session to keep here alongside the provider (their twins live in Preferences too).
+# Plan mode, auto-accept and compare-complex are the agent toggles flipped often enough
+# mid-session to keep here alongside the provider (their twins live in Preferences too).
+# Plan mode leads: it is the one that decides whether the agent may change anything at all,
+# and it is flipped at the START of a piece of work, which is when this menu is open (D101).
+.m.settings add checkbutton -label "Agent: Plan mode" -variable ::agent_plan_mode \
+	-command apply_plan_mode
 .m.settings add checkbutton -label "Agent: Auto-accept edits" -variable ::agent_auto_accept \
 	-command {rio_result agent.autoaccept.set [dict create on $::agent_auto_accept]; chat_status_update}
 .m.settings add checkbutton -label "Agent: Compare complex edits" \

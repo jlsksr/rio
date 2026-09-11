@@ -227,7 +227,20 @@ proc rio::ops::agent_autoaccept_set {params} {
 }
 rio::dispatch::register agent.autoaccept.set rio::ops::agent_autoaccept_set
 
-# agent.status -> {provider, auto_accept, key_set} ; the agent's current settings,
+# agent.mode.set {mode} -> {mode} ; switch between `build` and `plan` (D101). In plan
+# mode the core hands the provider only the read tools and present_plan, and adds the
+# plan prompt layer — so what the agent may do changes here, in the core, not in a
+# provider. An unknown mode is a bad_request. Approving a presented plan flips the mode
+# back to `build` on its own and announces it with an `agent.mode` event.
+proc rio::ops::agent_mode_set {params} {
+	if {![dict exists $params mode]} {
+		rio::error::raise bad_request "agent.mode.set requires mode"
+	}
+	return [dict create result [dict create mode [rio::agent::set_mode [dict get $params mode]]]]
+}
+rio::dispatch::register agent.mode.set rio::ops::agent_mode_set
+
+# agent.status -> {provider, auto_accept, mode, key_set} ; the agent's current settings,
 # so a frontend renders its menus/dialogs without holding the state itself (D3).
 # `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless one
 # like echo); per-provider key state is in agent.providers. All leaves are
@@ -236,6 +249,7 @@ proc rio::ops::agent_status {params} {
 	return [dict create result [dict create \
 		provider    [rio::agent::provider_name] \
 		auto_accept [rio::agent::auto_accept] \
+		mode        [rio::agent::mode] \
 		key_set     [rio::agent::key_status]]]
 }
 rio::dispatch::register agent.status rio::ops::agent_status

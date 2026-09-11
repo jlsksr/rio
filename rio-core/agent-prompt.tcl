@@ -8,7 +8,7 @@
 # (the provider contract's `system` argument, agent.tcl), exactly as it already
 # pushes `tools`; a provider with no system-prompt slot (echo) simply ignores it.
 #
-# Four layers, composed in order, deliberately kept apart so a user's own
+# Five layers, composed in order, deliberately kept apart so a user's own
 # instructions never have to live in rio's shipped code. All are plain Markdown
 # DATA — loaded, never executed:
 #
@@ -29,8 +29,14 @@
 #
 #   project (layer 4) — an optional `.rio/agent.md` at the open project root: the
 #       instructions specific to THIS codebase (its conventions, its don'ts). The
-#       tightest, most task-specific layer, so it comes last. Opt-in, and it lives
-#       WITH the project, not with rio.
+#       tightest, most task-specific layer of the standing ones, and it lives WITH the
+#       project, not with rio. Opt-in.
+#
+#   plan (layer 5, D101) — the shipped `agent/plan.md`, added ONLY while the agent is in
+#       plan mode: how to investigate and what a plan the user will read should say. It
+#       comes last because it is momentary — a state the user turned on just now — and it
+#       has to outrank anything above it that describes how to make changes. Like the base
+#       it is rio's own machinery, so it is shipped and overridable in the XDG agent dir.
 #
 # Layers 2–4 are the user-facing prompts, editable from the GUI (Preferences ▸ Agent ▸
 # Agent Prompts…, which opens each file in rio's own editor via the `agent.prompt.edit` op).
@@ -120,6 +126,21 @@ proc rio::agent::prompt::_provider {name} {
 	return [_read $p]
 }
 
+# The plan layer (D101): the shipped `agent/plan.md`, added only while the agent is in
+# plan mode. Found the same way as the base — the user's agent dir first, so a user who
+# wants the agent to plan differently drops their own `plan.md` there — because this is
+# rio's machinery speaking, not the user's standing instructions. "" in build mode, and ""
+# if the shipped file is missing (plan mode then still withholds the editing tools, which
+# is the half that does not depend on the model reading anything).
+proc rio::agent::prompt::_plan {mode} {
+	if {$mode ne "plan"} { return "" }
+	foreach d [_basedirs] {
+		set p [file join $d plan.md]
+		if {[file isfile $p]} { return [_read $p] }
+	}
+	return ""
+}
+
 # The project layer: `.rio/agent.md` at the open project root, or "" when there is
 # no open project or no such file. Per-project instructions live with the project.
 proc rio::agent::prompt::_project {} {
@@ -146,11 +167,13 @@ proc rio::agent::prompt::_read {path} {
 # layer, then the active provider's own layer, then any project layer — each appended
 # so the more specific refines the more general (D70/D79). `provider` is the active
 # provider's NAME (the caller passes rio::agent::provider_name); "" (or echo) simply
-# contributes no provider layer. Any layer may be empty; the result is "" only when
-# nothing is available at all.
-proc rio::agent::prompt::compose {{provider ""}} {
+# contributes no provider layer. `mode` adds the plan layer while the agent is planning
+# (D101) — last, because it is the most situational thing said here and it has to win
+# over anything above it that says how to make changes. Any layer may be empty; the
+# result is "" only when nothing is available at all.
+proc rio::agent::prompt::compose {{provider ""} {mode build}} {
 	set parts {}
-	foreach t [list [_base] [_user] [_provider $provider] [_project]] {
+	foreach t [list [_base] [_user] [_provider $provider] [_project] [_plan $mode]] {
 		if {$t ne ""} { lappend parts $t }
 	}
 	return [join $parts "\n\n"]

@@ -151,10 +151,10 @@ ok "paint: fenced code is marked"   [expr {[llength [$t tag ranges code]] > 0}] 
 # A click resolves through the L<n> tag sitting under the pointer, so that mapping — not a
 # synthetic click, which needs a mapped window — is what is checked.
 help_show index.md
-ok "links: the contents page is full of them" [expr {$::help_link_n > 15}] 1
+ok "links: the contents page is full of them" [expr {$::help_link_n($t) > 15}] 1
 set ltag [lsearch -inline -glob [$t tag names [lindex [$t tag ranges link] 0]] L*]
-ok "links: the tag carries a target" [info exists ::help_link($ltag)] 1
-help_goto $::help_link($ltag)
+ok "links: the tag carries a target" [info exists ::help_link($t,$ltag)] 1
+help_goto $::help_link($t,$ltag)
 ok "links: following one lands"     $::help_topic getting-started.md
 help_history back
 ok "history: back returns"          $::help_topic index.md

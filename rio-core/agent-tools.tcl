@@ -5,13 +5,16 @@
 # the built-ins. Each tool wraps existing core ops (one implementation, the op's
 # validation reused).
 #
-# Two kinds, split on safety:
+# Kinds, split on safety:
 #   read  (fs_list/fs_read/buffer_list/buffer_text) — inspection; auto-executed,
 #         never mutates, rendered as transparency (slice 4).
 #   write (propose_edit/propose_create) — mutation; NEVER auto-run. The loop
 #         surfaces a diff and waits for the user's approval before apply_write
 #         touches anything (slice 5). On approval the edit applies to the open
 #         buffer (undoable) and, by default, is written to disk.
+#   exec  (run_command) — an argv the user always confirms (D83).
+#   plan  (present_plan) — the work described before it is done (D101): gated like a
+#         write, but what it changes is the mode, not the project.
 #
 # Rails: path inputs are confined to the open project root (absolute / ../ escapes
 # refused); read results are size-capped. The write surface reaches disk only
@@ -60,12 +63,28 @@ rio::agent::tools::_def run_command exec "" \
 	"Run a command in the open project and return its exit code, stdout, and stderr — for tests, a linter, a build, git, and the like. `command` is an ARGUMENT VECTOR, not a shell line: pass the program and each argument as separate array elements (e.g. \[\"pytest\",\"-q\",\"tests/\"\]). There is NO shell, so pipes, redirects, globs, quotes, ~, environment-variable expansion and `&&`/`;` do NOT work — chain steps by calling the tool again. The user reviews the exact command and approves or rejects before it runs; a run always waits for the human. A non-zero exit is a normal result (its code is data). cwd is confined to the project; the command is killed if it exceeds its timeout." \
 	{{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"description":"The command as an argument vector: the program followed by each argument as a separate string. Not a shell string."},"cwd":{"type":"string","description":"Working directory relative to the project root (omit for the root). Must stay within the project."},"timeout":{"type":"integer","description":"Seconds before the command is killed (default 120, max 600)."}},"required":["command"]}}
 
+rio::agent::tools::_def present_plan plan "" \
+	"Present your plan for the work, for the user to read and approve BEFORE anything changes. Investigate first with the read tools, then call this ONCE with the whole plan. `plan` is Markdown — headings, lists, tables, fenced code — and the user reads it RENDERED, not as source, so write it for a person: what you understood the task to be, what you will change (file by file), and how it will be verified. Say what you are deliberately NOT doing. The user approves or rejects; on approval you carry the plan out, one reviewed edit at a time." \
+	{{"type":"object","properties":{"title":{"type":"string","description":"A short name for the plan — one line, no Markdown."},"plan":{"type":"string","description":"The plan itself, as Markdown."}},"required":["title","plan"]}}
+
 # The tool specs handed to a provider: {name, description, input_schema} per tool.
 # input_schema is a JSON-string fragment the provider splices verbatim (D26).
-proc rio::agent::tools::specs {} {
+#
+# The set depends on the agent's MODE (D101): in `plan` mode the model gets the reads
+# plus present_plan and NOTHING that changes anything — the restriction is real, not a
+# request in the prompt, and it is provider-agnostic because the core composes this list
+# for every provider. In `build` mode present_plan is withheld instead: a plan is what
+# plan mode is for, and offering it everywhere invites a plan nobody asked for.
+proc rio::agent::tools::specs {{mode build}} {
 	variable specs
 	set out {}
 	dict for {name s} $specs {
+		set kind [dict get $s kind]
+		if {$mode eq "plan"} {
+			if {$kind ni {read plan}} continue
+		} elseif {$kind eq "plan"} {
+			continue
+		}
 		lappend out [dict create name $name \
 			description [dict get $s description] \
 			input_schema [dict get $s schema]]
@@ -79,18 +98,18 @@ proc rio::agent::tools::is_write {name} {
 	expr {[dict exists $specs $name] && [dict get $specs $name kind] eq "write"}
 }
 
-# A tool's kind (read|write|exec), or "" if unknown.
+# A tool's kind (read|write|exec|plan), or "" if unknown.
 proc rio::agent::tools::kind_of {name} {
 	variable specs
 	if {[dict exists $specs $name]} { return [dict get $specs $name kind] }
 	return ""
 }
 
-# Does this tool go through the approval gate? Write (edit/create) and exec
-# (run_command) both do; only reads auto-run.
+# Does this tool go through the approval gate? Write (edit/create), exec
+# (run_command) and plan (present_plan) all do; only reads auto-run.
 proc rio::agent::tools::is_gated {name} {
 	set k [kind_of $name]
-	expr {$k eq "write" || $k eq "exec"}
+	expr {$k in {write exec plan}}
 }
 
 # Execute one READ tool call. Returns {ok <0|1>, content <text for Claude>, summary
@@ -229,6 +248,68 @@ proc rio::agent::tools::apply_write {plan} {
 	}
 	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)" \
 		events [dict get $out events]]
+}
+
+# --- plan: prepare (shape it, and keep a copy) -------------------------------
+# The present_plan tool (D101). Returns {ok 1, name, title, markdown, path} for the loop
+# to surface (agent.propose, kind plan) and for the user to approve. Nothing here touches
+# the project's own files: the only write is the plan's own copy under `.rio/plans/`, so
+# a plan is a record even when it is rejected — and `path` is "" when there is no project
+# to keep it in (D72), which is not an error, only a plan that leaves no trace.
+proc rio::agent::tools::prepare_plan {input} {
+	foreach k {title plan} {
+		if {![dict exists $input $k] || [string trim [dict get $input $k]] eq ""} {
+			return [_err "present_plan requires $k" "error: missing $k"]
+		}
+	}
+	set title [string trim [dict get $input title]]
+	set md [_plan_markdown $title [string trim [dict get $input plan]]]
+	return [dict create ok 1 name present_plan title $title markdown $md \
+		path [_plan_save $title $md]]
+}
+
+# The plan as one Markdown document: its title as the opening heading, unless the model
+# already wrote one (then its own is kept — two titles read worse than either).
+proc rio::agent::tools::_plan_markdown {title body} {
+	foreach line [split $body "\n"] {
+		if {[string trim $line] eq ""} continue
+		if {[string index [string trimleft $line] 0] eq "#"} { return $body }
+		break
+	}
+	return "# $title\n\n$body"
+}
+
+# Write the plan under the open project's `.rio/plans/` and return its project-relative
+# path, or "" (no project, or the write failed — a plan that cannot be filed is still a
+# plan worth reading). Timestamped and slugged so the directory reads as a history; a
+# same-second collision takes the next free suffix rather than overwriting.
+proc rio::agent::tools::_plan_save {title md} {
+	set root [rio::project::root]
+	if {$root eq ""} { return "" }
+	set stamp [clock format [clock seconds] -format %Y%m%d-%H%M%S]
+	set base "$stamp-[_slug $title]"
+	set rel [file join .rio plans "$base.md"]
+	for {set n 2} {[file exists [file join $root $rel]]} {incr n} {
+		set rel [file join .rio plans "$base-$n.md"]
+	}
+	set abs [file join $root $rel]
+	if {[catch {
+		file mkdir [file dirname $abs]
+		set fh [open $abs w]
+		fconfigure $fh -encoding utf-8
+		puts $fh $md
+		close $fh
+	}]} { return "" }
+	return $rel
+}
+
+# A title as a filename fragment: lowercase, runs of anything else collapsed to one
+# dash, trimmed and length-capped. Never empty — a title of pure punctuation still
+# needs a name.
+proc rio::agent::tools::_slug {s} {
+	set out [string trim [regsub -all -- {-+} [regsub -all {[^a-z0-9]+} [string tolower $s] -] -] -]
+	if {$out eq ""} { return plan }
+	return [string trim [string range $out 0 47] -]
 }
 
 # --- exec: prepare (validate + build a reviewable command) -------------------

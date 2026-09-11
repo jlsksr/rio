@@ -5145,6 +5145,97 @@ would explain it.
 
 ---
 
+### D101 — Plan mode: the agent says what it would do, in a view you can read
+
+An agent that starts editing on a one-line request is answering a question nobody checked.
+The VSCode Claude plugin's planning mode is the shape jka asked for: the model investigates,
+lays out a plan as a **rendered document**, and only then does anything. rio had no plan mode
+at all. This adds one — and the interesting part is how little it took, because every seam it
+needs already existed.
+
+**It is a core tool, not a provider feature.** Tools are core-owned (D20): `agent-tools.tcl`
+composes the specs and `_run` hands them to every provider through the contract's `tools`
+argument, which each `api-face.tcl` converts. So a plan presented through a **tool call** is
+provider-agnostic *by construction* — Claude, the OpenAI-compatible provider (and any local
+model behind it), and any future one, with **zero lines** in `extensions/`. The new built-in
+is `present_plan {title, plan}`, kind `plan`, and it goes through the gate D26 s5 and D83
+already built: a gated tool emits `agent.propose`, the turn's coroutine yields, `agent.approve`
+resumes it, the decision becomes the `tool_result`. A plan is simply a third **kind** in that
+vocabulary — `edit`, `command`, `plan`.
+
+**The mode has teeth.** `Settings ▸ Agent: Plan mode` (twinned in Preferences ▸ Agent, per
+D85) sets `rio::agent::mode`; in `plan` mode `tools::specs` hands out the reads plus
+`present_plan` and **nothing that changes anything**, and `prompt::compose` appends a fifth
+layer, the shipped `agent/plan.md` (overridable in the XDG agent dir like the base, since it
+is rio's machinery and not the user's standing instructions). Both halves are composed in the
+core, so a provider cannot opt out of a mode it never learns about — asking the model nicely
+in a prompt would have been a suggestion, not a restriction. The mode lives in the core for
+the D3/D30 reason too: `agent.status` carries it, so a second frontend on the same core agrees
+about what the agent may do. `present_plan` is **never** auto-accepted — `auto_accept` is
+edits-only by charter (D83), and a plan whose whole purpose is a human's judgement is the last
+thing to skip past one.
+
+**Approval continues the same turn**, which cost one real change: `_run` used to compute the
+tool specs and the system prompt **once**, before its step loop. Approving a plan flips the
+mode mid-turn, and a model handed a stale tool list would go on planning with the tools it had
+when the turn started. Both are now recomposed **every step**, so the write tools arrive on the
+very next provider call and the plan layer drops away with the mode. Rejection leaves plan mode
+on — the user is still planning — and tells the model to ask what they want different rather
+than to present another plan immediately.
+
+**The plan takes the center, not the chat column.** It lands in `.plan`, packed where the
+editor goes, exactly as a complex proposed edit lands in the compare view (D28): a proposal too
+big to read in a 340-pixel column gets the width of the document area, while the decision stays
+on the chat's Approve/Reject bar with every other agent decision. A `Plan` button reopens it
+(the pane still holds the painted plan, so reopening costs nothing and keeps the scroll), `Esc`
+or `× Close plan` puts the editor back, and a decision — or a new message, the D28 abandon path
+— dismisses it. One center: opening a plan closes the compare view and the reverse.
+
+It renders with **the manual's renderer** (`help_blocks` → `help_paint`, D100), so a plan reads
+like a page of the manual instead of a text dump. Two small things made that sharing honest:
+the tag configuration moved out of `help_restyle` into **`help_style {t}`**, which the plan view
+calls too; and `help_paint`'s `::help_anchor` / `::help_link` arrays are now keyed **by widget**,
+because painting a plan was otherwise clearing an open manual page's anchors and quietly
+breaking its own `#slug` links. Links inside a plan are **styled but inert** — the renderer's
+click binding follows a *manual topic*, which is not what a path in a plan means, and a wrong
+door is worse than no door.
+
+**Every plan is filed.** The core writes it to the project's `.rio/plans/<stamp>-<slug>.md` as
+it is presented — rejected ones too, since the record of what was refused is worth as much as
+the record of what was built. `.rio/` is already rio's project-local home (D79 `agent.md`,
+D84 `allow.list`) and the write mirrors `allow::_write`. No project open (D72) means no file
+and no error: the plan still shows, it just leaves no trace. The core writes it, not the GUI,
+because the project lives on the core's machine (D3/D29).
+
+**One old defect the plan made visible.** `chat_clear` reset the conversation but left the
+approve bar — and the compare view — on screen, asking about a decision the core had already
+aborted. Harmless enough with a two-line diff inline; not with a plan holding the whole center.
+`chat_clear` now takes the review UI down with the conversation it belonged to.
+
+**What the guards hold.** `agent.test` +11 and `agent-prompt.test` +4 (core 542 → 557): the
+spec filter both ways, `present_plan` gated and never auto-accepted, approval flipping the mode
+*and the next step's tool list*, rejection keeping it, the file landing with a slugged name, no
+project → no file, and the plan layer appearing only in plan mode. A new GUI suite `plan.tcl`
+(49 checks) drives synthetic `agent.propose` events the way `smoke.tcl` drives the other kinds:
+the pane renders headings/lists/tables/code and hides the source markup, the bar asks the plan's
+question and offers `Plan` but neither `Compare` nor `Always allow`, close/reopen/decide/send
+each do the right thing to the center, a theme change restyles it, the mode toggle round-trips
+through the core (including an `agent.mode` event the core sends when it flips the mode itself),
+and — the one that proves the renderer factoring — a plan painted while the help window is open
+leaves that page's anchors intact. Five injections, each failing by name: no spec filter, specs
+hoisted back out of the step loop, the anchor arrays un-keyed, no `plan_close` on a decision,
+and plans not filed.
+
+**Not built, deliberately:** editing a plan and handing the edited text back as the task; a
+browser over `.rio/plans/`; a keyboard chord for the mode (D23 data — addable later without
+touching this); rendering Markdown in the chat transcript generally.
+
+**Honest limit:** every check above is headless. That a *model* actually reaches for
+`present_plan`, and that the tool's description reads well enough to make it do so, is not
+something a synthetic event can prove — that takes a live turn against a real provider.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

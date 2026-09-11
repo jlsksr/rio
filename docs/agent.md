@@ -70,6 +70,35 @@ it may do three kinds of thing:
    run confined to your project and are time-boxed, so a runaway process cannot sit
    there forever.
 
+## Planning before building
+
+For anything bigger than a small fix, you can ask to see the plan first. Turn on
+***Settings ▸ Agent: Plan mode*** (also in *Preferences ▸ Agent*) and describe the
+job as usual.
+
+While plan mode is on the agent **cannot change anything** — not as a promise it
+makes, but because it is handed no editing and no command tools at all. It can only
+read your project and then do one thing: present a plan.
+
+The plan opens **in the middle of the window**, where the editor sits, formatted
+the way the manual is — headings, lists, tables — because it is meant to be read
+rather than skimmed. The chat pane keeps the decision:
+
+- **Approve** ends plan mode and the agent starts work, proposing each edit and
+  each command for your approval exactly as before.
+- **Reject** leaves plan mode on. Say what you want different and let it try again.
+- **Plan** reopens the plan if you closed it; `Esc` or **× Close plan** puts the
+  editor back while you think.
+
+Every plan is also saved in your project, under `.rio/plans/`, with the date and
+its title in the filename — including the ones you reject. They are plain Markdown:
+keep them, read them later, or delete the folder; nothing in rio depends on them.
+(Add `.rio/plans/` to your `.gitignore` if you would rather they didn't travel with
+the code.)
+
+Plan mode is part of rio, not of one model's API, so it works the same whichever
+provider you have installed.
+
 ## Loosening the gate, deliberately
 
 Two escape hatches exist, and they are separate on purpose.

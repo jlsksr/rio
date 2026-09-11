@@ -287,6 +287,19 @@ for later:
   Still wanted: **streaming** a command's output as it runs and a per-command
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
   **own dock panel** rather than inline in the chat; a richer rules editor.
+- **Plan mode** — *landed* (AGENTS.md D101). ***Settings ▸ Agent: Plan mode*** withholds
+  every changing tool from the provider — reads plus one new gated built-in,
+  **`present_plan`** — and adds a shipped **plan prompt layer**. The plan arrives as an
+  `agent.propose` of kind `plan` carrying Markdown and takes the **center**, rendered with
+  the manual's renderer (D100) beside the chat's Approve/Reject bar; approving it flips the
+  mode back to `build` **inside the same turn** (the loop recomposes tools and prompt every
+  step) and the agent carries the plan out, each edit still gated. Every presented plan —
+  rejected ones included — is filed under the project's `.rio/plans/`. Provider-agnostic by
+  construction: the tool list and the system prompt are composed in the core, so nothing in
+  `extensions/` knows plan mode exists.
+  Still wanted: **editing** a plan and handing the edited text back as the task; a browser
+  over `.rio/plans/`; a **keyboard chord** for the mode (the keymap is D23 data, so one can
+  be added without touching this).
 
 ## Frontends
 

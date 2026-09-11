@@ -22,6 +22,13 @@
 # Reads happen (they are not proposals); the approval gate is reserved for the
 # write/run slice (O4). A step cap bounds the read->think->read loop.
 #
+# Modes (D101): the loop runs in `build` (the normal working set) or `plan`, where the
+# tool list handed to the provider holds only the reads and `present_plan` and the prompt
+# gains a planning layer. Because BOTH the tool list and the system prompt are composed
+# here, planning behaves the same whatever provider is live — a provider cannot opt out of
+# a mode it never learns about. Approving a presented plan flips the mode back to `build`
+# inside the same turn, which is why the loop recomputes tools and prompt every step.
+#
 # Conversation entries are {role, content} where content is a list of blocks —
 # {type text …} / {type tool_use …} / {type tool_result …} — the shape Claude's
 # Messages API needs to carry tool exchanges across a turn. history() flattens the
@@ -35,6 +42,7 @@ namespace eval rio::agent {
 	variable pending                                ;# array: turn -> {coro id} awaiting approval
 	variable apply_writes_disk 1                    ;# approved edits also save to disk (D26 s5 default)
 	variable auto_accept       0                    ;# skip the approval gate (opt-in; EDITS only, D83)
+	variable mode              build                ;# build | plan — which tools exist (D101)
 	variable proposals                              ;# array: turn -> {name,path,original,proposed} awaiting review
 	variable running                                ;# array: turn -> {coro token} a run_command in flight (D83)
 
@@ -57,6 +65,21 @@ proc rio::agent::writes_disk {} { variable apply_writes_disk ; return $apply_wri
 proc rio::agent::set_writes_disk {v} { variable apply_writes_disk ; set apply_writes_disk [expr {$v ? 1 : 0}] }
 proc rio::agent::set_auto_accept {v} { variable auto_accept ; set auto_accept [expr {$v ? 1 : 0}] }
 proc rio::agent::auto_accept {} { variable auto_accept ; return $auto_accept }
+
+# The agent's mode (D101). `plan` withholds every tool that changes anything — the model
+# can read and then present_plan, nothing else — and adds the plan prompt layer; `build`
+# is the normal working set. It lives here, in the core, so the restriction holds for every
+# provider and every frontend attached to this core (D3/D30). An unknown value is a
+# bad_request: a mode is a state, not a hint.
+proc rio::agent::set_mode {m} {
+	variable mode
+	if {$m ni {build plan}} {
+		rio::error::raise bad_request "unknown agent mode: $m"
+	}
+	set mode $m
+	return $mode
+}
+proc rio::agent::mode {} { variable mode ; return $mode }
 
 # Swap the active provider directly — a command prefix obeying the contract in
 # _run. The low-level hook used by the core's own tests; frontends pick a provider
@@ -274,9 +297,13 @@ proc rio::agent::_run {turn emit} {
 	variable provider
 	variable maxsteps
 	set co [info coroutine]
-	set toolspecs [rio::agent::tools::specs]
-	set system [rio::agent::prompt::compose [rio::agent::provider_name]]
 	for {set step 0} {1} {incr step} {
+		# Recomputed EVERY step, not once per turn: approving a plan flips the mode
+		# mid-turn (D101), and the model has to see the tools it just earned on the very
+		# next call — otherwise it goes on planning with a stale list. The system prompt
+		# follows for the same reason (the plan layer drops away with the mode).
+		set toolspecs [rio::agent::tools::specs [mode]]
+		set system [rio::agent::prompt::compose [rio::agent::provider_name] [mode]]
 		set acc ""
 		set calls {}        ;# tool calls this step: {id name input raw} dicts
 		set stop ""
@@ -350,6 +377,7 @@ proc rio::agent::_run {turn emit} {
 			switch -- [rio::agent::tools::kind_of $name] {
 				write { set r [_do_write $turn $id $name [dict get $c input] $emit $co] }
 				exec  { set r [_do_exec  $turn $id $name [dict get $c input] $emit $co] }
+				plan  { set r [_do_plan  $turn $id $name [dict get $c input] $emit $co] }
 				default {
 					set r [rio::agent::tools::run $name [dict get $c input]]
 					{*}$emit [dict create event agent.tool_result \
@@ -462,6 +490,47 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 	return $r
 }
 
+# Handle one present_plan call (D101): file the plan, surface it (agent.propose, kind
+# plan, carrying the Markdown itself — unlike a write's full texts there is only one
+# document and the frontend needs all of it to render anything, so there is nothing for a
+# pull op to keep lean), and yield until the user decides. ALWAYS gated: `auto_accept` is
+# edits-only (D83), and a plan whose whole purpose is a human's judgement is the last
+# thing to auto-approve. Approval flips the mode to `build` and tells the model to carry
+# the plan out — the loop's per-step spec recompute then hands it the tools to do it with,
+# each edit still stopped by the ordinary gate. Rejection leaves the mode alone: the user
+# is still planning, and the model should plan again.
+proc rio::agent::_do_plan {turn id name input emit co} {
+	variable pending
+	set prep [rio::agent::tools::prepare_plan $input]
+	if {[dict get $prep ok] == 0} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 \
+				summary [dict get $prep summary]]]
+		return $prep
+	}
+	{*}$emit [dict create event agent.propose \
+		params [dict create turn $turn id $id name $name kind plan \
+			title [dict get $prep title] plan [dict get $prep markdown] \
+			path [dict get $prep path]]]
+	set pending($turn) [list $co $id]
+	set decision [yield]
+	unset -nocomplain pending($turn)
+	if {$decision ne "approve"} {
+		{*}$emit [dict create event agent.tool_result \
+			params [dict create turn $turn id $id name $name ok 0 summary "rejected by user"]]
+		return [dict create ok 0 \
+			content "The user rejected this plan. Do not start work — ask what they want changed about it, or present a revised plan." \
+			summary "rejected by user"]
+	}
+	set_mode build
+	{*}$emit [dict create event agent.mode params [dict create mode build]]
+	{*}$emit [dict create event agent.tool_result \
+		params [dict create turn $turn id $id name $name ok 1 summary "plan approved"]]
+	return [dict create ok 1 \
+		content "The user approved this plan. Plan mode is off and the editing tools are available again — carry the plan out now, step by step; each edit and command still waits for the user's approval." \
+		summary "plan approved"]
+}
+
 # rio::exec::start's completion bridge: resume the suspended turn with the capture.
 # Deferred onto the event loop like _post, so resuming is always legal.
 proc rio::agent::_exec_done {co result} {
@@ -469,8 +538,8 @@ proc rio::agent::_exec_done {co result} {
 }
 
 # Resolve a pending approval: resume the suspended turn's coroutine with the user's
-# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5). Serves
-# both a proposed edit and a proposed command — both park in `pending`.
+# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5). Serves a
+# proposed edit, a proposed command and a presented plan alike — all park in `pending`.
 proc rio::agent::approve {turn decision} {
 	variable pending
 	if {![info exists pending($turn)]} {

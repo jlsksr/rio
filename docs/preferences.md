@@ -115,6 +115,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
 | `modes/` | installed editing modes — vi, emacs (`*.tcl`) | drop-in / installed |
 | `agent/prompt.md` | replaces the shipped agent **base** prompt (rio's tool contract) — an override, not a layer | only if you mean it |
+| `agent/plan.md` | replaces the shipped **plan-mode** prompt (how the agent investigates and what a plan should say) — an override, not a layer | only if you mean it |
 | `agent/system.md` | your **system prompt**: standing instructions added on top, for every project and provider | yes — plain Markdown |
 | `agent/providers/<name>.md` | a **per-provider prompt**, applied only while that provider is live | yes — plain Markdown |
 | `agent/allow.list` | trusted commands for **all projects** — one rule per line | yes — plain text |

@@ -578,6 +578,168 @@ test agent-exec-always-gated {run_command still waits for approval even with aut
 	list $s1 $s2 [string match {ran *exit 0} [ev_summary w1]]
 } -cleanup { rio::agent::set_auto_accept 0 ; rio::project::close } -result {propose done 1}
 
+# --- plan mode (D101) --------------------------------------------------------
+# Plan mode is a CORE state, so what it forbids it forbids for every provider: the tool
+# list a provider is handed holds only reads and present_plan. Approving a presented plan
+# flips the mode back inside the same turn, which only works because the loop recomposes
+# tools and prompt every step — the last test here is the one that proves it.
+
+# The params of the propose event for tool id $id (or "" if none).
+proc ev_propose {id} {
+	foreach ev $::evs {
+		if {[dict get $ev event] eq "agent.propose" && [dict get $ev params id] eq $id} {
+			return [dict get $ev params]
+		}
+	}
+	return ""
+}
+# A provider that records the tool names it was handed on EACH pass into ::seen, then
+# presents a plan on the first pass and finishes once a tool_result comes back.
+proc plan_provider {conversation tools system post} {
+	set names {}
+	foreach t $tools { lappend names [dict get $t name] }
+	lappend ::seen $names
+	set last [lindex $conversation end]
+	set sawtool 0
+	if {[dict exists $last content]} {
+		foreach b [dict get $last content] {
+			if {[dict get $b type] eq "tool_result"} { set sawtool 1 }
+		}
+	}
+	if {$sawtool} {
+		{*}$post delta "building" ; {*}$post done end_turn
+	} else {
+		{*}$post tool p1 present_plan \
+			[dict create title "Add a cache" plan "## Changes\n\n- memoize it\n"] \
+			{{"title":"Add a cache","plan":"## Changes"}}
+		{*}$post done tool_use
+	}
+}
+
+test agent-plan-specs-filtered {plan mode offers reads + present_plan and nothing that changes anything} -body {
+	set names {}
+	foreach t [rio::agent::tools::specs plan] { lappend names [dict get $t name] }
+	list [expr {"present_plan" in $names}] \
+		[expr {"propose_edit" in $names}] [expr {"propose_create" in $names}] \
+		[expr {"run_command" in $names}] [expr {"fs_read" in $names}]
+} -result {1 0 0 0 1}
+
+test agent-plan-specs-build {build mode offers the working tools and withholds present_plan} -body {
+	set names {}
+	foreach t [rio::agent::tools::specs build] { lappend names [dict get $t name] }
+	list [expr {"present_plan" in $names}] \
+		[expr {"propose_edit" in $names}] [expr {"run_command" in $names}]
+} -result {0 1 1}
+
+test agent-plan-gated {present_plan is a gated plan-kind tool} -body {
+	list [rio::agent::tools::kind_of present_plan] [rio::agent::tools::is_gated present_plan]
+} -result {plan 1}
+
+test agent-plan-mode-set {agent.mode.set round-trips; an unknown mode is a bad_request} -body {
+	set a [dict get [rio::core::call agent.mode.set {mode plan}] response result mode]
+	set b [dict get [rio::core::call agent.status {}] response result mode]
+	set r [dict get [rio::core::call agent.mode.set {mode sideways}] response]
+	list $a $b [dict get $r ok] [dict get $r error code]
+} -cleanup { rio::agent::set_mode build } -result {plan plan false bad_request}
+
+test agent-plan-markdown-title {the title becomes the opening heading unless there is one} -body {
+	list [rio::agent::tools::_plan_markdown T "body"] \
+		[rio::agent::tools::_plan_markdown T "## Own\n\nbody"]
+} -result {{# T
+
+body} {## Own
+
+body}}
+
+test agent-plan-no-project {without a project a plan is still presented, it just leaves no file} -body {
+	set r [rio::agent::tools::prepare_plan [dict create title "No home" plan "x"]]
+	list [dict get $r ok] [dict get $r path] [dict get $r title]
+} -result {1 {} {No home}}
+
+test agent-plan-missing-input {present_plan without a plan is refused, unread} -body {
+	set r [rio::agent::tools::prepare_plan [dict create title "T" plan "  "]]
+	list [dict get $r ok] [dict get $r summary]
+} -result {0 {error: missing plan}}
+
+test agent-plan-approve {an approved plan files itself, flips the mode, and tells the model to build} -setup {
+	set ::pdir [makeDirectory agpa]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_mode plan
+	rio::agent::set_provider write_provider
+	set ::wt_name present_plan
+	set ::wt_input [dict create title "Add a cache" plan "## Changes\n\n- memoize it\n"]
+	set ::wt_raw {{"title":"Add a cache","plan":"## Changes"}}
+} -body {
+	set s1 [start_write turn]
+	set p [ev_propose w1]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	set files [glob -nocomplain -directory [file join $::pdir .rio plans] *.md]
+	list $s1 $s2 [dict get $p kind] [dict get $p title] \
+		[string match "*- memoize it*" [dict get $p plan]] \
+		[llength $files] [string match {*-add-a-cache.md} [lindex $files 0]] \
+		[string match ".rio/plans/*" [dict get $p path]] \
+		[rio::agent::mode] [ev_summary w1]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } \
+	-result {propose done plan {Add a cache} 1 1 1 1 build {plan approved}}
+
+test agent-plan-reject {a rejected plan keeps plan mode, and is still on the record} -setup {
+	set ::pdir [makeDirectory agpr]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_mode plan
+	rio::agent::set_provider write_provider
+	set ::wt_name present_plan
+	set ::wt_input [dict create title "Rewrite it all" plan "everything"]
+	set ::wt_raw {{"title":"Rewrite it all","plan":"everything"}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision reject]
+	set s2 [wait_done]
+	list $s1 $s2 [rio::agent::mode] [ev_summary w1] \
+		[llength [glob -nocomplain -directory [file join $::pdir .rio plans] *.md]]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } \
+	-result {propose done plan {rejected by user} 1}
+
+test agent-plan-always-gated {auto-accept never approves a plan for the user} -setup {
+	set ::pdir [makeDirectory agpg]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 1
+	rio::agent::set_mode plan
+	rio::agent::set_provider write_provider
+	set ::wt_name present_plan
+	set ::wt_input [dict create title "Quietly" plan "do it"]
+	set ::wt_raw {{"title":"Quietly","plan":"do it"}}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	list $s1 [wait_done]
+} -cleanup {
+	rio::agent::set_auto_accept 0 ; rio::agent::set_mode build ; rio::project::close
+} -result {propose done}
+
+test agent-plan-tools-return-on-approval {after approval the SAME turn is handed the editing tools again} -setup {
+	set ::pdir [makeDirectory agpt]
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_mode plan
+	rio::agent::set_provider plan_provider
+	set ::seen {}
+} -body {
+	set s1 [start_write turn]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	# Pass 1 was composed in plan mode, pass 2 after the approval flipped it.
+	list $s1 $s2 [llength $::seen] \
+		[expr {"propose_edit" in [lindex $::seen 0]}] \
+		[expr {"present_plan" in [lindex $::seen 0]}] \
+		[expr {"propose_edit" in [lindex $::seen 1]}] \
+		[expr {"present_plan" in [lindex $::seen 1]}]
+} -cleanup { rio::agent::set_mode build ; rio::project::close } -result {propose done 2 0 1 1 0}
+
 # --- allow-list: standing approval (D84) -------------------------------------
 # A command covered by an allow-list rule runs WITHOUT an agent.approve — the propose
 # event carries auto=1 and the turn completes on its own. The allow-list is pinned to a
