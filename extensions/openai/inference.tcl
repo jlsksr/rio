@@ -260,7 +260,7 @@ proc rio::openai::_done {sid status err} {
 	variable tcalls ; variable retry
 	if {![info exists cb($sid)]} return
 	set postcmd $cb($sid)
-	if {!$fin($sid) && $status == 400 && [_retry_token_param $sid $postcmd]} {
+	if {!$fin($sid) && $status == 400 && [_repair_400 $sid $postcmd]} {
 		# The turn was re-sent with the other token-cap parameter; its own _done will
 		# report the outcome. Nothing is posted for this attempt — the user never sees
 		# a failure rio knew how to answer.
@@ -287,37 +287,61 @@ proc rio::openai::_done {sid status err} {
 		retry($sid)
 }
 
-# The token cap's parameter name is per MODEL, and only the server knows which one
-# a given model wants: `max_tokens` for gpt-4o and essentially every local
-# OpenAI-compatible server, `max_completion_tokens` for OpenAI's reasoning models
-# (o1/o3/o4, gpt-5…). OpenAI's /v1/models says nothing about it — unlike Anthropic's
-# capabilities (D106a), there is nothing to ask — but the 400 says it outright:
+# Two request fields are per MODEL while rio's choice of them is per PROVIDER, and
+# OpenAI's /v1/models describes neither — unlike Anthropic's capabilities (D106a),
+# there is nothing to ask. But the 400 says it outright, so rio lets the refusal
+# teach it (D106c/D106d, jka's call): re-send the turn with the field repaired, and
+# hand the answer to the face to remember for that model.
 #
-#   "Unsupported parameter: 'max_tokens' is not supported with this model.
-#    Use 'max_completion_tokens' instead."
+#   token cap — "Unsupported parameter: 'max_tokens' is not supported with this
+#               model. Use 'max_completion_tokens' instead."   (reasoning models)
+#   effort    — "Unrecognized request argument supplied: reasoning_effort"
+#                                                    (gpt-4o, most local servers)
 #
-# So rio lets the refusal teach it (D106c, jka's call): re-send the turn ONCE with
-# the other name, and hand the answer to the face to remember for that model. No
-# vendor table to rot, and a server that wants `max_tokens` never gets here. The
-# 400 is refused before any generation, so the round trip costs no tokens.
-#
-# Deliberately one direction only: this is the error OpenAI actually produces. A
-# retried request carries `token_retried`, so a second 400 is reported, never looped.
-proc rio::openai::_retry_token_param {sid postcmd} {
+# No vendor table to rot; a server that is happy with what we sent never gets here;
+# and a 400 is refused before any generation, so a repair costs no tokens. Each
+# repair is attempted at most ONCE per turn (`repaired` records which have been
+# applied), so a server that refuses everything reports its 400 rather than looping.
+proc rio::openai::_repair_400 {sid postcmd} {
 	variable raw ; variable retry
 	if {![info exists retry($sid)]} { return 0 }
 	lassign $retry($sid) conf conversation tools auth transport
-	if {[dict exists $conf token_retried]} { return 0 }
-	if {[dict get $conf token_param] ne "max_tokens"} { return 0 }
-	if {![string match {*max_completion_tokens*} $raw($sid)]} { return 0 }
-	dict set conf token_param max_completion_tokens
-	dict set conf token_retried 1
-	# The face owns persistence (the settings file is its business, not the wire's).
-	if {[dict exists $conf token_learn] && [dict get $conf token_learn] ne ""} {
-		catch {{*}[dict get $conf token_learn] [dict get $conf model] max_completion_tokens}
+	set done [expr {[dict exists $conf repaired] ? [dict get $conf repaired] : {}}]
+	set body $raw($sid)
+	set fix ""
+	if {"token" ni $done && [dict get $conf token_param] eq "max_tokens"
+			&& [string match {*max_completion_tokens*} $body]} {
+		set fix token
+	} elseif {"effort" ni $done && [dict exists $conf effort_json]
+			&& [dict get $conf effort_json] ne ""
+			&& [string match {*reasoning_effort*} $body]} {
+		set fix effort
+	}
+	if {$fix eq ""} { return 0 }
+	lappend done $fix
+	dict set conf repaired $done
+	switch -- $fix {
+		token {
+			dict set conf token_param max_completion_tokens
+			_learned $conf token_learn [dict get $conf model] max_completion_tokens
+		}
+		effort {
+			# Drop the field for this turn. The user's CHOICE is left alone — support is
+			# per model, so switching back to a model that takes an effort restores it
+			# (the rule D106a settled for Claude).
+			dict set conf effort_json ""
+			_learned $conf effort_learn [dict get $conf model] ""
+		}
 	}
 	infer $conf $conversation $tools $auth $transport $postcmd
 	return 1
+}
+
+# Tell the face what the server taught us; persistence is its business, not the
+# wire's. Never fatal — a turn that works must not fail on a bookkeeping error.
+proc rio::openai::_learned {conf key model value} {
+	if {![dict exists $conf $key] || [dict get $conf $key] eq ""} return
+	catch {{*}[dict get $conf $key] $model $value}
 }
 
 # Map an HTTP status (+ optional JSON error body) to {code, message}. Messages

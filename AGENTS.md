@@ -5759,6 +5759,41 @@ anything else is reported rather than re-sent; a server refusing both names stop
 and the shipped `max_tokens` default is untouched for everyone who never hit this. Disabling
 `_retry_token_param` fails six of them by name.
 
+#### D106d — and the effort field itself, learned the same way
+
+With D106c live, **`reasoning_effort` was finally proven**: `gpt-5-nano` answered at `low`
+and at `high`, and the token repair fired correctly on all five reasoning models. D106's
+OpenAI half is verified end to end.
+
+The same run surfaced the mirror image of the Haiku 400 that produced D106a:
+
+```
+gpt-4o + effort=high -> 400 "Unrecognized request argument supplied: reasoning_effort"
+```
+
+A user can pick that pair from the pane and lose the turn — the option's hint warns about
+it, but a warning is not a behaviour. Applied without asking again, because it is the same
+problem rio has now answered twice and jka has already chosen the remedy for the same
+provider in D106c: the repair machinery generalizes from one field to two. `_repair_400`
+now recognizes either refusal, applies **each repair at most once per turn** (`repaired`
+records which), and a model needing both gets both over three requests — none of which
+generate a token.
+
+Held to D106a's rule about *not* rewriting the user: the stored effort is left exactly as
+chosen, since support is per model while the choice is per provider; switching back to a
+reasoning model restores it. And the option explains itself the way Claude's does — only
+`Provider default` offered, with a hint naming the model — except this face learned it from
+a refusal instead of reading a capabilities listing, because OpenAI publishes none.
+
+openai **1.1.3**; no core change.
+
+**Guards** (openai 51 → 57): the field is dropped and the turn recovered; the refusal is
+remembered so the next turn sends none; the user's choice survives and comes back on a model
+that takes one; the option names the model and collapses to the default; a 400 mentioning
+the field when rio sent none is reported rather than "repaired"; and a server refusing both
+fields yields both repairs in one turn and then succeeds. Removing the drop fails
+`openai-effort-refusal-is-remembered` by name.
+
 ### D107 — extension versions are semver, and rio compares them
 
 The Extensions window could install and remove but could not answer the question a package

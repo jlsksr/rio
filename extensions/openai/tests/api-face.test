@@ -139,6 +139,7 @@ proc reset_openai_opts {} {
 	rio::openai::api::configure messages_url https://api.openai.com/v1/chat/completions
 	rio::openai::api::configure models_url ""
 	rio::openai::api::configure token_models ""
+	rio::openai::api::configure effort_models ""
 	set ::rio::openai::api::models {{value gpt-4o label "GPT-4o"} {value gpt-4o-mini label "GPT-4o mini"}}
 }
 # The refresh callback is the core's announcer, so a test sees the agent.options EVENT.
@@ -325,6 +326,107 @@ test openai-token-retry-happens-once {a second refusal is reported rather than l
 	token_turn o3-mini always_400
 	list [llength $::sent] [lindex [lindex $::posts end] 0]
 } -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {2 error}
+
+# --- the effort field, dropped for a model that refuses it (D106d) -------------
+#
+# The same mechanism, the other field: gpt-4o answers "Unrecognized request argument
+# supplied: reasoning_effort" (observed live, 2026-09-12).
+proc effort_tp {req on_chunk on_done} {
+	lappend ::sent [dict get $req body]
+	if {[llength $::sent] == 1} {
+		{*}$on_chunk "{\"error\":{\"message\":\"Unrecognized request argument supplied: reasoning_effort\"}}"
+		{*}$on_done 400 ""
+	} else {
+		{*}$on_chunk "data: \[DONE\]\n"
+		{*}$on_done 200 ""
+	}
+}
+proc sent_has_effort {i} {
+	return [dict exists [json::json2dict [lindex $::sent $i]] reasoning_effort]
+}
+
+test openai-effort-dropped-on-refusal {a model that refuses an effort gets the turn without one} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	rio::agent::option_set effort high openai
+	token_turn gpt-4o effort_tp
+	list [llength $::sent] [sent_has_effort 0] [sent_has_effort 1] \
+		[lindex [lindex $::posts end] 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {2 1 0 done}
+
+test openai-effort-refusal-is-remembered {the second turn sends no effort at all} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	rio::agent::option_set effort high openai
+	token_turn gpt-4o effort_tp     ;# learns
+	token_turn gpt-4o effort_tp     ;# no refusal to recover from this time
+	list [llength $::sent] [sent_has_effort 0] [rio::agent::settings::get openai effort_models]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 0 gpt-4o}
+
+test openai-effort-choice-is-not-rewritten {the user's choice survives a model that can't use it} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# Support is per MODEL while the choice is per PROVIDER (D106a's rule): rio sends
+	# nothing for gpt-4o, but switching back to a reasoning model must restore `high`
+	# rather than having silently reset it to default.
+	rio::agent::option_set effort high openai
+	token_turn gpt-4o effort_tp
+	set kept [rio::openai::api::cget effort]
+	rio::agent::option_set model o4-mini openai
+	list $kept [rio::openai::api::cget effort] \
+		[dict exists [json::json2dict [openai_body]] reasoning_effort]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {high high 1}
+
+test openai-effort-refused-model-says-so {the option explains itself, naming the model} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	rio::agent::option_set effort high openai
+	token_turn gpt-4o effort_tp
+	set o [lindex [rio::agent::options openai] 1]
+	list [llength [dict get $o choices]] \
+		[string match "*gpt-4o does not accept one*" [dict get $o hint]] \
+		[dict get $o value]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 1 high}
+
+test openai-effort-refusal-not-retried-without-one {no effort sent means nothing to repair} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# effort is `default`, so the body carries no reasoning_effort: a 400 mentioning
+	# it cannot be about anything rio sent, and must be reported, not "repaired".
+	token_turn gpt-4o effort_tp
+	list [llength $::sent] [lindex [lindex $::posts end] 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 error}
+
+test openai-both-repairs-in-turn {a model needing both repairs gets both, one per attempt} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# First the token cap, then the effort — each repair is attempted at most once per
+	# turn, so this takes three requests and then succeeds.
+	proc fussy_tp {req on_chunk on_done} {
+		lappend ::sent [dict get $req body]
+		set d [json::json2dict [dict get $req body]]
+		if {[dict exists $d max_tokens]} {
+			{*}$on_chunk "{\"error\":{\"message\":\"Use 'max_completion_tokens' instead.\"}}"
+			{*}$on_done 400 ""
+		} elseif {[dict exists $d reasoning_effort]} {
+			{*}$on_chunk "{\"error\":{\"message\":\"Unrecognized request argument supplied: reasoning_effort\"}}"
+			{*}$on_done 400 ""
+		} else {
+			{*}$on_chunk "data: \[DONE\]\n"
+			{*}$on_done 200 ""
+		}
+	}
+	rio::agent::option_set effort high openai
+	token_turn weird-model fussy_tp
+	list [llength $::sent] [lindex [lindex $::posts end] 0] \
+		[rio::openai::api::cget token_models] [rio::openai::api::cget effort_models]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {3 done weird-model weird-model}
 
 test openai-token-default-is-untouched {a model nobody complained about still sends max_tokens} -setup {
 	reset_openai_opts

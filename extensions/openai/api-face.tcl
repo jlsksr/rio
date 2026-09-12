@@ -30,6 +30,7 @@ namespace eval rio::openai::api {
 		effort          default \
 		token_param     max_tokens \
 		token_models    "" \
+		effort_models   "" \
 		max_tokens      4096 \
 		request_timeout 600000 \
 		secret_name     openai-api]
@@ -89,6 +90,7 @@ proc rio::openai::api::provider {conversation tools system post} {
 	# the server corrects us (D106c).
 	dict set conf token_param [_token_param]
 	dict set conf token_learn rio::openai::api::_token_learned
+	dict set conf effort_learn rio::openai::api::_effort_learned
 	rio::openai::infer $conf $conversation $tools $auth $transport $post
 }
 
@@ -130,20 +132,55 @@ proc rio::openai::api::_effort_json {} {
 	variable effort_json
 	set e [dict get $config effort]
 	if {$e eq "" || $e eq "default"} { return "" }
+	# A model the server has already refused the field for (D106d) sends nothing. The
+	# stored choice is deliberately NOT rewritten: support is per model while the
+	# choice is per provider, so switching back to a reasoning model restores it —
+	# the rule D106a settled for Claude, reached here by being told instead of asking.
+	if {[_effort_refused [dict get $config model]]} { return "" }
 	return [string map [list %v $e] $effort_json]
+}
+
+# The models this provider has been TOLD refuse `reasoning_effort` — gpt-4o and most
+# local servers. Learned from the 400, never guessed from the model's name.
+proc rio::openai::api::_effort_refused {model} {
+	variable config
+	return [expr {[lsearch -exact [dict get $config effort_models] $model] >= 0}]
+}
+
+proc rio::openai::api::_effort_learned {model _value} {
+	variable config
+	if {$model eq ""} return
+	set l [dict get $config effort_models]
+	if {[lsearch -exact $l $model] >= 0} return
+	lappend l $model
+	dict set config effort_models $l
+	catch {rio::agent::settings::store openai effort_models $l}
 }
 
 proc rio::openai::api::options {} {
 	variable config
 	variable models
 	variable efforts
+	set m [dict get $config model]
+	# Once the server has refused the field for this model, say so with the model's
+	# own name and offer only the default — the same honesty D106a gives Claude, but
+	# learned from a refusal rather than read from a capabilities listing, because
+	# OpenAI's /v1/models carries none. The stored choice still shows, and comes back
+	# when a model that takes an effort is chosen again.
+	if {[_effort_refused $m]} {
+		set ehint "Reasoning effort. $m does not accept one — the server said so — and rio sends none. Choose a reasoning model (o3, o4-mini, gpt-5…) to use this."
+		set echoices [list [lindex $efforts 0]]
+	} else {
+		set ehint "Reasoning effort. Provider default sends nothing — gpt-4o and most local servers refuse the field."
+		set echoices $efforts
+	}
 	return [list \
 		[dict create name model label Model \
 			hint "Which model answers. Refresh to list what this server offers." \
-			value [dict get $config model] free 1 refresh 1 choices $models] \
+			value $m free 1 refresh 1 choices $models] \
 		[dict create name effort label Effort \
-			hint "Reasoning effort. Provider default sends nothing — gpt-4o and most local servers refuse the field." \
-			value [dict get $config effort] free 0 refresh 0 choices $efforts]]
+			hint $ehint \
+			value [dict get $config effort] free 0 refresh 0 choices $echoices]]
 }
 
 proc rio::openai::api::option_set {name value} {
@@ -274,7 +311,7 @@ proc rio::openai::api::_adopt_settings {} {
 	variable config
 	# token_models is not a user CHOICE but something the server taught this provider
 	# (D106c) — it persists the same way, so a restart doesn't re-learn it.
-	foreach k {model effort token_models} {
+	foreach k {model effort token_models effort_models} {
 		set v [rio::agent::settings::get openai $k]
 		if {$v ne ""} { dict set config $k $v }
 	}
