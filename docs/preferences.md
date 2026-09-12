@@ -55,6 +55,7 @@ separate "make this the default" step and no "save settings" button.
   | `font_size` | the editor font size in points, 5–72; out-of-range values are ignored |
   | `editmode` | `windows`, `vi` or `emacs` — the last two only take effect once installed as extensions |
   | `project` | the folder that was open at the last launch, reopened on the next one (local cores only) |
+  | `check_updates` | `"1"` looks for newer versions of your installed extensions shortly after start-up, `"0"` (the default) never touches the network unasked |
   | `layout` | a **nested object** holding the whole dock arrangement: which panes sit left, right or bottom, which are hidden, and their sizes |
 
   `layout` is fiddly to write by hand, so toggle it from the **View** menu and let
@@ -96,6 +97,27 @@ Otherwise it's optional: no file means no repositories.
 What you have actually installed, and from where, is tracked separately in a
 provenance ledger, `extensions.json` — rio writes it, and each entry records the
 source URL and version a `kind/name` came from.
+
+## Checking for extension updates
+
+Extension versions follow [semver](https://semver.org/), so rio can tell you when
+a repository offers something newer than what you have. It compares on every scan
+— opening *Settings ▸ Extensions…* rescans, as does its `⟳` button — and shows the
+answer on the row: `[1.1.0 → 1.2.0]`. **Update** replaces one extension;
+**Update All** takes every pending update after a single confirmation listing them.
+Nothing is ever installed on its own.
+
+An update only comes from **the repository that extension was installed from**.
+Nobody owns a name — there is no central index — so a same-named extension on
+another host is treated as a different thing you may *switch* to by hand, not as a
+newer version of yours. Where you know better, tick *Also accept updates from other
+repositories* on that extension in the Extensions window.
+
+*Preferences ▸ Extensions ▸ Check for extension updates at start-up* (the
+`check_updates` key) makes rio look once, shortly after it starts, and tell you
+what it found. It is **off** by default. A version that doesn't follow semver —
+a date stamp, say — is shown but never compared, and never claimed to be out of
+date.
 
 ## Where everything lives
 

@@ -3,7 +3,7 @@
 # Headless test for the Preferences window (AGENTS.md D58). The window owns no state:
 # each control drives the SAME global its menu twin binds and calls the SAME applier, so
 # it is live-apply and the two doors stay in sync for free. Checks that the window opens
-# with its four categories, that toggling a control there flips the global AND matches
+# with its five categories, that toggling a control there flips the global AND matches
 # the menu entry's -variable (the two-door sync), that changing the tab layout re-flows
 # the strip, that the category switch selects, that opening twice is safe, and that the
 # theme/mode radios are enumerated from the core/registry.
@@ -43,15 +43,23 @@ proc mkbuf {name} {
 	return $id
 }
 
-# --- the window opens with its four categories ------------------------------------
+# --- the window opens with its five categories ------------------------------------
 preferences_window
 update idletasks
 ok "window exists"               [winfo exists .prefs]                 1
-ok "four categories"             [.prefs.cats size]                    4
+ok "five categories"             [.prefs.cats size]                    5
 ok "view body exists"            [winfo exists .prefs.body.view]       1
 ok "editor body exists"          [winfo exists .prefs.body.editor]     1
 ok "agent body exists"           [winfo exists .prefs.body.agent]      1
+ok "extensions body exists"      [winfo exists .prefs.body.extensions] 1
 ok "keyboard body exists"        [winfo exists .prefs.body.keyboard]   1
+
+# The Extensions category (D107): the start-up update check is the one durable
+# decision about repositories, so it lives here, in the config home — and it is OFF
+# by default, because a fresh rio makes no network request it wasn't asked to make.
+ok "update check exists"         [winfo exists .prefs.body.extensions.chk] 1
+ok "update check is off"         $::ext_check_updates                  0
+ok "update check binds the flag" [.prefs.body.extensions.chk cget -variable] ::ext_check_updates
 
 # --- two-door sync: the window control binds the SAME global the menu entry does ---
 ok "wrap: same var as menu"      [.prefs.body.view.wrap cget -variable] \

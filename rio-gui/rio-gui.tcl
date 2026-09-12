@@ -7382,6 +7382,7 @@ proc prefs_load {} {
 	if {[dict exists $d relative_line_numbers]} { set ::relative_line_numbers [expr {[dict get $d relative_line_numbers] ? 1 : 0}] }
 	if {[dict exists $d show_hidden]} { set ::show_hidden [expr {[dict get $d show_hidden] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
+	if {[dict exists $d check_updates]} { set ::ext_check_updates [expr {[dict get $d check_updates] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
 		set tl [dict get $d tab_layout]
 		if {$tl eq "scroll" || $tl eq "multi"} { set ::tab_layout $tl }
@@ -7428,6 +7429,7 @@ proc prefs_save {} {
 			relative_line_numbers $::relative_line_numbers \
 			show_hidden $::show_hidden \
 			column_edit $::col_on \
+			check_updates $::ext_check_updates \
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
 			font_size   $::editor_font_size \
@@ -7533,14 +7535,105 @@ proc session_restore {} {
 # rule kills traversal and percent-encoding games at the format level.
 # ---------------------------------------------------------------------------
 
-set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed} (ledger_load)
+set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed ?anysource?} (ledger_load)
 set ::provider_api_max 1 ;# highest provider-api the core loads (provider.list; D66)
 set ::repo_variants {}  ;# every installable variant found by the last scan
 set ::repo_dead {}      ;# {url error} per unreachable/non-repository source
 set ::repo_srcinfo {}   ;# source url -> {name description} from its manifest
+set ::ext_core_providers {} ;# name -> {version source} from provider.list (D107)
+set ::ext_installed {} ;# "kind/name" -> {version source} — what is installed, ledger + core
+set ::ext_updates {}   ;# "kind/name" -> {from to variant} — what a source now offers (D107)
 
 proc ext_safe_name {s} {
 	return [regexp {^[A-Za-z0-9][A-Za-z0-9._-]*$} $s]
+}
+
+# --- versions: semver, and compared (AGENTS.md D107) ---------------------------
+# D39 froze `version` as an opaque string rio never compares, which left the user
+# to eyeball "is mine still current?". D107 replaces that with a published rule —
+# an extension version is semver (semver.org) — and this comparator.
+#
+# The parse is deliberately LENIENT about the one thing the spec is strict on:
+# 1-3 numeric core components, missing ones zero, so `1.1` reads as `1.1.0`. The
+# rule is new and every version installed anywhere predates it (rio's own
+# extensions shipped as `1.0`/`1.1`); refusing those would blind the feature on
+# exactly the installs it exists for. Everything else follows the spec: an
+# optional `-prerelease` of dot-separated identifiers, `+build` ignored.
+#
+# Returns {core {maj min patch} pre {id …}} or "" — and "" is a real answer, for
+# `2026-07-17`, `v2-final`, anything not following the rule. Such an extension
+# still lists, still installs, and simply never carries an update claim: D39's
+# opacity survives precisely where the rule isn't followed.
+proc ext_ver_parse {s} {
+	set s [string trim $s]
+	if {$s eq ""} { return "" }
+	set plus [string first + $s]
+	if {$plus >= 0} { set s [string range $s 0 $plus-1] }   ;# build metadata: ignored
+	set pre {}
+	set dash [string first - $s]
+	if {$dash >= 0} {
+		set pre [split [string range $s $dash+1 end] .]
+		set s [string range $s 0 $dash-1]
+		if {![llength $pre]} { return "" }
+		foreach id $pre {
+			if {![regexp {^[0-9A-Za-z-]+$} $id]} { return "" }
+		}
+	}
+	set parts [split $s .]
+	if {[llength $parts] < 1 || [llength $parts] > 3} { return "" }
+	# The short-form allowance is for `1.1` and nothing else. Combined with a
+	# pre-release it starts reading strings that are not versions at all as if they
+	# were — `2026-07-17` would parse as 2026.0.0-07-17 — so a pre-release requires
+	# the full three-component core the spec asks for.
+	if {[llength $pre] && [llength $parts] != 3} { return "" }
+	set core {}
+	foreach p $parts {
+		# `string is integer` would accept 0x10 and a leading +/-; a version component
+		# is digits, nothing else.
+		if {![regexp {^[0-9]+$} $p]} { return "" }
+		lappend core [scan $p %d]   ;# scan, not expr: 010 is ten, not an octal error
+	}
+	while {[llength $core] < 3} { lappend core 0 }
+	return [dict create core $core pre $pre]
+}
+
+# Compare two version STRINGS: -1 / 0 / 1, or "" when either side doesn't parse.
+# Callers must treat "" as "no claim can be made" — never as equality.
+proc ext_ver_cmp {a b} {
+	set pa [ext_ver_parse $a]
+	set pb [ext_ver_parse $b]
+	if {$pa eq "" || $pb eq ""} { return "" }
+	foreach x [dict get $pa core] y [dict get $pb core] {
+		if {$x < $y} { return -1 }
+		if {$x > $y} { return 1 }
+	}
+	set ra [dict get $pa pre]
+	set rb [dict get $pb pre]
+	# A pre-release ranks BELOW the release it leads to: 1.0.0-beta < 1.0.0.
+	if {![llength $ra] && ![llength $rb]} { return 0 }
+	if {![llength $ra]} { return 1 }
+	if {![llength $rb]} { return -1 }
+	foreach x $ra y $rb {
+		# `foreach` over uneven lists pads with "" — the shorter list runs out first,
+		# and a version with FEWER identifiers ranks lower (1.0.0-alpha < 1.0.0-alpha.1).
+		if {$x eq ""} { return -1 }
+		if {$y eq ""} { return 1 }
+		set nx [regexp {^[0-9]+$} $x]
+		set ny [regexp {^[0-9]+$} $y]
+		if {$nx && $ny} {
+			set x [scan $x %d] ; set y [scan $y %d]
+			if {$x < $y} { return -1 }
+			if {$x > $y} { return 1 }
+		} elseif {$nx} {
+			return -1              ;# numeric identifiers rank below alphanumeric ones
+		} elseif {$ny} {
+			return 1
+		} else {
+			set c [string compare $x $y]
+			if {$c != 0} { return [expr {$c < 0 ? -1 : 1}] }
+		}
+	}
+	return 0
 }
 
 # --- sources.list -------------------------------------------------------------
@@ -7603,8 +7696,10 @@ proc ledger_path {} {
 }
 
 # Machine-written JSON: {"kind/name": {source, dir, version, installed,
-# files:[…]}, …}. Corrupt or missing -> an empty ledger, never fatal — the
-# worst outcome is "rio forgot where an extension came from", not a crash.
+# files:[…], ?anysource?}, …}. Corrupt or missing -> an empty ledger, never fatal
+# — the worst outcome is "rio forgot where an extension came from", not a crash.
+# `anysource` (D107) is NOT in the required set: it arrived later, and every
+# ledger written before it must keep loading. Absent means 0.
 proc ledger_load {} {
 	set ::ext_ledger {}
 	set path [ledger_path]
@@ -7626,6 +7721,10 @@ proc ledger_entry_json {e} {
 		lappend parts "[rio::wire::str $k]:[rio::wire::str [dict get $e $k]]"
 	}
 	lappend parts "\"files\":[rio::wire::strarr [dict get $e files]]"
+	# Written only when SET, so an untouched ledger keeps its pre-D107 shape.
+	if {[dict exists $e anysource] && [dict get $e anysource]} {
+		lappend parts "\"anysource\":\"1\""
+	}
 	return "{[join $parts ,]}"
 }
 
@@ -7774,6 +7873,105 @@ proc repo_scan_all {{progress ""}} {
 			name [dict get $s name] description [dict get $s description]]
 		foreach v [dict get $s exts] { lappend ::repo_variants $v }
 	}
+	ext_installed_compute
+	ext_updates_compute
+}
+
+# --- what is installed, and what is an update (AGENTS.md D107) -----------------
+
+# The installed view: "kind/name" -> {version source}. The ledger is the base —
+# but for a PROVIDER the core wins, because a provider installs core-side and
+# provider.list reports the store's own truth ({name, version, source}, D66).
+# That is D39's recorded ledger caveat answered where it actually bites: a
+# provider installed by another frontend, or onto a remote core, still shows its
+# real version here and still gets update tracking.
+#
+# This view is DERIVED and never written back to extensions.json: a GUI that
+# talks to two cores in turn would otherwise persist one core's answer as what
+# it believes it installed on the other.
+proc ext_installed_compute {} {
+	set ::ext_installed {}
+	dict for {key e} $::ext_ledger {
+		dict set ::ext_installed $key [dict create \
+			version [dict get $e version] source [dict get $e source]]
+	}
+	dict for {name p} $::ext_core_providers {
+		dict set ::ext_installed provider/$name $p
+	}
+}
+
+# Ask the core which providers its store holds, at which versions (D66's op, put
+# to a second use). Best effort: an old core without provider.list, or a failed
+# call, leaves the ledger to speak for providers as it did before.
+proc ext_core_providers_refresh {} {
+	set ::ext_core_providers {}
+	set pr [rio_call provider.list {}]
+	if {![dict get $pr ok]} return
+	if {[dict exists $pr result api_max]} {
+		set ::provider_api_max [dict get $pr result api_max]
+	}
+	if {![dict exists $pr result providers]} return
+	foreach p [dict get $pr result providers] {
+		if {![dict exists $p name] || ![dict exists $p version]} continue
+		# echo is the built-in stub, not an installed extension — it has no source.
+		set src [expr {[dict exists $p source] ? [dict get $p source] : ""}]
+		if {$src eq ""} continue
+		dict set ::ext_core_providers [dict get $p name] \
+			[dict create version [dict get $p version] source $src]
+	}
+}
+
+# Whether an extension takes updates from repositories OTHER than the one it was
+# installed from. Off by default, and that default is the safe direction: with no
+# central index nobody is forced to respect a namespace, so `vi` on another host
+# may be an entirely different program that merely shares a name (jka, D107).
+# Switching to it stays possible — as an INSTALL, with the consent that names the
+# new source — it just is not an "update".
+proc ext_anysource {key} {
+	if {![dict exists $::ext_ledger $key]} { return 0 }
+	set e [dict get $::ext_ledger $key]
+	return [expr {[dict exists $e anysource] && [dict get $e anysource] ? 1 : 0}]
+}
+
+proc ext_anysource_set {key on} {
+	if {![dict exists $::ext_ledger $key]} return
+	dict set ::ext_ledger $key anysource [expr {$on ? 1 : 0}]
+	ledger_save
+	ext_updates_compute
+}
+
+# Is this variant an update to what is installed? Returns the installed version it
+# would replace, or "" for anything that is not an update — not installed, an
+# unparseable version on either side (no claim, D107), the same or a lower
+# version, a foreign source without the flag, or a variant this rio can't install
+# anyway (an unknown kind, a provider needing a newer provider-api: never offer an
+# update that would be refused).
+proc ext_variant_update {v} {
+	set key "[dict get $v kind]/[dict get $v name]"
+	if {![dict exists $::ext_installed $key]} { return "" }
+	if {[dict exists $v offline]} { return "" }
+	if {![ext_variant_installable $v]} { return "" }
+	set cur [dict get $::ext_installed $key]
+	if {[dict get $v source] ne [dict get $cur source] && ![ext_anysource $key]} { return "" }
+	if {[ext_ver_cmp [dict get $v version] [dict get $cur version]] != 1} { return "" }
+	return [dict get $cur version]
+}
+
+# "kind/name" -> {from to variant}: one pending update per extension, the highest
+# on offer when several sources qualify (only possible with anysource set).
+proc ext_updates_compute {} {
+	set ::ext_updates {}
+	foreach v $::repo_variants {
+		set from [ext_variant_update $v]
+		if {$from eq ""} continue
+		set key "[dict get $v kind]/[dict get $v name]"
+		if {[dict exists $::ext_updates $key]} {
+			set have [dict get [dict get $::ext_updates $key] to]
+			if {[ext_ver_cmp [dict get $v version] $have] != 1} continue
+		}
+		dict set ::ext_updates $key [dict create \
+			from $from to [dict get $v version] variant $v]
+	}
 }
 
 # --- installing & removing ----------------------------------------------------
@@ -7831,7 +8029,12 @@ proc ext_file_owner {kind name files} {
 # payloads -> write -> activate -> ledger. Returns 1 installed / 0 not.
 # Nothing is written until every payload arrived intact, and a half-failed
 # write rolls the files back — an install is all-or-nothing on disk.
-proc ext_install {variant} {
+#
+# `consented` is set only by Update All (D107), which asked ONCE for the whole
+# batch — a summary listing every extension, its version change and its source.
+# It suppresses this dialog and nothing else: the collision refusal, the
+# fetch-everything-first rule, the rollback and the ledger write are unchanged.
+proc ext_install {variant {consented 0}} {
 	dict with variant {}  ;# source dir name kind version author description files
 	if {![ext_kind_known $kind]} {
 		report_error "'$name' has kind '$kind', which this rio doesn't know — it needs a newer rio."
@@ -7851,11 +8054,11 @@ proc ext_install {variant} {
 		set what "'$name' is Tcl CODE that will run inside your editor with your permissions."
 	}
 	set msg "Install $kind '$name' $version by $author?\n\n$what\n\nFrom: $source"
-	if {[dict exists $::ext_ledger $key]} {
-		set old [dict get $::ext_ledger $key]
+	if {[dict exists $::ext_installed $key]} {
+		set old [dict get $::ext_installed $key]
 		set msg "$msg\n\nReplaces the installed '$name' [dict get $old version] from [dict get $old source]."
 	}
-	if {[tk_messageBox -icon warning -type yesno -title "rio — install extension" \
+	if {!$consented && [tk_messageBox -icon warning -type yesno -title "rio — install extension" \
 			-message $msg] ne "yes"} { return 0 }
 	# Payloads of one kind share a flat drop-in dir (syntax/mode) — a name owned by
 	# another installed extension would be silently overwritten, so refuse. A
@@ -7886,10 +8089,22 @@ proc ext_install {variant} {
 	} else {
 		if {![ext_install_files $kind $name $payload]} { return 0 }
 	}
-	dict set ::ext_ledger $key [dict create \
+	# A provider's installed version is read back from the core (ext_installed_compute),
+	# and the store just changed under us — record it rather than re-asking, so the row
+	# shows the version that was actually written.
+	if {$kind eq "provider"} {
+		dict set ::ext_core_providers $name [dict create version $version source $source]
+	}
+	set entry [dict create \
 		source $source dir $dir version $version files $files \
 		installed [clock format [clock seconds] -format %Y-%m-%d]]
+	# The cross-source flag is the USER's setting for this extension, not a property
+	# of the payload — an update must not silently reset it (D107).
+	if {[ext_anysource $key]} { dict set entry anysource 1 }
+	dict set ::ext_ledger $key $entry
 	ledger_save
+	ext_installed_compute
+	ext_updates_compute
 	return 1
 }
 
@@ -7976,7 +8191,19 @@ proc ext_install_provider {name manifest payload source} {
 # so Remove can be retried; a vanished file is already what delete wanted.
 proc ext_remove {kind name} {
 	set key $kind/$name
-	if {![dict exists $::ext_ledger $key]} { return 0 }
+	if {![dict exists $::ext_ledger $key]} {
+		# A provider the CORE holds but this GUI's ledger doesn't know — installed by
+		# another frontend, or onto a shared core (D107). provider.delete takes a name
+		# and nothing else, so Remove works without an entry to consult.
+		if {$kind eq "provider" && [dict exists $::ext_core_providers $name]} {
+			catch {rio_call provider.delete [dict create name $name]}
+			dict unset ::ext_core_providers $name
+			ext_installed_compute
+			ext_updates_compute
+			return 1
+		}
+		return 0
+	}
 	set e [dict get $::ext_ledger $key]
 	if {$kind eq "theme"} {
 		foreach f [dict get $e files] {
@@ -7984,6 +8211,7 @@ proc ext_remove {kind name} {
 		}
 	} elseif {$kind eq "provider"} {
 		catch {rio_call provider.delete [dict create name $name]}
+		dict unset ::ext_core_providers $name
 	} else {
 		set dstdir [ext_kind_dir $kind]
 		foreach f [dict get $e files] {
@@ -7992,6 +8220,8 @@ proc ext_remove {kind name} {
 	}
 	dict unset ::ext_ledger $key
 	ledger_save
+	ext_installed_compute
+	ext_updates_compute
 	ext_reload $kind
 	return 1
 }
@@ -8030,6 +8260,54 @@ proc ext_reload {kind} {
 			# it takes effect on the core's next start, so there is no reload here.
 		}
 	}
+}
+
+# Update everything ::ext_updates lists, under ONE consent (AGENTS.md D107) —
+# apt's shape, and the reasoning is apt's too: you already trusted each of these
+# source+extension pairs when you installed them, so an update is not a fresh
+# trust decision, and N dialogs for N updates is a prompt people click through.
+#
+# The exception is spelled out in its own paragraph of the same dialog: an update
+# taken from a DIFFERENT repository than the one it was installed from (only
+# possible where the user set that extension's cross-source flag) IS a trust
+# decision, because nothing makes two repositories agree on what a name means.
+#
+# ::ext_updates is snapshotted first — each install recomputes it.
+proc ext_update_all {} {
+	set pending $::ext_updates
+	if {![dict size $pending]} { return 0 }
+	set same {} ; set foreign {}
+	foreach key [lsort [dict keys $pending]] {
+		set u [dict get $pending $key]
+		lassign [split $key /] kind name
+		set v [dict get $u variant]
+		set line [format "  %-16s %s → %s   %s" \
+			"$name ($kind)" [dict get $u from] [dict get $u to] \
+			[host_of [dict get $v source]]]
+		if {[dict exists $::ext_installed $key]
+				&& [dict get $v source] eq [dict get [dict get $::ext_installed $key] source]} {
+			lappend same $line
+		} else {
+			lappend foreign $line
+		}
+	}
+	set msg "Update [dict size $pending] extension(s)?\n"
+	if {[llength $same]} {
+		append msg "\nFrom the repository each was installed from:\n[join $same "\n"]\n"
+	}
+	if {[llength $foreign]} {
+		append msg "\nFrom a DIFFERENT repository than the one it was installed from —\
+			a name is not owned by anyone, so check you mean these:\n[join $foreign "\n"]\n"
+	}
+	append msg "\nEach is re-installed from its repository. Modes and highlighters are code\
+		that runs in your editor; providers are code that runs in your core."
+	if {[tk_messageBox -icon warning -type yesno -title "rio — update extensions" \
+			-message $msg] ne "yes"} { return 0 }
+	set done 0
+	foreach key [lsort [dict keys $pending]] {
+		if {[ext_install [dict get [dict get $pending $key] variant] 1]} { incr done }
+	}
+	return $done
 }
 
 # ---------------------------------------------------------------------------
@@ -8074,10 +8352,14 @@ proc extensions_window {} {
 	frame $w.hdr -background [dict get $c ui.bg]
 	button $w.hdr.repos   -text "Repositories…" -font RioUIFont -command extw_sources_dialog
 	button $w.hdr.refresh -text "⟳" -font RioUIFont -command extw_refresh  ;# ⟳ rescan (D27)
+	# Update All (D107): apt's `upgrade` beside its `update`. Its label carries the
+	# count, and it is disabled at zero — the button itself is the answer to "is
+	# anything out of date?", so it must never look clickable when nothing is.
+	button $w.hdr.upall -text "Update All" -font RioUIFont -command extw_update_all
 	label $w.hdr.flbl -text "Filter:" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	entry $w.hdr.filter -font RioUIFont -width 18
-	pack $w.hdr.repos $w.hdr.refresh -side left -padx {0 4}
+	pack $w.hdr.repos $w.hdr.refresh $w.hdr.upall -side left -padx {0 4}
 	pack $w.hdr.filter $w.hdr.flbl -side right
 	bind $w.hdr.filter <KeyRelease> extw_fill
 
@@ -8128,31 +8410,62 @@ proc extw_busy {on} {
 	if {![winfo exists .extw]} return
 	set st [expr {$on ? "disabled" : "normal"}]
 	foreach b {.extw.hdr.repos .extw.hdr.refresh} { $b configure -state $st }
+	extw_upall_sync
 	foreach f [winfo children .extw.det] {
+		# The cross-source checkbutton sits directly in the detail frame; the
+		# Install/Update/Remove buttons sit one level deeper, in a variant's row.
+		if {[winfo class $f] eq "Checkbutton"} { $f configure -state $st ; continue }
 		foreach ch [winfo children $f] {
 			if {[winfo class $ch] eq "Button"} { $ch configure -state $st }
 		}
 	}
 }
 
+# The Update All button's label and state: the count is part of the label, so the
+# window answers "anything out of date?" without a selection or a click.
+proc extw_upall_sync {} {
+	if {![winfo exists .extw.hdr.upall]} return
+	set n [dict size $::ext_updates]
+	.extw.hdr.upall configure \
+		-text [expr {$n ? "Update All ($n)" : "Update All"}] \
+		-state [expr {$n && !$::repo_busy ? "normal" : "disabled"}]
+}
+
 proc extw_refresh {} {
 	if {$::repo_busy} return
 	extw_busy 1
-	# The core's provider-api ceiling (D66) — so a repo provider that needs a newer
-	# rio greys before an install even reaches the core. Best-effort: an old core
-	# with no provider.list leaves the default, and every provider then lists as
-	# api 1 (what such a core could load anyway).
-	set pr [rio_call provider.list {}]
-	if {[dict get $pr ok] && [dict exists $pr result api_max]} {
-		set ::provider_api_max [dict get $pr result api_max]
-	}
+	# What the core holds: its provider-api ceiling (D66) — so a repo provider that
+	# needs a newer rio greys before an install even reaches the core — and the
+	# installed version of each provider in its store, which for a provider outranks
+	# this GUI's ledger (D107). Best-effort: an old core with no provider.list leaves
+	# the default, and every provider then lists as api 1 (what such a core could
+	# load anyway).
+	ext_core_providers_refresh
 	repo_scan_all {apply {{src n total} {
 		extw_status "fetching [host_of $src] ($n/$total)…"
 		update idletasks
 	}}}
 	extw_busy 0
-	extw_status "[llength $::repo_variants] extension(s) from [dict size $::repo_srcinfo] repositories"
+	set msg "[llength $::repo_variants] extension(s) from [dict size $::repo_srcinfo] repositories"
+	if {[dict size $::ext_updates]} { append msg " — [dict size $::ext_updates] update(s)" }
+	extw_status $msg
 	extw_fill
+}
+
+# Update All from the window: one consent for the batch (ext_update_all), then a
+# rescan — an update can change what a source offers next (a payload list, a
+# provider's api), and the row marks must come from fresh manifests, not from the
+# ones that were on screen when the button was pressed.
+proc extw_update_all {} {
+	if {$::repo_busy} return
+	if {![dict size $::ext_updates]} return
+	set n [dict size $::ext_updates]
+	extw_busy 1
+	extw_status "updating $n extension(s)…"
+	set done [ext_update_all]
+	extw_busy 0
+	extw_status [expr {$done ? "updated $done of $n extension(s)" : "nothing updated"}]
+	if {$done} { extw_refresh } else { extw_fill }
 }
 
 # Aggregate the scan + ledger into display rows: one per (kind, name), sorted;
@@ -8163,14 +8476,18 @@ proc extw_rows_build {} {
 	foreach v $::repo_variants {
 		dict lappend bykey "[dict get $v kind]/[dict get $v name]" $v
 	}
-	dict for {key e} $::ext_ledger {
+	# Installed, but no source lists it: the ledger (or, for a provider, the core —
+	# D107) speaks for it, so Remove always works even when the repository is gone.
+	dict for {key cur} $::ext_installed {
 		if {[dict exists $bykey $key]} continue
 		lassign [split $key /] kind name
+		set e [expr {[dict exists $::ext_ledger $key] ? [dict get $::ext_ledger $key] : {}}]
 		dict set bykey $key [list [dict create \
-			source [dict get $e source] dir [dict get $e dir] name $name kind $kind \
-			version [dict get $e version] author "" \
+			source [dict get $cur source] \
+			dir [expr {[dict exists $e dir] ? [dict get $e dir] : ""}] \
+			name $name kind $kind version [dict get $cur version] author "" \
 			description "installed; its repository is not configured or unreachable" \
-			files [dict get $e files] offline 1]]
+			files [expr {[dict exists $e files] ? [dict get $e files] : {}}] offline 1]]
 	}
 	set rows {}
 	foreach key [lsort [dict keys $bykey]] {
@@ -8220,13 +8537,29 @@ proc extw_fill {} {
 			set from [host_of [dict get [lindex $vars 0] source]]
 			if {[dict exists [lindex $vars 0] offline]} { append from " (offline)" }
 		}
+		# The installed mark carries the version comparison (D107): what you have, and
+		# what a repository now offers instead. A version that doesn't follow the semver
+		# rule says so rather than being silently left out of the comparison.
 		set marks ""
-		if {[dict exists $::ext_ledger [dict get $row key]]} { append marks " \[installed\]" }
+		set key [dict get $row key]
+		set update [dict exists $::ext_updates $key]
+		if {[dict exists $::ext_installed $key]} {
+			set cur [dict get [dict get $::ext_installed $key] version]
+			if {$update} {
+				append marks " \[$cur → [dict get [dict get $::ext_updates $key] to]\]"
+			} elseif {[ext_ver_parse $cur] eq ""} {
+				append marks " \[installed $cur — version not comparable\]"
+			} else {
+				append marks " \[installed $cur\]"
+			}
+		}
 		if {![ext_row_installable $row]} { append marks " (needs a newer rio)" }
 		.extw.body.list insert end \
 			[format "%-16s %-8s %s%s" [dict get $row name] [dict get $row kind] $from $marks]
 		if {![ext_row_installable $row]} {
 			.extw.body.list itemconfigure end -foreground [dict get $c gutter.fg]
+		} elseif {$update} {
+			.extw.body.list itemconfigure end -foreground [dict get $c accent]
 		}
 	}
 	if {$keep ne ""} {
@@ -8238,13 +8571,21 @@ proc extw_fill {} {
 			}
 		}
 	}
+	extw_upall_sync
 	extw_select
 }
 
 # Rebuild the detail section for the selected row: the extension's header line,
 # then one line per variant — `version by author — source-host` with Install,
-# or [installed] + Remove on the variant the ledger says is in place. An
-# installed version no longer listed by its source gets its own honest line.
+# or [installed] + Remove on the variant that is in place. An installed version
+# no longer listed by its source gets its own honest line.
+#
+# D107 adds the version comparison to each variant line: the one that would
+# UPDATE what is installed says so and its button reads Update; one that is
+# behind says so and keeps a plain Install (a downgrade stays possible, it just
+# never happens by accident). Below the header, an installed row carries the
+# cross-source checkbutton — the per-extension opt-in that lets a repository
+# OTHER than the one it came from count as an update at all.
 proc extw_select {} {
 	set det .extw.det
 	if {![winfo exists $det]} return
@@ -8271,11 +8612,24 @@ proc extw_select {} {
 	label $det.head -anchor w -justify left -wraplength $wrap -font RioUIFont -text $head \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	pack $det.head -fill x -pady {0 2}
+	set key [dict get $row key]
 	set entry ""
-	if {[dict exists $::ext_ledger [dict get $row key]]} {
-		set entry [dict get $::ext_ledger [dict get $row key]]
-	}
+	if {[dict exists $::ext_installed $key]} { set entry [dict get $::ext_installed $key] }
 	set st [expr {$::repo_busy ? "disabled" : "normal"}]
+	# The cross-source opt-in, on installed rows only: it is a statement about THIS
+	# extension's identity across repositories, so it belongs on the extension, not in
+	# Preferences. Off by default (D107).
+	if {$entry ne "" && [dict exists $::ext_ledger $key]} {
+		set ::extw_anysource [ext_anysource $key]
+		checkbutton $det.anysrc -variable ::extw_anysource -state $st \
+			-text "Also accept updates from other repositories" \
+			-command [list extw_anysource_toggle $key] \
+			-font RioUIFont -anchor w -wraplength $wrap \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+			-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg] \
+			-selectcolor [dict get $c ui.bg]
+		pack $det.anysrc -fill x -pady {0 2}
+	}
 	set i 0
 	set matched 0
 	foreach v [dict get $row variants] {
@@ -8283,11 +8637,19 @@ proc extw_select {} {
 		set line "  [dict get $v version]"
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
 		append line " — [host_of [dict get $v source]]"
-		label $f.l -anchor w -justify left -wraplength $wrapb -font RioUIFont -text $line \
-			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		set this_installed [expr {$entry ne "" \
 			&& [dict get $v source]  eq [dict get $entry source] \
 			&& [dict get $v version] eq [dict get $entry version]}]
+		# How this variant relates to what is installed. Only ever stated when both
+		# versions follow the semver rule — otherwise rio makes no claim (D107).
+		set is_update [expr {[ext_variant_update $v] ne ""}]
+		if {!$this_installed && !$is_update && $entry ne "" && ![dict exists $v offline]
+				&& [dict get $v source] eq [dict get $entry source]
+				&& [ext_ver_cmp [dict get $v version] [dict get $entry version]] eq "-1"} {
+			append line "  (older than the installed [dict get $entry version])"
+		}
+		label $f.l -anchor w -justify left -wraplength $wrapb -font RioUIFont -text $line \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		if {$this_installed} {
 			set matched 1
 			label $f.mark -font RioUIFont -text "\[installed\]" \
@@ -8300,8 +8662,10 @@ proc extw_select {} {
 				-command [list extw_remove [dict get $row kind] [dict get $row name]]
 			pack $f.rm -side right -padx 2
 		} elseif {[ext_variant_installable $v]} {
-			button $f.in -text Install -font RioUIFont -state $st \
-				-command [list extw_install $sel $i]
+			# Update, not Install, when this is the newer version of what you already
+			# have — same act, but the button says which act it is.
+			button $f.in -text [expr {$is_update ? "Update" : "Install"}] \
+				-font RioUIFont -state $st -command [list extw_install $sel $i]
 			pack $f.in -side right -padx 2
 		}
 		pack $f.l -side left -fill x -expand 1
@@ -8333,6 +8697,15 @@ proc extw_install {rowidx vidx} {
 	extw_fill
 }
 
+# Flip one extension's cross-source flag and repaint: the count in Update All and
+# the row's mark both change with it, so the effect of the checkbutton is visible
+# in the same window without a rescan (the variants are already in hand).
+set ::extw_anysource 0   ;# the detail checkbutton's variable, per selected row
+proc extw_anysource_toggle {key} {
+	ext_anysource_set $key $::extw_anysource
+	extw_fill
+}
+
 proc extw_remove {kind name} {
 	if {$::repo_busy} return
 	extw_busy 1
@@ -8342,6 +8715,100 @@ proc extw_remove {kind name} {
 	extw_status "removed $name"
 	extw_fill
 }
+
+# ---------------------------------------------------------------------------
+# The start-up check (AGENTS.md D107) — rio's `apt update` at boot, OFF by
+# default: a fresh rio makes no network request it was not asked to make, and
+# the request is the CORE's anyway (repo.fetch), which on a remote core means
+# someone else's machine.
+#
+# Deferred on a timer, and deferred again while an op is in flight or the
+# Extensions window is scanning — the rule fs_changed_settle follows: never
+# start a core call from a timer inside another op's round trip. Every failure
+# is silent (a dead source is already one honest row in the window); the only
+# thing this is allowed to interrupt the user with is a genuine finding.
+# ---------------------------------------------------------------------------
+set ::ext_check_updates 0    ;# the preference (prefs.json `check_updates`)
+set ::ext_check_delay 1500   ;# ms after boot; long enough for the window to settle
+set ::ext_check_after ""     ;# pending check timer; "" while none is armed
+
+proc ext_check_arm {} {
+	if {!$::ext_check_updates} return
+	if {$::ext_check_after ne ""} return
+	set ::ext_check_after [after $::ext_check_delay ext_startup_check]
+}
+
+proc ext_startup_check {} {
+	set ::ext_check_after ""
+	if {!$::ext_check_updates} return
+	if {[array size ::pending] || $::repo_busy} {
+		set ::ext_check_after [after $::ext_check_delay ext_startup_check]
+		return
+	}
+	if {![llength [sources_load]]} return
+	set ::repo_busy 1
+	catch {
+		ext_core_providers_refresh
+		repo_scan_all
+	}
+	set ::repo_busy 0
+	if {[dict size $::ext_updates]} { ext_update_dialog }
+}
+
+# What the check found. A plain toplevel rather than a tk_messageBox because it
+# carries a checkbutton — and "don't ask again" is the honest escape from a
+# start-up notification: it turns the preference off, which means checking
+# becomes the user's own business in the Extensions window, and says so.
+#
+# NO grab and no tkwait: this reports, it does not ask. Boot must not block on
+# it, and a modal a headless run can reach is exactly the hazard the dialog
+# guard at the foot of this file exists to prevent.
+proc ext_update_dialog {} {
+	set w .extupd
+	destroy $w
+	toplevel $w
+	wm title $w "rio — extension updates"
+	wm transient $w .
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set n [dict size $::ext_updates]
+	label $w.head -anchor w -justify left -font RioUIFont \
+		-text "[expr {$n == 1 ? "One extension has" : "$n extensions have"}] a newer version available:" \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	set lines {}
+	foreach key [lsort [dict keys $::ext_updates]] {
+		set u [dict get $::ext_updates $key]
+		lassign [split $key /] kind name
+		lappend lines [format "    %-16s %s → %s    %s" $name \
+			[dict get $u from] [dict get $u to] [host_of [dict get [dict get $u variant] source]]]
+	}
+	label $w.list -anchor w -justify left -font RioUIFont -text [join $lines "\n"] \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	checkbutton $w.stop -variable ::ext_check_updates -onvalue 0 -offvalue 1 \
+		-text "Don't check for updates at start-up" -command ext_check_pref_save \
+		-font RioUIFont -anchor w \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg] \
+		-selectcolor [dict get $c ui.bg]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.ext   -text "Extensions…" -font RioUIFont \
+		-command [list apply {{w} { destroy $w ; extensions_window }} $w]
+	button $w.btns.close -text "Close" -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right
+	pack $w.btns.ext   -side right -padx {0 4}
+	grid $w.head -row 0 -column 0 -sticky we -padx 12 -pady {12 4}
+	grid $w.list -row 1 -column 0 -sticky we -padx 12
+	grid $w.stop -row 2 -column 0 -sticky w  -padx 12 -pady {10 4}
+	grid $w.btns -row 3 -column 0 -sticky we -padx 12 -pady {4 12}
+	grid columnconfigure $w 0 -weight 1
+	bind $w <Escape> [list destroy $w]
+	focus $w.btns.close
+}
+
+# The preference is one flag, written through the same prefs.json as every other
+# view setting — so both of its doors (this dialog's checkbutton and the
+# Preferences pane) record the same thing.
+proc ext_check_pref_save {} { prefs_save }
 
 # The compact sources editor behind `Repositories…`: the URLs of sources.list
 # in a listbox, Remove for the selected one, an entry + Add below. Writes
@@ -8353,7 +8820,9 @@ proc extw_sources_dialog {} {
 	destroy $w
 	toplevel $w
 	wm title $w "Repositories"
-	wm transient $w .extw
+	# Reachable from the Extensions window and from Preferences ▸ Extensions (D107),
+	# so the master is whichever is actually there.
+	wm transient $w [expr {[winfo exists .extw] ? ".extw" : "."}]
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 	# Hint text is muted (gutter.fg), so static help never reads as an interactive
@@ -8393,7 +8862,9 @@ proc extw_sources_dialog {} {
 	catch {grab $w}
 	focus $w.add.url
 	tkwait window $w
-	extw_refresh
+	# Only rescan when there is a window to repaint: opened from Preferences, this
+	# dialog is a plain edit of sources.list and must not reach for the network.
+	if {[winfo exists .extw]} { extw_refresh }
 }
 
 proc extw_source_add {} {
@@ -9506,6 +9977,23 @@ proc prefs_fill_agent {f} {
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 
+# Extensions category (D107): where the repositories are configured and where the
+# one durable decision about them lives — whether rio looks for new versions when
+# it starts. D85 puts it here rather than in the Extensions window: that window is
+# a browsing surface, this is the config home. The two buttons are doors to the
+# surfaces themselves, so the pane is not a dead end.
+proc prefs_fill_extensions {f} {
+	set r 0
+	grid [prefs_check $f.chk "Check for extension updates at start-up" \
+		::ext_check_updates ext_check_pref_save] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_hint $f.hint "Off by default: rio asks its core to fetch from your repositories only when you tell it to. Updates are never installed automatically, and an update comes from the repository an extension was installed from — a same-named extension elsewhere is a different thing until you say otherwise."] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
+	grid [prefs_button $f.ext "Extensions…" extensions_window] \
+		-row [incr r] -column 0 -sticky w -pady {8 2}
+	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
+		-row [incr r] -column 0 -sticky w -pady {2 2}
+}
+
 # Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
 # reimplemented, from here.
 proc prefs_fill_keyboard {f} {
@@ -9536,18 +10024,19 @@ proc preferences_window {} {
 		-activestyle none -highlightthickness 0 -borderwidth 1 -relief solid \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg]
-	foreach cat {View Editor Agent Keyboard} { $w.cats insert end $cat }
+	foreach cat {View Editor Agent Extensions Keyboard} { $w.cats insert end $cat }
 	bind $w.cats <<ListboxSelect>> [list prefs_show_cat $w]
 
 	frame $w.body -background [dict get $c ui.bg]
-	foreach cat {view editor agent keyboard} {
+	foreach cat {view editor agent extensions keyboard} {
 		frame $w.body.$cat -background [dict get $c ui.bg]
 		grid $w.body.$cat -row 0 -column 0 -sticky nsew
 	}
-	prefs_fill_view     $w.body.view
-	prefs_fill_editor   $w.body.editor
-	prefs_fill_agent    $w.body.agent
-	prefs_fill_keyboard $w.body.keyboard
+	prefs_fill_view       $w.body.view
+	prefs_fill_editor     $w.body.editor
+	prefs_fill_agent      $w.body.agent
+	prefs_fill_extensions $w.body.extensions
+	prefs_fill_keyboard   $w.body.keyboard
 
 	# Extensions… mirrors the Settings menu, where it sits right under Preferences…
 	# (D67): from here you jump to the installer for the providers/modes/themes/syntax
@@ -10320,6 +10809,7 @@ modes_menu_fill
 # the default rather than erroring at startup (D31).
 prefs_load
 ledger_load   ;# which extensions this GUI installed, with their provenance (D39)
+ext_installed_compute  ;# the installed view (D107) — the core's half arrives with the first scan
 sources_seed_default   ;# first run: pre-fill sources.list with rio's own repo (D39)
 # Greet the core before any other op. This is the first exchange over the channel, so
 # it's also where a stale connection surfaces: a dead `ssh -L` forward accepts the
@@ -10394,6 +10884,12 @@ pack propagate . 0
 
 # Startup is done: from here, view-state and workspace changes persist (D31).
 set ::rio_started 1
+
+# Look for new versions of the installed extensions, if the user asked for that
+# (D107) — off by default, deferred on a timer, and silent about everything but a
+# genuine finding. Armed after ::rio_started so a preference written by the
+# dialog's "don't check again" persists.
+ext_check_arm
 
 # Register the whole window as an OS file-drop target (D86) so a file dropped anywhere —
 # a dock, the tab strip, empty editor space — opens (each editor text widget also registers

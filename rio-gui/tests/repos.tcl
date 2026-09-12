@@ -43,7 +43,10 @@ proc ok {label got want} {
 # --- the fetch stub and the dialog stub ----------------------------------------
 # repo_fetch is THE seam (its header says tests replace it): serve from ::fix.
 array set ::fix {}
+set ::fetches 0        ;# every fetch the GUI asks for — the start-up check must make NONE
+                       ;# while its preference is off (D107)
 proc repo_fetch {url} {
+	incr ::fetches
 	if {[info exists ::fix($url)]} {
 		lassign $::fix($url) status text
 		return [dict create ok 1 status $status text $text]
@@ -405,6 +408,224 @@ ok "sources dialog: http added"     [expr {"http://e.example/more" in $::src_mid
 ok "sources dialog: https refused"  [string match "*https is not supported yet*" [mb_last]] 1
 ok "sources dialog: only http kept" [llength $::src_mid] 1
 ok "sources dialog: remove removes" $::src_after {}
+destroy .extw
+
+# ===================================================================================
+# Versions, and updates (AGENTS.md D107)
+#
+# D39 said a version was an opaque string rio never compares; D107 makes it semver
+# and compares it. Everything below is the consequence: what "installed" means, what
+# counts as an update (and pointedly what does not — another repository's same-named
+# extension), Update All's single consent, and the start-up check that must not touch
+# the network until it is asked to.
+# ===================================================================================
+
+# --- the comparator ----------------------------------------------------------------
+# The lenient half is deliberate: `1.1` must compare, because every version installed
+# anywhere predates the rule. The strict half is too: a date stamp is NOT a version,
+# and saying so is better than inventing an order for it.
+ok "ver: patch order"        [list [ext_ver_cmp 1.0.0 1.0.1] [ext_ver_cmp 1.0.1 1.0.0]] {-1 1}
+ok "ver: minor beats patch"  [ext_ver_cmp 1.0.9 1.1.0] -1
+ok "ver: major beats minor"  [ext_ver_cmp 1.9.9 2.0.0] -1
+ok "ver: numeric, not lexical" [ext_ver_cmp 1.10.0 1.9.0] 1
+ok "ver: short form is semver" [list [ext_ver_cmp 1.1 1.1.0] [ext_ver_cmp 1 1.0.0]] {0 0}
+ok "ver: short form still orders" [ext_ver_cmp 1.1 1.1.1] -1
+ok "ver: pre-release ranks below its release" \
+	[list [ext_ver_cmp 1.0.0-beta 1.0.0] [ext_ver_cmp 1.0.0 1.0.0-beta]] {-1 1}
+ok "ver: pre-release fields"  [list [ext_ver_cmp 1.0.0-alpha.1 1.0.0-alpha.2] \
+	[ext_ver_cmp 1.0.0-alpha.2 1.0.0-alpha.beta] [ext_ver_cmp 1.0.0-alpha 1.0.0-alpha.1]] {-1 -1 -1}
+ok "ver: build metadata ignored" [ext_ver_cmp 1.0.0+a 1.0.0+z] 0
+ok "ver: dates make no claim"  [ext_ver_cmp 2026-07-17 2026-08-01] ""
+ok "ver: junk makes no claim"  [list [ext_ver_cmp v2 1.0.0] [ext_ver_cmp 1.2.3.4 1.0.0] \
+	[ext_ver_cmp "" 1.0.0]] {{} {} {}}
+ok "ver: parse fills components" [ext_ver_parse 1.1] {core {1 1 0} pre {}}
+ok "ver: parse refuses non-digits" [list [ext_ver_parse 1.a.0] [ext_ver_parse 0x2.0.0]] {{} {}}
+
+# --- fixtures for the update cases --------------------------------------------------
+# U is "the repository you installed from"; V offers the SAME NAME from somewhere else.
+set U http://u.example/repo
+set V http://v.example/repo
+proc up_manifest {name version} {
+	return "name = $name\nkind = syntax\nversion = $version\nauthor = alice\ndescription = updatable\nfiles = $name.tcl"
+}
+proc up_payload {name} { return "# payload of $name" }
+proc up_publish {src name version} {
+	set ::fix($src/$name-syntax/rio-extension.conf) [list 200 [up_manifest $name $version]]
+	set ::fix($src/$name-syntax/$name.tcl) [list 200 [up_payload $name]]
+}
+set ::fix($U/rio-repository.conf) [list 200 "name = U repository\nmaintainer = alice"]
+set ::fix($U/index) [list 200 "up\nup2\nfresh\n"]
+set ::fix($V/rio-repository.conf) [list 200 "name = V repository\nmaintainer = mallory"]
+set ::fix($V/index) [list 200 "up\n"]
+# The index names dirs, the manifests live under <dir>/ — up_publish spells both.
+foreach {n v} {up 1.0.0 up2 1.0.0 fresh 1.0.0} { up_publish $U $n $v }
+up_publish $V up 2.0.0
+set ::fix($U/index) [list 200 "up-syntax\nup2-syntax\nfresh-syntax\n"]
+set ::fix($V/index) [list 200 "up-syntax\n"]
+
+sources_save [list $U]
+repo_scan_all
+ok "updates: three offered by U"   [llength $::repo_variants] 3
+set ::mb_answers {yes}
+ok "updates: install the 1.0.0"    [ext_install [variant up $::U]] 1
+ok "updates: nothing pending yet"  [dict size $::ext_updates] 0
+ok "updates: installed view knows it" \
+	[dict get $::ext_installed syntax/up] [dict create version 1.0.0 source $::U]
+
+# --- the publisher ships a new version ----------------------------------------------
+up_publish $U up 1.1.0
+repo_scan_all
+ok "updates: one pending"          [dict size $::ext_updates] 1
+ok "updates: from and to"          [list [dict get $::ext_updates syntax/up from] \
+	[dict get $::ext_updates syntax/up to]] {1.0.0 1.1.0}
+ok "updates: uninstalled is not an update" [dict exists $::ext_updates syntax/fresh] 0
+
+# A source that goes BACKWARDS is not an update — a downgrade stays possible, by hand.
+up_publish $U up 0.9.0
+repo_scan_all
+ok "updates: older is not an update" [dict size $::ext_updates] 0
+
+# A version that doesn't follow the rule is never claimed to be newer.
+up_publish $U up 2026-07-17
+repo_scan_all
+ok "updates: incomparable makes no claim" [dict size $::ext_updates] 0
+up_publish $U up 1.1.0
+repo_scan_all
+
+# --- same-named, different repository: a SWITCH, not an update ----------------------
+sources_save [list $U $V]
+repo_scan_all
+ok "updates: V's 2.0.0 is listed"   [dict get [variant up $::V] version] 2.0.0
+ok "updates: still only U's update" [dict get $::ext_updates syntax/up to] 1.1.0
+ok "updates: V's variant is not one" [ext_variant_update [variant up $::V]] ""
+
+# ...until the user says these two names mean the same thing.
+ext_anysource_set syntax/up 1
+ok "anysource: V now counts"        [dict get $::ext_updates syntax/up to] 2.0.0
+ok "anysource: the highest wins"    [dict get [dict get $::ext_updates syntax/up variant] source] $::V
+ledger_save ; set ::ext_ledger {} ; ledger_load
+ok "anysource: survives the ledger" [ext_anysource syntax/up] 1
+ext_anysource_set syntax/up 0
+ok "anysource: off again"           [dict get $::ext_updates syntax/up to] 1.1.0
+
+# --- Update All: one consent for the batch -------------------------------------------
+sources_save [list $U]
+repo_scan_all
+set ::mb_answers {yes}
+ok "update all: install a second"   [ext_install [variant up2 $::U]] 1
+up_publish $U up  1.2.0
+up_publish $U up2 1.3.0
+up_publish $U fresh 9.9.9          ;# never installed: must not be touched
+repo_scan_all
+ok "update all: two pending"        [dict size $::ext_updates] 2
+set before [llength $::mb_log]
+set ::mb_answers {yes}
+ok "update all: updates both"       [ext_update_all] 2
+ok "update all: asked exactly once" [llength $::mb_log] [expr {$before + 1}]
+ok "update all: consent lists both" \
+	[list [string match "*up *1.0.0 → 1.2.0*" [mb_last]] [string match "*up2*1.0.0 → 1.3.0*" [mb_last]]] {1 1}
+ok "update all: consent says which repository" \
+	[string match "*repository each was installed from*" [mb_last]] 1
+ok "update all: ledger carries the new versions" \
+	[list [dict get $::ext_ledger syntax/up version] [dict get $::ext_ledger syntax/up2 version]] \
+	{1.2.0 1.3.0}
+ok "update all: nothing left pending" [dict size $::ext_updates] 0
+ok "update all: the uninstalled one stayed out" [dict exists $::ext_ledger syntax/fresh] 0
+set ::mb_answers {no}
+ok "update all: refusing changes nothing" [ext_update_all] 0
+
+# --- a provider's installed version comes from the CORE ------------------------------
+# A provider installs core-side (D66), so provider.list — not this GUI's ledger — is the
+# truth about what is installed. That is what makes the version right for a provider
+# another frontend installed, or one installed onto a shared core (D107).
+set ::fix($U/pp-provider/rio-extension.conf) [list 200 \
+	"name = pp\nkind = provider\nversion = 1.0.0\nprovider-api = 1\nentry = pp.tcl\nauthor = alice\nfiles = pp.tcl"]
+set ::fix($U/pp-provider/pp.tcl) [list 200 "# a provider payload"]
+set ::fix($U/index) [list 200 "up-syntax\nup2-syntax\nfresh-syntax\npp-provider\n"]
+repo_scan_all
+set ::mb_answers {yes}
+ok "provider: installs core-side"   [ext_install [variant pp $::U]] 1
+# Forget it locally: exactly the state a second frontend on the same core starts in.
+dict unset ::ext_ledger provider/pp
+set ::ext_core_providers {}
+ledger_save
+ext_core_providers_refresh
+ok "provider: the core still knows it" [dict get $::ext_core_providers pp] \
+	[dict create version 1.0.0 source $::U]
+ext_installed_compute
+ok "provider: installed without a ledger entry" \
+	[dict get $::ext_installed provider/pp version] 1.0.0
+# The view is DERIVED: what a core says is installed must never be written back into
+# this GUI's ledger, or a frontend that talks to two cores in turn persists one core's
+# answer as what it believes it installed on the other.
+ok "provider: the core's answer stays out of the ledger" \
+	[dict exists $::ext_ledger provider/pp] 0
+set ::fix($U/pp-provider/rio-extension.conf) [list 200 \
+	"name = pp\nkind = provider\nversion = 1.4.0\nprovider-api = 1\nentry = pp.tcl\nauthor = alice\nfiles = pp.tcl"]
+repo_scan_all
+ok "provider: update detected from the core's version" \
+	[list [dict get $::ext_updates provider/pp from] [dict get $::ext_updates provider/pp to]] \
+	{1.0.0 1.4.0}
+ok "provider: remove works with no ledger entry" [ext_remove provider pp] 1
+ok "provider: the core dropped it" \
+	[expr {"pp" in [lmap p [dict get [rio_result provider.list {}] providers] {dict get $p name}]}] 0
+ok "provider: no longer installed"  [dict exists $::ext_installed provider/pp] 0
+set ::fix($U/index) [list 200 "up-syntax\nup2-syntax\nfresh-syntax\n"]
+
+# --- the start-up check ---------------------------------------------------------------
+up_publish $U up 1.5.0
+repo_scan_all
+set ::ext_check_updates 0
+set ::fetches 0
+ext_startup_check
+ok "startup: off means no network at all" $::fetches 0
+ok "startup: off opens nothing"           [winfo exists .extupd] 0
+ext_check_arm
+ok "startup: off arms no timer"           $::ext_check_after ""
+
+set ::ext_check_updates 1
+set ::fetches 0
+ext_startup_check
+ok "startup: on, it fetched"              [expr {$::fetches > 0}] 1
+ok "startup: it reports what it found"    [winfo exists .extupd] 1
+ok "startup: the dialog names the change" \
+	[string match "*up *1.2.0 → 1.5.0*" [.extupd.list cget -text]] 1
+ok "startup: it does not grab"            [grab current] ""
+ok "startup: it offers the door onward"   [winfo exists .extupd.btns.ext] 1
+
+# "Don't check again" is the honest escape: it turns the preference off, and says so.
+set ::rio_started 1     ;# prefs_save no-ops during boot; here we want the file
+.extupd.stop invoke
+ok "startup: the checkbutton clears the pref" $::ext_check_updates 0
+ok "startup: and it is persisted" \
+	[dict get [json::json2dict [slurp_utf8 [prefs_path]]] check_updates] 0
+set ::rio_started 0
+destroy .extupd
+ext_startup_check
+ok "startup: cleared means silent again"  [winfo exists .extupd] 0
+
+# The Extensions window says it too: the count in Update All, and the row's own mark.
+set ::ext_check_updates 0
+extensions_window
+ok "window: Update All carries the count" [.extw.hdr.upall cget -text] "Update All (1)"
+ok "window: Update All is live"           [.extw.hdr.upall cget -state] normal
+ok "window: the row shows the change"     \
+	[string match "*\[1.2.0 → 1.5.0\]*" [.extw.body.list get [rowidx syntax up]]] 1
+ok "window: an up-to-date row shows its version" \
+	[string match "*\[installed 1.3.0\]*" [.extw.body.list get [rowidx syntax up2]]] 1
+ok "window: status counts the updates"    \
+	[string match "*— 1 update(s)" [.extw.foot.status cget -text]] 1
+.extw.body.list selection clear 0 end
+.extw.body.list selection set [rowidx syntax up]
+extw_select
+ok "window: the button says Update"       [.extw.det.v0.in cget -text] Update
+ok "window: the cross-source opt-in is there, off" \
+	[list [winfo exists .extw.det.anysrc] $::extw_anysource] {1 0}
+set ::mb_answers {yes}
+.extw.det.v0.in invoke
+ok "window: Update installs it"           [dict get $::ext_ledger syntax/up version] 1.5.0
+ok "window: nothing pending after"        [.extw.hdr.upall cget -text] "Update All"
+ok "window: Update All goes dead at zero" [.extw.hdr.upall cget -state] disabled
 destroy .extw
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]

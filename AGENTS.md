@@ -2490,9 +2490,11 @@ publisher-facing spec lives in CONTRIBUTING.md "Extension repositories"):
   output). An explicit index is sturdier (listings off, staged-but-unlisted
   dirs); the fallback keeps "just point it at a directory" honest.
 - `<base>/<extdir>/rio-extension.conf` — `name`/`kind`/`version`/`files`
-  required, `author`/`description` shown. `version` is an **opaque displayed
+  required, `author`/`description` shown. `version` was an **opaque displayed
   string, never compared** — rio offers what's listed and the user decides;
-  no dependency-resolver ambitions. Payload files sit beside the manifest:
+  no dependency-resolver ambitions. **Superseded by D107**: it is semver now,
+  and compared, so rio can say what is out of date — but only that; the
+  no-dependency-resolver half of this stands. Payload files sit beside the manifest:
   one extension per directory, N files, no subdirs (v1), text only, fetches
   capped at 2 MB.
 - **The safe-name rule**: every remote-supplied name (extdir, name, kind,
@@ -2538,9 +2540,11 @@ replace consent ("replaces X 1.0 from host"), the flat-dir collision refusal
 install rather than silently overwrite), offline rows (an installed
 extension whose source vanished is synthesized from the ledger so Remove
 always works), and updates (= installing the newer-listed variant; rio never
-auto-updates). Recorded caveat: the ledger is GUI-side — "this GUI installed
-X onto its core" — so a second frontend on the same daemon doesn't see it; a
-core-side ledger is a ROADMAP item.
+auto-updates — D107 made "newer" a comparison rather than the user's eye, and
+nothing else about that changed). Recorded caveat: the ledger is GUI-side —
+"this GUI installed X onto its core" — so a second frontend on the same daemon
+doesn't see it; a core-side ledger is a ROADMAP item (D107 closes the *provider*
+half of it by reading provider.list, which is the core's own record).
 
 **Consent is code-vs-data, with provenance.** Installing syntax/modes says
 "Tcl CODE that will run inside your editor" next to the source URL; themes
@@ -5653,6 +5657,89 @@ not have that provider"). `agent.options.list` now raises `bad_request` for a pr
 core does not carry, and stays soft only for a registered provider that declares nothing
 (echo). `rio::agent::provider_known` is the one-line predicate behind it; core 633 → 634.
 
+### D107 — extension versions are semver, and rio compares them
+
+The Extensions window could install and remove but could not answer the question a package
+manager exists for: **is what I have still what the repository offers?** An installed row
+said `[installed]`, the offered version sat on another line, and comparing them was the
+user's job — as was noticing that a comparison was possible at all. There was no check, no
+notification, and no upgrade path but spotting a different number and re-installing by hand.
+
+**This amends D39**, which froze `version` as *"an opaque displayed string, never
+compared"* — a promise made to publishers in CONTRIBUTING. Comparing is the whole feature,
+so jka took the rule the other way, deliberately, while nothing is public and every
+extension in existence is in-house: **an extension version is
+[semver](https://semver.org/)**, stated to authors as a rule, and rio orders it.
+
+**The parse is lenient in exactly one direction.** `1-3` numeric core components, missing
+ones zero, so `1.1` reads as `1.1.0` — rio's own extensions shipped as `1.0`/`1.1`, and jka's
+VPS was carrying `openai 1.0` while this was being written; a strict parser would have
+blinded the feature on the very installs it exists for. Everything else is the spec:
+`-prerelease` ranks below its release and compares field by field (numeric below
+alphanumeric), `+build` is ignored. A pre-release requires the full three-component core —
+without that rule `2026-07-17` parses as `2026.0.0-07-17`, which is how leniency starts
+inventing an order for strings that are not versions. **Anything that doesn't parse returns
+`""`, and every caller reads that as "no claim can be made"**: the extension lists,
+installs, and says *(version not comparable)*. D39's opacity survives precisely where the
+rule isn't followed, which is also the entire penalty for not following it.
+
+**An update is same-source by default**, and that is the load-bearing decision. D39's own
+premise is that there is no central index and therefore no namespace: nobody is forced to
+respect a name, so `vi` on another host may be an entirely different program. An update is
+offered only from the repository the ledger says an extension was installed from; another
+source's higher version is listed as a variant to **switch** to by hand, with the consent
+that names the new source. A per-extension flag (`anysource`, one key in that ledger entry,
+off by default) opens it up for the mirror/fork case. jka's first instinct was the opposite
+default; asked to confirm, they took the safe direction — the danger being exactly the one
+their own reasoning named.
+
+**What "installed" means gained a second source of truth.** `::ext_installed` is derived:
+the ledger as the base, but for a **provider** the core wins, because a provider installs
+core-side and `provider.list` already reports `{name, version, source}` from the store
+(D66's op, put to a second use). That answers D39's recorded ledger caveat — "this GUI
+installed X onto its core" — in the case that actually bites: a provider installed by
+another frontend, or onto a remote core, now shows its real version and gets update
+tracking, and Remove works with no ledger entry at all. The view is **never written back**:
+a GUI talking to two cores in turn would otherwise persist one core's answer as what it
+believes it installed on the other.
+
+**Consent scales with what is actually being decided.** *Update All* asks **once** — a
+summary naming each extension, its version change and its host — because you already
+trusted these source+extension pairs when you installed them, and N dialogs for N updates
+is a prompt people learn to click through. The exception gets its own paragraph in that
+same dialog: an update crossing into a *different* repository is a trust decision, and is
+listed apart, under a heading that says so.
+
+**The start-up check is opt-in and quiet.** Off by default — a fresh rio makes no network
+request it wasn't asked to make, and the request is the *core's* (repo.fetch), which on a
+remote core means someone else's machine. It runs on a timer after boot and defers again
+while an op is in flight or the window is scanning (`fs_changed_settle`'s rule: never start
+a core call from inside another's round trip). Failures are silent — a dead source is
+already one honest row in the window — and the only thing it may interrupt with is a real
+finding. jka rejected a badge on the menu entry ("it just doesn't feel like win2000 era
+software") in favour of a plain dialog listing what it found, with *Don't check for updates
+at start-up*, which turns the preference off and hands the job back to the user. It takes
+**no grab and no tkwait**: it reports, it does not ask, so boot never blocks on it and no
+headless run can be trapped by it. Its home is a new **Preferences ▸ Extensions** category —
+D85's rule, and extensions had no pane in the config home at all.
+
+**No core changes.** `repo.fetch` already fetched and `provider.list` already answered; this
+is entirely GUI-side, which is itself the evidence that D39's split of labour was drawn in
+the right place. rio's own five extensions were renumbered to three-component semver in the
+tree and the test repository, so the repo rio ships with obeys the rule it now publishes.
+
+**Guards** (repos 93 → 161, prefs_window 52 → 57; core 634, claude 51, openai 40 unchanged,
+as a change touching no core file should leave them): the comparator's table including
+`1.10.0 > 1.9.0`, the short form, pre-release ordering and the strings that make no claim;
+an update appearing when a fixture publisher bumps a version, and *not* appearing for a
+downgrade, an uninstalled extension, or an incomparable version; the same-source rule and
+its flag, which survives a ledger round-trip; Update All asking exactly once and leaving the
+uninstalled one alone; a provider whose installed version comes from the core with no ledger
+entry, updated and removed through it; and the start-up check making **zero** fetches while
+its preference is off. Six injections, each failing by name: a lexical version compare, the
+same-source test dropped, Update All installing unasked, the check ignoring its preference,
+the short-form allowance removed, and the derived view written back into the ledger.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -6262,3 +6349,7 @@ status changes, rather than pretending a test could hold it.
   rio's first D35-style tool window (D39).
 - **safe-name rule** — `^[A-Za-z0-9][A-Za-z0-9._-]*$`, required of every
   remote-supplied name before any URL/path join (D39).
+- **update (of an extension)** — a *higher semver* offered by the repository an
+  extension was installed from. Another repository's same-named extension is a
+  **switch**, not an update, unless that extension's cross-source flag is set;
+  a version that isn't semver is never compared at all (D107).

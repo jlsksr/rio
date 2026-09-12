@@ -228,9 +228,16 @@ for later:
   and **Claude followed (D69)** — the core now carries **no** provider payload, only the
   `echo` stub, with every real provider installed. Still open here: `provider-api 2` and a
   core-side ledger (below).
-- **Update checking** — *deferred.* rio never auto-updates; an update is
-  installing the newer-listed variant by hand. A "newer version available"
-  marker on installed rows would be a cheap, honest middle ground.
+- **Update checking** — *landed* (AGENTS.md D107). It went further than the
+  "newer version available marker" deferred here, because the marker needed the
+  thing D39 had refused: an **ordering over versions**. `version` is now
+  **semver** — a published rule for authors, leniently parsed, and anything that
+  isn't semver is shown but never compared. The Extensions window marks a row
+  `[1.1.0 → 1.2.0]`, its button says *Update*, *Update All* takes the batch under
+  one consent, and an opt-in check at start-up reports what it found. rio still
+  **never auto-updates**, and an update comes only from the repository the
+  extension was installed from (a per-extension flag opens that up) — with no
+  central index, a shared name is not a shared identity.
 - **Core-side ledger** — *gap.* The provenance ledger is GUI-side ("this GUI
   installed X onto its core"); a second frontend on the same daemon doesn't
   see it. Theme installs land core-side already; the ledger could follow.

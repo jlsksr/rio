@@ -221,6 +221,13 @@ same name, both are listed with author and source and **you choose**; and
 installing code (a highlighter, a mode) says plainly that it is code, next to
 the URL you're trusting. Themes are data, parsed and never executed.
 
+Versions are [semver](https://semver.org/), so rio can tell you when a
+repository offers something newer — `[1.1.0 → 1.2.0]` on the row, one button to
+update it, another to update everything at once, and an optional look at
+start-up. **Nothing is ever installed on its own**, and an update comes only
+from the repository that extension was installed from: a same-named extension
+elsewhere is a different thing you may switch to, not a newer version of yours.
+
 *Installing:* Settings ▸ Extensions…. *Publishing your own repository:* the
 complete spec — three small text files — is in
 [CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).

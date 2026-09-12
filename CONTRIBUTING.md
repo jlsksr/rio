@@ -173,7 +173,7 @@ window shows:
 
     name = night
     kind = theme
-    version = 1.0
+    version = 1.0.0
     author = jka
     description = a very dark theme
     files = night.theme
@@ -203,7 +203,7 @@ All three files use rio's conf format (AGENTS.md D21): `key = value` lines,
 | ------------- | -------- | -------------------------------------------------------------- |
 | `name`        | yes      | the extension's name — users see it as *kind/name*             |
 | `kind`        | yes      | what it is: `syntax`, `mode`, `theme`, or `provider` today (open — below) |
-| `version`     | yes      | an **opaque string** shown to users (`1.0`, `2026-07-17`, …) — rio displays it, never compares it |
+| `version`     | yes      | **[semver](https://semver.org/)** — `MAJOR.MINOR.PATCH`, optionally `-prerelease` (`1.2.0`, `2.0.0-rc.1`). rio compares it to decide what is an update |
 | `files`       | yes      | the payload filename(s), space-separated, beside the manifest  |
 | `author`      | shown    | your name or handle — displayed with every variant             |
 | `description` | shown    | one line about the extension                                   |
@@ -299,14 +299,37 @@ of it:
     curl http://yourserver.example/rio/rio-repository.conf   # does the marker parse?
     curl http://yourserver.example/rio/index                 # does it list your dirs?
 
+### Versions are semver
+
+`version` is a **[semver](https://semver.org/)** string — `MAJOR.MINOR.PATCH`,
+with an optional `-prerelease` (`1.2.0`, `2.0.0-rc.1`, `0.9.0-beta.2`). That is
+the one thing rio asks you to follow rather than merely display, because it is
+what lets a user's editor tell them your new release *is* newer.
+
+The comparison is ordinary semver: numeric fields compared as numbers (so
+`1.10.0` beats `1.9.0`), a pre-release ranking below the release it leads to,
+and `+build` metadata ignored. rio is lenient about one thing only — a
+two-component `1.1` is read as `1.1.0`, because versions predating this rule are
+still installed out there. Anything it can't read as a version (a bare date, a
+`v2-final`) is **shown but never compared**: your extension lists and installs
+normally, it just never tells anyone an update is waiting. That is the cost of
+not following the rule, and it is the whole cost.
+
 ### Updating & removing
 
-To ship a new version, update the payload files and **bump `version =`**. It's
-an opaque label, so date stamps serve as well as semvers. Users see your new
-version listed beside the one they installed and re-install to update — rio
-never auto-updates. To retire an extension, delete its directory (and its
-`index` line): it unlists, while existing installs keep working and stay
-removable — each user's rio remembers what it installed, and from where.
+To ship a new version, update the payload files and **bump `version =`**. Users
+see it as `[1.1.0 → 1.2.0]` on the row, update one extension with a button or
+all of them at once, and can have rio look for new versions when it starts.
+**rio never auto-updates** — it only ever tells.
+
+An update is offered from **the repository the user installed from**, not from
+whichever source happens to list the highest number. Nobody owns a name here,
+so a same-named extension in another repository is a different thing the user
+may deliberately switch to, never a silent upgrade path into your users.
+
+To retire an extension, delete its directory (and its `index` line): it unlists,
+while existing installs keep working and stay removable — each user's rio
+remembers what it installed, and from where.
 
 ### Trust, honestly
 
