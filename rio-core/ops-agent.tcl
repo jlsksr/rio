@@ -208,9 +208,16 @@ proc rio::ops::_option_provider {params} {
 # agent.options.list {?provider?} -> {provider, options:[{name,label,hint,value,free,
 # refresh, choices:[{value,label}]}]} ; what this provider lets you choose right now.
 # A provider with no options answers with an empty list (echo), so a frontend can ask
-# unconditionally. A two-level result — the wire layer spells both levels out (D25).
+# unconditionally — but a provider this core does NOT CARRY is a bad_request, as it is
+# for every other agent op. The two must not read alike: "nothing to choose" and "no
+# such provider here" send a frontend in different directions (a remote core carrying
+# only openai answered for `claude` as though it merely had no options; D106).
+# A two-level result — the wire layer spells both levels out (D25).
 proc rio::ops::agent_options_list {params} {
 	set name [_option_provider $params]
+	if {![rio::agent::provider_known $name]} {
+		rio::error::raise bad_request "unknown agent provider: $name"
+	}
 	return [dict create result [dict create \
 		provider $name options [rio::agent::options $name]]]
 }

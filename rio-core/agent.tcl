@@ -139,6 +139,15 @@ proc rio::agent::use_provider {name} {
 proc rio::agent::provider_name  {} { variable active_provider ; return $active_provider }
 proc rio::agent::provider_names {} { variable providers ; return [lsort [dict keys $providers]] }
 
+# Whether this core carries a provider by that name. Lets an op tell "a provider that
+# offers nothing" apart from "a provider this core has never heard of" — two different
+# answers that must not read the same (found against a remote core that carries only
+# openai and answered for `claude` as though it simply had no options, D106).
+proc rio::agent::provider_known {name} {
+	variable providers
+	return [dict exists $providers $name]
+}
+
 # A rendering of every registered provider for a frontend's picker + key UI
 # (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup}. Sorted by
 # name for a stable menu order. All leaves are strings (the wire's flat-object

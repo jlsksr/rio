@@ -220,6 +220,15 @@ test op-list-echo {the built-in stub lists no options rather than failing} -setu
 	dict get [dict get [rio::ops::agent_options_list {provider echo}] result] options
 } -result {}
 
+test op-list-unknown-provider {a provider this core doesn't carry is a bad_request, not "no options"} -setup {
+	reset_opts
+} -body {
+	# "nothing to choose" and "no such provider here" must not read alike — a frontend
+	# asking a remote core about a provider it does not have needs to be told so.
+	catch {rio::ops::agent_options_list {provider nosuch}} e
+	set e
+} -match glob -result {*unknown agent provider: nosuch*}
+
 test op-set {agent.option.set replies with the accepted value and announces} -setup {
 	reset_opts
 	set ::events {}

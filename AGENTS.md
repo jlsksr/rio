@@ -5643,6 +5643,16 @@ takes none offers only the default and says so; a choice made on one model is no
 into a 400 on another; switching back restores it; a listing with no capabilities at all (an
 older API, a trimming proxy) leaves rio asking the API rather than assuming either way.
 
+**A second finding, from the remote core** (jka's VPS over an SSH tunnel — the first time
+these ops answered from a machine that is not this one, which is the D30 case they exist
+for): asked about `claude`, a core carrying only `openai` replied **"no options"** rather
+than "no such provider". `agent.option.set` was strict about an unknown provider while
+`agent.options.list` was soft, so the two readings collapsed into one — and they send a
+frontend in opposite directions ("this provider offers nothing to choose" vs "this core does
+not have that provider"). `agent.options.list` now raises `bad_request` for a provider the
+core does not carry, and stays soft only for a registered provider that declares nothing
+(echo). `rio::agent::provider_known` is the one-line predicate behind it; core 633 → 634.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
