@@ -5517,6 +5517,99 @@ puts rio's own back.
 
 ---
 
+### D106 — the model and the effort are a choice, made where the agent is
+
+jka asked whether the agent pane can switch **models and efforts**. It could not, and the
+gap was worse than "no control": the model was a hardcoded value inside each provider
+extension's config dict (`claude-sonnet-5`, `gpt-4o`), changeable only by editing the
+extension's source on the core's disk and lost on the next reinstall — and **effort did not
+exist in rio at all**. Meanwhile D85 had already settled the principle: the provider picker
+belongs in reach because it answers *"which model am I talking to right now"*. That question
+was being answered with the provider's name and a model nobody could see or change.
+
+**The seam: a provider declares its options; the core never learns what they mean.**
+`register_provider` gains `-options {list <cmd> set <cmd> ?refresh <cmd>?}`, shaped exactly
+like the `-key {set clear status}` block beside it — capability *commands*, not data,
+because the valid choices depend on state only the provider has (the chosen model, what a
+refresh returned, what a local server reports). A descriptor is
+`{name label hint value free refresh choices {{value .. label ..} ..}}`; the core normalizes
+it, routes `agent.options.list` / `agent.option.set` / `agent.options.refresh` by NAME, and
+shapes the wire. Nothing in `rio-core/` contains the word "effort" — the same discipline
+that keeps the tool list and the system prompt out of `extensions/` (D20/D34/D101). A
+provider that grows a third knob needs no core change **and no GUI change**.
+
+`free 1` (any value accepted) and `refresh 1` (re-enumerable) are what make a shipped list
+of model names survivable: it *will* go stale, so **Other…** takes a model id this build
+never heard of, and **⟳ Refresh from provider** replaces the list with what the key — or the
+local server — can actually reach. For Ollama/llama-server that listing is the only
+sensible source, and the URL derives from the endpoint already configured, so pointing the
+OpenAI face at a local server stays the one-line change it always was.
+
+**A refresh is asynchronous, so it announces rather than replies.** `agent.options.refresh`
+is a streaming op: it acks, and the answer arrives as an `agent.options` event. The event
+carries only the provider name — an event is a flat object on the wire and an option list is
+two levels deep — so a frontend re-lists and gets the list *as it is now* rather than as it
+was when the event was queued. Its one extra field is `error`, because a failure that
+arrives after the reply has nowhere else to go; a failed fetch leaves the choices exactly as
+they were (a picker that empties itself because the network blinked is worse than a stale
+one).
+
+**Choices persist as a file, not as process state.** `rio::agent::settings` writes
+`$XDG_CONFIG_HOME/rio/agent/providers/<name>.conf` — the same flat `key = value` format
+rio parses and never executes (D21/D24), beside that provider's prompt layer (D79) and its
+allow-list (D84). Core owns format and location, provider owns which keys exist: the split
+`rio::secret` already has with the same providers' API keys. D105's rule applied to
+settings — what the agent runs on is a file you can read, edit or delete.
+
+**Effort defaults to sending nothing.** `default` is a choice like any other, and it means
+the request is byte-identical to the one rio has always sent — which matters because
+`gpt-4o` and most local servers *reject* `reasoning_effort`. The wire spelling is
+config-as-data (`effort_json`, `%v`), so an upstream rename is one line. Installing this
+version changes no request until the user asks it to.
+
+**The control is the status strip** (jka's call). `.chat.status` was a label naming the
+provider that the busy animation *took over* — so for the whole time it mattered most, the
+pane stopped saying which model was working. It is now a frame: a menubutton on the left
+(provider · model · anything not at its default, with the full state on hover), the
+indicator on the right. It sits directly under the composer, where VSCode puts the same
+control and where the eye already is. The menu is built from what the core declared: a
+Provider section (the same radios and the same writer as Settings and Preferences — three
+doors, one answer, D102), then one section per option. "Not at its default" is read from the
+provider's own convention — the **first** declared choice is the quiet one — because the
+core has no opinion about meaning.
+
+`agent_option_pick` writes and then **re-reads**: the reply carries what the provider
+*accepted* (it may canonicalize), and a refusal changes nothing, so the pane mirrors the core
+rather than its own guess. The `agent.options` event repaints from the **idle loop**, since
+that handler runs inside the channel reader and an op call from there would nest one vwait
+in another.
+
+**One door, deliberately:** Preferences ▸ Agent keeps the durable config (keys, prompts,
+allow-list, D85); the pane keeps the runtime switch, beside the mode control. `bump:
+provider-api 1 → 2` — `-options`, `rio::agent::settings::*` and `rio::llm::http::get` are
+new surface, so the shipped providers declare 2 and an older core greys them rather than
+crashing on an unknown flag; a provider declaring 1 still loads, because the surface only
+grows.
+
+**Not verified offline, and stated as such:** that a live Claude request accepts
+`output_config.effort` and a live OpenAI one accepts `reasoning_effort`. Both are spelled
+from config-as-data and both are absent by default, but only a real turn proves the vendor
+takes them — and that costs tokens, so it waits for jka.
+
+**Guards** (core 592 → 633, claude 30 → 45, openai 29 → 40, smoke 586 → 613): a fake provider
+whose options are deliberately *not* model and effort (normalization, free vs closed values,
+canonicalization, per-provider isolation, unknown option/provider, the refresh announcement
+and its error path); the settings file's round-trip, merge, hand-edit, malformed-file and
+unsafe-name behaviour; both faces' declarations, persistence, adoption at load, the derived
+models URL, a parsed listing, a keyless refresh, a network failure and a garbage body; and
+in the GUI the selector's label, the menu's sections, picking, typing a free value, a
+refusal leaving the pane honest, and the indicator no longer erasing the agent's name.
+Five injections, each failing by name: the core skipping the option-exists check, a choice
+not persisted, effort sent at `default`, the event not repainting, and the indicator writing
+over the selector.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

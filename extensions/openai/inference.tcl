@@ -41,7 +41,8 @@ namespace eval rio::openai {
 proc rio::openai::_nn {v} { return [expr {$v eq "null" ? "" : $v}] }
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
-# messages_url, model, token_param, max_tokens, ?system?, ?request_timeout?.
+# messages_url, model, token_param, max_tokens, ?system?, ?effort_json? (the face's
+# already-spelled effort fragment, D106), ?request_timeout?.
 # `auth` is a {header value} pair the face supplies (Authorization "Bearer <key>").
 # `transport` is `{*}$transport request on_chunk on_done` (the shared rio::llm
 # transport, or a test fake). `post` is the agent provider callback. Returns
@@ -77,6 +78,12 @@ proc rio::openai::_request_json {conf conversation tools} {
 	lappend parts "\"[dict get $conf token_param]\":[dict get $conf max_tokens]"
 	lappend parts "\"stream\":true"
 	lappend parts "\"messages\":\[[join [_messages_json $conf $conversation] ,]\]"
+	# The effort choice (D106), already spelled by the face — empty by default, so the
+	# request stays the one rio has always sent (and that gpt-4o and local servers,
+	# which reject `reasoning_effort`, have always accepted).
+	if {[dict exists $conf effort_json] && [dict get $conf effort_json] ne ""} {
+		lappend parts [dict get $conf effort_json]
+	}
 	if {[llength $tools]} {
 		set tj {}
 		foreach t $tools {

@@ -127,5 +127,135 @@ test openai-api-provider-streams {a configured provider streams a reply via agen
 	rio::openai::api::clear_key
 } -result {done {Hi there}}
 
-file delete -force $rio::secret::override_dir
+# --- the options: model and effort (D106) ------------------------------------
+
+set ::optdir [file join [::tcltest::temporaryDirectory] rioopt-[clock clicks]]
+rio::agent::settings::override_dir $::optdir
+
+proc reset_openai_opts {} {
+	file delete -force $::optdir
+	rio::openai::api::configure model gpt-4o
+	rio::openai::api::configure effort default
+	rio::openai::api::configure messages_url https://api.openai.com/v1/chat/completions
+	rio::openai::api::configure models_url ""
+	set ::rio::openai::api::models {{value gpt-4o label "GPT-4o"} {value gpt-4o-mini label "GPT-4o mini"}}
+}
+# The refresh callback is the core's announcer, so a test sees the agent.options EVENT.
+proc announce {ev} { set ::announced $ev }
+proc announced_error {} {
+	if {$::announced eq ""} { return "(nothing announced)" }
+	return [dict get $::announced params error]
+}
+
+test openai-options-declared {the face declares model (free, refreshable) and effort (closed)} -setup {
+	reset_openai_opts
+} -body {
+	set os [rio::agent::options openai]
+	list [llength $os] [dict get [lindex $os 0] name] [dict get [lindex $os 0] free] \
+		[dict get [lindex $os 1] name] [dict get [lindex $os 1] free]
+} -result {2 model 1 effort 0}
+
+test openai-option-set-model {choosing a model applies it and remembers it} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set model llama3.2:3b openai
+	list [rio::openai::api::cget model] [rio::agent::settings::get openai model]
+} -cleanup { reset_openai_opts } -result {llama3.2:3b llama3.2:3b}
+
+test openai-option-set-effort-unknown {an effort outside the declared set is refused} -setup {
+	reset_openai_opts
+} -body {
+	catch {rio::agent::option_set effort ludicrous openai} e
+	list $e [rio::openai::api::cget effort]
+} -match glob -result {{*must be one of*} default}
+
+test openai-adopts-stored {a choice in the provider's conf file is adopted at load} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::settings::store openai model from-the-file
+	rio::openai::api::_adopt_settings
+	rio::openai::api::cget model
+} -cleanup { reset_openai_opts } -result {from-the-file}
+
+# --- effort on the wire ------------------------------------------------------
+
+proc openai_body {} {
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set ::rio::openai::api::transport capture_tp
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	set ::rio::openai::api::transport rio::llm::http::stream
+	return [dict get $::seen body]
+}
+
+test openai-effort-default-sends-nothing {the default request is the one rio always sent} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# gpt-4o and most local servers REJECT reasoning_effort — the shipped request
+	# must stay byte-identical until the user asks for effort.
+	dict exists [json::json2dict [openai_body]] reasoning_effort
+} -cleanup { rio::openai::api::clear_key } -result 0
+
+test openai-effort-reaches-the-request {a chosen effort is spelled into the body} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	rio::agent::option_set effort low openai
+	dict get [json::json2dict [openai_body]] reasoning_effort
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {low}
+
+test openai-model-reaches-the-request {the chosen model is the model asked for} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	rio::agent::option_set model o4-mini openai
+	dict get [json::json2dict [openai_body]] model
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {o4-mini}
+
+# --- refreshing the model list ----------------------------------------------
+
+test openai-models-url-derived {the listing URL follows the configured endpoint} -setup {
+	reset_openai_opts
+} -body {
+	set hosted [rio::openai::api::_models_url]
+	rio::openai::api::configure messages_url http://localhost:11434/v1/chat/completions
+	set local [rio::openai::api::_models_url]
+	rio::openai::api::configure models_url http://elsewhere/models
+	list $hosted $local [rio::openai::api::_models_url]
+} -cleanup { reset_openai_opts } -result {https://api.openai.com/v1/models http://localhost:11434/v1/models http://elsewhere/models}
+
+test openai-refresh-replaces-choices {a server's listing becomes the picker's choices} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+	set ::announced {}
+	set body {{"data":[{"id":"qwen2.5-coder"},{"id":"llama3.2"}]}}
+	set ::rio::openai::api::fetcher [list apply {{body req done} {{*}$done 200 "" $body}} $body]
+} -body {
+	rio::agent::options_refresh model announce openai
+	list [announced_error] [dict get [lindex [rio::agent::options openai] 0] choices]
+} -cleanup {
+	set ::rio::openai::api::fetcher rio::llm::http::get
+	rio::openai::api::clear_key ; reset_openai_opts
+} -result {{} {{value llama3.2 label llama3.2} {value qwen2.5-coder label qwen2.5-coder}}}
+
+test openai-refresh-keyless {a local server is asked without an Authorization header} -setup {
+	reset_openai_opts
+	rio::openai::api::clear_key
+	set ::rio::openai::api::fetcher [list apply {{req done} {set ::seen $req ; {*}$done 200 "" {{"data":[]}}}}]
+} -body {
+	rio::agent::options_refresh model announce openai
+	dict get $::seen headers
+} -cleanup { set ::rio::openai::api::fetcher rio::llm::http::get } -result {}
+
+test openai-refresh-network-failure {a failed fetch keeps the old choices and says why} -setup {
+	reset_openai_opts
+	set ::announced {}
+	set ::rio::openai::api::fetcher [list apply {{req done} {{*}$done 0 "connection refused" ""}}]
+} -body {
+	rio::agent::options_refresh model announce openai
+	list [announced_error] [llength [dict get [lindex [rio::agent::options openai] 0] choices]]
+} -cleanup { set ::rio::openai::api::fetcher rio::llm::http::get } -match glob -result {{*connection refused*} 2}
+
+file delete -force $rio::secret::override_dir $::optdir
 cleanupTests

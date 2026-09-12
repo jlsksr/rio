@@ -331,6 +331,19 @@ for later:
   (`agent.prompt.list` / `.get` / `.edit`).
   Still wanted: rendering rio's *superseded* version next to an override (today the override is
   shown and rio's own copy is only on disk); a token-count beside each layer.
+- **Model and effort, chosen from the pane** — *landed* (AGENTS.md D106). The strip at the
+  bottom of the agent pane is now the control that says — and sets — **which agent is
+  working**: provider, model, and how much effort to ask for, in one menu, with *Other…* for
+  a model id the shipped list never carried and **⟳ Refresh from provider** for what the key
+  (or the local server) can actually reach. The seam is provider-declared options
+  (`register_provider -options`, `agent.options.list` / `.option.set` / `.options.refresh`):
+  the core routes them by name and never learns what "effort" means, so a provider's third
+  knob needs no core *and* no GUI change. Effort sends **nothing** by default — `gpt-4o` and
+  most local servers reject the field — and every choice persists in one flat, hand-editable
+  file per provider beside its prompt layer. `provider-api` is now **2**.
+  Still wanted: a **live check** that the vendors accept `output_config.effort` /
+  `reasoning_effort` (costs tokens); `max_tokens` and the endpoint URL as options; a
+  per-project model.
 
 ## Frontends
 

@@ -114,5 +114,179 @@ test claude-api-provider-streams {a configured provider streams a Claude reply v
 	rio::claude::api::clear_key
 } -result {done {Hi there}}
 
-file delete -force $rio::secret::override_dir
+# --- the options: model and effort (D106) ------------------------------------
+#
+# The face declares them, the core only routes. Settings go to a throwaway dir so a
+# test never writes into the real ~/.config.
+
+set ::optdir [file join [::tcltest::temporaryDirectory] rioopt-[clock clicks]]
+rio::agent::settings::override_dir $::optdir
+
+proc reset_claude_opts {} {
+	file delete -force $::optdir
+	rio::claude::api::configure model claude-sonnet-5
+	rio::claude::api::configure effort default
+	set ::rio::claude::api::models {
+		{value claude-opus-5 label "Opus 5"} {value claude-sonnet-5 label "Sonnet 5"}
+	}
+}
+# The refresh's callback is the core's own announcer, so what a test sees is the
+# `agent.options` EVENT — with the provider's message (if any) in its `error` field.
+proc announce {ev} { set ::announced $ev }
+proc announced_error {} {
+	if {$::announced eq ""} { return "(nothing announced)" }
+	return [dict get $::announced params error]
+}
+
+test claude-options-declared {the face declares model (free, refreshable) and effort (closed)} -setup {
+	reset_claude_opts
+} -body {
+	set os [rio::agent::options claude]
+	set m [lindex $os 0] ; set e [lindex $os 1]
+	list [llength $os] [dict get $m name] [dict get $m free] [dict get $m refresh] \
+		[dict get $e name] [dict get $e free] [dict get $e refresh]
+} -result {2 model 1 1 effort 0 0}
+
+test claude-options-value {each option reports the live config value} -setup {
+	reset_claude_opts
+} -body {
+	rio::claude::api::configure model claude-opus-5
+	rio::agent::options_summary claude
+} -result {model claude-opus-5 effort default}
+
+test claude-option-set-model {choosing a model applies it and remembers it} -setup {
+	reset_claude_opts
+} -body {
+	rio::agent::option_set model claude-opus-5 claude
+	list [rio::claude::api::cget model] [rio::agent::settings::get claude model]
+} -result {claude-opus-5 claude-opus-5}
+
+test claude-option-set-model-free {a model id this build never heard of is accepted} -setup {
+	reset_claude_opts
+} -body {
+	rio::agent::option_set model claude-something-7 claude
+	rio::claude::api::cget model
+} -result {claude-something-7}
+
+test claude-option-set-model-empty {an empty model is refused} -setup {
+	reset_claude_opts
+} -body {
+	catch {rio::agent::option_set model "  " claude} e
+	list $e [rio::claude::api::cget model]
+} -match glob -result {{*must not be empty*} claude-sonnet-5}
+
+test claude-option-set-effort-unknown {an effort outside the declared set is refused} -setup {
+	reset_claude_opts
+} -body {
+	catch {rio::agent::option_set effort ludicrous claude} e
+	list $e [rio::claude::api::cget effort]
+} -match glob -result {{*must be one of*} default}
+
+test claude-adopts-stored {a choice in the provider's conf file is adopted at load} -setup {
+	reset_claude_opts
+} -body {
+	rio::agent::settings::store claude model claude-from-the-file
+	rio::claude::api::_adopt_settings
+	rio::claude::api::cget model
+} -cleanup { reset_claude_opts } -result {claude-from-the-file}
+
+# --- effort on the wire ------------------------------------------------------
+
+proc claude_body {} {
+	set ::seen ""
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set ::rio::claude::api::transport capture_tp
+	rio::claude::api::provider {{role user text hi}} {} {} collect_post
+	set ::rio::claude::api::transport rio::llm::http::stream
+	return [dict get $::seen body]
+}
+
+test claude-effort-default-sends-nothing {the default request is the one rio always sent} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	dict exists [json::json2dict [claude_body]] output_config
+} -cleanup { rio::claude::api::clear_key } -result 0
+
+test claude-effort-reaches-the-request {a chosen effort is spelled into the body} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	rio::agent::option_set effort high claude
+	dict get [json::json2dict [claude_body]] output_config effort
+} -cleanup { reset_claude_opts ; rio::claude::api::clear_key } -result {high}
+
+test claude-model-reaches-the-request {the chosen model is the model asked for} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	rio::agent::option_set model claude-opus-5 claude
+	dict get [json::json2dict [claude_body]] model
+} -cleanup { reset_claude_opts ; rio::claude::api::clear_key } -result {claude-opus-5}
+
+# --- refreshing the model list ----------------------------------------------
+
+test claude-refresh-replaces-choices {a models listing becomes the picker's choices} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+	set ::announced {}
+	set body {{"data":[{"id":"claude-a","display_name":"Claude A"},{"id":"claude-b"}]}}
+	set ::rio::claude::api::fetcher [list apply {{body req done} {{*}$done 200 "" $body}} $body]
+} -body {
+	rio::agent::options_refresh model announce claude
+	set cs [dict get [lindex [rio::agent::options claude] 0] choices]
+	list [announced_error] $cs
+} -cleanup {
+	set ::rio::claude::api::fetcher rio::llm::http::get
+	rio::claude::api::clear_key ; reset_claude_opts
+} -result {{} {{value claude-a label {Claude A}} {value claude-b label claude-b}}}
+
+test claude-refresh-sends-the-key {the listing request carries this face's auth} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-LIST
+	set ::rio::claude::api::fetcher [list apply {{req done} {set ::seen $req ; {*}$done 200 "" {{"data":[]}}}}]
+} -body {
+	rio::agent::options_refresh model announce claude
+	list [dict get $::seen url] [dict get [dict get $::seen headers] x-api-key]
+} -cleanup {
+	set ::rio::claude::api::fetcher rio::llm::http::get
+	rio::claude::api::clear_key
+} -result {https://api.anthropic.com/v1/models sk-ant-LIST}
+
+test claude-refresh-no-key {with no key the refresh says so instead of calling out} -setup {
+	reset_claude_opts
+	rio::claude::api::clear_key
+	set ::announced {}
+} -body {
+	rio::agent::options_refresh model announce claude
+	announced_error
+} -match glob -result {*No Claude API key*}
+
+test claude-refresh-network-failure {a failed fetch keeps the old choices and says why} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+	set ::announced {}
+	set ::rio::claude::api::fetcher [list apply {{req done} {{*}$done 0 "connection refused" ""}}]
+} -body {
+	rio::agent::options_refresh model announce claude
+	list [announced_error] [llength [dict get [lindex [rio::agent::options claude] 0] choices]]
+} -cleanup {
+	set ::rio::claude::api::fetcher rio::llm::http::get
+	rio::claude::api::clear_key
+} -match glob -result {{*connection refused*} 2}
+
+test claude-refresh-garbage {an unreadable listing keeps the old choices} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+	set ::announced {}
+	set ::rio::claude::api::fetcher [list apply {{req done} {{*}$done 200 "" "<html>nope</html>"}}]
+} -body {
+	rio::agent::options_refresh model announce claude
+	list [announced_error] [llength [dict get [lindex [rio::agent::options claude] 0] choices]]
+} -cleanup {
+	set ::rio::claude::api::fetcher rio::llm::http::get
+	rio::claude::api::clear_key
+} -match glob -result {{*Couldn't read the model list*} 2}
+
+file delete -force $rio::secret::override_dir $::optdir
 cleanupTests

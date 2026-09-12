@@ -192,4 +192,36 @@ test wire-roundtrip-diff-lines {the encoded diff survives json2dict} -body {
 		[dict get [lindex [dict get $d result ops] 0] b]
 } -result {insert 5}
 
+test wire-result-agent-options {agent.options.list encodes BOTH levels — options and their choices} -body {
+	rio::wire::response [dict create id 5 ok true op agent.options.list \
+		result [dict create provider claude options [list \
+			[dict create name model label Model hint "" value m1 free 1 refresh 1 \
+				choices [list [dict create value m1 label "One"] \
+				              [dict create value m2 label "Two"]]]]]]
+} -result {{"id":"5","ok":true,"result":{"provider":"claude","options":[{"name":"model","label":"Model","hint":"","value":"m1","free":"1","refresh":"1","choices":[{"value":"m1","label":"One"},{"value":"m2","label":"Two"}]}]}}}
+
+test wire-roundtrip-agent-options {the encoded option list survives json2dict} -body {
+	set enc [rio::wire::response [dict create id 6 ok true op agent.options.list \
+		result [dict create provider openai options [list \
+			[dict create name effort label Effort hint "how hard" value high free 0 refresh 0 \
+				choices [list [dict create value low label Low] \
+				              [dict create value high label High]]]]]]]
+	set d [json::json2dict $enc]
+	set o [lindex [dict get $d result options] 0]
+	list [dict get $o name] [dict get $o value] \
+		[dict get [lindex [dict get $o choices] 1] label]
+} -result {effort high High}
+
+test wire-result-agent-status {agent.status nests the option summary as an object} -body {
+	rio::wire::response [dict create id 7 ok true op agent.status \
+		result [dict create provider claude auto_accept 0 mode build key_set 1 \
+			options [dict create model m1 effort high]]]
+} -result {{"id":"7","ok":true,"result":{"provider":"claude","auto_accept":"0","mode":"build","key_set":"1","options":{"model":"m1","effort":"high"}}}}
+
+test wire-result-agent-status-empty {a provider with no options still shapes as an object} -body {
+	set d [json::json2dict [rio::wire::response [dict create id 8 ok true op agent.status \
+		result [dict create provider echo auto_accept 0 mode build key_set 0 options {}]]]]
+	dict get $d result options
+} -result {}
+
 cleanupTests

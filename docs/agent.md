@@ -37,6 +37,42 @@ mid-session) or in ***Preferences ▸ Agent***, which is also where each provide
 heavier configuration lives. See [extensions](extensions.md) for adding a
 repository to install from.
 
+## Choosing a model, and how hard it thinks
+
+The strip along the **bottom of the agent pane** names the agent you are talking to
+— **`Claude · Sonnet 5 ▾`** — and clicking it is how you change that. It is one menu
+with a section for each choice:
+
+- **Provider** — the same picker as ***Settings ▸ Agent Provider***, next to the
+  rest of the decision rather than two menus away.
+- **Model** — the models that provider offers. The list is short and shipped, so it
+  goes stale: **Other…** takes any model id you type (a release newer than your rio,
+  a tag on your own server), and **⟳ Refresh from provider** replaces the list with
+  what your key — or your local server — can actually reach right now.
+- **Effort** — how much thinking to ask for. **Provider default** sends nothing at
+  all, which is what rio has always done; the other values are opt-in, because not
+  every model accepts the request (`gpt-4o` and most local servers refuse it).
+
+Whatever is *not* at its default is spelled out in the strip, so a raised effort is
+never something you have silently left on. Hover for the full state, raw model id
+included.
+
+Each provider remembers its own choices, in a plain file you can read or edit
+yourself:
+
+```
+$XDG_CONFIG_HOME/rio/agent/providers/claude.conf
+```
+
+```
+model = claude-opus-5
+effort = high
+```
+
+It sits beside that provider's prompt layer and its allow-list, and it lives **on
+the core's machine** — with a remote core, the menu shows the models that core can
+reach, and the file is on the server.
+
 ## Your API key
 
 ***Preferences ▸ Agent ▸ `<provider>` API Key…*** stores the key for a provider.

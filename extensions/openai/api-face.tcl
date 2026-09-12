@@ -25,15 +25,37 @@ namespace eval rio::openai::api {
 	# it per turn and the provider merges it in (D34).
 	variable config [dict create \
 		messages_url    https://api.openai.com/v1/chat/completions \
+		models_url      "" \
 		model           gpt-4o \
+		effort          default \
 		token_param     max_tokens \
 		max_tokens      4096 \
 		request_timeout 600000 \
 		secret_name     openai-api]
 
-	# Network seam: the shared tcltls streaming transport (plugins/lib/transport.tcl);
-	# tests inject a fake.
+	# How an effort choice is spelled on the wire, %v standing for the value (D106).
+	# Config-as-data like the rest: a server that wants a different key is one line.
+	variable effort_json {"reasoning_effort":"%v"}
+
+	# The models offered in the picker. Short and shipped: the option is `free` (type
+	# any id) and `refresh` re-lists from the server itself — which is the only
+	# sensible answer for a local Ollama / llama-server / LM Studio, whose models are
+	# whatever that machine happens to have pulled.
+	variable models {
+		{value gpt-4o      label "GPT-4o"}
+		{value gpt-4o-mini label "GPT-4o mini"}
+	}
+	variable efforts {
+		{value default label "Provider default"}
+		{value low     label "Low"}
+		{value medium  label "Medium"}
+		{value high    label "High"}
+	}
+
+	# Network seams: the shared tcltls streaming transport for a turn and the plain
+	# GET for a models listing (plugins/lib/transport.tcl); tests inject fakes.
 	variable transport rio::llm::http::stream
+	variable fetcher   rio::llm::http::get
 }
 
 # Override one config key (a user setting, a test, a model or endpoint choice).
@@ -61,7 +83,116 @@ proc rio::openai::api::provider {conversation tools system post} {
 	# persistent config dict stays clean. infer skips an empty `system`.
 	set conf $config
 	dict set conf system $system
+	dict set conf effort_json [_effort_json]
 	rio::openai::infer $conf $conversation $tools $auth $transport $post
+}
+
+# --- the options a frontend may offer (D106) ---------------------------------
+
+# The effort fragment for the live choice, or "" for `default`. Default matters more
+# here than anywhere: `reasoning_effort` is REJECTED by a non-reasoning model (gpt-4o)
+# and by most local servers, so rio keeps sending exactly what it always sent until
+# the user picks otherwise.
+proc rio::openai::api::_effort_json {} {
+	variable config
+	variable effort_json
+	set e [dict get $config effort]
+	if {$e eq "" || $e eq "default"} { return "" }
+	return [string map [list %v $e] $effort_json]
+}
+
+proc rio::openai::api::options {} {
+	variable config
+	variable models
+	variable efforts
+	return [list \
+		[dict create name model label Model \
+			hint "Which model answers. Refresh to list what this server offers." \
+			value [dict get $config model] free 1 refresh 1 choices $models] \
+		[dict create name effort label Effort \
+			hint "Reasoning effort. Provider default sends nothing — gpt-4o and most local servers refuse the field." \
+			value [dict get $config effort] free 0 refresh 0 choices $efforts]]
+}
+
+proc rio::openai::api::option_set {name value} {
+	variable config
+	variable efforts
+	switch -- $name {
+		model {
+			if {[string trim $value] eq ""} {
+				rio::error::raise bad_request "model must not be empty"
+			}
+			dict set config model [string trim $value]
+		}
+		effort {
+			set ok {}
+			foreach c $efforts { lappend ok [dict get $c value] }
+			if {$value ni $ok} {
+				rio::error::raise bad_request "effort must be one of: [join $ok {, }]"
+			}
+			dict set config effort $value
+		}
+		default { rio::error::raise bad_request "unknown option: $name" }
+	}
+	rio::agent::settings::store openai $name [dict get $config $name]
+	return
+}
+
+# The models endpoint. Derived from `messages_url` unless one is configured, so
+# pointing this face at a local server stays the ONE-line change it has always been:
+# .../v1/chat/completions -> .../v1/models, which Ollama, llama-server, LM Studio and
+# vLLM all answer.
+proc rio::openai::api::_models_url {} {
+	variable config
+	set u [dict get $config models_url]
+	if {$u ne ""} { return $u }
+	set base [dict get $config messages_url]
+	if {[string match */chat/completions $base]} {
+		return "[string range $base 0 end-17]/models"   ;# drop "/chat/completions"
+	}
+	return $base
+}
+
+# Re-list what this server offers. Asynchronous (D10); a failure leaves the choices
+# alone and says why.
+proc rio::openai::api::option_refresh {name announce} {
+	variable fetcher
+	if {$name ne "model"} { rio::error::raise bad_request "cannot refresh: $name" }
+	set key [_api_key]
+	set headers {}
+	# A local server usually needs no key; the hosted API always does. Send one when
+	# we have one, and let the server say no when we don't.
+	if {$key ne ""} { set headers [list Authorization "Bearer $key"] }
+	{*}$fetcher [dict create url [_models_url] headers $headers] \
+		[list rio::openai::api::_models_done $announce]
+	return
+}
+
+# The listing -> the picker's choices. The OpenAI shape is {"data":[{"id":…}, …]},
+# which every compatible server copies; the id is both value and label (these servers
+# publish no display name).
+proc rio::openai::api::_models_done {announce status err body} {
+	variable models
+	if {$status == 0} {
+		{*}$announce "Couldn't reach the model list ($err)"
+		return
+	}
+	if {$status != 200} {
+		{*}$announce "The server refused the model list (HTTP $status)"
+		return
+	}
+	if {[catch {json::json2dict $body} d] || ![dict exists $d data]} {
+		{*}$announce "Couldn't read the model list from the server"
+		return
+	}
+	set out {}
+	foreach m [dict get $d data] {
+		if {![dict exists $m id]} continue
+		lappend out [dict create value [dict get $m id] label [dict get $m id]]
+	}
+	if {[llength $out]} { set models [lsort -index 1 $out] }
+	{*}$announce
+	return
 }
 
 # Whether a key is stored (the GUI offers Set / Clear accordingly).
@@ -98,4 +229,20 @@ rio::agent::register_provider openai rio::openai::api::provider \
 	-key [dict create \
 		set    rio::openai::api::set_key \
 		clear  rio::openai::api::clear_key \
-		status rio::openai::api::configured]
+		status rio::openai::api::configured] \
+	-options [dict create \
+		list    rio::openai::api::options \
+		set     rio::openai::api::option_set \
+		refresh rio::openai::api::option_refresh]
+
+# Adopt the choices the user made last time (D106), from the flat, hand-editable
+# $XDG_CONFIG_HOME/rio/agent/providers/openai.conf — beside this provider's prompt
+# layer and allow-list. Absent file, shipped defaults.
+proc rio::openai::api::_adopt_settings {} {
+	variable config
+	foreach k {model effort} {
+		set v [rio::agent::settings::get openai $k]
+		if {$v ne ""} { dict set config $k $v }
+	}
+}
+rio::openai::api::_adopt_settings

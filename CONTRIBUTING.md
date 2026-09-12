@@ -248,13 +248,25 @@ understanding before you publish one:
   manifest and your `.tcl` payloads (no subdirectories, v1); the core sources the
   file named by `entry`, which should register the provider.
 - **Write against `provider-api`.** Declare the contract version you built for
-  (`provider-api = 1` today). The core loads the API surface — `rio::agent::register_provider`
-  (with `-label`, `-signup`, and a `-key` capability), the provider proc contract
+  (`provider-api = 2` today). The core loads the API surface — `rio::agent::register_provider`
+  (with `-label`, `-signup`, a `-key` capability, and since **2** an `-options`
+  capability), the provider proc contract
   `{conversation tools system post}` with its `delta` / `tool` / `done` / `error`
-  callbacks, and the runtime helpers `rio::llm::http::stream`,
-  `rio::llm::jstr` / `rio::llm::obj_json`, and `rio::secret::*` — *before* your code,
+  callbacks, and the runtime helpers `rio::llm::http::stream` (and `::get`),
+  `rio::llm::jstr` / `rio::llm::obj_json`, `rio::secret::*` and
+  `rio::agent::settings::*` — *before* your code,
   so you ship no copy of it. A rio that implements an older `provider-api` than you
-  declare lists your provider greyed ("needs a newer rio") and won't install it.
+  declare lists your provider greyed ("needs a newer rio") and won't install it;
+  declaring `1` still works on a newer core, since the surface only grows.
+- **Options are how a provider offers choices** (a model, an effort, anything else
+  it names). `-options {list <cmd> set <cmd> ?refresh <cmd>?}`: `list` returns
+  descriptors `{name label hint value free refresh choices {{value .. label ..} ..}}`,
+  `set` validates and applies one, `refresh` re-enumerates asynchronously and calls
+  the announce callback it is handed (with a message, if it failed). The core routes
+  by name and never learns what an option means, so a frontend renders whatever you
+  declare — no GUI change for your third knob. Persist a choice with
+  `rio::agent::settings::store <you> <key> <value>` and read it back at registration:
+  it lands in one flat, hand-editable file per provider.
   ([extensions/openai/](extensions/openai/) is a complete worked example — the
   OpenAI-compatible provider ships exactly this way.)
 - **The user is warned, specifically.** Because your code runs in the core (which

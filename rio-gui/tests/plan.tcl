@@ -223,7 +223,7 @@ sandbox_drop_fixture $::proj
 set ::agent_mode_ui plan ; agent_mode_set
 ok "mode: the core is in plan mode"     [dict get [rio_result agent.status {}] mode] plan
 ok "mode: the control says Plan"        [.chat.hdr.mode cget -text] "Plan ▾"
-ok "mode: the strip names the provider only" [.chat.status cget -text] "Echo"
+ok "mode: the strip names the provider only" [.chat.status.sel cget -text] "Echo ▾"
 set ::agent_mode_ui auto ; agent_mode_set
 ok "mode: auto turns the core's flag on" [dict get [rio_result agent.status {}] auto_accept] 1
 ok "mode: and leaves build mode"         [dict get [rio_result agent.status {}] mode] build

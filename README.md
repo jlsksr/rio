@@ -129,7 +129,12 @@ in [docs/](docs/index.md).
   base prompt and the plan-mode one, as files on disk and rendered in the app, with *Show
   the whole prompt…* for the composed text exactly as the model receives it. Nothing the
   agent is told about your project is hidden from you, and one click makes any of it your
-  own editable copy.
+  own editable copy. **Which model, and how hard it thinks, is a menu at the bottom of
+  the pane** — provider, model, and effort in one place, with *Other…* for a model id
+  the shipped list never carried and *⟳ Refresh from provider* for the models your key
+  (or your local server) can actually reach. Effort defaults to sending nothing, and any
+  choice that isn't the default is spelled out in the strip rather than left silently on.
+  Each provider remembers its own choices in a plain file beside its prompt.
 - **Theming** — live-switchable colour themes from *View ▸ Theme…*: the plain
   default, Solarized Dark/Light, Plan 9 Acme, and any theme you install or drop
   in yourself — the list is whatever the core can load. Themes are plain

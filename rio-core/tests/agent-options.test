@@ -1,0 +1,357 @@
+# Tests for a provider's runtime OPTIONS (AGENTS.md D106): the `-options` capability on
+# register_provider, the core's routing/normalizing/announcing around it, the three
+# agent.option* ops, and the per-provider settings file that remembers a choice between
+# runs (rio::agent::settings). The core never learns what an option MEANS — these tests
+# use a fake provider whose options are deliberately not "model" and "effort" in half the
+# cases, to prove nothing here knows those words. Pure: no network, no event loop.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# --- a fake provider that declares options -----------------------------------
+#
+# Deliberately minimal: it declares one free+refreshable option (`flavour`) and one
+# closed one (`heat`, with bare-string choices, to exercise normalization).
+namespace eval fake {
+	variable flavour vanilla
+	variable heat    mild
+	variable choices {{value vanilla label Vanilla} {value pistachio label Pistachio}}
+	variable refreshed 0
+	variable fail ""     ;# non-empty: the refresh reports this instead of succeeding
+}
+proc fake::provider {conversation tools system post} { {*}$post done stop }
+proc fake::opts_list {} {
+	variable flavour ; variable heat ; variable choices
+	return [list \
+		[dict create name flavour label Flavour hint "which one" \
+			value $flavour free 1 refresh 1 choices $choices] \
+		[dict create name heat value $heat choices {mild hot}]]
+}
+proc fake::opts_set {name value} {
+	variable flavour ; variable heat ; variable choices
+	switch -- $name {
+		flavour { set flavour [string tolower $value] }
+		heat {
+			if {$value ni {mild hot}} {
+				rio::error::raise bad_request "heat must be mild or hot"
+			}
+			set heat $value
+		}
+		default { rio::error::raise bad_request "no such option: $name" }
+	}
+	rio::agent::settings::store fake $name $value
+	return
+}
+proc fake::opts_refresh {name announce} {
+	variable choices ; variable refreshed ; variable fail
+	incr refreshed
+	if {$fail ne ""} { {*}$announce $fail ; return }   ;# the asynchronous-failure path
+	lappend choices [dict create value fetched label Fetched]
+	{*}$announce
+	return
+}
+
+# A dir per test, and a clean fake provider + settings dir before each.
+proc mkdir {} {
+	set d [file join [::tcltest::temporaryDirectory] rioopts-[clock clicks][incr ::seq]]
+	file mkdir $d
+	return $d
+}
+proc writefile {path text} {
+	file mkdir [file dirname $path]
+	set fh [open $path w] ; fconfigure $fh -encoding utf-8 ; puts -nonewline $fh $text ; close $fh
+}
+proc reset_opts {} {
+	set fake::flavour vanilla
+	set fake::heat    mild
+	set fake::choices {{value vanilla label Vanilla} {value pistachio label Pistachio}}
+	set fake::refreshed 0
+	set fake::fail ""
+	if {[info exists ::optdir]} { file delete -force $::optdir }
+	set ::optdir [mkdir]
+	rio::agent::settings::override_dir $::optdir
+	rio::agent::register_provider fake fake::provider -label "Fake" \
+		-options {list fake::opts_list set fake::opts_set refresh fake::opts_refresh}
+	rio::agent::use_provider echo
+}
+# Collect announced events instead of sending them anywhere.
+proc collect {ev} { lappend ::events $ev }
+
+# --- declaring and listing ---------------------------------------------------
+
+test options-normalized {every descriptor key is filled in, and bare choices grow labels} -setup {
+	reset_opts
+} -body {
+	set o [lindex [rio::agent::options fake] 1]   ;# `heat`, declared with the bare minimum
+	list [dict get $o name] [dict get $o label] [dict get $o hint] [dict get $o value] \
+		[dict get $o free] [dict get $o refresh] [dict get $o choices]
+} -result {heat heat {} mild 0 0 {{value mild label mild} {value hot label hot}}}
+
+test options-declared-kept {a fully declared option comes back as declared} -setup {
+	reset_opts
+} -body {
+	set o [lindex [rio::agent::options fake] 0]
+	list [dict get $o label] [dict get $o hint] [dict get $o free] [dict get $o refresh] \
+		[llength [dict get $o choices]]
+} -result {Flavour {which one} 1 1 2}
+
+test options-none {a provider with no options answers softly with an empty list} -setup {
+	reset_opts
+} -body {
+	list [rio::agent::options echo] [rio::agent::options_summary echo]
+} -result {{} {}}
+
+test options-summary {the flat summary is name -> current value} -setup {
+	reset_opts
+} -body {
+	rio::agent::options_summary fake
+} -result {flavour vanilla heat mild}
+
+test options-default-provider {with no name given, the ACTIVE provider answers} -setup {
+	reset_opts
+	rio::agent::use_provider fake
+} -body {
+	rio::agent::options_summary
+} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild}
+
+# --- choosing a value --------------------------------------------------------
+
+test option-set-accepted {a valid value reaches the provider and is reported back} -setup {
+	reset_opts
+} -body {
+	list [rio::agent::option_set heat hot fake] $fake::heat
+} -result {hot hot}
+
+test option-set-canonicalized {the reply is what the PROVIDER made of the value, not the input} -setup {
+	reset_opts
+} -body {
+	# The fake lowercases a flavour — a frontend must mirror the core, not its own guess.
+	rio::agent::option_set flavour PISTACHIO fake
+} -result {pistachio}
+
+test option-set-free {a free option takes a value that is not among its choices} -setup {
+	reset_opts
+} -body {
+	rio::agent::option_set flavour "some-new-thing" fake
+} -result {some-new-thing}
+
+test option-set-refused {a value the provider refuses changes nothing} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::option_set heat scorching fake} e
+	list $e $fake::heat
+} -match glob -result {{*mild or hot*} mild}
+
+test option-set-unknown-option {an option the provider does not declare is a bad_request} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::option_set topping sprinkles fake} e
+	set e
+} -match glob -result {*has no option 'topping'*}
+
+test option-set-no-options {a provider that declares none refuses the op} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::option_set flavour vanilla echo} e
+	set e
+} -match glob -result {*'echo' has no options*}
+
+test option-set-unknown-provider {an unregistered provider is a bad_request} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::option_set flavour vanilla nosuch} e
+	set e
+} -match glob -result {*unknown agent provider: nosuch*}
+
+# --- refreshing the choices --------------------------------------------------
+
+test option-refresh-announces {a refresh re-enumerates and announces agent.options} -setup {
+	reset_opts
+	set ::events {}
+} -body {
+	rio::agent::options_refresh flavour collect fake
+	list $fake::refreshed \
+		[dict get [lindex $::events 0] event] \
+		[dict get [lindex $::events 0] params provider] \
+		[dict get [lindex $::events 0] params error] \
+		[llength [dict get [lindex [rio::agent::options fake] 0] choices]]
+} -result {1 agent.options fake {} 3}
+
+test option-refresh-failure {a refresh that couldn't fetch reports it on the same event} -setup {
+	reset_opts
+	set fake::fail "couldn't reach the server"
+	set ::events {}
+} -body {
+	rio::agent::options_refresh flavour collect fake
+	# The op's reply is long gone by the time the network answers, so the failure
+	# rides the announcement — and the choices are left exactly as they were.
+	list [dict get [lindex $::events 0] params error] \
+		[llength [dict get [lindex [rio::agent::options fake] 0] choices]]
+} -result {{couldn't reach the server} 2}
+
+test option-refresh-not-refreshable {an option that declared no refresh refuses} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::options_refresh heat collect fake} e
+	set e
+} -match glob -result {*cannot be refreshed*}
+
+# --- the ops -----------------------------------------------------------------
+
+test op-list {agent.options.list names the provider and carries every option} -setup {
+	reset_opts
+} -body {
+	set r [dict get [rio::ops::agent_options_list {provider fake}] result]
+	list [dict get $r provider] [llength [dict get $r options]] \
+		[dict get [lindex [dict get $r options] 0] name]
+} -result {fake 2 flavour}
+
+test op-list-active {agent.options.list with no provider answers for the active one} -setup {
+	reset_opts
+	rio::agent::use_provider fake
+} -body {
+	dict get [dict get [rio::ops::agent_options_list {}] result] provider
+} -cleanup { rio::agent::use_provider echo } -result {fake}
+
+test op-list-echo {the built-in stub lists no options rather than failing} -setup {
+	reset_opts
+} -body {
+	dict get [dict get [rio::ops::agent_options_list {provider echo}] result] options
+} -result {}
+
+test op-set {agent.option.set replies with the accepted value and announces} -setup {
+	reset_opts
+	set ::events {}
+} -body {
+	set r [dict get [rio::ops::agent_option_set {provider fake name heat value hot} collect] result]
+	list [dict get $r provider] [dict get $r name] [dict get $r value] \
+		[dict get [lindex $::events 0] event]
+} -result {fake heat hot agent.options}
+
+test op-set-requires {agent.option.set without a value is a bad_request} -setup {
+	reset_opts
+} -body {
+	catch {rio::ops::agent_option_set {provider fake name heat} collect} e
+	set e
+} -match glob -result {*requires value*}
+
+test op-refresh-acks {agent.options.refresh acks at once and announces when done} -setup {
+	reset_opts
+	set ::events {}
+} -body {
+	set r [dict get [rio::ops::agent_options_refresh {provider fake name flavour} collect] result]
+	list [dict get $r started] [llength $::events]
+} -result {1 1}
+
+test op-status-options {agent.status carries the live option summary} -setup {
+	reset_opts
+	rio::agent::use_provider fake
+} -body {
+	dict get [dict get [rio::ops::agent_status {}] result] options
+} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild}
+
+test op-status-echo {agent.status for an optionless provider carries an empty summary} -setup {
+	reset_opts
+} -body {
+	dict get [dict get [rio::ops::agent_status {}] result] options
+} -result {}
+
+# --- the settings file (rio::agent::settings) --------------------------------
+
+test settings-roundtrip {a stored value comes back} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::store fake model some-model-1
+	rio::agent::settings::get fake model
+} -result {some-model-1}
+
+test settings-persists-a-choice {setting an option writes it to the provider's file} -setup {
+	reset_opts
+} -body {
+	rio::agent::option_set heat hot fake
+	# What a NEW core start would read back — the point of the file.
+	rio::agent::settings::get fake heat
+} -result {hot}
+
+test settings-merges {a second key does not erase the first} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::store fake model m1
+	rio::agent::settings::store fake effort high
+	list [rio::agent::settings::get fake model] [rio::agent::settings::get fake effort]
+} -result {m1 high}
+
+test settings-hand-editable {the file is the flat key = value format, one line per key} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::store fake model m1
+	set p [rio::agent::settings::path fake]
+	set fh [open $p r] ; fconfigure $fh -encoding utf-8 ; set text [read $fh] ; close $fh
+	# Parsed by the same parser the rest of rio's config uses (D21: parsed, never run).
+	list [file tail $p] [dict get [rio::conf::parse $text] "" model]
+} -result {fake.conf m1}
+
+test settings-reads-a-hand-edit {a value typed into the file by hand is what loads} -setup {
+	reset_opts
+} -body {
+	writefile [rio::agent::settings::path fake] "# mine\nmodel = typed-by-hand\n"
+	rio::agent::settings::get fake model
+} -result {typed-by-hand}
+
+test settings-missing-file {no file means no settings, not an error} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::load fake
+} -result {}
+
+test settings-malformed-file {a typo in the file leaves the defaults standing, quietly} -setup {
+	reset_opts
+} -body {
+	writefile [rio::agent::settings::path fake] "this line has no equals sign\n"
+	rio::agent::settings::load fake
+} -result {}
+
+test settings-default {get returns the given default for an unset key} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::get fake model claude-fallback
+} -result {claude-fallback}
+
+test settings-bad-key {a key that is not a bare word is refused} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::settings::store fake "mo del" x} e
+	set e
+} -match glob -result {*settings key*}
+
+test settings-multiline-value {a value with a newline is refused rather than silently split} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::settings::store fake model "a\nb = c"} e
+	list $e [rio::agent::settings::load fake]
+} -match glob -result {{*single line*} {}}
+
+test settings-unsafe-provider {a provider name with a path separator has no file} -setup {
+	reset_opts
+} -body {
+	list [rio::agent::settings::path ../evil] [rio::agent::settings::store ../evil k v]
+} -result {{} {}}
+
+test settings-per-provider {two providers keep separate files} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::store fake model m1
+	rio::agent::settings::store other model m2
+	list [rio::agent::settings::get fake model] [rio::agent::settings::get other model]
+} -result {m1 m2}
+
+test settings-beside-the-prompts {the file sits in the agent dir's providers/ folder} -setup {
+	reset_opts
+} -body {
+	set p [rio::agent::settings::path fake]
+	list [file tail [file dirname $p]] [file tail $p]
+} -result {providers fake.conf}
+
+file delete -force $::optdir
+cleanupTests

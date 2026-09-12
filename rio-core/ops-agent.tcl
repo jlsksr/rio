@@ -189,6 +189,66 @@ proc rio::ops::agent_providers {params} {
 }
 rio::dispatch::register agent.providers rio::ops::agent_providers
 
+# --- a provider's runtime options (D106) -------------------------------------
+#
+# Model and effort — and anything else a provider declares. The ops are generic on
+# purpose: they carry an option's NAME, never a meaning, so the core (and this file)
+# stay ignorant of what any of them do. `provider` defaults to the active one, which
+# is the case a frontend almost always wants ("the agent I am talking to now").
+
+# The provider an option op targets: the one named, else the active one. Resolved
+# here rather than passed as "" so every reply says WHICH provider it answered for.
+proc rio::ops::_option_provider {params} {
+	if {[dict exists $params provider] && [dict get $params provider] ne ""} {
+		return [dict get $params provider]
+	}
+	return [rio::agent::provider_name]
+}
+
+# agent.options.list {?provider?} -> {provider, options:[{name,label,hint,value,free,
+# refresh, choices:[{value,label}]}]} ; what this provider lets you choose right now.
+# A provider with no options answers with an empty list (echo), so a frontend can ask
+# unconditionally. A two-level result — the wire layer spells both levels out (D25).
+proc rio::ops::agent_options_list {params} {
+	set name [_option_provider $params]
+	return [dict create result [dict create \
+		provider $name options [rio::agent::options $name]]]
+}
+rio::dispatch::register agent.options.list rio::ops::agent_options_list
+
+# agent.option.set {name value ?provider?} -> {provider, name, value} ; choose a value.
+# The reply carries what the provider ACCEPTED (it may canonicalize), so a frontend
+# mirrors the core rather than its own guess. An unknown provider/option, or a value
+# the provider refuses, is a bad_request and nothing changes. Also announces
+# agent.options, so every other attached frontend repaints (D3/D30).
+proc rio::ops::agent_option_set {params emit} {
+	foreach k {name value} {
+		if {![dict exists $params $k]} {
+			rio::error::raise bad_request "agent.option.set requires $k"
+		}
+	}
+	set prov [_option_provider $params]
+	set val [rio::agent::option_set [dict get $params name] [dict get $params value] $prov]
+	rio::agent::announce_options $prov $emit
+	return [dict create result [dict create \
+		provider $prov name [dict get $params name] value $val]]
+}
+rio::dispatch::register_stream agent.option.set rio::ops::agent_option_set
+
+# agent.options.refresh {name ?provider?} -> {started} ; re-enumerate an option's
+# choices from wherever the provider gets them (a vendor's models endpoint, a local
+# server's own list). A STREAMING op: the network call is asynchronous, so the reply
+# is an ack and the refreshed list arrives as an `agent.options` event (D26's shape,
+# D10's rule that the core never blocks).
+proc rio::ops::agent_options_refresh {params emit} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.options.refresh requires name"
+	}
+	rio::agent::options_refresh [dict get $params name] $emit [_option_provider $params]
+	return [dict create result [dict create started 1]]
+}
+rio::dispatch::register_stream agent.options.refresh rio::ops::agent_options_refresh
+
 # The prompt layers a frontend may name (D34/D70/D79/D101/D105), in composition order.
 # `base` and `plan` are rio's own shipped layers; the other three are the user's.
 namespace eval rio::ops { variable prompt_layers {base system provider project plan} }
@@ -323,7 +383,8 @@ proc rio::ops::agent_status {params} {
 		provider    [rio::agent::provider_name] \
 		auto_accept [rio::agent::auto_accept] \
 		mode        [rio::agent::mode] \
-		key_set     [rio::agent::key_status]]]
+		key_set     [rio::agent::key_status] \
+		options     [rio::agent::options_summary]]]
 }
 rio::dispatch::register agent.status rio::ops::agent_status
 

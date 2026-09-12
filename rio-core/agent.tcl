@@ -94,22 +94,29 @@ proc rio::agent::set_provider {cmd} {
 # --- named-provider registry (D26/D30) ---------------------------------------
 #
 # register_provider name cmd ?-label <text>? ?-signup <text>? ?-key {set .. clear .. status ..}?
+#                             ?-options {list .. set .. ?refresh ..?}?
 #   Record a provider under `name`. `-label` is its display name (a frontend's
 #   menus/badge; defaults to the name) and `-signup` a where-to-get-a-key hint —
 #   both DATA the provider owns, so the GUI's picker and key dialog are generic
 #   (they render whatever a provider declares; an installed provider ships its own,
 #   milestone B). `-key` declares the provider holds a durable credential and wires
 #   the three commands the agent.key.* ops drive; the agent layer stays
-#   credential-blind and each keyed provider keeps its own store.
+#   credential-blind and each keyed provider keeps its own store. `-options` declares
+#   the provider has runtime CHOICES a frontend may offer — its model, how much effort
+#   to ask for, anything else it names (D106) — and wires the commands agent.option.*
+#   drive. Both are capability blocks of COMMANDS, not data, because both answer
+#   questions only the provider can: whether a key is stored, what choices are valid
+#   right now.
 proc rio::agent::register_provider {name cmd args} {
 	variable providers
 	set entry [dict create provider $cmd label $name signup ""]
 	foreach {opt val} $args {
 		switch -- $opt {
-			-key    { dict set entry key $val }
-			-label  { dict set entry label $val }
-			-signup { dict set entry signup $val }
-			default { error "register_provider: unknown option $opt" }
+			-key     { dict set entry key $val }
+			-options { dict set entry options $val }
+			-label   { dict set entry label $val }
+			-signup  { dict set entry signup $val }
+			default  { error "register_provider: unknown option $opt" }
 		}
 	}
 	dict set providers $name $entry
@@ -152,8 +159,8 @@ proc rio::agent::providers_info {} {
 	return $out
 }
 
-# The provider a key op targets: the given name, or the active provider when none
-# is named (the common case — configure the key for the provider you just picked).
+# The provider a key or option op targets: the given name, or the active provider when
+# none is named (the common case — configure the provider you just picked).
 proc rio::agent::_key_target {name} {
 	variable active_provider
 	return [expr {$name eq "" ? $active_provider : $name}]
@@ -181,6 +188,129 @@ proc rio::agent::key_status {{name ""}} {
 	set name [_key_target $name]
 	if {![dict exists $providers $name] || ![dict exists $providers $name key]} { return 0 }
 	return [{*}[dict get $providers $name key status]]
+}
+
+# --- a provider's runtime options (D106) -------------------------------------
+#
+# Which model, how much effort, whatever else a provider names: choices that belong
+# to the PROVIDER's vocabulary, not the core's. The core routes and shapes; it never
+# learns what an option means, the same discipline that keeps the tool list and the
+# system prompt out of `extensions/` (D20/D34). So a provider that grows a third knob
+# needs no core change and no GUI change — it declares it, and it appears.
+#
+# A descriptor is {name, label, hint, value, free, refresh, choices [{value label}…]}.
+# The provider may omit everything but `name` and `value`; _option_norm fills the rest
+# in, so a frontend can rely on every key being there.
+
+# The options capability of a named provider, or raise. A frontend should only offer
+# options for a provider that declared them, so this raises only on a misuse — or on
+# a core that carries an older build of that provider.
+proc rio::agent::_options_caps {name} {
+	variable providers
+	if {![dict exists $providers $name]} {
+		rio::error::raise bad_request "unknown agent provider: $name"
+	}
+	if {![dict exists $providers $name options]} {
+		rio::error::raise bad_request "agent provider '$name' has no options"
+	}
+	return [dict get $providers $name options]
+}
+
+# One descriptor with every key present. `choices` is normalized too: a bare value is
+# its own label, so a provider may declare {claude-opus-5 …} or the long form.
+proc rio::agent::_option_norm {o} {
+	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {}]
+	set out [dict merge $out $o]
+	if {[dict get $out label] eq ""} { dict set out label [dict get $out name] }
+	set cs {}
+	foreach c [dict get $out choices] {
+		if {[llength $c] == 1} {
+			lappend cs [dict create value $c label $c]
+		} else {
+			set v [dict get $c value]
+			lappend cs [dict create value $v \
+				label [expr {[dict exists $c label] ? [dict get $c label] : $v}]]
+		}
+	}
+	dict set out choices $cs
+	dict set out free    [expr {[dict get $out free]    ? 1 : 0}]
+	dict set out refresh [expr {[dict get $out refresh] ? 1 : 0}]
+	return $out
+}
+
+# Every option a provider declares, normalized. A provider WITHOUT options answers
+# softly with {} — a frontend renders "no options" for echo without having to ask
+# whether it has any first (like key_status's soft 0).
+proc rio::agent::options {{name ""}} {
+	variable providers
+	set name [_key_target $name]
+	if {![dict exists $providers $name] || ![dict exists $providers $name options]} { return {} }
+	set out {}
+	foreach o [{*}[dict get $providers $name options list]] { lappend out [_option_norm $o] }
+	return $out
+}
+
+# A flat {name value …} view of the same, for agent.status — one attach call still
+# tells a frontend everything about the live agent.
+proc rio::agent::options_summary {{name ""}} {
+	set out [dict create]
+	foreach o [options $name] { dict set out [dict get $o name] [dict get $o value] }
+	return $out
+}
+
+# Whether a provider declares an option by this name (structural — the core checks
+# that the option EXISTS so every frontend gets the same error for a typo; whether a
+# VALUE is acceptable is the provider's question, and only it can answer).
+proc rio::agent::_option_find {name option} {
+	foreach o [options $name] {
+		if {[dict get $o name] eq $option} { return $o }
+	}
+	rio::error::raise bad_request "agent provider '$name' has no option '$option'"
+}
+
+# Choose a value (agent.option.set). Returns what the provider ACCEPTED — it may
+# canonicalize — so a frontend mirrors the core rather than its own guess. A refused
+# value raises out of the provider as a bad_request, leaving the agent untouched.
+proc rio::agent::option_set {option value {name ""}} {
+	set name [_key_target $name]
+	set caps [_options_caps $name]
+	_option_find $name $option
+	{*}[dict get $caps set] $option $value
+	return [dict get [_option_find $name $option] value]
+}
+
+# Re-enumerate an option's choices from wherever the provider gets them — a vendor's
+# models endpoint, a local server's own list (D106). Asynchronous by construction: the
+# provider is handed the turn-style `emit` and announces `agent.options` when the
+# answer lands, so the core never blocks on a network call (D10).
+proc rio::agent::options_refresh {option emit {name ""}} {
+	set name [_key_target $name]
+	set caps [_options_caps $name]
+	set o [_option_find $name $option]
+	if {![dict get $o refresh] || ![dict exists $caps refresh]} {
+		rio::error::raise bad_request "option '$option' cannot be refreshed"
+	}
+	{*}[dict get $caps refresh] $option [list rio::agent::announce_options $name $emit]
+	return 1
+}
+
+# The `agent.options` event: "this provider's options changed — look again". Broadcast
+# to every attached frontend (D3/D30), so a change made in one window, or a refresh
+# that has just completed, repaints in all of them.
+#
+# It carries the provider NAME and not the options themselves, because an event is a
+# flat object on the wire (rio::wire::event) and the option list is two levels deep.
+# A frontend that cares re-lists; one that doesn't ignores a short line. The choice
+# also keeps the event honest under a race — the list a frontend then reads is the
+# list as it is now, not as it was when the event was queued.
+#
+# `error` is how an ASYNCHRONOUS failure gets back to the user: a refresh's reply is
+# long gone by the time the network answers, so a provider that couldn't fetch says so
+# here (and leaves its choices untouched) rather than failing silently.
+proc rio::agent::announce_options {name emit {error ""}} {
+	{*}$emit [dict create event agent.options \
+		params [dict create provider $name error $error]]
+	return
 }
 
 # Clear the conversation (agent.reset). Also abort any turn suspended awaiting an

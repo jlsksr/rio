@@ -266,6 +266,38 @@ proc rio::wire::_result_agent_prompt_list {result} {
 }
 rio::wire::result_encoder agent.prompt.list rio::wire::_result_agent_prompt_list
 
+# agent.options.list: `options` is an array of option objects, each carrying its own
+# `choices` array — the protocol's second two-level shape (D106), so like the search
+# results it spells BOTH levels out rather than guessing them from Tcl values (D25).
+proc rio::wire::_option {o} {
+	set cs {}
+	foreach c [dict get $o choices] { lappend cs [obj $c] }
+	set parts {}
+	foreach k {name label hint value free refresh} {
+		lappend parts "[str $k]:[str [dict get $o $k]]"
+	}
+	lappend parts "\"choices\":[arr $cs]"
+	return "{[join $parts ,]}"
+}
+proc rio::wire::_result_agent_options_list {result} {
+	set items {}
+	foreach o [dict get $result options] { lappend items [_option $o] }
+	return "{\"provider\":[str [dict get $result provider]],\"options\":[arr $items]}"
+}
+rio::wire::result_encoder agent.options.list rio::wire::_result_agent_options_list
+
+# agent.status: flat except `options`, the live {name value …} summary of whatever the
+# provider declares (D106) — an object of string leaves, declared rather than inferred.
+proc rio::wire::_result_agent_status {result} {
+	set parts {}
+	foreach k {provider auto_accept mode key_set} {
+		lappend parts "[str $k]:[str [dict get $result $k]]"
+	}
+	lappend parts "\"options\":[obj [dict get $result options]]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder agent.status rio::wire::_result_agent_status
+
 # agent.allow.list: `rules` is an array of rules, each rule an array of argv-prefix
 # token strings (D84) — a nested string array, declared here rather than inferred.
 proc rio::wire::_result_agent_allow_list {result} {

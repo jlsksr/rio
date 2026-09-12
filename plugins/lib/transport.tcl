@@ -1,13 +1,16 @@
 # plugins/lib — the shared HTTPS streaming transport (AGENTS.md D8/D26, D10).
 #
-# The network layer every LLM provider plugs into: a STREAMING POST for an SSE
-# completions API, delivering body chunks live. A command prefix matching the
-# seam the inference cores expect:
-#   stream req on_chunk on_done   — on_chunk <text> per chunk; on_done <status> <err>
-# where req = {url, headers (flat {k v ...}), body, ?timeout?} and status is the
-# HTTP code (0 = couldn't connect). Async via the http package + tcltls (event
-# loop, D10). TLS verifies the server cert against the system CA bundle when
-# present. Nothing here is provider-specific — Claude and OpenAI share this copy.
+# The network layer every LLM provider plugs into. Two command-prefix seams, both
+# async via the http package + tcltls (event loop, D10), both taking
+# req = {url, headers (flat {k v ...}), ?body?, ?timeout?} with status the HTTP code
+# (0 = couldn't connect):
+#   stream req on_chunk on_done  — a STREAMING POST for an SSE completions API,
+#                                  delivering body chunks live (on_chunk <text>;
+#                                  on_done <status> <err>)
+#   get    req on_done           — a plain GET for one small document, e.g. the
+#                                  vendor's model list (on_done <status> <err> <body>)
+# TLS verifies the server cert against the system CA bundle when present. Nothing
+# here is provider-specific — Claude and OpenAI share this copy.
 #
 # Sourced by more than one plugin loader (server.tcl loads each), so it is guarded
 # to define its procs exactly once.
@@ -67,6 +70,41 @@ proc rio::llm::http::stream {req on_chunk on_done} {
 	} err]} {
 		{*}$on_done 0 $err
 	}
+}
+
+# --- plain GET (a small JSON document: the vendor's model list) ---------------
+#
+# The second seam (D106): one request, one whole body — no streaming, because a
+# models listing is a few kB that is useless in pieces. Same request shape as
+# `stream` minus the body, and the same "never block the core" rule (D10): the
+# reply arrives on the callback, in the event loop.
+#   get req on_done   — on_done <status> <err> <body>; status 0 = couldn't connect
+proc rio::llm::http::get {req on_done} {
+	if {[catch {_ensure_tls} e]} { {*}$on_done 0 $e "" ; return }
+	set hlist [_headers [dict get $req headers] ctype]
+	set timeout [expr {[dict exists $req timeout] ? [dict get $req timeout] : 30000}]
+	if {[catch {
+		::http::geturl [dict get $req url] -method GET -headers $hlist \
+			-command [list rio::llm::http::_on_get_end $on_done] -timeout $timeout
+	} err]} {
+		{*}$on_done 0 $err ""
+	}
+}
+
+# A JSON response is `application/json`, which the http package treats as BINARY —
+# so ::http::data hands back raw bytes and the utf-8 decode is ours to do, exactly as
+# the streaming path does it at the socket. When the server did declare a charset,
+# http has already decoded, and decoding twice would mangle every non-ASCII name.
+proc rio::llm::http::_on_get_end {on_done token} {
+	lassign [_status $token] status err
+	set body [::http::data $token]
+	set ctype ""
+	catch {set ctype [dict get [::http::meta $token] content-type]}
+	if {![string match -nocase *charset=* $ctype]} {
+		catch {set body [encoding convertfrom utf-8 $body]}
+	}
+	::http::cleanup $token
+	{*}$on_done $status $err $body
 }
 
 # Per-chunk: hand the decoded text to on_chunk. Decoding at the socket (utf-8)

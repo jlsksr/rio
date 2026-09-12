@@ -30,7 +30,7 @@ namespace eval rio::claude {
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
 # messages_url, anthropic_version, anthropic_beta, model, max_tokens, ?system?,
-# ?request_timeout?.
+# ?effort_json? (the face's already-spelled effort fragment, D106), ?request_timeout?.
 # `auth` is a {header value} pair the face supplies (x-api-key <key> for the
 # API face). `transport` is `{*}$transport request on_chunk on_done`:
 #   request  = {url, headers, body, ?timeout?}
@@ -81,6 +81,12 @@ proc rio::claude::_request_json {conf conversation tools} {
 	lappend parts "\"messages\":\[[join $msgs ,]\]"
 	if {[dict exists $conf system] && [dict get $conf system] ne ""} {
 		lappend parts "\"system\":[rio::llm::jstr [dict get $conf system]]"
+	}
+	# The effort choice (D106), already spelled as a JSON fragment by the face — or
+	# empty, which is the default and means the request is byte-for-byte the one rio
+	# has always sent.
+	if {[dict exists $conf effort_json] && [dict get $conf effort_json] ne ""} {
+		lappend parts [dict get $conf effort_json]
 	}
 	if {[llength $tools]} {
 		set tj {}

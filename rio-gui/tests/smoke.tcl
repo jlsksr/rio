@@ -1284,12 +1284,15 @@ ok "busy: start sets the flag"        $::chat_busy 1
 ok "busy: a real phrase is chosen"    [expr {$::chat_busy_word in $::chat_busy_words}] 1
 chat_busy_stop
 ok "busy: stop clears the flag"       $::chat_busy 0
-ok "busy: idle status restored"       [.chat.status cget -text] [agent_provider_label $::agent_provider]
+ok "busy: idle indicator cleared"     [.chat.status.busy cget -text] ""
 # render is a pure function of frame+word: a 1→2→3 "Please wait…" dot cycle.
 set ::chat_busy_word "Reticulating splines" ; set ::chat_busy_frame 0 ; chat_busy_render
-ok "busy: one dot at frame 0"         [.chat.status cget -text] "Reticulating splines."
+ok "busy: one dot at frame 0"         [.chat.status.busy cget -text] "Reticulating splines."
 set ::chat_busy_frame 2 ; chat_busy_render
-ok "busy: three dots at frame 2"      [.chat.status cget -text] "Reticulating splines..."
+ok "busy: three dots at frame 2"      [.chat.status.busy cget -text] "Reticulating splines..."
+# The indicator has its own half of the strip (D106): while it animates, the selector
+# still says which agent is working — the thing the old one-label strip erased.
+ok "busy: the agent is still named"   [string match "Echo*" [.chat.status.sel cget -text]] 1
 # A turn ending (message or error) stops the animation.
 chat_busy_start ; chat_event {event agent.message params {turn 20 role assistant text hi}}
 ok "busy: message ends it"            $::chat_busy 0
@@ -1406,17 +1409,105 @@ adopt_agent_status
 ok "provider: default is echo"        $::agent_provider echo
 apply_provider
 ok "provider: echo selected in core"  [rio::agent::provider_name] echo
-ok "status: names echo agent"         [.chat.status cget -text] "Echo"
+ok "status: names echo agent"         [.chat.status.sel cget -text] "Echo ▾"
 set ::agent_provider claude ; apply_provider
 ok "provider: claude selected in core" [rio::agent::provider_name] claude
-ok "status: names claude agent"       [.chat.status cget -text] "Claude"
+ok "status: names claude agent"       [string match "Claude*" [.chat.status.sel cget -text]] 1
 # The mode is NOT in the strip: it is stated once, by the control that sets it (D102).
 # Saying it twice was how the old strip came to lie — it showed "plan mode" over an armed
 # auto-accept flag it had no room for.
 set ::agent_auto_accept 1 ; agent_mode_sync
-ok "status: the mode is not repeated here" [.chat.status cget -text] "Claude"
+ok "status: the mode is not repeated here" \
+	[string match "*Auto*" [.chat.status.sel cget -text]] 0
 ok "status: the control carries it"        [.chat.hdr.mode cget -text] "Auto ▾"
 set ::agent_auto_accept 0 ; agent_mode_sync
+
+# --- the agent selector: model and effort, from the pane (D106) --------------
+# claude is the live provider here, and it declares two options. NOTHING in the GUI
+# names them: the pane renders what the core says the provider declared.
+agent_options_refresh
+ok "options: the pane lists what the provider declared" [llength $::agent_options] 2
+ok "options: the first is the model"   [dict get [lindex $::agent_options 0] name] model
+ok "options: a model is free to type"  [dict get [lindex $::agent_options 0] free] 1
+ok "options: a model can be refreshed" [dict get [lindex $::agent_options 0] refresh] 1
+ok "options: effort is a closed list"  [dict get [lindex $::agent_options 1] free] 0
+ok "options: the selector names provider AND model" \
+	[string match "Claude · *▾" [.chat.status.sel cget -text]] 1
+# Picking writes through the core to the provider, and the label follows.
+agent_option_pick model claude-opus-5
+ok "options: the provider took the choice" [rio::claude::api::cget model] claude-opus-5
+ok "options: the label shows the choice"   [string match "*Opus 5 ▾" [.chat.status.sel cget -text]] 1
+ok "options: the choice was remembered"    [rio::agent::settings::get claude model] claude-opus-5
+# An option at its default stays out of the label (a 340 px column); a non-default
+# one is never invisible.
+ok "options: a default option is not spelled out" \
+	[string match "*default*" [.chat.status.sel cget -text]] 0
+agent_option_pick effort high
+ok "options: a non-default option shows"   [string match "*High ▾" [.chat.status.sel cget -text]] 1
+ok "options: and would reach the request"  [rio::claude::api::_effort_json] \
+	{"output_config":{"effort":"high"}}
+agent_option_pick effort default
+ok "options: back to default, out of the label again" \
+	[string match "*High*" [.chat.status.sel cget -text]] 0
+# The menu: a Provider section, then one section per declared option.
+proc menu_labels {m} {
+	set out {}
+	for {set i 0} {$i <= [$m index end]} {incr i} {
+		if {[$m type $i] eq "separator"} { lappend out "--" ; continue }
+		lappend out [string trim [$m entrycget $i -label]]
+	}
+	return $out
+}
+set ::mlabels [menu_labels .chat.status.sel.m]
+ok "options: the menu heads a Provider section" [lindex $::mlabels 0] "Provider"
+ok "options: and a section per option"          [expr {"Model" in $::mlabels && "Effort" in $::mlabels}] 1
+ok "options: a free option offers Other…"       [expr {"Other…" in $::mlabels}] 1
+ok "options: a refreshable one offers a refresh" \
+	[expr {"⟳ Refresh from provider" in $::mlabels}] 1
+ok "options: effort offers neither"             [llength [lsearch -all -exact $::mlabels "Other…"]] 1
+# Other…: a value the shipped list never carried (a model newer than this build).
+rename name_prompt _real_name_prompt
+proc name_prompt {title label prefill} { return "claude-typed-by-hand" }
+agent_option_other model
+rename name_prompt {} ; rename _real_name_prompt name_prompt
+ok "options: a typed value is accepted"    [rio::claude::api::cget model] claude-typed-by-hand
+ok "options: and labels itself as typed"   [string match "*claude-typed-by-hand ▾" [.chat.status.sel cget -text]] 1
+# A refusal leaves the pane mirroring the core, not its own guess. (report_error is
+# captured for the whole suite, above — a modal would hang a headless run.)
+set ::captured {}
+agent_option_pick effort ludicrous
+ok "options: a refused value is reported"  [string match "*must be one of*" $::captured] 1
+ok "options: and the pane still shows the core's value" \
+	[dict get [agent_option_entry effort] value] "default"
+# Refresh with no key: the provider says so rather than calling out (the message rides
+# the agent.options event, because the op's reply is long gone by then).
+set ::captured {}
+agent_option_fetch model
+update
+ok "options: a keyless refresh explains itself" \
+	[string match "*No Claude API key*" $::captured] 1
+ok "options: and the choices are untouched" \
+	[llength [dict get [agent_option_entry model] choices]] 3
+# Refresh: the provider re-enumerates, and the agent.options event repaints the pane.
+rio::claude::api::set_key sk-ant-smoke-refresh
+set ::claude_fetcher_was $::rio::claude::api::fetcher
+set ::rio::claude::api::fetcher [list apply {{req done} {
+	{*}$done 200 "" {{"data":[{"id":"claude-fetched","display_name":"Fetched Model"}]}}
+}}]
+agent_option_fetch model
+# The refreshed list arrives as an agent.options event and repaints from the idle
+# loop, so give the event loop its turn (bounded, so a regression fails rather than
+# hangs).
+for {set i 0} {$i < 50 && [llength [dict get [agent_option_entry model] choices]] != 1} {incr i} {
+	update ; after 10
+}
+set ::claude_choices [dict get [agent_option_entry model] choices]
+ok "options: a refresh replaced the choices" [llength $::claude_choices] 1
+ok "options: with what the provider listed"  [dict get [lindex $::claude_choices 0] label] "Fetched Model"
+set ::rio::claude::api::fetcher $::claude_fetcher_was
+rio::claude::api::clear_key   ;# the later block checks the keyless error path
+# Back to something sane for the rest of the run.
+agent_option_pick model claude-sonnet-5
 
 # adopt_agent_status MIRRORS the core's live settings into the menus without
 # writing back — attaching to an already-configured core must not reset it (D30).
@@ -1527,7 +1618,7 @@ ok "provider: openai now in the picker cache" \
 	[expr {[agent_provider_entry openai] ne ""}] 1
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai
-ok "status: names ChatGPT agent"       [.chat.status cget -text] "ChatGPT"
+ok "status: names ChatGPT agent"       [string match "ChatGPT*" [.chat.status.sel cget -text]] 1
 provider_key_dialog openai
 ok "keydlg: titled for openai"         [wm title .providerkey] "ChatGPT API key"
 .providerkey.e insert end "sk-oai-smoke-123"

@@ -12,11 +12,17 @@
 #
 # The provider-api this core implements — the surface a `provider-api = N` manifest
 # promises against — is loaded BEFORE any provider is sourced (server.tcl):
-#   - rio::agent::register_provider (with -label / -signup / -key),
-#   - the provider proc contract {conversation tools system post} and the `post`
-#     vocab delta / tool / done ?stop_reason? / error (rio::agent, D65),
-#   - the runtime helpers rio::llm::http::stream, rio::llm::jstr / rio::llm::obj_json
-#     (plugins/lib) and rio::secret::* (the 0600 key store, D21).
+#   1 - rio::agent::register_provider (with -label / -signup / -key),
+#     - the provider proc contract {conversation tools system post} and the `post`
+#       vocab delta / tool / done ?stop_reason? / error (rio::agent, D65),
+#     - the runtime helpers rio::llm::http::stream, rio::llm::jstr / rio::llm::obj_json
+#       (plugins/lib) and rio::secret::* (the 0600 key store, D21).
+#   2 - register_provider's -options capability {list set ?refresh?} and the
+#       agent.option* ops behind it (D106),
+#     - rio::agent::settings::* (the provider's own durable choices, one flat
+#       hand-editable file per provider),
+#     - the runtime helper rio::llm::http::get (a plain GET, for a models listing).
+# A provider declaring an OLDER api still loads: the surface only grows.
 #
 # The store is one dir per provider: <name>/rio-extension.conf (the D39 manifest,
 # parsed as conf — data, never executed — to decide WHETHER to source) plus its
@@ -25,7 +31,7 @@
 
 namespace eval rio::provider {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path
-	variable api_version 1     ;# the highest provider-api this core implements
+	variable api_version 2     ;# the highest provider-api this core implements
 }
 
 # The highest provider-api this core implements — a frontend compares a repo

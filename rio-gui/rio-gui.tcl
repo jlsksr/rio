@@ -185,7 +185,7 @@ set ::editor_theme_family monospace ;# the active theme's editor family (apply_t
 set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
-# The agent "working" indicator (D82): while a turn is in flight the .chat.status strip
+# The agent "working" indicator (D82): while a turn is in flight the .chat.status.busy label
 # animates a cycling retro-productivity phrase with a "Please wait…" dot cadence, so a
 # multi-second wait on the LLM never looks frozen. Pure Tk (an `after` loop) — no deps.
 set ::chat_busy       0    ;# a turn is being worked (animation running)
@@ -2911,6 +2911,19 @@ proc chat_event {ev} {
 			set ::agent_plan_mode [expr {[dict get $ev params mode] eq "plan"}]
 			agent_mode_sync
 		}
+		agent.options {
+			# A provider's options changed — here, in another window (D3/D30), or because
+			# a refresh has just come back from the network. The event says only THAT they
+			# changed, so re-read: the list we then render is the list as it is now.
+			set err [expr {[dict exists $ev params error] ? [dict get $ev params error] : ""}]
+			if {$err ne ""} { report_error $err }
+			# Re-read from the IDLE loop, not from here: this handler runs inside the
+			# channel reader, and an op call from there would nest one vwait inside
+			# another. The repaint is not urgent — nothing is waiting on it.
+			if {[dict get $ev params provider] eq $::agent_provider} {
+				after idle agent_options_refresh
+			}
+		}
 		agent.tool_result {
 			# The outcome of a read or an applied/rejected edit (red if it failed).
 			approve_bar 0
@@ -4340,7 +4353,127 @@ proc provider_radio_label {p} {
 # Settings radio) — see adopt_agent_status for why we don't write at attach time.
 proc apply_provider {} {
 	rio_result agent.provider.set [dict create name $::agent_provider]
+	agent_options_refresh   ;# a different provider offers different choices
 	chat_status_update
+}
+
+# --- the live agent: provider, model, effort, as one control (D106) -----------
+#
+# What a provider lets you choose is the PROVIDER's business (a model, an effort, or
+# something rio has never heard of): the core hands over a list of declared options
+# and this pane renders whatever is in it. So nothing below names a model or an
+# effort — a provider that grows a third option gets a third section for free.
+set ::agent_options {}           ;# the active provider's options, as the core declared them
+array set ::agent_option_value {} ;# option name -> chosen value, for the menu's radios
+
+# Pull the active provider's options from the core (D30: they live where the agent
+# runs, so a remote core answers for its own machine) and repaint the control.
+proc agent_options_refresh {} {
+	set r [rio_call agent.options.list {}]
+	set ::agent_options [expr {[dict get $r ok] ? [dict get $r result options] : {}}]
+	agent_options_sync
+}
+
+# One option's descriptor by name, or "" — the pane asks by name, never by position.
+proc agent_option_entry {name} {
+	foreach o $::agent_options { if {[dict get $o name] eq $name} { return $o } }
+	return ""
+}
+
+# A value's label, falling back to the value itself (a free value the list never had).
+proc agent_option_label {o value} {
+	foreach c [dict get $o choices] {
+		if {[dict get $c value] eq $value} { return [dict get $c label] }
+	}
+	return $value
+}
+
+# Repaint the selector: the provider, then every option whose value is worth saying.
+# The FIRST option is always shown (that is the model, for both shipped providers —
+# "which model am I talking to" is the question this strip exists to answer); the rest
+# appear only when they are not at their default, so a non-default effort is never
+# invisible and a default one never takes up room in a 340 px column.
+proc agent_options_sync {} {
+	if {![winfo exists .chat.status.sel]} return
+	set parts [list [agent_provider_label $::agent_provider]]
+	set full  [list "Provider: [agent_provider_label $::agent_provider]"]
+	set first 1
+	foreach o $::agent_options {
+		set n [dict get $o name] ; set v [dict get $o value]
+		set ::agent_option_value($n) $v
+		if {$first || ![agent_option_is_default $o]} { lappend parts [agent_option_label $o $v] }
+		lappend full "[dict get $o label]: [agent_option_label $o $v] ($v)"
+		set first 0
+	}
+	.chat.status.sel configure -text "[join $parts { · }] ▾"
+	tooltip .chat.status.sel [join $full "\n"]
+	agent_options_menu_fill
+}
+
+# Whether an option sits at its default. The core does not say which choice is the
+# default — it has no opinion about meaning — so the rule is the provider's own
+# convention, declared in the choice list: the FIRST choice is the quiet one.
+proc agent_option_is_default {o} {
+	set cs [dict get $o choices]
+	if {![llength $cs]} { return 0 }
+	return [expr {[dict get $o value] eq [dict get [lindex $cs 0] value]}]
+}
+
+# Build the selector's menu: the providers (the same radios and the same writer the
+# Settings cascade and Preferences use — three doors, one answer, as D102 established),
+# then one section per declared option.
+proc agent_options_menu_fill {} {
+	if {![winfo exists .chat.status.sel.m]} return
+	set m .chat.status.sel.m
+	$m delete 0 end
+	$m add command -label "Provider" -state disabled
+	foreach p $::agent_providers {
+		$m add radiobutton -label "   [provider_radio_label $p]" \
+			-variable ::agent_provider -value [dict get $p name] -command apply_provider
+	}
+	foreach o $::agent_options {
+		set n [dict get $o name]
+		$m add separator
+		$m add command -label [dict get $o label] -state disabled
+		foreach c [dict get $o choices] {
+			$m add radiobutton -label "   [dict get $c label]" \
+				-variable ::agent_option_value($n) -value [dict get $c value] \
+				-command [list agent_option_pick $n [dict get $c value]]
+		}
+		if {[dict get $o free]} {
+			$m add command -label "   Other…" -command [list agent_option_other $n]
+		}
+		if {[dict get $o refresh]} {
+			$m add command -label "   ⟳ Refresh from provider" \
+				-command [list agent_option_fetch $n]
+		}
+	}
+}
+
+# The single writer. Push the choice to the core and then re-read: the reply carries
+# what the provider ACCEPTED (it may canonicalize), and on a refusal nothing changed,
+# so re-reading puts the menu back rather than leaving it claiming a choice the agent
+# is not running.
+proc agent_option_pick {name value} {
+	rio_result agent.option.set [dict create name $name value $value]
+	agent_options_refresh
+}
+
+# A value the shipped list doesn't carry — a model released after this build, a tag
+# on a local server. Only offered for an option the provider declared `free`.
+proc agent_option_other {name} {
+	set o [agent_option_entry $name]
+	if {$o eq ""} return
+	set v [name_prompt "[dict get $o label]" "Enter a [string tolower [dict get $o label]]:" \
+		[dict get $o value]]
+	if {$v eq "" || $v eq [dict get $o value]} return
+	agent_option_pick $name $v
+}
+
+# Ask the provider to re-enumerate (its models endpoint, a local server's own list).
+# The call only acks — the list arrives as an agent.options event, which repaints.
+proc agent_option_fetch {name} {
+	rio_result agent.options.refresh [dict create name $name]
 }
 
 # Adopt the core's LIVE agent settings into our menus instead of imposing ours.
@@ -4358,6 +4491,7 @@ proc adopt_agent_status {} {
 	set ::agent_auto_accept [dict get $st auto_accept]
 	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
 	providers_menu_fill     ;# refresh the cache + the provider/key menus from the core
+	agent_options_refresh   ;# what this provider lets us choose, and what it chose (D106)
 	agent_mode_sync         ;# and the mode control, which repaints the strip
 }
 
@@ -4410,13 +4544,15 @@ proc chat_busy_tick {} {
 # UI font can drop a glyph (the D54 Windows / Alpine / OpenBSD matrix).
 proc chat_busy_render {} {
 	set dots [string repeat "." [expr {$::chat_busy_frame % 3 + 1}]]
-	catch {.chat.status configure -text "$::chat_busy_word$dots"}
+	catch {.chat.status.busy configure -text "$::chat_busy_word$dots"}
 }
-# Stop animating and hand the strip back to its idle provider text.
+# Stop animating and clear the indicator's half of the strip (the agent selector beside
+# it never went anywhere).
 proc chat_busy_stop {} {
 	after cancel $::chat_busy_after
 	set ::chat_busy_after ""
 	set ::chat_busy 0
+	catch {.chat.status.busy configure -text ""}
 	chat_send_button
 	chat_status_update
 }
@@ -4453,10 +4589,11 @@ proc chat_stop {} {
 
 # The status strip names the live agent, and nothing else: the mode is stated once, by the
 # header control that sets it (D102). Two places saying it was how the old strip came to lie
-# — it showed "plan mode" over an armed auto-accept flag it had no room for.
+# — it showed "plan mode" over an armed auto-accept flag it had no room for. Since D106 the
+# strip is a control, and it keeps answering while a turn runs: the working indicator has
+# its own half.
 proc chat_status_update {} {
-	if {$::chat_busy} return   ;# the working indicator owns the strip while a turn runs
-	catch {.chat.status configure -text [agent_provider_label $::agent_provider]}
+	agent_options_sync
 }
 
 # --- the agent's mode, as one control (D102) ---------------------------------
@@ -6763,7 +6900,15 @@ proc apply_theme {theme} {
 		-insertbackground [dict get $c chat.fg]
 	.chat.send configure -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	.chat.status configure -font RioUIFont \
+	# The bottom strip: the agent selector is a CONTROL, so it takes the accent the
+	# pane's other controls take (D68 — static text is muted, interactive text is not),
+	# while the working indicator beside it stays quiet chrome.
+	.chat.status configure -background [dict get $c tab.bar.bg]
+	.chat.status.sel configure -font RioUIFont \
+		-background [dict get $c tab.bar.bg] -foreground [dict get $c accent]
+	.chat.status.sel.m configure -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	.chat.status.busy configure -font RioUIFont \
 		-background [dict get $c tab.bar.bg] -foreground [dict get $c ui.fg]
 	# Speaker headers get a full-width highlight band so each turn is easy to find in
 	# the log (diffs, tool lines, replies). The label's trailing newline is in the tag
@@ -9737,10 +9882,20 @@ button .chat.send -text "▶" -font {monospace 9} -command chat_send  ;# ▶ sen
 # …and ■ stop while a turn is working (D104): the same button, because "send" and "stop"
 # are never both available — the turn is either yours to type into or the agent's to run.
 tooltip .chat.send "Send this message"
-# Status strip at the pane's very bottom: live agent + edit mode (filled by
-# chat_status_update; room for context-window usage later).
-label .chat.status -anchor w -font {monospace 9} -padx 4 -pady 2 \
+# Status strip at the pane's very bottom: on the left the agent you are talking to —
+# provider, model, and any option that is not at its default — as a CONTROL (D106),
+# on the right the working indicator. They used to be one label, which meant the
+# animation erased the answer to "which model is this?" for the whole time it mattered
+# most. This is also where the eye already is: directly under the composer.
+frame .chat.status -background "#eeeeee"
+menubutton .chat.status.sel -anchor w -font {monospace 9} -padx 4 -pady 2 \
+	-menu .chat.status.sel.m -cursor hand2 \
 	-background "#eeeeee" -foreground "#444444"
+menu .chat.status.sel.m -tearoff 0
+label .chat.status.busy -anchor e -font {monospace 9} -padx 4 -pady 2 \
+	-background "#eeeeee" -foreground "#444444"
+pack .chat.status.sel  -side left
+pack .chat.status.busy -side right
 bind .chat.input <Return>       { chat_send ; break }
 bind .chat.input <Shift-Return> { %W insert insert "\n" ; break }
 # A thin draggable divider between the transcript and the composer, so the user can
