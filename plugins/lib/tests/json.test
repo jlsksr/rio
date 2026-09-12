@@ -26,6 +26,43 @@ test jstr-astral {an astral codepoint escapes to a UTF-16 surrogate pair} -body 
 	list [string is ascii $j] [string match {*\\ud83d\\ude00*} $j]
 } -result {1 1}
 
+# --- jascii: the whole-body ASCII guarantee (found live, 2026-09-12) -----------
+# jstr keeps everything IT touches ASCII, but a request body also carries JSON the
+# provider splices raw (a tool's input_schema). jascii is the last word on the body.
+
+test jascii-passes-ascii-through {a body that was already ASCII is untouched} -body {
+	rio::llm::jascii {{"a":"plain","n":1}}
+} -result {{"a":"plain","n":1}}
+
+test jascii-escapes-inside-spliced-json {a raw em-dash becomes — and the JSON still means the same} -body {
+	# Exactly the shape that broke live: a schema spliced whole, with an em-dash in
+	# one of its description strings.
+	set body "{\"tools\":\[{\"input_schema\":{\"description\":\"a name — one line\"}}\]}"
+	set out [rio::llm::jascii $body]
+	set d [json::json2dict $out]
+	list [string is ascii $out] \
+		[dict get [dict get [lindex [dict get $d tools] 0] input_schema] description]
+} -result {1 {a name — one line}}
+
+test jascii-astral {an astral codepoint becomes a surrogate pair, like jstr} -body {
+	set ch [encoding convertfrom utf-8 "\xF0\x9F\x98\x80"]
+	set out [rio::llm::jascii "{\"t\":\"x$ch\"}"]
+	list [string is ascii $out] [dict get [json::json2dict $out] t]
+} -result [list 1 x[encoding convertfrom utf-8 "\xF0\x9F\x98\x80"]]
+
+test jascii-idempotent {escaping an already-escaped body changes nothing} -body {
+	set once [rio::llm::jascii "{\"t\":\"a—b\"}"]
+	string equal $once [rio::llm::jascii $once]
+} -result 1
+
+test jascii-keeps-length-honest {chars == bytes, which is what the HTTP layer counts} -body {
+	# http-2.9.8.tm counts Content-Length in CHARACTERS (:1377) and then writes the
+	# body to a BINARY channel (:1518). A body whose two lengths differ is a body
+	# that does not arrive as it was written — U+2014 went out as the byte 0x14.
+	set body [rio::llm::jascii "{\"t\":\"a—b…\"}"]
+	expr {[string length $body] == [string length [encoding convertto utf-8 $body]]}
+} -result 1
+
 test obj-json-flat {a flat dict becomes an object with every key and value escaped} -body {
 	set o [rio::llm::obj_json [dict create path f.txt new_string "a\nb→c"]]
 	set d [json::json2dict $o]

@@ -209,14 +209,53 @@ test claude-adopts-stored {a choice in the provider's conf file is adopted at lo
 
 # --- effort on the wire ------------------------------------------------------
 
-proc claude_body {} {
+proc claude_body {{tools {}} {system ""}} {
 	set ::seen ""
 	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
 	set ::rio::claude::api::transport capture_tp
-	rio::claude::api::provider {{role user text hi}} {} {} collect_post
+	rio::claude::api::provider {{role user text hi}} $tools $system collect_post
 	set ::rio::claude::api::transport rio::llm::http::stream
 	return [dict get $::seen body]
 }
+
+# A tool spec shaped like the core's, with a non-ASCII character INSIDE its schema —
+# where jstr never reaches, because the schema is already JSON and is spliced whole.
+# rio's own present_plan carries exactly this (an em-dash in a description).
+proc tool_with_dash {} {
+	return [list [dict create name present_plan description "Present your plan" \
+		input_schema {{"type":"object","properties":{"title":{"type":"string","description":"A short name — one line."}}}}]]
+}
+
+test claude-body-with-tools-is-ascii {a tool schema's non-ASCII never reaches the HTTP layer raw} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	# Found live (2026-09-12): Tcl's http counts Content-Length in characters and
+	# writes the body to a binary channel, so a U+2014 that survives this far goes
+	# out as the byte 0x14 — a raw control character inside a JSON string. OpenAI
+	# refused the request; Anthropic had been tolerating it. Both lengths must agree.
+	set b [claude_body [tool_with_dash]]
+	list [string is ascii $b] \
+		[expr {[string length $b] == [string length [encoding convertto utf-8 $b]]}] \
+		[expr {[catch {json::json2dict $b}] ? "unparseable" : "parses"}]
+} -cleanup { rio::claude::api::clear_key } -result {1 1 parses}
+
+test claude-body-with-tools-keeps-its-meaning {escaping the body does not change what it says} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	set d [json::json2dict [claude_body [tool_with_dash]]]
+	set t [lindex [dict get $d tools] 0]
+	dict get [dict get [dict get [dict get $t input_schema] properties] title] description
+} -cleanup { rio::claude::api::clear_key } -result {A short name — one line.}
+
+test claude-body-system-non-ascii {a system prompt's non-ASCII survives as itself} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-XYZ
+} -body {
+	set d [json::json2dict [claude_body {} "rio — the editor"]]
+	dict get $d system
+} -cleanup { rio::claude::api::clear_key } -result {rio — the editor}
 
 test claude-effort-default-sends-nothing {the default request is the one rio always sent} -setup {
 	reset_claude_opts

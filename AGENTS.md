@@ -5657,6 +5657,57 @@ not have that provider"). `agent.options.list` now raises `bad_request` for a pr
 core does not carry, and stays soft only for a registered provider that declares nothing
 (echo). `rio::agent::provider_known` is the one-line predicate behind it; core 633 → 634.
 
+#### D106b — the request body was never pure ASCII, and one vendor said so
+
+Running D106's ChatGPT half against jka's remote core (2026-09-12, the check that had been
+waiting on the openai install) every turn came back:
+
+```
+HTTP 400 — "We could not parse the JSON body of your request."
+```
+
+Effort was the suspect and effort was innocent: a control run with `effort=default` — the
+request rio has always sent — failed identically. The defect is older than D106 and has
+nothing to do with it.
+
+**What it was.** `plugins/lib/json.tcl` states the invariant plainly: `jstr` `\u`-escapes
+every non-ASCII character "so the whole request body is pure ASCII… That sidesteps request-
+body transcoding entirely." But a body is not only jstr's output. Both faces splice a tool's
+`input_schema` in **raw** — correctly, it is already JSON, not a string to escape — and
+`present_plan`'s schema ([agent-tools.tcl:68](rio-core/agent-tools.tcl#L68)) carries an
+em-dash in a description. Tcl's `http` then counts `Content-Length` in **characters**
+(http-2.9.8.tm:1377) and writes the body to a **binary** channel (:1518), where a character
+above 0xFF is truncated to its low byte. Measured, not inferred: `a—b` leaves as
+`61 14 62`. U+2014 arrives as `0x14` — a raw control character inside a JSON string, which
+RFC 8259 forbids.
+
+**Why it had never shown.** Anthropic's parser accepts it; OpenAI's does not. rio had been
+sending invalid JSON to both vendors for as long as `present_plan` has existed, and exactly
+one of them ever complained. Every offline body test passed an empty tool list, so the
+schemas — the only part of the body that bypasses jstr — were never in a tested request.
+That is the real hole, and it is the one the new guards close.
+
+**The fix** is `rio::llm::jascii`: `\u`-escape every non-ASCII character of an already-valid
+JSON document, applied as the **last word on the body** in both faces. Safe because JSON can
+only carry a non-ASCII character inside a string literal, idempotent, and a no-op on a body
+that was already ASCII. It sits at the boundary where the invariant is declared, so it also
+covers the next raw splice nobody thinks about.
+
+**It forced a `provider-api` bump, and that is the mechanism working.** `jascii` lives in the
+core's shared runtime while the *call* lives in the extension, so an extension updated ahead
+of its core would call a proc that does not exist — a worse failure than the bug. That is
+precisely what the versioned surface is for: **provider-api 3**, declared by both faces, so a
+core that predates `jascii` greys the install as "needs a newer rio" instead of loading
+something that will break. Both providers go to **1.1.1** (a fix, not a feature — semver's
+own answer, the day after D107 made rio read it).
+
+**Guards** (plugins/lib 9 → 14, claude 51 → 54, openai 40 → 43; core 634 unchanged bar the
+api_max literal): `jascii` on a spliced schema, on an astral codepoint, its idempotence, and
+the length identity the HTTP layer actually depends on (`chars == bytes`); and in **both**
+faces a body built *with* a tool whose schema carries an em-dash — asserting it is ASCII,
+that its two lengths agree, that it parses, and that the em-dash still reads as an em-dash
+on the other side. Reverting the fix fails `openai-body-with-tools-is-ascii` by name.
+
 ### D107 — extension versions are semver, and rio compares them
 
 The Extensions window could install and remove but could not answer the question a package

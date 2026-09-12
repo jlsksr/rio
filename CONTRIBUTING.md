@@ -248,16 +248,28 @@ understanding before you publish one:
   manifest and your `.tcl` payloads (no subdirectories, v1); the core sources the
   file named by `entry`, which should register the provider.
 - **Write against `provider-api`.** Declare the contract version you built for
-  (`provider-api = 2` today). The core loads the API surface — `rio::agent::register_provider`
+  (`provider-api = 3` today). The core loads the API surface — `rio::agent::register_provider`
   (with `-label`, `-signup`, a `-key` capability, and since **2** an `-options`
   capability), the provider proc contract
   `{conversation tools system post}` with its `delta` / `tool` / `done` / `error`
   callbacks, and the runtime helpers `rio::llm::http::stream` (and `::get`),
-  `rio::llm::jstr` / `rio::llm::obj_json`, `rio::secret::*` and
-  `rio::agent::settings::*` — *before* your code,
+  `rio::llm::jstr` / `rio::llm::obj_json` (and since **3** `rio::llm::jascii`),
+  `rio::secret::*` and `rio::agent::settings::*` — *before* your code,
   so you ship no copy of it. A rio that implements an older `provider-api` than you
   declare lists your provider greyed ("needs a newer rio") and won't install it;
-  declaring `1` still works on a newer core, since the surface only grows.
+  declaring `1` still works on a newer core, since the surface only grows. That
+  greying is the point: it is what stops a provider calling a helper the core it
+  landed on does not have.
+- **Hand the HTTP layer a pure-ASCII body.** `jstr` guarantees that for every value
+  it escapes, but anything you splice in *already serialised* — a tool's
+  `input_schema`, a tool_use block's captured input — has never been through it. End
+  your body with **`rio::llm::jascii`**: it `\u`-escapes every non-ASCII character of
+  an already-valid JSON document, which is safe because JSON can only carry one
+  inside a string literal. This is not theoretical: Tcl's `http` counts
+  `Content-Length` in *characters* and then writes the body to a *binary* channel, so
+  a stray `—` leaves as the byte `0x14` — a raw control character inside a string,
+  which RFC 8259 forbids. One vendor rejected the request outright; another had been
+  silently accepting it.
 - **Options are how a provider offers choices** (a model, an effort, anything else
   it names). `-options {list <cmd> set <cmd> ?refresh <cmd>?}`: `list` returns
   descriptors `{name label hint value free refresh choices {{value .. label ..} ..}}`,

@@ -179,14 +179,54 @@ test openai-adopts-stored {a choice in the provider's conf file is adopted at lo
 
 # --- effort on the wire ------------------------------------------------------
 
-proc openai_body {} {
+proc openai_body {{tools {}} {system ""}} {
 	set ::seen ""
 	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
 	set ::rio::openai::api::transport capture_tp
-	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	rio::openai::api::provider {{role user text hi}} $tools $system collect_post
 	set ::rio::openai::api::transport rio::llm::http::stream
 	return [dict get $::seen body]
 }
+
+# A tool spec shaped like the core's, with a non-ASCII character INSIDE its schema —
+# where jstr never reaches, because the schema is already JSON and is spliced whole.
+# rio's own present_plan carries exactly this (an em-dash in a description).
+proc tool_with_dash {} {
+	return [list [dict create name present_plan description "Present your plan" \
+		input_schema {{"type":"object","properties":{"title":{"type":"string","description":"A short name — one line."}}}}]]
+}
+
+test openai-body-with-tools-is-ascii {a tool schema's non-ASCII never reaches the HTTP layer raw} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# The live failure this test exists for (2026-09-12): every turn against
+	# api.openai.com returned HTTP 400 "We could not parse the JSON body of your
+	# request". Tcl's http counts Content-Length in characters and writes the body to
+	# a binary channel, so the em-dash in present_plan's schema went out as the byte
+	# 0x14 — a raw control character inside a JSON string. Both lengths must agree.
+	set b [openai_body [tool_with_dash]]
+	list [string is ascii $b] \
+		[expr {[string length $b] == [string length [encoding convertto utf-8 $b]]}] \
+		[expr {[catch {json::json2dict $b}] ? "unparseable" : "parses"}]
+} -cleanup { rio::openai::api::clear_key } -result {1 1 parses}
+
+test openai-body-with-tools-keeps-its-meaning {escaping the body does not change what it says} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	set d [json::json2dict [openai_body [tool_with_dash]]]
+	set f [dict get [lindex [dict get $d tools] 0] function]
+	dict get [dict get [dict get [dict get $f parameters] properties] title] description
+} -cleanup { rio::openai::api::clear_key } -result {A short name — one line.}
+
+test openai-body-system-non-ascii {a system message's non-ASCII survives as itself} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	set d [json::json2dict [openai_body {} "rio — the editor"]]
+	dict get [lindex [dict get $d messages] 0] content
+} -cleanup { rio::openai::api::clear_key } -result {rio — the editor}
 
 test openai-effort-default-sends-nothing {the default request is the one rio always sent} -setup {
 	reset_openai_opts

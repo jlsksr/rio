@@ -31,7 +31,7 @@
 
 namespace eval rio::provider {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path
-	variable api_version 2     ;# the highest provider-api this core implements
+	variable api_version 3     ;# the highest provider-api this core implements
 }
 
 # The highest provider-api this core implements — a frontend compares a repo

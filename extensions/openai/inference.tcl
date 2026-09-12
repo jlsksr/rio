@@ -91,7 +91,11 @@ proc rio::openai::_request_json {conf conversation tools} {
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
-	return "{[join $parts ,]}"
+	# jascii is the last word on the body, because not every part of it came through
+	# jstr: a tool's `input_schema` is spliced raw (it is already JSON). The HTTP
+	# layer is handed a pure-ASCII body or it mangles what it doesn't expect — see
+	# rio::llm::jascii for the failure this cost live.
+	return [rio::llm::jascii "{[join $parts ,]}"]
 }
 
 # One rio conversation entry can expand to SEVERAL OpenAI messages: an assistant

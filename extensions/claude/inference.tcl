@@ -95,7 +95,11 @@ proc rio::claude::_request_json {conf conversation tools} {
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
-	return "{[join $parts ,]}"
+	# jascii is the last word on the body, because not every part of it came through
+	# jstr: a tool's `input_schema` is spliced raw (it is already JSON), as is a
+	# tool_use block's own `raw` input. The HTTP layer is handed a pure-ASCII body or
+	# it mangles what it doesn't expect — see rio::llm::jascii for what that cost.
+	return [rio::llm::jascii "{[join $parts ,]}"]
 }
 
 # A message's content -> a JSON array of block objects. A legacy {role,text} entry
