@@ -46,6 +46,44 @@ test http-get-refuses-non-http {get itself refuses a non-http url: io_error, no
 	list [rio::error::code_of $opts] [string match "not an http:// url*" $e]
 } -result {io_error 1}
 
+# --- body decoding (pure: the seam is the decoder, not the socket) ------------
+# A repository is a plain webdir, which declares no charset — so ::http::data
+# hands back a body decoded as iso8859-1, one latin-1 character per UTF-8 byte.
+# Left alone, the GUI writes that back out as UTF-8 and the installed extension
+# is corrupted on disk (found live against rio.skylm.org, 2026-09-12).
+
+# The three latin-1 characters an em-dash's UTF-8 bytes become when read that way.
+set mangled "aâb"
+
+test http-decode-undeclared-charset-is-utf8 {no charset means UTF-8, not latin-1} -body {
+	rio::http::_decode $::mangled "text/plain"
+} -result "a—b"
+
+test http-decode-declared-charset-is-left-alone {http already decoded it; twice would mangle} -body {
+	# The bytes are the same; the difference is that the server said what they are.
+	rio::http::_decode $::mangled "text/plain; charset=iso-8859-1"
+} -result "aâb"
+
+test http-decode-declared-utf8-is-left-alone {a declared utf-8 body is already decoded} -body {
+	rio::http::_decode "a—b" "text/plain; charset=utf-8"
+} -result "a—b"
+
+test http-decode-ascii-unchanged {the overwhelmingly common case costs nothing} -body {
+	rio::http::_decode "name = night\nkind = theme\n" "text/plain"
+} -result "name = night\nkind = theme\n"
+
+test http-decode-invalid-utf8-kept-as-is {bytes that are NOT utf-8 are not replaced by U+FFFD} -body {
+	# A lone 0xE9 (latin-1 "é") is not a valid UTF-8 sequence: decoding it as UTF-8
+	# would destroy it, so the body http gave us stands.
+	rio::http::_decode "café" "text/plain"
+} -result "café"
+
+test http-decode-multibyte-round-trip {a whole manifest line survives intact} -body {
+	set src "description = OpenAI-compatible agent provider — hosted ChatGPT"
+	set wire [encoding convertfrom iso8859-1 [encoding convertto utf-8 $src]]
+	rio::http::_decode $wire "text/plain"
+} -result "description = OpenAI-compatible agent provider — hosted ChatGPT"
+
 # --- repo.fetch parameter validation (no fetch is ever attempted) -------------
 test repo-fetch-requires-url {a missing url is bad_request} -body {
 	catch {rio::ops::repo_fetch {}} e opts

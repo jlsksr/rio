@@ -46,6 +46,35 @@ proc rio::http::_progress {tok total current} {
 # through; /path keeps the origin; a bare relative path resolves against the
 # base's directory. (https targets pass through too — and then fail the scheme
 # check in `get`, honestly, rather than being silently rewritten.)
+# Decode a fetched body honestly (found live, 2026-09-12).
+#
+# ::http::data returns the body decoded with the charset the server DECLARED — and
+# a plain webdir serving a repository declares none, so Tcl falls back to
+# iso8859-1 (the old RFC 2616 default). Every non-ASCII byte then arrives as a
+# separate latin-1 character: an em-dash comes back as U+00E2 U+0080 U+0094. The
+# damage is not cosmetic — the GUI writes installed payloads back out as UTF-8, so
+# those three characters become six bytes on disk and the extension is silently
+# CORRUPTED at install time. (Observed: an installed provider's own option hints
+# reading "â" on a core that fetched them through this.)
+#
+# A repository is rio's own D21 conf-and-Tcl, which is UTF-8, so an undeclared
+# charset means UTF-8 here. The round-trip check keeps that from being a new
+# guess: if the bytes are not valid UTF-8 (a genuinely latin-1 repository, or
+# something binary), the re-encode won't match and we keep what http gave us
+# rather than replacing characters with U+FFFD.
+#
+# The provider-side GET already did this (rio::llm::http::_on_get_end, D106); this
+# is the older repository path, which never learned.
+proc rio::http::_decode {body ctype} {
+	if {[string match -nocase *charset=* $ctype]} { return $body }
+	if {[catch {
+		set bytes [encoding convertto iso8859-1 $body]
+		set text  [encoding convertfrom utf-8 $bytes]
+	}]} { return $body }
+	if {[encoding convertto utf-8 $text] ne $bytes} { return $body }
+	return $text
+}
+
 proc rio::http::_resolve {base loc} {
 	if {[regexp -nocase {^[a-z][a-z0-9+.-]*:} $loc]} { return $loc }
 	regexp -nocase {^(http://[^/?#]+)([^?#]*)} $base -> origin path
@@ -92,7 +121,13 @@ proc rio::http::get {url {timeout_ms 15000}} {
 			}
 			# A redirect without a Location is nonsense; fall through as data.
 		}
-		set body [::http::data $tok]
+		set ctype ""
+		catch {
+			foreach {k v} [::http::meta $tok] {
+				if {[string equal -nocase $k content-type]} { set ctype $v }
+			}
+		}
+		set body [_decode [::http::data $tok] $ctype]
 		::http::cleanup $tok
 		return [dict create status $ncode url $here text $body]
 	}

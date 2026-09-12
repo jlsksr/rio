@@ -5794,6 +5794,43 @@ the field when rio sent none is reported rather than "repaired"; and a server re
 fields yields both repairs in one turn and then succeeds. Removing the drop fails
 `openai-effort-refusal-is-remembered` by name.
 
+#### D106e — and the repository fetch had been corrupting every install
+
+D106d verified (`gpt-4o` + effort answers, the option collapses and names the model), and
+the output carried one more thing: the core's **own hint text** came back as `â` where the
+same string in the tree is an em-dash. Same channel, same client, so it was not the wire.
+
+`::http::data` decodes with the charset the server DECLARED, and a plain webdir — which is
+exactly what a D39 repository is — declares none, so Tcl falls back to iso8859-1, the old
+RFC 2616 default. Every non-ASCII byte arrives as a separate latin-1 character: an em-dash
+becomes `U+00E2 U+0080 U+0094`. Proven on the spot by fetching the published manifest
+through that very core and printing its codepoints.
+
+**It is not cosmetic.** `ext_install` writes each fetched payload back out as UTF-8, so
+three mis-read characters become six bytes on disk: **every extension rio has ever installed
+that contained a non-ASCII character has been silently corrupted at install time.** The
+mojibake hint was that corruption read back — the provider's own source, double-encoded on
+the core's disk, sourced correctly and displaying what was actually stored. One root cause,
+both symptoms.
+
+The fix is the one the provider-side GET already had (`rio::llm::http::_on_get_end`, D106):
+when no charset is declared, treat the body as UTF-8 — a repository is rio's own D21 conf
+and Tcl, which is UTF-8. A round-trip check keeps that from being a fresh guess: re-encode
+the decode and compare, and if the bytes were not valid UTF-8 (a genuinely latin-1
+repository, something binary) keep what http gave us rather than substituting U+FFFD.
+
+That the newer seam got this right and the older one never did is the whole lesson: D39
+shipped with "no live HTTP in the test environment", and this is precisely the class of
+defect that choice hides. The decoder is now a pure proc, so the suite tests it without a
+socket.
+
+**Repairing an existing install is a re-install** — the corruption is on disk, not in the
+code reading it.
+
+**Guards** (core 634 → 640): an undeclared charset decodes as UTF-8; a declared one is left
+alone in both directions; ASCII is untouched; invalid UTF-8 is kept as-is rather than
+replaced; and a whole manifest line round-trips. Disabling the decoder fails two by name.
+
 ### D107 — extension versions are semver, and rio compares them
 
 The Extensions window could install and remove but could not answer the question a package
