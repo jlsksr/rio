@@ -211,9 +211,10 @@ Consequences:
   `echo`, an offline stub needing no key or network; a real provider (Claude, ChatGPT, …)
   is **installed** from *Settings ▸ Extensions…* and needs a stored key + `tcltls`.
 
-The provider/key/policy are core ops (`agent.provider.set`, `agent.key.set` /
-`clear`, `agent.autoaccept.set`, `agent.status`), so they behave the same against a
-local or remote core.
+The provider, key, mode and model choices are all core ops (`agent.provider.set`,
+`agent.key.set` / `clear`, `agent.autoaccept.set`, `agent.mode.set`,
+`agent.option.set`, `agent.status`), so they behave the same against a local or
+remote core.
 
 ---
 

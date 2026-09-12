@@ -102,7 +102,9 @@ in [docs/](docs/index.md).
   a new file, you review the **diff** and **Approve or Reject**, and on approval
   it applies (and, by default, saves) — and **run commands** (tests, a linter, a
   build): it proposes the exact command, you see it and **Approve or Reject**, then
-  it runs, confined to your project and time-boxed. A **complex** edit opens live in the
+  it runs, confined to your project and time-boxed. A turn runs until the model is
+  done — **no step limit** — and the composer's **▶** turns into **■ Stop** while it
+  works, so a turn going nowhere ends when you say so. A **complex** edit opens live in the
   side-by-side **compare view** (toggleable) rather than inline. For bigger jobs there is
   **plan mode** (*Settings ▸ Agent Mode*, or the menu atop the chat pane): the agent is
   handed no changing tools at all — it reads, then presents a **plan**, rendered as a
@@ -170,8 +172,10 @@ in [docs/](docs/index.md).
   (each theme carries its own `syntax.*` palette, so switching recolours code live).
   The highlighters are small, self-contained files in `syntax/` with no external
   dependencies; a language is easy to add or **swap out** — drop a replacement in
-  `~/.config/rio/syntax/` to override the shipped one. **(X)HTML, CSS, JavaScript,
-  Perl, Tcl, shell, Markdown, PHP, Python, Lua, C, C#, C++, Go, Rust, and JSON** ship.
+  `~/.config/rio/syntax/` to override the shipped one. **33 languages** ship:
+  (X)HTML, XML, CSS, JavaScript, TypeScript, Perl, Tcl, shell, Markdown, PHP, Python,
+  Ruby, Lua, C, C#, C++, Go, Rust, Java, Kotlin, Swift, Scala, SQL, JSON, YAML, TOML,
+  INI, Makefile, Dockerfile, Batch, PowerShell, awk, and sed.
 - **Sessions** — reopen a project and rio brings back the files you had open and the
   active tab, plus your view preferences (theme, line-wrap, dock side, chat). Even with
   **no folder open**, the loose files you had open come back too — handy for a scratch
@@ -200,8 +204,9 @@ locally, or a socket to a core running elsewhere (**server mode**, like
 `emacs-server`). Same op calls either way; there is no separate in-process path.
 Frontends are thin views — the core owns your files and broadcasts changes back.
 
-**Still to come:** streaming command output (and a Stop button) for the agent,
-the terminal frontend (below), and a polished install/packaging path.
+**Still to come:** streaming a command's output as it runs (and its own dock panel
+rather than the chat), the terminal frontend (below), and a polished install/packaging
+path.
 The fuller list of candidate work lives in [ROADMAP.md](ROADMAP.md).
 
 ## Extensions & repositories
@@ -248,11 +253,12 @@ can attach later **without touching the core**.
 ## Cross-platform
 
 Linux (Debian, Alpine) and **Windows 11** — GUI today; the TUI when it lands. Both are
-**run, not assumed**: the full suite passes on each, and a Windows GUI has been driven
-against a Linux core over an SSH tunnel, so the remote path is exercised across
+**run, not assumed**: the full suite has passed on each, and a Windows GUI has been
+driven against a Linux core over an SSH tunnel, so the remote path is exercised across
 platforms too ([RELEASING.md](RELEASING.md) Gate 0 records what that took, and the
-handful of things still open). Setup on Windows is one script — see
-[WINDOWS.md](WINDOWS.md).
+handful of things still open). Development happens on Linux, so the Windows run is
+periodic rather than continuous — the last was 2026-09-09. Setup on Windows is one
+script — see [WINDOWS.md](WINDOWS.md).
 
 The **BSDs** are a design target rather than a verified one: nothing in rio is
 Linux-specific, the deploy scripts cover OpenBSD's `pkg_add`, and the code is the same

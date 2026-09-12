@@ -6,10 +6,12 @@ rio — it needs nothing beyond Tk + tcllib — and nothing in the code blocks i
 Windows. The heavier features (git, the agent, a remote core) work here too; see
 [§7](#7-beyond-notes-git-the-agent-and-remote-cores).
 
-> **Status:** verified. rio has now been run natively on Windows 11 — it launches,
-> spawns its own core, edits and saves, and every test suite passes (see
-> [RELEASING.md](RELEASING.md) Gate 0 for what that took and the few things still
-> open). If something does break, §6 says where to look first.
+> **Status:** verified. rio has been run natively on Windows 11 — it launches, spawns
+> its own core, edits and saves, and every test suite passed at the last run there
+> (2026-09-09; see [RELEASING.md](RELEASING.md) Gate 0 for what that took and the few
+> things still open). Development happens on Linux, so a Windows run always trails the
+> tree by some way — §8 is how to do one. If something does break, §6 says where to
+> look first.
 
 ## 1. Get rio and run the deploy script
 
@@ -286,8 +288,9 @@ if {[catch {uplevel #0 [list source $t]} err]} {
 wish runtest.tcl rio-gui\tests\highlight.tcl
 ```
 
-**Where Windows stands today.** Everything is green, with nothing hanging and nothing
-skipped beyond the three `unix`-constrained permission tests:
+**Where Windows stands.** At the last full Windows run — **2026-09-09, commit
+`697acd2`** — everything was green, with nothing hanging and nothing skipped beyond the
+three `unix`-constrained permission tests:
 
 | Suite | Result |
 |---|---|
@@ -298,7 +301,10 @@ skipped beyond the three `unix`-constrained permission tests:
 | `extensions/openai` | 29 / 29 |
 | `rio-gui` | 1218 checks / 0 failed, across 21 suites |
 
-The findings behind that — and the handful of things still open — are in
+The suites have grown since — they are larger on every row, and there are more of them —
+so these are a **dated record, not today's count**: the numbers you get from a fresh
+Windows run will be bigger, and the thing to check is that the failure column is still
+zero. The findings behind the run — and the handful of things still open — are in
 [RELEASING.md](RELEASING.md) Gate 0.
 
 **Writing a GUI test that measures widget geometry.** A headless run withdraws the

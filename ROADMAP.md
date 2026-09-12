@@ -176,6 +176,19 @@ Each entry notes its state:
   This entry previously also carried *"`docs/` installing"* — a leftover from D91, written
   against a packaging path that does not exist. rio is deployed by cloning it, so `docs/` is
   already beside the code wherever it runs; there was nothing to install. Dropped, not done.
+- **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
+  did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
+  the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared
+  `editor_menu_items` table feeds both the menubar and the popup (so they cannot drift), and
+  the entries are the procs that already existed. The click itself is the load-bearing half —
+  inside a selection it survives, outside it the caret moves where you pointed — and it
+  focuses the group it was in, so a right-click in the other half of a split acts on that
+  half. `Menu` and `Shift+F10` open it at the caret.
+  Still wanted, both deliberately out of scope at D108 (jka's call): a **Copy / Select All
+  menu on the read-only views** — the agent log, the compare panes, the git diff, the manual
+  (`Ctrl+C` already copies there through Tk's own class binding; only the menu is missing);
+  and the same for the **entry/text widgets outside the editor** — the find bar, the chat
+  input, dialog fields, which Tk leaves bare too.
 
 ## Syntax highlighting
 

@@ -29,13 +29,13 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Seven groups of checks. Each exists because something drifted once.
+Ten groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
    entry pointing at nothing is a dead end in the future help viewer.
 2. **Every relative link resolves** — between topics, and out to the root documents
-   via `../`. Anchors are not checked; targets are.
+   via `../`. This one stops at the filename; the `#anchor` half is check 9.
 3. **`keyboard.md` matches `::keymap_default`.** Every command in the keymap is
    documented, and the page invents none. The keymap is the single source of truth for
    chords; a shortcut table written by hand is how this started going wrong.
@@ -47,6 +47,19 @@ Seven groups of checks. Each exists because something drifted once.
    the live Tk menubar widgets, not the source text.
 7. **Every menu the docs *name* exists.** A capitalised word in front of *menu*,
    *submenu* or *cascade* is treated as a name and must be one rio has.
+8. **The help viewer can reach the manual.** `help_dir` points at the real `docs/`, and
+   the topics `help_contents` parses out of `index.md` are exactly the pages `index.md`
+   lists — both directions, like check 1, one layer up. Two things break the viewer
+   while every page stays perfect: the directory moves, or the contents list is
+   rewritten into a shape the parser cannot read (a table, say) and the window opens
+   empty.
+9. **Every `#anchor` a page links to is a real heading.** Since the viewer scrolls to
+   them (D100) an anchor is a destination, not decoration. It is checked against
+   `help_slug` and `help_blocks` — rio's own slug rule, not a second copy of GitHub's —
+   so it catches both an anchor that never named a heading and a heading whose wording
+   was edited afterwards.
+10. **`editor.md` lists exactly the editor's right-click menu.** The suite builds the
+    real menu and holds the page against it both ways (D108).
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:
@@ -64,6 +77,10 @@ human happened to read it.
   looked at. Determiners and the compounds where *menu* is the adjective (`menu paths`,
   `menu bar`) are exempt by list.
 - **Links between topics are relative** — `[the editor](editor.md)`.
+- **In `editor.md`'s *The right-click menu* section, bold marks a menu entry** — and
+  nothing else. That is what lets check 10 read the section as a list and catch an
+  invented entry as well as a missing one. Emphasise anything else in there and the
+  check will tell you.
 - **Filenames are stable.** A filename is the topic's id: how pages link to it, and how
   the help viewer will one day jump to it. Renaming a page is a breaking change, not a
   tidy-up.
