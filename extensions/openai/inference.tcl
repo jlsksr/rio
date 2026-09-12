@@ -31,6 +31,7 @@ namespace eval rio::openai {
 	variable fin     ;# sid -> 1 once a terminal event (done/error) was posted
 	variable finish  ;# sid -> the choice's finish_reason ("" until one arrives)
 	variable tcalls  ;# sid -> dict: tool-call index -> {id .. name .. args ..}
+	variable retry   ;# sid -> {conf conversation tools auth transport}: a one-shot re-send
 }
 
 # tcllib's json decodes a JSON `null` to the STRING "null" (indistinguishable from
@@ -49,10 +50,13 @@ proc rio::openai::_nn {v} { return [expr {$v eq "null" ? "" : $v}] }
 # immediately; the turn completes asynchronously as the transport drives back.
 proc rio::openai::infer {conf conversation tools auth transport post} {
 	variable seq ; variable buf ; variable raw ; variable cb ; variable fin
-	variable finish ; variable tcalls
+	variable finish ; variable tcalls ; variable retry
 	set sid [incr seq]
 	set buf($sid) "" ; set raw($sid) "" ; set cb($sid) $post ; set fin($sid) 0
 	set finish($sid) "" ; set tcalls($sid) [dict create]
+	# Everything needed to send this turn again, for the one retry _done may make
+	# when the server tells us the token-cap parameter is the other one (D106c).
+	set retry($sid) [list $conf $conversation $tools $auth $transport]
 	set headers [list Content-Type application/json]
 	lappend headers {*}$auth
 	set req [dict create \
@@ -253,9 +257,17 @@ proc rio::openai::_flush_terminal {sid postcmd} {
 # otherwise classify by HTTP status into an actionable agent.error (D26).
 proc rio::openai::_done {sid status err} {
 	variable buf ; variable raw ; variable cb ; variable fin ; variable finish
-	variable tcalls
+	variable tcalls ; variable retry
 	if {![info exists cb($sid)]} return
 	set postcmd $cb($sid)
+	if {!$fin($sid) && $status == 400 && [_retry_token_param $sid $postcmd]} {
+		# The turn was re-sent with the other token-cap parameter; its own _done will
+		# report the outcome. Nothing is posted for this attempt — the user never sees
+		# a failure rio knew how to answer.
+		unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) \
+			tcalls($sid) retry($sid)
+		return
+	}
 	if {!$fin($sid)} {
 		if {$status == 0} {
 			if {[string match {*can't find package tls*} $err]} {
@@ -271,7 +283,41 @@ proc rio::openai::_done {sid status err} {
 			{*}$postcmd error $code $msg
 		}
 	}
-	unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) tcalls($sid)
+	unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) tcalls($sid) \
+		retry($sid)
+}
+
+# The token cap's parameter name is per MODEL, and only the server knows which one
+# a given model wants: `max_tokens` for gpt-4o and essentially every local
+# OpenAI-compatible server, `max_completion_tokens` for OpenAI's reasoning models
+# (o1/o3/o4, gpt-5…). OpenAI's /v1/models says nothing about it — unlike Anthropic's
+# capabilities (D106a), there is nothing to ask — but the 400 says it outright:
+#
+#   "Unsupported parameter: 'max_tokens' is not supported with this model.
+#    Use 'max_completion_tokens' instead."
+#
+# So rio lets the refusal teach it (D106c, jka's call): re-send the turn ONCE with
+# the other name, and hand the answer to the face to remember for that model. No
+# vendor table to rot, and a server that wants `max_tokens` never gets here. The
+# 400 is refused before any generation, so the round trip costs no tokens.
+#
+# Deliberately one direction only: this is the error OpenAI actually produces. A
+# retried request carries `token_retried`, so a second 400 is reported, never looped.
+proc rio::openai::_retry_token_param {sid postcmd} {
+	variable raw ; variable retry
+	if {![info exists retry($sid)]} { return 0 }
+	lassign $retry($sid) conf conversation tools auth transport
+	if {[dict exists $conf token_retried]} { return 0 }
+	if {[dict get $conf token_param] ne "max_tokens"} { return 0 }
+	if {![string match {*max_completion_tokens*} $raw($sid)]} { return 0 }
+	dict set conf token_param max_completion_tokens
+	dict set conf token_retried 1
+	# The face owns persistence (the settings file is its business, not the wire's).
+	if {[dict exists $conf token_learn] && [dict get $conf token_learn] ne ""} {
+		catch {{*}[dict get $conf token_learn] [dict get $conf model] max_completion_tokens}
+	}
+	infer $conf $conversation $tools $auth $transport $postcmd
+	return 1
 }
 
 # Map an HTTP status (+ optional JSON error body) to {code, message}. Messages

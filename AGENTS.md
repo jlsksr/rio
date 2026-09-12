@@ -5708,6 +5708,57 @@ faces a body built *with* a tool whose schema carries an em-dash — asserting i
 that its two lengths agree, that it parses, and that the em-dash still reads as an em-dash
 on the other side. Reverting the fix fails `openai-body-with-tools-is-ascii` by name.
 
+#### D106c — the token cap is per model too, and only the refusal knows which
+
+With D106b's fix live, `gpt-4o` answered — rio's first ChatGPT turn over a remote core. The
+*reasoning* models did not:
+
+```
+HTTP 400 — "Unsupported parameter: 'max_tokens' is not supported with
+            this model. Use 'max_completion_tokens' instead."
+```
+
+Probed across the picker: `gpt-4o` and `gpt-4o-mini` take `max_tokens`; `o3-mini`,
+`o4-mini`, `gpt-5-nano` and `gpt-5.4-nano` all demand `max_completion_tokens`. Those are
+precisely the models `reasoning_effort` exists for, so **D106's effort option was
+unreachable on the OpenAI side**: 130 models in the picker, and every one that could use an
+effort was refused before the effort was read.
+
+This is D106a's shape a third time — *the choice is per provider, the capability is per
+model* — but without D106a's remedy. Anthropic's `/v1/models` carries `capabilities`;
+OpenAI's returns `{id, object, created, owned_by}` and nothing more. **There is nothing to
+ask.** `token_param` had been config-as-data since D26 precisely for this, and that was
+enough while the model was hardcoded; letting the user *pick* a model (D106) is what made
+the assumption reachable.
+
+**jka's call: let the 400 teach it.** The refusal names the fix outright, so rio re-sends
+the turn **once** with the other parameter and hands the answer to the face, which records
+that model in a `token_models` settings key beside the model and effort choices. The retry
+is silent — the first attempt posts nothing, so a user never sees a failure rio knew how to
+answer — and costs no tokens, because the request is refused before any generation. After
+that, that model is right on the first try, across restarts.
+
+The rejected alternatives are the interesting part. A **third declared option** would have
+cost no GUI work (the D106 seam renders whatever a provider declares) but asks a person to
+know which HTTP parameter name their model wants — not a choice a user should have to
+understand. **Deriving it from the model id** (`gpt-5*`, `o[1-9]*`) is one line and needs no
+round trip, and is exactly the hardcoded vendor table D106a threw out after the Haiku 400 —
+wrong the day OpenAI ships a name outside the pattern, and meaningless for a stranger's
+OpenAI-compatible server. Letting the server be the judge keeps the rule rio has now
+arrived at three times: **ask, or be told — never remember on the vendor's behalf.**
+
+Deliberately one-directional (this is the error OpenAI actually produces; a server wanting
+`max_tokens` never gets here) and one-shot: a retried request carries `token_retried`, so a
+server refusing both names reports the second 400 instead of looping. No core change —
+`provider-api` stays 3 — so openai alone goes to **1.1.2**.
+
+**Guards** (openai 43 → 51): the retry fires on the server's word and re-sends with the
+other name; it posts no error for the attempt it recovered; the answer is persisted, skips
+the retry next time, and survives a simulated restart through `_adopt_settings`; a 400 about
+anything else is reported rather than re-sent; a server refusing both names stops at two;
+and the shipped `max_tokens` default is untouched for everyone who never hit this. Disabling
+`_retry_token_param` fails six of them by name.
+
 ### D107 — extension versions are semver, and rio compares them
 
 The Extensions window could install and remove but could not answer the question a package

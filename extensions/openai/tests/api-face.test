@@ -138,6 +138,7 @@ proc reset_openai_opts {} {
 	rio::openai::api::configure effort default
 	rio::openai::api::configure messages_url https://api.openai.com/v1/chat/completions
 	rio::openai::api::configure models_url ""
+	rio::openai::api::configure token_models ""
 	set ::rio::openai::api::models {{value gpt-4o label "GPT-4o"} {value gpt-4o-mini label "GPT-4o mini"}}
 }
 # The refresh callback is the core's announcer, so a test sees the agent.options EVENT.
@@ -219,6 +220,119 @@ test openai-body-with-tools-keeps-its-meaning {escaping the body does not change
 	set f [dict get [lindex [dict get $d tools] 0] function]
 	dict get [dict get [dict get [dict get $f parameters] properties] title] description
 } -cleanup { rio::openai::api::clear_key } -result {A short name — one line.}
+
+# --- the token cap's parameter name, learned from the refusal (D106c) ----------
+#
+# A fake transport that refuses the FIRST request the way OpenAI refuses a reasoning
+# model, then accepts the second. Every request it sees is recorded, so a test can
+# assert on what was actually re-sent.
+set ::sent {}
+proc token_tp {req on_chunk on_done} {
+	lappend ::sent [dict get $req body]
+	if {[llength $::sent] == 1} {
+		{*}$on_chunk "{\"error\":{\"message\":\"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\"}}"
+		{*}$on_done 400 ""
+	} else {
+		{*}$on_chunk "data: \[DONE\]\n"
+		{*}$on_done 200 ""
+	}
+}
+proc token_turn {model {tp token_tp}} {
+	set ::sent {} ; set ::posts {}
+	rio::agent::option_set model $model openai
+	set ::rio::openai::api::transport $tp
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	set ::rio::openai::api::transport rio::llm::http::stream
+}
+proc sent_param {i} {
+	set d [json::json2dict [lindex $::sent $i]]
+	return [expr {[dict exists $d max_completion_tokens] ? "max_completion_tokens" \
+		: ([dict exists $d max_tokens] ? "max_tokens" : "neither")}]
+}
+
+test openai-token-retries-on-the-servers-word {a 400 naming the other parameter re-sends once} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# OpenAI's /v1/models carries no capabilities, so there is nothing to ASK (unlike
+	# D106a) — the refusal itself is the answer, and rio takes it.
+	token_turn o4-mini
+	list [llength $::sent] [sent_param 0] [sent_param 1]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {2 max_tokens max_completion_tokens}
+
+test openai-token-retry-is-silent {the user never sees the failure rio knew how to answer} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	token_turn o4-mini
+	# The first attempt posts nothing at all; only the retry's outcome is reported.
+	set errs 0
+	foreach p $::posts { if {[lindex $p 0] eq "error"} { incr errs } }
+	list $errs [lindex [lindex $::posts end] 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {0 done}
+
+test openai-token-learned-is-remembered {the answer is persisted, so it is learned once per model} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	token_turn o4-mini
+	list [rio::openai::api::cget token_models] [rio::agent::settings::get openai token_models]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {o4-mini o4-mini}
+
+test openai-token-learned-skips-the-retry {a learned model sends the right name the first time} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	token_turn o4-mini            ;# learns
+	token_turn o4-mini            ;# should need no second request
+	list [llength $::sent] [sent_param 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 max_completion_tokens}
+
+test openai-token-survives-a-restart {the learned name is adopted from the settings file} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	token_turn o4-mini
+	rio::openai::api::configure token_models ""   ;# as if the core had just started
+	rio::openai::api::_adopt_settings
+	rio::openai::api::cget token_models
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {o4-mini}
+
+test openai-token-other-400s-are-not-retried {a 400 about something else is reported, not re-sent} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	proc other_400 {req on_chunk on_done} {
+		lappend ::sent [dict get $req body]
+		{*}$on_chunk "{\"error\":{\"message\":\"Invalid value for 'temperature'\"}}"
+		{*}$on_done 400 ""
+	}
+	token_turn gpt-4o other_400
+	list [llength $::sent] [lindex [lindex $::posts end] 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 error}
+
+test openai-token-retry-happens-once {a second refusal is reported rather than looped} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# A server that refuses BOTH names must not spin: the retried request carries
+	# token_retried, so the second 400 goes to the user.
+	proc always_400 {req on_chunk on_done} {
+		lappend ::sent [dict get $req body]
+		{*}$on_chunk "{\"error\":{\"message\":\"Use 'max_completion_tokens' instead.\"}}"
+		{*}$on_done 400 ""
+	}
+	token_turn o3-mini always_400
+	list [llength $::sent] [lindex [lindex $::posts end] 0]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {2 error}
+
+test openai-token-default-is-untouched {a model nobody complained about still sends max_tokens} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-XYZ
+} -body {
+	# The shipped behaviour for gpt-4o and every local OpenAI-compatible server.
+	dict exists [json::json2dict [openai_body]] max_tokens
+} -cleanup { rio::openai::api::clear_key } -result 1
 
 test openai-body-system-non-ascii {a system message's non-ASCII survives as itself} -setup {
 	reset_openai_opts

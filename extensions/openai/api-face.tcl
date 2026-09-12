@@ -29,6 +29,7 @@ namespace eval rio::openai::api {
 		model           gpt-4o \
 		effort          default \
 		token_param     max_tokens \
+		token_models    "" \
 		max_tokens      4096 \
 		request_timeout 600000 \
 		secret_name     openai-api]
@@ -84,7 +85,38 @@ proc rio::openai::api::provider {conversation tools system post} {
 	set conf $config
 	dict set conf system $system
 	dict set conf effort_json [_effort_json]
+	# Which token-cap parameter this model wants, and where to record the answer if
+	# the server corrects us (D106c).
+	dict set conf token_param [_token_param]
+	dict set conf token_learn rio::openai::api::_token_learned
 	rio::openai::infer $conf $conversation $tools $auth $transport $post
+}
+
+# --- the token cap's parameter name, learned per model (D106c) ----------------
+
+# `token_models` is the list of model ids this provider has been TOLD want
+# `max_completion_tokens` — by the server, in a 400. Everything else gets the
+# configured default (`max_tokens`, which is what local OpenAI-compatible servers
+# and the older hosted models take). Config-as-data still: the list is an ordinary
+# settings key a user can read, edit or empty by hand.
+proc rio::openai::api::_token_param {} {
+	variable config
+	if {[lsearch -exact [dict get $config token_models] [dict get $config model]] >= 0} {
+		return max_completion_tokens
+	}
+	return [dict get $config token_param]
+}
+
+# Remember what the refusal taught us, so the retry happens once per model ever and
+# not once per turn. Persisted beside the model and effort choices (D106).
+proc rio::openai::api::_token_learned {model param} {
+	variable config
+	if {$param ne "max_completion_tokens" || $model eq ""} return
+	set l [dict get $config token_models]
+	if {[lsearch -exact $l $model] >= 0} return
+	lappend l $model
+	dict set config token_models $l
+	catch {rio::agent::settings::store openai token_models $l}
 }
 
 # --- the options a frontend may offer (D106) ---------------------------------
@@ -240,7 +272,9 @@ rio::agent::register_provider openai rio::openai::api::provider \
 # layer and allow-list. Absent file, shipped defaults.
 proc rio::openai::api::_adopt_settings {} {
 	variable config
-	foreach k {model effort} {
+	# token_models is not a user CHOICE but something the server taught this provider
+	# (D106c) — it persists the same way, so a restart doesn't re-learn it.
+	foreach k {model effort token_models} {
 		set v [rio::agent::settings::get openai $k]
 		if {$v ne ""} { dict set config $k $v }
 	}
