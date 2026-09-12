@@ -5914,6 +5914,70 @@ its preference is off. Six injections, each failing by name: a lexical version c
 same-source test dropped, Update All installing unasked, the check ignoring its preference,
 the short-form allowance removed, and the derived view written back into the ledger.
 
+### D108 — the editor gets the context menu every other surface already had
+
+Right-clicking the text did **nothing**. The file pane and the git pane got context menus in
+D44, tab handles in D33, dock tabs with them — and the one surface a user spends the whole
+day in had none. Nothing had to be built to fix it: `editor_cut`/`editor_copy`/
+`editor_paste`/`editor_select_all` (D38), `do_undo`/`do_redo` and `find_open`/`search_open`
+(D75) all exist, are shared, and already act on the focused group. Only the door was missing.
+
+**jka's two decisions (2026-09-12):** the menu carries **the Edit menu's actions plus the
+find cluster**, and it is **the editor only** — the read-only views (agent log, compare
+panes, git diff, manual) stay out, where `Ctrl+C` already copies through Tk's own class
+binding and only the menu is absent. That is its own later change.
+
+**One table, two doors.** D38's rule — one implementation behind the menu and the mode
+keys, so they cannot drift — applied one level up, to the two *menus*. `editor_menu_items`
+returns the Edit menu's whole action block as `{label command accel state}`; the menubar
+builds from it, the right-click menu builds from it, and `.m.edit`'s `-postcommand`
+re-derives the greys for the focused group each time it is posted. The test that proves
+this is an injection: swapping Cut and Copy in the table fails a check on **each** menu.
+
+**The greys are only the ones rio can compute honestly.** Cut and Copy follow the
+selection, Select All follows an empty buffer. **Undo and Redo stay enabled** — the history
+lives in the core and there is no "can undo" query to ask, so a grey there would be a
+guess, not an answer. **Paste stays enabled too**, for a different reason: probing the
+clipboard is a blocking X round-trip to whichever application owns the selection, and an
+unresponsive owner would stall the menu on its way up. An empty clipboard already does
+nothing, silently.
+
+**What the click does before the menu appears** is the load-bearing half. Click *inside* a
+selection and it survives untouched, so Cut/Copy/Search act on what you can see is
+highlighted; click anywhere else and the selection is dropped and the caret moves to the
+character you pointed at, so Paste lands there — the Win98/VSCode convention, and Tk does
+neither on its own. The click also **focuses the group it was in**: Tk moves keyboard focus
+on Button-1 only, and Undo, Find and Search all act on `::focus`, so a right-click in the
+other half of a split would otherwise have quietly acted on the other pane. That focus step
+is also what lets every command in the table be **late-bound** (`editor_cut` with no
+argument resolves the focused group when invoked) — one invariant, "the menu acts on the
+focused group", instead of two menus binding widgets at build time.
+
+**The find group is the context menu's own.** D75 lifted Find/Replace/Search out of Edit
+into their own top-level menu; they come back *here* because they act on the selection you
+just right-clicked — and they need no new code, because `find_open` and `search_open`
+already seed themselves from the focused group's selection, single-line only. The label
+says so rather than promising more than it does: `Search for “needle”` with a usable
+selection (elided past 20 characters), and the plain `Search…` for the two cases that seed
+nothing — no selection, or one spanning lines.
+
+Bound on the **widget**, ahead of the `RioMode` tag in the D38 precedence order and ending
+in `break`, so the app's menu wins over anything an editing mode might put on Button-3 —
+the same place `<Button-1>`'s `focus_group` already sits. The **Menu key and Shift+F10**
+open the same menu at the caret, which is the half of a Win2000-era context menu that a
+mouse-only implementation quietly drops.
+
+**Guards** (new `context_menu.tcl`, 32 checks; docs 21 → 25; every other suite and the core
+unchanged, as a GUI-only change should leave them): the three bindings; the caret and
+selection after a click inside and outside a selection; the entries and their order; each
+grey and each deliberate non-grey; the Search label's rule in all four of its cases; the
+split case; `.m.edit` built from the same table and its `-postcommand`; and an entry
+actually invoked. Five injections, each failing by name: the inside-selection branch
+dropped, Cut always enabled, `focus_group` dropped from the click, the table's order
+changed, and the label promising to seed from a multi-line selection. The item list
+`docs/editor.md` prints is a **derived fact** and joins §7's register — `docs.tcl` builds
+the real menu and holds the page against it both ways.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -6444,6 +6508,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
 | the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
+| the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
@@ -6473,6 +6538,15 @@ grammar — a **capitalised** word before *menu*, *submenu* or *cascade* is a na
 must be one rio has. It stays narrow by leaning on the same distinction English
 already makes: a name is capitalised, a description is not, so "the row menu" and "a
 right-click menu" are never even looked at.
+
+**The context-menu row is both directions, and it pays for that with a convention
+of its own**: inside `docs/editor.md`'s right-click section, **bold marks a menu
+entry** — that is what gives the guard a counterpart list to be complete against,
+which the menubar row has none of. The cost is one rule for whoever edits that
+section: bold anything else there and the check will say so, by name. Its own
+variable half stays out — the Search entry quotes the current selection, so the
+guard builds the menu with none, and the label's *rule* is tested where it belongs,
+in `context_menu.tcl`.
 
 The last two rows are the honest backlog. Where a fact is genuinely prose —
 README's status section — accept that it has no guard and re-read it when the

@@ -485,5 +485,51 @@ foreach a $anchored {
 }
 ok "every #anchor names a real heading" $lost {}
 
+# --- 10. the editor's context menu and the page that lists it ------------------
+
+# editor.md enumerates the right-click menu (D108), which is a list the CODE decides
+# — a derived fact, so it gets a guard like the keymap and prefs tables above, and
+# for the same reason: nothing fails when a menu entry is added, renamed or dropped
+# and the page keeps the old wording.
+#
+# Behaviour, not source text: the REAL menu is built here, the way the right-click
+# builds it. With no selection, so every label is in its static form — the Search
+# entry quotes the selection when there is one, and that variable half belongs to
+# `context_menu.tcl`, which tests it against the rule rather than against a string.
+#
+# Both directions, and the convention that makes the second one possible: inside
+# that section **bold marks a menu entry**, so an entry the page forgot and a name
+# the page invented are both caught. Bold anything else there and this check will
+# say so.
+menu .docsmenu -tearoff 0
+[gget 0 path] tag remove sel 1.0 end
+editor_context_build .docsmenu 0
+set ::ctxlabels {}
+for {set i 0} {$i <= [.docsmenu index end]} {incr i} {
+	if {[.docsmenu type $i] eq "separator"} continue
+	lappend ::ctxlabels [.docsmenu entrycget $i -label]
+}
+destroy .docsmenu
+ok "the context menu has entries" [expr {[llength $::ctxlabels] > 5}] 1
+
+set ed [slurp [file join $::docs editor.md]]
+set sect ""
+regexp {\n## The right-click menu\n(.*?)(?:\n## |\Z)} $ed -> sect
+ok "editor.md has the right-click section" [expr {$sect ne ""}] 1
+
+set bolded [lsort -unique [lmap {_ b} [regexp -all -inline {\*\*([^*]+)\*\*} $sect] {set b}]]
+
+set missing {}
+foreach l $::ctxlabels {
+	if {[lsearch -exact $bolded $l] < 0} { lappend missing $l }
+}
+ok "every context-menu entry is documented" $missing {}
+
+set invented {}
+foreach b $bolded {
+	if {[lsearch -exact $::ctxlabels $b] < 0} { lappend invented $b }
+}
+ok "the section names no entry the menu lacks" $invented {}
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -79,7 +79,7 @@ what the menus show.
 
 ## Keys the table doesn't cover
 
-Three groups of keys work without appearing above, because they don't belong to
+Four groups of keys work without appearing above, because they don't belong to
 this table:
 
 - **The clipboard and text motion** — `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`,
@@ -90,6 +90,8 @@ this table:
   be a lie in vi mode. The menu commands themselves work in every mode.
 - **Zoom** — `Ctrl+scroll`, `Ctrl++`, `Ctrl+-`, `Ctrl+0`, on the *View ▸ Font &
   Zoom* submenu.
+- **The `Menu` key and `Shift+F10`** — open the editor's
+  [right-click menu](editor.md#the-right-click-menu) at the caret.
 - **`Esc`** — closes the find bar and leaves the compare view.
 
 **App shortcuts always win over the editing mode's keys.** `Ctrl+S` saves whether

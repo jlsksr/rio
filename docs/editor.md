@@ -71,6 +71,35 @@ allowed; the `●` marker tells you whether what's on screen matches the disk.
 > whole insert session — `i`, type a word, `Esc` — comes back in one `u`, which is
 > also what vi does. See [editing modes](editing-modes.md).
 
+## The right-click menu
+
+Right-click in the text and you get the actions you reach for most, without going
+to the menu bar: **Undo** and **Redo**, then **Cut**, **Copy** and **Paste**, then
+**Select All**, and finally **Find…**, **Replace…** and **Search…**.
+
+The click itself follows the usual convention, and it matters for what the menu
+then does:
+
+- right-click *inside* a selection and the selection stays exactly as it is — so
+  Cut, Copy and the search entries act on the text you can see is highlighted;
+- right-click anywhere else and the selection is dropped and the caret moves to
+  where you pointed — so Paste lands there.
+
+With a word or phrase selected, the last entry names it (*Search for “needle”*)
+and opens the [project-wide search](find-and-replace.md) already filled in; Find
+and Replace seed themselves from the selection the same way. A selection that
+spans several lines seeds nothing, and the entry says so by going back to its
+plain name.
+
+Entries you cannot use right now are greyed — Cut and Copy without a selection,
+Select All in an empty buffer. Undo and Redo are always offered: the undo history
+lives in the core, and rio does not claim to know whether there is anything left
+to undo until it asks.
+
+The keyboard opens the same menu at the caret, with the `Menu` key (the one next
+to the right `Ctrl` on most keyboards) or `Shift+F10`. The menu works the same in
+every [editing mode](editing-modes.md) — in vi mode too, in any of its modes.
+
 ## Line wrap
 
 ***View ▸ Wrap Lines*** (`Ctrl+Shift+W`) wraps long lines to the window width

@@ -9240,6 +9240,150 @@ proc editor_paste {{w ""}} {
 }
 
 # ---------------------------------------------------------------------------
+# The editor's context menu (AGENTS.md D108), and the table it shares with the
+# Edit menu.
+#
+# D38's rule — one implementation behind the menu and the mode keys, so they
+# cannot drift — applied one level up, to the two MENUS. `editor_menu_items`
+# is the whole of the Edit menu's action block; the menubar builds from it and
+# so does the right-click menu, which then appends the find group of its own.
+#
+# Each row is {label command accel state}. No accelerators on the clipboard
+# three: those keys belong to the editing mode (Ctrl+X/C/V in the Windows mode;
+# emacs and vi have their own ideas), so a fixed label here could lie — the same
+# reason the Edit menu has shown none since D38.
+#
+# The greys are only the ones rio can compute HONESTLY:
+#   • Undo/Redo stay enabled — the history lives in the core and there is no
+#     "can undo" query to ask (ops-undo.tcl registers edit.undo/edit.redo and
+#     nothing else). A grey we cannot compute would be a guess.
+#   • Paste stays enabled — probing the clipboard means a blocking X round-trip
+#     to whichever application owns the selection, and an unresponsive owner
+#     would stall the menu on its way up. An empty clipboard already does
+#     nothing, silently, in editor_paste.
+#
+# `w` decides the GREYS only. Every command is late-bound — editor_cut and its
+# neighbours resolve [gget $::focus path] when they are invoked — so both menus act
+# on the focused group, and the right-click's own job is to make the group you
+# clicked the focused one before the menu is built (editor_context_click).
+# ---------------------------------------------------------------------------
+proc editor_menu_items {w} {
+	set sel  [expr {[llength [$w tag ranges sel]] ? "normal" : "disabled"}]
+	set some [expr {[$w compare "end -1c" > 1.0] ? "normal" : "disabled"}]
+	return [list \
+		[list "Undo"       do_undo             [key_accel undo] normal] \
+		[list "Redo"       do_redo             [key_accel redo] normal] \
+		[list "-"          {}                  {}               {}] \
+		[list "Cut"        editor_cut          {}               $sel] \
+		[list "Copy"       editor_copy         {}               $sel] \
+		[list "Paste"      editor_paste        {}               normal] \
+		[list "-"          {}                  {}               {}] \
+		[list "Select All" editor_select_all   {}               $some]]
+}
+
+# Append the rows to a menu (a separator for the "-" rows).
+proc editor_menu_fill {m items} {
+	foreach it $items {
+		lassign $it label cmd accel state
+		if {$label eq "-"} { $m add separator ; continue }
+		$m add command -label $label -command $cmd -accelerator $accel -state $state
+	}
+}
+
+# Re-derive the Edit menu's greys for the focused group each time it is posted.
+# Only -state: the labels and accelerators stay as built, so keymap_refresh_menus
+# keeps addressing them by label.
+proc editor_menu_post {} {
+	if {$::focus eq "" || ![dict exists $::grp $::focus]} return
+	foreach it [editor_menu_items [gget $::focus path]] {
+		lassign $it label cmd accel state
+		if {$label eq "-"} continue
+		catch {.m.edit entryconfigure $label -state $state}
+	}
+}
+
+# What a right-click does BEFORE the menu appears (the Win98/VSCode convention):
+# click inside the selection and it survives untouched, so Cut/Copy/Search act on
+# what you can see is highlighted; click anywhere else and the selection is
+# cleared and the caret moves to the character you pointed at, so Paste lands
+# there. Tk moves keyboard focus on Button-1 only, and Undo/Find/Search all act on
+# the FOCUSED group (::focus / ::cur) — so a right-click in the other half of a
+# split has to focus it first, or the menu would quietly act on the other pane.
+proc editor_context_click {g x y} {
+	set w [gget $g path]
+	focus_group $g
+	focus $w
+	set idx [$w index @$x,$y]
+	set inside 0
+	foreach {from to} [$w tag ranges sel] {
+		if {[$w compare $idx >= $from] && [$w compare $idx < $to]} { set inside 1 ; break }
+	}
+	if {!$inside} {
+		$w tag remove sel 1.0 end
+		$w mark set insert $idx
+	}
+	cursor_moved $g
+}
+
+# Fill menu `m` for group `g`: the shared Edit block, then the find group.
+#
+# The find items are the context menu's own (D75 lifted them out of Edit into
+# their own top-level menu) because they are the ones that act on the selection
+# you just right-clicked: find_open and search_open ALREADY seed their entry from
+# the focused group's selection, single-line only. The Search label says so —
+# with a usable selection it quotes it; with none, or one spanning lines (the two
+# cases search_open will not seed from), it is the plain "Search…" the Find menu
+# carries. Rebuilt on every popup, so the quoted text and every accelerator are
+# current by construction.
+proc editor_context_build {m g} {
+	set w [gget $g path]
+	editor_menu_fill $m [editor_menu_items $w]
+	$m add separator
+	$m add command -label "Find…"    -accelerator [key_accel find]    -command {find_open 0}
+	$m add command -label "Replace…" -accelerator [key_accel replace] -command {find_open 1}
+	$m add command -label [editor_search_label $w] \
+		-accelerator [key_accel search] -command search_open
+}
+
+# The Search entry's label for the current selection (see above). 20 characters
+# is the cap: long enough to recognise the needle, short enough that the menu
+# keeps its shape.
+proc editor_search_label {w} {
+	if {[catch {$w get sel.first sel.last} s]} { return "Search…" }
+	if {$s eq "" || [string first "\n" $s] >= 0} { return "Search…" }
+	if {[string length $s] > 20} { set s "[string range $s 0 19]…" }
+	return "Search for “$s”"
+}
+
+# Right-click: place the caret/selection, then post a fresh menu — the D44 idiom,
+# with the builder split from the popup so a headless test can read the entries
+# without a global grab nobody is there to dismiss.
+proc editor_context_menu {g x y X Y} {
+	editor_context_click $g $x $y
+	catch {destroy .edmenu}
+	menu .edmenu -tearoff 0
+	editor_context_build .edmenu $g
+	tk_popup .edmenu $X $Y
+}
+
+# The keyboard route (the Menu key, Shift+F10): the same menu at the caret. No
+# click, so nothing about the selection changes. The caret's bbox is empty when it
+# has been scrolled out of view — then the widget's top-left corner stands in.
+proc editor_context_key {g} {
+	set w [gget $g path]
+	focus_group $g
+	set X [winfo rootx $w] ; set Y [winfo rooty $w]
+	if {[set bb [$w bbox insert]] ne ""} {
+		lassign $bb bx by bw bh
+		set X [expr {$X + $bx}] ; set Y [expr {$Y + $by + $bh}]
+	}
+	catch {destroy .edmenu}
+	menu .edmenu -tearoff 0
+	editor_context_build .edmenu $g
+	tk_popup .edmenu $X $Y
+}
+
+# ---------------------------------------------------------------------------
 # Block indent / dedent (D38). The Windows mode binds these to Tab / Shift+Tab.
 # With a selection, every line the selection touches shifts by one tab as a
 # SINGLE core edit (one undo step, one round-trip): existing leading tabs and
@@ -10239,6 +10383,13 @@ proc make_editor_group {g} {
 	# is attached covers this group with no per-widget rebinding.
 	bindtags $f.t [linsert [bindtags $f.t] 1 RioMode]
 	bind $f.t <Button-1> [list focus_group $g]   ;# clicking a group focuses it
+	# Right-click opens the editor's context menu (D108); the Menu key and Shift+F10
+	# open the same one at the caret. Bound on the WIDGET, so they sit ahead of the
+	# RioMode tag in the D38 precedence order — the app's menu wins over anything an
+	# editing mode might put on Button-3 — and `break` stops the rest of the chain.
+	bind $f.t <Button-3>   "editor_context_menu $g %x %y %X %Y ; break"
+	bind $f.t <Key-Menu>   "editor_context_key $g ; break"
+	bind $f.t <Shift-F10>  "editor_context_key $g ; break"
 	# Keep the status bar's Ln/Col segment live: any key-up or click-release may have
 	# moved the insert mark (arrows, typing, click-to-place). Cheap; edits already
 	# refresh, this covers pure navigation. Guarded on focus so a stray event is a no-op.
@@ -10618,18 +10769,14 @@ menu .m.file -tearoff 0
 .m.file add separator
 .m.file add command -label "Close Tab" -accelerator [key_accel close-tab]   -command do_close
 .m.file add command -label "Quit"      -accelerator [key_accel quit]        -command do_quit
-menu .m.edit -tearoff 0
+# Undo/Redo and the clipboard block (Win98 canon) come from editor_menu_items — the
+# ONE table the editor's right-click menu is built from too (D108), so the two doors
+# offer the same actions, on the same procs, greyed by the same rules. The commands
+# work in every editing mode; -postcommand re-derives the greys for the focused group
+# each time the menu is posted.
+menu .m.edit -tearoff 0 -postcommand editor_menu_post
 .m add cascade -label Edit -menu .m.edit
-.m.edit add command -label "Undo" -accelerator [key_accel undo] -command do_undo
-.m.edit add command -label "Redo" -accelerator [key_accel redo] -command do_redo
-.m.edit add separator
-# The clipboard block (Win98 canon). No accelerators shown: the keys belong to the
-# editing mode (Ctrl+X/C/V in Windows mode; emacs and vi have their own ideas), so
-# a fixed label here could lie. The commands work in every mode.
-.m.edit add command -label "Cut"        -command editor_cut
-.m.edit add command -label "Copy"       -command editor_copy
-.m.edit add command -label "Paste"      -command editor_paste
-.m.edit add command -label "Select All" -command editor_select_all
+editor_menu_fill .m.edit [editor_menu_items [gget $::focus path]]
 # Find / Replace / Search moved out to their own top-level Find menu (D75) — see below.
 menu .m.view -tearoff 0
 .m add cascade -label View -menu .m.view
