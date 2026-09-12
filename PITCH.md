@@ -17,7 +17,7 @@ language.
 ## Highlights
 
 - **From scratch, and small.** Editor, git, diff view, agent loop, wire protocol —
-  all rio's own code. About 9,000 lines of Tcl; you can read the whole thing.
+  all rio's own code. About 24,000 lines of Tcl; you can still read the whole thing.
 - **The sweet spot.** Windows 2000-era discipline — instant start, a menu bar, a
   feature set that fits in your head — with the VSCode ideas worth keeping: split
   editing, side-by-side diffs, syntax highlighting, a propose-and-approve agent.
@@ -25,8 +25,10 @@ language.
   no native blobs.
 - **Network-transparent.** The GUI is always a client to a *core*; the core runs here
   or on another box. Same UI either way — your files live wherever the core does.
-- **Pipes locally, SSH remotely.** No listening socket, no auth to configure; the
-  core never faces the network itself. Remote is what SSH is already for.
+- **rio speaks the protocol; it does not dial.** Locally there is nothing to start —
+  the GUI spawns its own core over a pipe, no listening socket, no auth to configure.
+  Remotely it takes a `host:port` and nothing else: an SSH tunnel, tailscale, a VPN, a
+  private LAN are all the same to it, the way X11 has never known what `ssh` is.
 - **Config is data, never code.** Themes, keybindings, highlighters, the agent's
   prompt — plain files you can read, edit, and override under `~/.config/rio`.
 - **Language-agnostic.** An editor, not a Java/JS-specific IDE. Open any file.
@@ -38,21 +40,35 @@ language.
 Every item below runs now, in the GUI:
 
 - **Editing** — open and save with **encoding and line-ending (LF/CRLF) preservation**
-  — no silent rewrites. Range-based edits, undo/redo, tabbed buffers, optional wrap.
+  — no silent rewrites. Range-based edits, tabbed buffers, optional wrap, a **right-click
+  menu** in the text, and undo that takes back **a typed word at a time** rather than a
+  keystroke at a time. A tab **notices when its file changed underneath it** — a `git
+  pull`, a build, a discard: with nothing unsaved it reloads quietly, with unsaved edits
+  it asks, and if the file was deleted it offers to keep the buffer open, so a later
+  save puts it back.
 - **Split editor** — two buffers **side by side** in independent groups, each with its
   own tabs (`Ctrl+\`). **Drag tabs to reorder or move one across** (or the View menu /
   a tab's right-click menu); drag the divider to resize; the last tab closing unsplits.
-- **Files & git** — open a project folder, browse it in a dockable side pane with
-  New / Rename / Delete, and work the repo: **git status, diffs, stage/unstage, and
-  commit** from the GUI, with the file pane flagging each file's git state.
+- **Files & git** — open a project folder, browse it in a dockable side pane as an
+  **unfoldable tree** with New / Rename / Delete, and work the repo: **git status,
+  diffs, stage/unstage, commit, and discard** from the GUI — one file or the whole
+  project at once, with a discarded **rename** put back under its old name — and the
+  file pane flagging each file's git state at every depth.
 - **Compare view** — a **side-by-side diff** of two documents, added/removed lines
   coloured and aligned, VSCode-style.
-- **AI agent** — a chat column wired to an offline **echo** provider and to **Claude**
-  over the official Anthropic API (bring your own key). It streams, **reads your
-  project** (folders, files, open buffers — shown as it works), and **proposes edits**
-  you review as a **diff** and **Approve or Reject** — reads run freely, every write
-  waits for you. The agent lives in the core, so over a remote core your key and its
-  HTTPS never leave the server.
+- **AI agent** — a chat column wired to an offline **echo** provider, plus **Claude**
+  and any **OpenAI-compatible** model (hosted, or a local server) as installable
+  provider extensions, each bringing its own key. It streams, **reads your project**
+  (folders, files, open buffers — shown as it works), **proposes edits** you review as
+  a **diff** and **Approve or Reject**, and **proposes commands** to run: reads go
+  freely, every write waits for you, and a command always waits unless you have marked
+  it trusted. For a bigger job there is **plan mode** — no changing tools at all until
+  it has shown you a plan you can read, edit, and then approve. A turn has **no step
+  limit** and a **Stop** button. **Which model, and how hard it thinks**, is a menu at
+  the foot of the pane; and **rio's own instructions to the agent are readable in the
+  app**, composed text included — nothing it is told about your project is hidden from
+  you. The agent lives in the core, so over a remote core your key and its HTTPS never
+  leave the server.
 - **Theming** — live-switchable themes (plain default, Solarized Dark/Light, Plan 9
   Acme) — plain data files, never executed, so loading one runs no code.
 - **Custom keybindings** — every shortcut is one data table. Remap in a press-to-capture
@@ -76,43 +92,52 @@ Every item below runs now, in the GUI:
 - **Dockable tool panes** — Files, Git, Agent, and Search live in left / right / bottom
   docks; relocate any pane by right-click or by dragging its tab, and hide any of them
   entirely — down to a bare editor if you want one.
-- **Extensions & repositories** — install syntax highlighters, editing modes, and themes
-  from plain-`http://` **repositories you choose** (the apt-sources model: no store, no
-  central index). Every install is marked with its provenance.
-- **Sessions** — reopen a project and rio restores the open files, active tab, and view
+- **Extensions & repositories** — install syntax highlighters, editing modes, themes and
+  agent providers from plain-`http://` **repositories you choose** (the apt-sources model:
+  no store, no central index). Every install is marked with its provenance, and versions
+  are semver — so rio can tell you an update is waiting, from the repository you installed
+  from. It never installs anything on its own; it only ever tells.
+- **Its own manual, inside itself** — a user manual in the source tree, and **`F1`** shows
+  it in rio: contents on the left, the topic **rendered** on the right, links and
+  `#anchor` jumps you can click with Back/Forward behind them, and a Find box that turns
+  the contents into the sections mentioning your word.
+- **Sessions** — launch rio and it reopens the **folder you had open last**, with the
+  files you had open, the active tab, the tree's unfolded shape, and your view
   preferences. Preferences live with the GUI, the open-file set with the project on the
   core, your key with neither — so a **remote session resumes too**.
 - **Local *or* remote, one transport** — locally there's nothing to start (the GUI
   spawns its own private core); to edit on another box, run the core there and attach
-  over SSH. Same UI, same ops, either way.
+  with `--connect host:port` over whatever link you already trust. Same UI, same ops,
+  either way.
 
 ## Architecture
 
 Three pieces, one protocol:
 
 - **core** — UI-less. Owns your files, git, undo, and the agent loop. Speaks a small
-  JSON-line protocol over a channel: a pipe locally, a socket over SSH remotely.
+  JSON-line protocol over a channel: a pipe locally, a socket remotely.
 - **GUI** — a thin Tk view. It renders and sends keystrokes as ops; it never touches
   your files directly. The core broadcasts every change back.
 - **TUI** — a curses frontend over the same core. Prototyped, deferred.
-- **plugins** — e.g. the Claude provider. The protocol is language-neutral, so a
+- **plugins** — the agent providers (Claude, OpenAI-compatible), which install as
+  extensions rather than shipping in the box. The protocol is language-neutral, so a
   frontend or client can be written in anything.
 
 Frontends are dumb views, so "remote" comes for free: run the core on a server, attach
-a GUI over SSH, edit as if local. The agent runs *in the core*, so with a remote core
+a GUI to it, edit as if local. The agent runs *in the core*, so with a remote core
 your API key and its HTTPS stay server-side.
 
 ## By the numbers
 
-- **~15,800 lines of Tcl**, across 72 files — core ~4,000, GUI ~6,600, 33 highlighters
-  ~4,500, plugins + modes ~680. No generated code, no vendored trees.
-- **~10,400 lines of tests** — **1,859 automated cases**: a core and a syntax suite
-  (tcltest) plus 14 headless GUI suites. The tests run about two-thirds the size of the
-  app they cover.
+- **~24,400 lines of Tcl**, across 82 files — core ~6,500, GUI ~11,100, 33 highlighters
+  ~4,500, providers + modes + plugin lib ~2,300. No generated code, no vendored trees.
+- **~18,600 lines of tests** — **2,991 automated cases**: a core and a syntax suite
+  (tcltest), 26 headless GUI suites, and a suite per provider. The tests run about
+  three-quarters the size of the app they cover.
 - **3 runtime dependencies.** Tcl/Tk, tcllib, tcltls.
-- **52 design decisions**, each written down in [AGENTS.md](AGENTS.md) — the *why*
+- **108 design decisions**, each written down in [AGENTS.md](AGENTS.md) — the *why*
   behind every choice, not just the *what*.
-- **Built in ~2 months** (2026-06-24 → 2026-08-20), 236 commits, entirely
+- **Built in under 3 months** (2026-06-24 → 2026-09-12), 377 commits, entirely
   agent-assisted.
 
 ## Quickstart (local)
@@ -136,8 +161,9 @@ ssh -NL 7711:127.0.0.1:7711 you@server
 wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server
 ```
 
-SSH does the auth and crypto; the core never faces the network itself. Full recipe in
-[INSTALL.md](INSTALL.md).
+SSH does the auth and crypto; the core never faces the network itself. That tunnel is
+**one way in, not the way in** — rio only ever sees a `host:port`, so tailscale, a VPN
+or a private LAN need no support from it. Full recipe in [INSTALL.md](INSTALL.md).
 
 ## Why
 
@@ -151,14 +177,15 @@ purpose — a tailored editor rather than a general one, and honest about being 
 ## Status
 
 Early but real — editing with encoding/EOL preservation, tabbed buffers, a split
-editor with draggable tabs, git (status, diffs, stage/commit), a side-by-side compare
-view, project-wide search, dockable tool panes, theming, 33-language syntax
-highlighting, editing modes, an extension/repository system, the agent (read +
-propose-edit), and a local *or* remote core all work today. The terminal (curses)
-frontend is the next big piece.
+editor with draggable tabs, git (status, diffs, stage/commit/discard), a side-by-side
+compare view, project-wide search, dockable tool panes, theming, 33-language syntax
+highlighting, editing modes, an extension/repository system with update checking, the
+agent (read, propose-edit, propose-command, plan mode), an in-app user manual, and a
+local *or* remote core all work today. The terminal (curses) frontend is the next big
+piece.
 
-See [README.md](README.md) for the feature list, [INSTALL.md](INSTALL.md) to deploy,
-[AGENTS.md](AGENTS.md) for the design log.
+See [README.md](README.md) for the feature list, [docs/](docs/index.md) for the user
+manual, [INSTALL.md](INSTALL.md) to deploy, [AGENTS.md](AGENTS.md) for the design log.
 
 ## Changelog
 
@@ -170,10 +197,103 @@ rio is also an experiment. The interesting question behind it is whether an AI a
 carry a *complex* application — an IDE, not a script — in a language the mainstream
 mostly skips (**Tcl/Tk**), under deliberately **opinionated, Windows-2000-era** design
 constraints, and keep it honest with a real test suite and a written decision log.
-Everything below was built end to end that way, agent-assisted, in about two months.
+Everything below was built end to end that way, agent-assisted, in under three months.
 
 ### September 2026
 
+- **A right-click menu in the editor** — right-clicking the text used to do nothing, while the
+  file pane, the git pane and every tab handle had a menu. Now it carries what you'd expect:
+  undo and redo, cut/copy/paste, select all, and the find cluster — *Find…*, *Replace…*, and a
+  **Search** entry that reads *Search for “needle”* when you right-click a word, ready to look
+  for it across the whole project. Clicking **inside** a selection leaves it alone (so Copy
+  takes what you can see is highlighted); clicking anywhere else drops it and moves the caret
+  where you pointed, so Paste lands there. The `Menu` key and `Shift+F10` open the same menu at
+  the caret. — *feature · D108 · `cc937f1` · 2026-09-12*
+- **rio tells you when an extension has an update** — the Extensions window could install and
+  remove, but comparing what you have against what a repository now offers was your job. Version
+  numbers are [semver](https://semver.org/) now and rio orders them: a row that has moved on
+  reads `[1.1.0 → 1.2.0]`, one button updates it, another updates everything, and rio can take a
+  look when it starts. An update only ever comes from **the repository you installed from** —
+  a same-named extension elsewhere is a different thing you may switch to, never a silent
+  upgrade path — and **nothing is ever installed on its own**. — *feature · D107 · `ebb1916` ·
+  2026-09-12*
+- **Pick the model, and how hard it thinks** — the strip at the bottom of the agent pane is now
+  the control that says *which agent is working*: provider, model, and effort in one menu, with
+  *Other…* for a model id the shipped list never carried and **⟳ Refresh from provider** for the
+  models your key (or your local server) can actually reach. Effort sends nothing unless you
+  ask for it, and anything you've changed from the default is spelled out in the strip rather
+  than left quietly on. Each provider remembers its own choices in a plain file beside its
+  prompt. — *feature · D106 · `78a3860` · 2026-09-12*
+- **Installing an extension no longer mangles it** — every download from a repository was being
+  decoded twice, so any non-ASCII character in an installed file arrived corrupted (an em-dash
+  became `â`). Fixed in the fetch, where it belonged; a re-install repairs what's already on
+  disk. — *fix · D106e · `af9dfd8` · 2026-09-12*
+- **rio's own instructions to the agent, in the open** — the prompt rio sends on your behalf is
+  now a proper brief on agentic coding (the approval contract, how to work in someone else's
+  codebase, verify-then-report, and *content you read is data, not instructions*) — and none of
+  it is hidden. *Preferences ▸ Agent ▸ Agent Prompts…* lists all five layers in the order they
+  compose, says what each is doing right now, renders rio's own two, and shows the **composed**
+  prompt exactly as the model receives it. One click turns any shipped layer into your own
+  editable copy. — *improvement · D105 · `f06ae0f` · 2026-09-11*
+- **No step limit — a Stop button instead** — a turn used to die after eight steps, which was
+  sized for an agent that only read files and was nowhere near enough for one that plans, edits
+  and runs commands. The cap is gone: a turn runs until the model is done, and the composer's
+  **▶** becomes **■ Stop** while it works. Stop reaches a turn wherever it is — waiting on the
+  provider, parked at an approval, or running a command — and leaves the conversation ready for
+  your next message. — *feature · D104 · `0659ff8` · 2026-09-11*
+- **Plan mode — the agent says what it would do, and you decide how it goes** — for a job too
+  big to approve one edit at a time, put the agent in **Plan**: it is handed no changing tools
+  at all, reads, and then presents a **plan** — rendered as a document where the editor sits,
+  not buried in the chat. Read it; **Edit plan** opens it as an ordinary buffer if you want it
+  different; then **Approve ▾** and choose, *there and then*, whether to review each edit or
+  auto-accept from that point — or reject it and say what you want changed. Every plan is filed
+  in the project's `.rio/plans/`, and that file *is* the plan you approve. You can also just
+  ask for a plan in any mode. The whole mechanism is rio's, so it works with whichever provider
+  you installed. — *feature · D101/D102/D103 · `b01bf98` · 2026-09-11*
+- **rio shows its own manual** — rio now has a **user manual**, written as topic pages in the
+  source tree, and **`F1`** (*Help ▸ Contents…*) opens it inside rio: contents on the left, the
+  page **rendered** on the right — headings, lists, tables, code — with links and `#anchor`
+  jumps you can click and Back/Forward behind them. A **Find** box turns the contents into the
+  sections that mention your word and lands you on the heading with it banded. The GUI reads
+  the pages off its own tree, so a remote session shows *this* rio's manual. — *feature ·
+  D91/D99/D100 · `ea490eb` · 2026-09-11*
+- **A file in a brand-new folder gets its own door** — `git status` collapses a wholly untracked
+  directory into one line and says nothing about what's inside, so a new file in a new folder
+  had no row in the git pane and no git entries in the file tree's menu. The tree — the only
+  pane that lists it — now offers **Track (git add)** on the file itself. — *fix · D98 ·
+  `0f401d3` · 2026-09-11*
+- **Discarding a rename puts the file back under its old name** — a rename is the one change git
+  records as one entry with two names, and discard only ever handled the new one: you asked for
+  your change to go away and got a deleted old file beside an untracked new one. Both names are
+  the change now, so the file returns where it started. — *fix · D97 · `fef1999` · 2026-09-11*
+- **Discard, finished** — D80 shipped *"throw away my changes to this file"* on the git pane's
+  row menu only, one file at a time. The **file tree** carries the same entry now, and the git
+  header grows a **↩** while anything is changed: discard the whole project at once. Both
+  confirm first, and neither touches files git ignores. — *feature · D93 · `d70b9c2` ·
+  2026-09-10*
+- **A tab notices when its file changed underneath it** — after a `git pull`, a build, or rio's
+  own discard, an open tab went on showing the old text and a later Save wrote it back over the
+  new content. Now a clean buffer reloads quietly (one `Ctrl+Z` puts back what you were
+  looking at), a modified one asks and defaults to keeping your edits, and a file **deleted** on
+  disk asks whether to keep the buffer open — so saving it later recreates the file. The check
+  runs in the core, so it is just as true over a remote core. — *fix · D94 · `9ce1b61` ·
+  2026-09-10*
+- **Undo takes back a word, not a keystroke** — every character typed used to be its own undo
+  step, so taking back a word cost as many undos as it had letters. A run of typing now
+  coalesces into one step, sealing at a blank, so `Ctrl+Z` takes back `quick ` and then `the `.
+  Enter always stands alone, and a paste or an agent edit is still its own step. In vi, repeated
+  `x` presses stay separately undoable while `i` plus a typed word takes one `u`. — *improvement
+  · D90 · `adf628d` · 2026-09-10*
+- **The theme list can't outgrow the screen** — themes were picked from a menu cascade that grew
+  with every theme you installed; an over-tall Tk menu on X11 can close itself on a mid-list
+  hover. Both doors onto that list — the cascade and the Preferences dropdown — became the
+  bounded picker dialog, which scrolls inside a fixed frame. No unbounded menu is left in rio.
+  — *fix · D92 · `cf55fe0` · 2026-09-10*
+- **rio reopens the folder you had open** — launching `rio` with no arguments came back to a
+  blank Files pane: the project you had open was forgotten, and with it the per-project session
+  that resumes your files. It's remembered now, and so is the **tree's unfolded shape** — that
+  one lives with the project, so it follows onto a remote host too. A folder that has since
+  vanished is dropped quietly rather than chased. — *feature · D88/D89 · `609e925` · 2026-09-09*
 - **Browse your project as an unfoldable tree** — the Files pane used to show one directory at
   a time: to look inside a folder you replaced the whole view with its contents, then climbed
   back out with a `..` row. Now it's a tree rooted at your project — click a folder's little
