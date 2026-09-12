@@ -54,6 +54,14 @@ namespace eval rio::claude::api {
 		{value high    label "High"}
 	}
 
+	# What each model can do, as the models endpoint reports it: id -> {effort {…}}.
+	# Empty until a refresh fills it. Effort is NOT universal — Haiku 4.5 answers a
+	# request carrying one with "This model does not support the effort parameter"
+	# (HTTP 400, found by the live check, D106) — and which models take it, and which
+	# values, is exactly the kind of fact that goes stale in a hardcoded table. The
+	# listing carries `capabilities.effort`, so rio asks instead of remembering.
+	variable caps {}
+
 	# Network seams: the shared tcltls streaming transport for a turn and the plain
 	# GET for a models listing (plugins/lib/transport.tcl); tests inject fakes.
 	variable transport rio::llm::http::stream
@@ -95,14 +103,36 @@ proc rio::claude::api::provider {conversation tools system post} {
 # never learns what they mean; the wire spelling and the shipped choices are this
 # face's business, and its alone.
 
+# What the CHOSEN model does with effort: {supported 0|1 values {…}}. Known only for a
+# model the listing described — until a refresh, nothing is known, and the honest answer
+# is to offer the shipped values and let the API be the judge (it refuses clearly).
+proc rio::claude::api::_effort_caps {} {
+	variable config
+	variable caps
+	variable efforts
+	set shipped {}
+	foreach c $efforts { if {[dict get $c value] ne "default"} { lappend shipped [dict get $c value] } }
+	set m [dict get $config model]
+	if {![dict exists $caps $m effort]} { return [dict create known 0 supported 1 values $shipped] }
+	set e [dict get $caps $m effort]
+	return [dict create known 1 \
+		supported [dict get $e supported] values [dict get $e values]]
+}
+
 # The effort fragment for the live choice, or "" for `default` — which means "send
 # the request rio has always sent". Any other value is opt-in, so installing this
 # version changes nothing about a turn until the user asks it to.
+#
+# "" also when this model is KNOWN not to take an effort: the choice is per provider
+# while support is per model, so switching from Opus to Haiku would otherwise carry a
+# parameter we have been told it refuses, and lose the turn to a 400. Not sending it is
+# not a silent override — the option says so in its own hint and offers nothing else.
 proc rio::claude::api::_effort_json {} {
 	variable config
 	variable effort_json
 	set e [dict get $config effort]
 	if {$e eq "" || $e eq "default"} { return "" }
+	if {![dict get [_effort_caps] supported]} { return "" }
 	return [string map [list %v $e] $effort_json]
 }
 
@@ -110,13 +140,39 @@ proc rio::claude::api::options {} {
 	variable config
 	variable models
 	variable efforts
+	set ec [_effort_caps]
+	set hint "How much thinking to ask for. Provider default sends nothing."
+	if {![dict get $ec supported]} {
+		set choices [list [dict create value default label "Provider default"]]
+		set hint "[dict get $config model] does not take an effort — the API says so, so rio doesn't send one."
+	} else {
+		set choices {}
+		foreach c $efforts {
+			set v [dict get $c value]
+			if {$v eq "default" || $v in [dict get $ec values]} { lappend choices $c }
+		}
+		# A refreshed model may offer values this build never shipped (xhigh, max).
+		foreach v [dict get $ec values] {
+			if {$v ni [_choice_values $choices]} {
+				lappend choices [dict create value $v label [string totitle $v]]
+			}
+		}
+	}
+	# When the model is known not to take one, the VALUE shown is what will actually be
+	# sent — nothing — rather than a leftover from another model.
+	set ev [expr {[dict get $ec supported] ? [dict get $config effort] : "default"}]
 	return [list \
 		[dict create name model label Model \
 			hint "Which Claude answers. Refresh to list what your key can reach." \
 			value [dict get $config model] free 1 refresh 1 choices $models] \
-		[dict create name effort label Effort \
-			hint "How much thinking to ask for. Provider default sends nothing." \
-			value [dict get $config effort] free 0 refresh 0 choices $efforts]]
+		[dict create name effort label Effort hint $hint \
+			value $ev free 0 refresh 0 choices $choices]]
+}
+
+proc rio::claude::api::_choice_values {choices} {
+	set out {}
+	foreach c $choices { lappend out [dict get $c value] }
+	return $out
 }
 
 # Choose a value: validate, apply to the live config, and remember it for the next
@@ -172,6 +228,7 @@ proc rio::claude::api::option_refresh {name announce} {
 # the id, and anything unparseable is reported rather than silently emptying the list.
 proc rio::claude::api::_models_done {announce status err body} {
 	variable models
+	variable caps
 	if {$status == 0} {
 		{*}$announce "Couldn't reach the Claude API ($err)"
 		return
@@ -184,16 +241,36 @@ proc rio::claude::api::_models_done {announce status err body} {
 		{*}$announce "Couldn't read the model list from the Claude API"
 		return
 	}
-	set out {}
+	set out {} ; set cp {}
 	foreach m [dict get $d data] {
 		if {![dict exists $m id]} continue
 		set id [dict get $m id]
 		lappend out [dict create value $id \
 			label [expr {[dict exists $m display_name] ? [dict get $m display_name] : $id}]]
+		set e [_effort_capability $m]
+		if {$e ne ""} { dict set cp $id effort $e }
 	}
-	if {[llength $out]} { set models $out }
+	if {[llength $out]} { set models $out ; set caps $cp }
 	{*}$announce
 	return
+}
+
+# One model's effort capability from its listing entry, or "" when the listing says
+# nothing about it (an older API, a proxy that trims the payload — then rio keeps
+# asking the API rather than assuming either way). The shape is
+# capabilities.effort.supported plus a sub-object per value:
+#   "effort":{"supported":true,"low":{"supported":true},"xhigh":{"supported":true},…}
+proc rio::claude::api::_effort_capability {m} {
+	if {![dict exists $m capabilities effort]} { return "" }
+	set e [dict get $m capabilities effort]
+	set sup [expr {[dict exists $e supported] && [dict get $e supported] ? 1 : 0}]
+	set vals {}
+	dict for {k v} $e {
+		if {$k eq "supported"} continue
+		if {[catch {dict get $v supported} s]} continue
+		if {$s} { lappend vals $k }
+	}
+	return [dict create supported $sup values $vals]
 }
 
 # Whether a key is stored (the GUI offers Set / Clear accordingly).

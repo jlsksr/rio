@@ -341,9 +341,12 @@ for later:
   knob needs no core *and* no GUI change. Effort sends **nothing** by default — `gpt-4o` and
   most local servers reject the field — and every choice persists in one flat, hand-editable
   file per provider beside its prompt layer. `provider-api` is now **2**.
-  Still wanted: a **live check** that the vendors accept `output_config.effort` /
-  `reasoning_effort` (costs tokens); `max_tokens` and the endpoint URL as options; a
-  per-project model.
+  **Verified live** (D106a): the listing fetch, and `output_config.effort` accepted by Opus 5
+  and Sonnet 5 — while **Haiku 4.5 refuses it** (HTTP 400). So the Claude face now reads
+  `capabilities.effort` from the same listing and offers only what the chosen model takes,
+  sending none for a model that takes none. No hardcoded model names.
+  Still wanted: the same live proof for OpenAI's `reasoning_effort` (no key stored here);
+  `max_tokens` and the endpoint URL as options; a per-project model.
 
 ## Frontends
 

@@ -51,7 +51,11 @@ with a section for each choice:
   what your key — or your local server — can actually reach right now.
 - **Effort** — how much thinking to ask for. **Provider default** sends nothing at
   all, which is what rio has always done; the other values are opt-in, because not
-  every model accepts the request (`gpt-4o` and most local servers refuse it).
+  every model accepts the request (`gpt-4o` and most local servers refuse it, and so
+  does Claude Haiku). For Claude, a refresh also learns *which* models take an effort
+  and which values they take — so after one refresh the menu offers only what the
+  model you picked will actually accept, and switching to a model that takes none
+  sends none rather than losing the turn to an error.
 
 Whatever is *not* at its default is spelled out in the strip, so a raised effort is
 never something you have silently left on. Hover for the full state, raw model id

@@ -5591,10 +5591,11 @@ new surface, so the shipped providers declare 2 and an older core greys them rat
 crashing on an unknown flag; a provider declaring 1 still loads, because the surface only
 grows.
 
-**Not verified offline, and stated as such:** that a live Claude request accepts
-`output_config.effort` and a live OpenAI one accepts `reasoning_effort`. Both are spelled
-from config-as-data and both are absent by default, but only a real turn proves the vendor
-takes them — and that costs tokens, so it waits for jka.
+**Verified live** (jka authorized the token spend; see the addendum below). The listing
+fetch works against the real endpoint, `output_config.effort` is accepted by Opus 5 and
+Sonnet 5 — and is **refused by Haiku 4.5**, which is what the addendum is about. No OpenAI
+key is stored on this machine, so `reasoning_effort` remains unproven live; it is absent by
+default, so nothing regresses if the spelling is wrong.
 
 **Guards** (core 592 → 633, claude 30 → 45, openai 29 → 40, smoke 586 → 613): a fake provider
 whose options are deliberately *not* model and effort (normalization, free vs closed values,
@@ -5607,6 +5608,40 @@ refusal leaving the pane honest, and the indicator no longer erasing the agent's
 Five injections, each failing by name: the core skipping the option-exists check, a choice
 not persisted, effort sent at `default`, the event not repainting, and the indicator writing
 over the selector.
+
+#### D106a — what the live check found: effort is per MODEL, and the listing says so
+
+The live run (authorized, ~8 tiny turns on Haiku/Sonnet/Opus) proved the happy path —
+`output_config.effort` accepted by **Opus 5** and **Sonnet 5** at low/medium/high — and then
+failed exactly where a table would have lied:
+
+```
+claude-haiku-4-5 + effort=high -> HTTP 400
+  "This model does not support the effort parameter."
+```
+
+So a user could pick Haiku, pick an effort, and lose the turn. The fix is the one this
+design already implies: **ask, don't remember.** The models endpoint carries
+`capabilities.effort` — `supported`, plus a sub-object per value (`low`, `medium`, `high`,
+`xhigh`, `max`) — so a refresh teaches the face which models take an effort and which values
+each one takes. `options` then offers exactly those (including values this build never
+shipped: the live run's menu grew `xhigh` and `max` on its own), and for a model the API
+says takes none it offers only *Provider default* and says why in the hint.
+
+`_effort_json` returns "" for such a model. This is not a silent override: the choice is
+per **provider** while support is per **model**, so switching Opus → Haiku would otherwise
+carry a parameter we have been *told* is refused. rio sends nothing, the option shows
+`default`, the hint names the model — and switching back restores the choice, which is why
+the stored value is left alone rather than rewritten. Until a refresh has happened, nothing
+is known and the shipped values stand, with the API as the judge (it refuses clearly).
+
+Re-verified live afterwards: Opus 5 sends `{"effort":"high"}` and answers; Haiku sends none
+and answers. The 400 is gone without a single hardcoded model name.
+
+**Guards** (claude 45 → 51): the values follow a refreshed model's declaration; a model that
+takes none offers only the default and says so; a choice made on one model is not carried
+into a 400 on another; switching back restores it; a listing with no capabilities at all (an
+older API, a trimming proxy) leaves rio asking the API rather than assuming either way.
 
 ---
 

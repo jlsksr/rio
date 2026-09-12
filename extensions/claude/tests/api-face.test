@@ -129,7 +129,24 @@ proc reset_claude_opts {} {
 	set ::rio::claude::api::models {
 		{value claude-opus-5 label "Opus 5"} {value claude-sonnet-5 label "Sonnet 5"}
 	}
+	set ::rio::claude::api::caps {}
 }
+# A listing shaped like the real one: one model that takes an effort (and says which
+# values), one that does not. Verified against the live endpoint (D106).
+set ::caps_listing {{"data":[
+	{"id":"claude-opus-5","display_name":"Opus 5","capabilities":{"effort":{"supported":true,
+		"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},
+		"xhigh":{"supported":true}}}},
+	{"id":"claude-haiku-4-5","display_name":"Haiku 4.5","capabilities":{"effort":{"supported":false}}}
+]}}
+proc load_caps {} {
+	rio::claude::api::set_key sk-ant-caps   ;# a refresh needs a key to ask with
+	set ::rio::claude::api::fetcher [list apply {{body req done} {{*}$done 200 "" $body}} $::caps_listing]
+	rio::agent::options_refresh model announce claude
+	set ::rio::claude::api::fetcher rio::llm::http::get
+	rio::claude::api::clear_key
+}
+proc effort_option {} { return [lindex [rio::agent::options claude] 1] }
 # The refresh's callback is the core's own announcer, so what a test sees is the
 # `agent.options` EVENT — with the provider's message (if any) in its `error` field.
 proc announce {ev} { set ::announced $ev }
@@ -287,6 +304,81 @@ test claude-refresh-garbage {an unreadable listing keeps the old choices} -setup
 	set ::rio::claude::api::fetcher rio::llm::http::get
 	rio::claude::api::clear_key
 } -match glob -result {{*Couldn't read the model list*} 2}
+
+# --- effort is per MODEL, and the listing says which (found live, D106) -------
+#
+# Haiku 4.5 answers a request carrying an effort with "This model does not support the
+# effort parameter" (HTTP 400). Which models take one — and which values — is exactly
+# the fact that goes stale in a table, so the provider reads it from the listing.
+
+test claude-effort-unknown-model {before any refresh, the shipped values stand and the API judges} -setup {
+	reset_claude_opts
+} -body {
+	# Nothing is known yet: offering the shipped set is honest, and the API refuses
+	# clearly if it turns out not to take one.
+	set o [effort_option]
+	list [llength [dict get $o choices]] [dict get $o value]
+} -result {4 default}
+
+test claude-effort-follows-the-model {a model that takes one offers exactly the values it declares} -setup {
+	reset_claude_opts
+	load_caps
+} -body {
+	rio::agent::option_set model claude-opus-5 claude
+	set vs {}
+	foreach c [dict get [effort_option] choices] { lappend vs [dict get $c value] }
+	set vs
+} -cleanup { reset_claude_opts } -result {default low medium high xhigh}
+
+test claude-effort-withheld {a model the API says takes none offers only the default} -setup {
+	reset_claude_opts
+	load_caps
+} -body {
+	rio::agent::option_set model claude-haiku-4-5 claude
+	set o [effort_option]
+	set vs {}
+	foreach c [dict get $o choices] { lappend vs [dict get $c value] }
+	list $vs [string match "*does not take an effort*" [dict get $o hint]]
+} -cleanup { reset_claude_opts } -result {default 1}
+
+test claude-effort-not-sent-when-unsupported {a choice made on another model is not carried into a 400} -setup {
+	reset_claude_opts
+	load_caps
+} -body {
+	# The choice is per provider, support is per model: pick high on Opus, switch to
+	# Haiku, and the request must not carry what we have been told Haiku refuses.
+	rio::agent::option_set model claude-opus-5 claude
+	rio::agent::option_set effort high claude
+	set on_opus [rio::claude::api::_effort_json]
+	rio::agent::option_set model claude-haiku-4-5 claude
+	list $on_opus [rio::claude::api::_effort_json] [dict get [effort_option] value]
+} -cleanup { reset_claude_opts } -result {{"output_config":{"effort":"high"}} {} default}
+
+test claude-effort-value-kept {switching back to a model that takes it restores the choice} -setup {
+	reset_claude_opts
+	load_caps
+} -body {
+	rio::agent::option_set model claude-opus-5 claude
+	rio::agent::option_set effort high claude
+	rio::agent::option_set model claude-haiku-4-5 claude
+	rio::agent::option_set model claude-opus-5 claude
+	list [dict get [effort_option] value] [rio::claude::api::_effort_json]
+} -cleanup { reset_claude_opts } -result {high {"output_config":{"effort":"high"}}}
+
+test claude-caps-absent {a listing that says nothing about capabilities leaves rio asking the API} -setup {
+	reset_claude_opts
+	rio::claude::api::set_key sk-ant-caps
+	set ::rio::claude::api::fetcher [list apply {{req done} {
+		{*}$done 200 "" {{"data":[{"id":"claude-proxy-1","display_name":"Proxied"}]}}
+	}}]
+} -body {
+	rio::agent::options_refresh model announce claude
+	rio::claude::api::clear_key
+	rio::agent::option_set model claude-proxy-1 claude
+	llength [dict get [effort_option] choices]
+} -cleanup {
+	set ::rio::claude::api::fetcher rio::llm::http::get ; reset_claude_opts
+} -result {4}
 
 file delete -force $rio::secret::override_dir $::optdir
 cleanupTests
