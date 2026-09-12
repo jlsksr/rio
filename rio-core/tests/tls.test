@@ -1,0 +1,226 @@
+# Tests for rio::tls (rio-core/tls.tcl) and https through the repository fetch
+# (rio::http), AGENTS.md D109.
+#
+# Two halves. The pure half — where the CA certificates come from, and how a refused
+# certificate is explained — runs everywhere. The loopback half makes REAL TLS
+# connections, to a child server on 127.0.0.1 (tls-server.tcl) with throwaway
+# self-signed certificates generated for the run: nothing leaves the machine, and it
+# proves what no stub can — that a certificate is actually verified, name included.
+# It needs tcltls 1.8+ and an `openssl` binary; where either is missing it is skipped,
+# not failed.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. tls.tcl]
+source [file join [file dirname [info script]] .. http.tcl]
+
+set ::tmp [file join [temporaryDirectory] rio-tls-test-[pid]]
+file mkdir $::tmp
+set ::bundle [file join $::tmp bundle.pem]
+set f [open $::bundle w] ; close $f
+set ::real_bundles $::rio::tls::bundles
+
+# --- where the CA certificates come from (pure) ---------------------------------------
+test tls-ca-env-file {SSL_CERT_FILE wins, passed explicitly} -body {
+	set ::rio::tls::bundles [list $::bundle]
+	rio::tls::ca_opts unix {SSL_CERT_FILE /etc/private-ca.pem} 1.8.0 "OpenSSL 3.4.1"
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {-cafile /etc/private-ca.pem}
+
+test tls-ca-env-dir {SSL_CERT_DIR is honoured too, and both together} -body {
+	list [rio::tls::ca_opts unix {SSL_CERT_DIR /etc/ca.d} 1.8.0 ""] \
+		[rio::tls::ca_opts unix {SSL_CERT_FILE /a.pem SSL_CERT_DIR /b} 1.8.0 ""]
+} -result {{-cadir /etc/ca.d} {-cafile /a.pem -cadir /b}}
+
+test tls-ca-env-empty-ignored {an empty variable is not an override} -body {
+	set ::rio::tls::bundles [list $::bundle]
+	rio::tls::ca_opts unix {SSL_CERT_FILE {}} 1.8.0 ""
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result [list -cafile $::bundle]
+
+test tls-ca-system-bundle {the first system bundle that exists} -body {
+	set ::rio::tls::bundles [list [file join $::tmp absent.pem] $::bundle]
+	rio::tls::ca_opts unix {} 1.8.0 "OpenSSL 3.4.1"
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result [list -cafile $::bundle]
+
+test tls-ca-windows-store {Windows with tcltls 1.8 on OpenSSL 3.2+: the Windows store} -body {
+	set ::rio::tls::bundles {}
+	list [rio::tls::ca_opts windows {} 1.8.0 "OpenSSL 3.2.0 23 Nov 2023"] \
+		[rio::tls::ca_opts windows {} 1.8.0 "OpenSSL 4.0.0"]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } \
+	-result {{-castore org.openssl.winstore://} {-castore org.openssl.winstore://}}
+
+test tls-ca-windows-too-old {no store URI where the library can't take one} -body {
+	set ::rio::tls::bundles {}
+	list [rio::tls::ca_opts windows {} 1.8.0 "OpenSSL 3.1.4"] \
+		[rio::tls::ca_opts windows {} 1.7.22 "OpenSSL 3.4.1"] \
+		[rio::tls::ca_opts windows {} 1.8.0 "LibreSSL 3.9.0"] \
+		[rio::tls::ca_opts unix {} 1.8.0 "OpenSSL 3.4.1"]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {{} {} {} {}}
+
+test tls-ca-env-beats-windows-store {the override wins on Windows as well} -body {
+	set ::rio::tls::bundles {}
+	rio::tls::ca_opts windows {SSL_CERT_FILE C:/ca.pem} 1.8.0 "OpenSSL 3.4.1"
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {-cafile C:/ca.pem}
+
+# --- the derived fact: INSTALL.md names the same locations (AGENTS §7) ----------------
+test tls-install-md-names-the-bundles {INSTALL.md's trusted-locations list and the bundles
+		rio tries agree, both directions — a path added to one and not the other fails} -body {
+	set f [open [file join [file dirname [info script]] .. .. INSTALL.md]]
+	fconfigure $f -encoding utf-8
+	set text [read $f] ; close $f
+	set from [string first "**Where certificates are trusted from.**" $text]
+	set to   [string first "A refused certificate" $text $from]
+	set section [string range $text $from $to]
+	set named [lsort -unique [regexp -all -inline {/etc/[^`\s]+} $section]]
+	list [expr {$from >= 0 && $to > $from}] [expr {$named eq [lsort $::real_bundles]}]
+} -result {1 1}
+
+# --- explaining a refusal (pure) -------------------------------------------------------
+test tls-explain-nothing-recorded {no handshake failure recorded: the error stands} -body {
+	set ::rio::tls::last_reasons {}
+	rio::tls::explain "couldn't open socket: connection refused"
+} -result "couldn't open socket: connection refused"
+
+test tls-explain-reason-and-hint {an untrusted issuer gets the reason and the fix} -body {
+	rio::tls::_note error sock1 "self-signed certificate"
+	rio::tls::_note error sock1 "certificate verify failed"
+	set m [rio::tls::explain "failed to use socket"]
+	list [string match "failed to use socket — the server's certificate was refused (self-signed certificate; certificate verify failed)*" $m] \
+		[string match "*set SSL_CERT_FILE*" $m] $::rio::tls::last_reasons
+} -result {1 1 {}}
+
+test tls-explain-hostname-no-hint {a name mismatch is not fixed by trusting a CA} -body {
+	rio::tls::_note error sock1 "hostname mismatch"
+	set m [rio::tls::explain "failed to use socket"]
+	list [string match "*(hostname mismatch)" $m] [string match "*SSL_CERT_FILE*" $m]
+} -result {1 0}
+
+test tls-explain-cleared-by-success {a later handshake that completes clears old reasons} -body {
+	rio::tls::_note error sock1 "hostname mismatch"
+	rio::tls::_note info sock2 handshake done "SSL negotiation finished successfully" info
+	rio::tls::explain "timeout"
+} -result timeout
+
+# --- https in the fetcher, before any connection (stubbed tcltls) ----------------------
+test http-https-without-tcltls {no tcltls: an io_error that names the package — and http://} -setup {
+	rename rio::tls::ensure _real_ensure
+	proc rio::tls::ensure {} { error {can't find package tls} }
+} -body {
+	catch {rio::http::get https://repo.example/rio} e opts
+	list [rio::error::code_of $opts] [string match "*needs tcltls*tcl-tls*http:// URL*" $e]
+} -cleanup {
+	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+} -result {io_error 1}
+
+test http-https-needs-hostname-checks {a tcltls that can't check names: refused, not trusted} -setup {
+	rename rio::tls::ensure _real_ensure
+	rename rio::tls::checks_hostname _real_checks
+	proc rio::tls::ensure {} {}
+	proc rio::tls::checks_hostname {} { return 0 }
+	namespace eval :: { package provide tls 1.7.22 }
+} -body {
+	catch {rio::http::get https://repo.example/rio} e opts
+	list [rio::error::code_of $opts] [string match "*tcltls 1.8 or newer*does not check*" $e]
+} -cleanup {
+	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+	rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
+	package forget tls
+} -result {io_error 1}
+
+test http-plain-never-loads-tcltls {an http:// fetch never reaches for tcltls} -setup {
+	rename rio::tls::ensure _real_ensure
+	proc rio::tls::ensure {} { error "tcltls was loaded for plain http" }
+} -body {
+	# Nothing listens on port 1: the fetch fails to CONNECT, which is the point — it
+	# got as far as connecting without ever asking for TLS.
+	catch {rio::http::get http://127.0.0.1:1/rio 2000} e
+	string match "*tcltls was loaded*" $e
+} -cleanup {
+	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+} -result 0
+
+# --- the loopback half: real certificates, really verified ------------------------------
+testConstraint tls18 [expr {![catch {package require tls}] && [package vsatisfies [package present tls] 1.8-]}]
+testConstraint openssl [expr {[auto_execok openssl] ne ""}]
+
+proc mkcert {name cn} {
+	exec openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+		-keyout [file join $::tmp $name.key] -out [file join $::tmp $name.pem] \
+		-subj /CN=$cn -addext subjectAltName=DNS:$cn 2>@1
+}
+
+set ::srv ""
+if {[testConstraint tls18] && [testConstraint openssl]} {
+	if {[catch {
+		mkcert good localhost
+		mkcert wrong other.example
+		set ::srv [open |[list [info nameofexecutable] \
+			[file join [file dirname [info script]] tls-server.tcl] $::tmp] r+]
+		lassign [gets $::srv] ::p_good ::p_wrong ::p_http
+		if {$::p_http eq ""} { error "the loopback server did not start" }
+	} e]} {
+		puts stderr "tls.test: loopback half skipped — $e"
+		testConstraint openssl 0
+	}
+}
+
+# The trust a test grants: the throwaway cert as the whole CA store, via the override.
+proc trusting {name script} {
+	set ::env(SSL_CERT_FILE) [file join $::tmp $name.pem]
+	set rc [catch {uplevel 1 $script} r opts]
+	unset -nocomplain ::env(SSL_CERT_FILE)
+	return -options $opts $r
+}
+
+test tls-loop-verified-fetch {https with a trusted certificate for the right name} -constraints {tls18 openssl} -body {
+	trusting good {
+		set r [rio::http::get https://localhost:$::p_good/ok 5000]
+	}
+	list [dict get $r status] [dict get $r text]
+} -result {200 {hello over https}}
+
+test tls-loop-untrusted {a certificate nobody trusts is refused, with the reason and the fix} -constraints {tls18 openssl} -body {
+	set ::rio::tls::bundles {}
+	catch {rio::http::get https://localhost:$::p_good/ok 5000} e opts
+	list [rio::error::code_of $opts] [string match "*certificate was refused*" $e] \
+		[string match "*SSL_CERT_FILE*" $e]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {io_error 1 1}
+
+test tls-loop-wrong-name {a TRUSTED certificate for another name is still refused} -constraints {tls18 openssl} -body {
+	trusting wrong {
+		catch {rio::http::get https://localhost:$::p_wrong/ok 5000} e opts
+	}
+	list [rio::error::code_of $opts] [string match "*hostname mismatch*" $e]
+} -result {io_error 1}
+
+test tls-loop-no-downgrade {an https repository redirecting to plain http is refused} -constraints {tls18 openssl} -body {
+	trusting good {
+		catch {rio::http::get https://localhost:$::p_good/down 5000} e opts
+	}
+	list [rio::error::code_of $opts] [string match "*refused a redirect from https to plain http*" $e]
+} -result {io_error 1}
+
+test tls-loop-upgrade-followed {an http repository redirecting to https is followed} -constraints {tls18 openssl} -body {
+	trusting good {
+		set r [rio::http::get http://localhost:$::p_http/up 5000]
+	}
+	list [dict get $r status] [dict get $r text] [string match https://* [dict get $r url]]
+} -result {200 {hello over https} 1}
+
+test tls-loop-plain-http {plain http on the same machine, alongside, untouched} -constraints {tls18 openssl} -body {
+	set r [rio::http::get http://localhost:$::p_http/ok 5000]
+	list [dict get $r status] [dict get $r text]
+} -result {200 {hello over http}}
+
+test tls-loop-opts-fail-closed {with no CA source at all, verification is still required} -constraints {tls18} -body {
+	set ::rio::tls::bundles {}
+	set saved [array get ::env SSL_CERT_*]
+	foreach {k v} $saved { unset ::env($k) }
+	set o [rio::tls::socket_opts]
+	foreach {k v} $saved { set ::env($k) $v }
+	list [dict get $o -require] [dict exists $o -cafile] [dict exists $o -castore]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {1 0 0}
+
+if {$::srv ne ""} { catch {close $::srv} }
+file delete -force $::tmp
+cleanupTests

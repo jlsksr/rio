@@ -220,10 +220,16 @@ Rules of the tree:
   names get joined into URLs and into file paths on the user's machine, and
   this one rule is what makes `../`, absolute paths, percent-encoding, and
   spaces impossible by construction. Anything failing it is skipped.
-- **Plain `http://` only.** rio implements no TLS of its own. If your server
-  is https-only, serve the repository from a plain-http host or front it with
-  a proxy (relayd, nginx); repository TLS is a roadmap item, and the trust
-  section below is honest about what https would and wouldn't buy here.
+- **`http://` or `https://` — your choice, and your users'.** Plain http is
+  fully supported and always will be; https is an option, not an obligation,
+  the way it is for a Debian mirror. Serve either or both. An https repository
+  needs **tcltls 1.8 or newer** on the user's core (the first version that checks
+  a certificate's name against the host), and it is verified against **that
+  host's own CA store** — so a certificate from a public CA just works, and a
+  private CA works once the user trusts it there (or points `SSL_CERT_FILE` at
+  it). If your https host redirects to plain http, rio refuses the redirect;
+  http → https is followed. The trust section below is honest about what https
+  does and doesn't buy.
 - Payloads are **text** (Tcl source, theme files); fetches are capped at 2 MB.
 
 What each kind installs as:
@@ -350,6 +356,11 @@ remembers what it installed, and from where.
   exactly that at install time, next to your source URL. There is no sandbox
   and no signing yet (roadmap): **your URL is your reputation**, and a user's
   sources list is their trust list — exactly like apt's.
+- **What https adds, and what it doesn't.** It proves the files came from the
+  host in the URL and weren't altered on the way. It says nothing about who
+  wrote them or whether the host itself is trustworthy — that is still your URL
+  and your reputation. The same repository over http and over https is the
+  same repository to rio: a user who switches schemes keeps their updates.
 - A **theme is data** — parsed, validated, never executed — and the consent
   dialog says that too.
 - Every installed extension is **marked with its provenance** (source URL +

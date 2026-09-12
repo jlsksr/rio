@@ -19,13 +19,31 @@ The **core** needs:
 |------|---------------------|---------------------|-----|
 | `tclsh` 8.6+ | `tcl` | `tcl%8.6` | the interpreter the core runs on |
 | `tcllib` | `tcllib` (Alpine: `tcl-lib`) | `tcllib` | the `json` package the wire protocol uses |
-| `tcltls` | `tcl-tls` | `tcltls` | **the agent's Claude HTTPS — runs in the core (D30)** |
+| `tcltls` | `tcl-tls` | `tcltls` | **HTTPS from the core (D30): a hosted agent provider, and https extension repositories (D109)** |
 | `git` *(optional)* | `git` | `git` | the git pane shells out to it |
 
 The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not**
-need `tcltls` — the agent's HTTPS happens wherever the *core* runs. Extension
-repositories (D39) add **no dependency anywhere**: they are fetched over plain
-HTTP by the core, with Tcl's own `http` package.
+need `tcltls` — all of rio's HTTPS happens wherever the *core* runs. Extension
+repositories (D39) served over plain **`http://` add no dependency anywhere**: the
+core fetches them with Tcl's own `http` package. An **`https://`** repository is
+equally supported (D109) and needs `tcltls` **1.8 or newer** on the core's host — the
+first version that checks a certificate's name against the host; an older one is
+refused with a message saying so, never used unverified.
+
+**Where certificates are trusted from.** rio ships no CA bundle; it uses the core
+host's own store, the one the package manager keeps current:
+
+- **Linux / BSD / macOS** — the system bundle (`/etc/ssl/certs/ca-certificates.crt`,
+  `/etc/pki/tls/certs/ca-bundle.crt`, or `/etc/ssl/cert.pem`, whichever exists).
+- **Windows** — the Windows certificate store, when the Tcl distribution's `tcltls` is
+  1.8+ built on OpenSSL 3.2+. With an older build there is no route to the store:
+  set `SSL_CERT_FILE` (below) to a PEM bundle instead.
+- **Your own CA, anywhere** — set **`SSL_CERT_FILE`** (a PEM file) or **`SSL_CERT_DIR`**
+  in the core's environment. It takes precedence over the system store, for the agent
+  and repositories alike.
+
+A refused certificate is reported with OpenSSL's reason (*self-signed certificate*,
+*hostname mismatch*, …), and names `SSL_CERT_FILE` when trusting a CA would fix it.
 
 > `http` (used by the TLS transport) ships with Tcl itself — no separate package.
 

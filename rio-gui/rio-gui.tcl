@@ -7667,7 +7667,7 @@ proc sources_save {urls} {
 	catch {
 		file mkdir [file dirname $path]
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
-		puts $f "# rio extension repositories — one http:// base URL per line (D39)."
+		puts $f "# rio extension repositories — one http:// or https:// base URL per line (D39, D109)."
 		foreach u $urls { puts $f $u }
 		close $f
 	}
@@ -7952,7 +7952,7 @@ proc ext_variant_update {v} {
 	if {[dict exists $v offline]} { return "" }
 	if {![ext_variant_installable $v]} { return "" }
 	set cur [dict get $::ext_installed $key]
-	if {[dict get $v source] ne [dict get $cur source] && ![ext_anysource $key]} { return "" }
+	if {![source_same [dict get $v source] [dict get $cur source]] && ![ext_anysource $key]} { return "" }
 	if {[ext_ver_cmp [dict get $v version] [dict get $cur version]] != 1} { return "" }
 	return [dict get $cur version]
 }
@@ -8285,7 +8285,7 @@ proc ext_update_all {} {
 			"$name ($kind)" [dict get $u from] [dict get $u to] \
 			[host_of [dict get $v source]]]
 		if {[dict exists $::ext_installed $key]
-				&& [dict get $v source] eq [dict get [dict get $::ext_installed $key] source]} {
+				&& [source_same [dict get $v source] [dict get [dict get $::ext_installed $key] source]]} {
 			lappend same $line
 		} else {
 			lappend foreign $line
@@ -8336,8 +8336,18 @@ set ::repo_busy 0     ;# a scan or install is running: action buttons disabled
 set ::extw_rows {}    ;# row dicts, index-aligned with the window's listbox
 
 proc host_of {url} {
-	if {[regexp -nocase {^http://([^/]+)} $url -> h]} { return $h }
+	if {[regexp -nocase {^https?://([^/]+)} $url -> h]} { return $h }
 	return $url
+}
+
+# Are two source URLs the same repository? The scheme is only how it is reached (D109):
+# a user who moves http://host/rio to https://host/rio keeps their updates, the
+# [installed] mark and the "from the repository it was installed from" grouping,
+# instead of every installed extension turning foreign overnight.
+proc source_same {a b} {
+	regsub -nocase {^https?://} $a {} a
+	regsub -nocase {^https?://} $b {} b
+	return [expr {$a eq $b}]
 }
 
 proc extensions_window {} {
@@ -8638,13 +8648,13 @@ proc extw_select {} {
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
 		append line " — [host_of [dict get $v source]]"
 		set this_installed [expr {$entry ne "" \
-			&& [dict get $v source]  eq [dict get $entry source] \
+			&& [source_same [dict get $v source] [dict get $entry source]] \
 			&& [dict get $v version] eq [dict get $entry version]}]
 		# How this variant relates to what is installed. Only ever stated when both
 		# versions follow the semver rule — otherwise rio makes no claim (D107).
 		set is_update [expr {[ext_variant_update $v] ne ""}]
 		if {!$this_installed && !$is_update && $entry ne "" && ![dict exists $v offline]
-				&& [dict get $v source] eq [dict get $entry source]
+				&& [source_same [dict get $v source] [dict get $entry source]]
 				&& [ext_ver_cmp [dict get $v version] [dict get $entry version]] eq "-1"} {
 			append line "  (older than the installed [dict get $entry version])"
 		}
@@ -8829,7 +8839,7 @@ proc extw_sources_dialog {} {
 	# element; the list below carries a solid border for the same reason — the
 	# selectable repository URLs must look distinct from this sentence (AGENTS D68).
 	label $w.hint -anchor w -justify left -font RioUIFont \
-		-text "Each repository is a plain http:// directory (see CONTRIBUTING.md to host one)." \
+		-text "Each repository is a plain directory served over http:// or https:// (see CONTRIBUTING.md to host one)." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	frame $w.body -background [dict get $c ui.bg]
 	scrollbar $w.body.sb -command {.extsrc.body.list yview}
@@ -8870,12 +8880,10 @@ proc extw_sources_dialog {} {
 proc extw_source_add {} {
 	set url [string trim [.extsrc.add.url get]]
 	if {$url eq ""} return
-	if {[regexp -nocase {^https://} $url]} {
-		report_error "https is not supported yet — repositories are plain http:// (an operator can front a webdir with a proxy; see CONTRIBUTING.md)."
-		return
-	}
-	if {![regexp -nocase {^http://} $url]} {
-		report_error "A repository URL starts with http:// — got: $url"
+	# http and https are both first-class (D109): the scheme is the user's choice, and
+	# nothing here nudges one over the other.
+	if {![regexp -nocase {^https?://} $url]} {
+		report_error "A repository URL starts with http:// or https:// — got: $url"
 		return
 	}
 	set urls [sources_load]

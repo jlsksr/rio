@@ -9,7 +9,9 @@
 #                                  on_done <status> <err>)
 #   get    req on_done           — a plain GET for one small document, e.g. the
 #                                  vendor's model list (on_done <status> <err> <body>)
-# TLS verifies the server cert against the system CA bundle when present. Nothing
+# How the server's certificate is verified is not decided here: rio::tls (rio-core/
+# tls.tcl, D109) owns that for every https connection the core makes — the host's own
+# CA store on each platform, the same for a turn as for a repository fetch. Nothing
 # here is provider-specific — Claude and OpenAI share this copy.
 #
 # Sourced by more than one plugin loader (server.tcl loads each), so it is guarded
@@ -18,28 +20,14 @@
 if {[llength [info commands rio::llm::http::stream]]} { return }
 
 package require http
-
-namespace eval rio::llm::http {
-	variable tls_ready 0
+# The core has normally loaded rio::tls already; standalone (this suite) it has not.
+if {![llength [info commands rio::tls::socket]]} {
+	source [file join [file dirname [file normalize [info script]]] .. .. rio-core tls.tcl]
 }
 
-# Register https with tcltls once, verifying the peer cert where we can.
-proc rio::llm::http::_ensure_tls {} {
-	variable tls_ready
-	if {$tls_ready} return
-	package require tls
-	::http::register https 443 [list rio::llm::http::_tls_socket]
-	set tls_ready 1
-}
-proc rio::llm::http::_tls_socket {args} {
-	set opts [list -autoservername 1 -require 1]
-	# The system CA bundle, wherever this platform keeps it: Debian/Alpine,
-	# RHEL-family, then OpenBSD (also macOS) — rio's supported hosts (D4).
-	foreach ca {/etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem} {
-		if {[file exists $ca]} { lappend opts -cafile $ca ; break }
-	}
-	return [::tls::socket {*}$opts {*}$args]
-}
+namespace eval rio::llm::http {}
+
+proc rio::llm::http::_ensure_tls {} { rio::tls::ensure }
 
 # Split a flat header list into the Content-Type (-> ctypeVar) and the rest.
 proc rio::llm::http::_headers {headers ctypeVar} {
@@ -131,5 +119,12 @@ proc rio::llm::http::_status {token} {
 	}
 	set err [::http::error $token]
 	if {$err eq ""} { set err [::http::status $token] }
+	# A refused certificate reaches http as "failed to use socket", which reads like a
+	# network outage; rio::tls kept the real reason. (http's error is a {msg info code}
+	# list — only the message is worth showing once there is a better one.)
+	if {![catch {lindex $err 0} msg]} {
+		set told [rio::tls::explain $msg]
+		if {$told ne $msg} { set err $told }
+	}
 	return [list 0 $err]
 }

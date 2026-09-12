@@ -215,11 +215,13 @@ Repositories shipped (AGENTS.md D39): plain-HTTP sources, the Extensions
 window, provenance-marked installs for syntax/modes/themes. Consciously left
 for later:
 
-- **Repository TLS / other transports** — *deferred.* v1 is plain `http://`
-  only; rio implements no TLS of its own (operators front a webdir with
-  relayd/nginx). Candidates when warranted: https via tcltls (already a core
-  dependency for the agent), ssh-fetched repositories, and git-backed sources
-  (dropped from v1 — see the D19 annotation).
+- **https repositories** — *landed* (AGENTS.md D109). `https://` sources beside
+  `http://`, which stays first-class; verified against the core host's own CA
+  store (system bundle, the Windows store, or `SSL_CERT_FILE`), needing tcltls
+  1.8+ for host-name checks. **Still open:** whether the agent on a tcltls 1.7
+  core should refuse the same way; a first run on Windows.
+- **Other repository transports** — *deferred.* ssh-fetched repositories, and
+  git-backed sources (dropped from v1 — see the D19 annotation).
 - **`.well-known/rio-repository` badges** — *planned.* The host-validation
   file is specced (CONTRIBUTING) and costs publishers one line; consuming it —
   a "host-validated" badge in the Extensions window, and an official-approval

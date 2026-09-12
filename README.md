@@ -158,7 +158,7 @@ in [docs/](docs/index.md).
   Backspace, Delete and Tab all act at that column on every line (one undo);
   drag a width and typing overwrites the rectangular block. Off by default.
 - **Extensions & repositories** — install syntax highlighters, editing modes,
-  and themes from **repositories you choose**: plain http-served directories,
+  and themes from **repositories you choose**: plain directories served over http or https,
   apt-sources style, no marketplace and no central index (see below). rio ships with
   the project's own repo (`http://rio.skylm.org/rio`) pre-filled so there's something
   to browse on first run — remove it in *Repositories…* if you'd rather not. Browse,
@@ -216,7 +216,8 @@ is **no marketplace, no store, no central index**: extensions are distributed
 the way Debian distributes packages and OpenBSD serves its mirrors — you keep
 a short list of **repositories**, and a repository is nothing more than a
 **plain http-served directory** anyone can host with a couple of text files in
-it. Add a URL under *Settings ▸ Extensions… ▸ Repositories…* and everything it
+it — `https://` if you like, `http://` just as well: like a Debian source, https is
+an option, not an obligation. Add a URL under *Settings ▸ Extensions… ▸ Repositories…* and everything it
 carries is yours to browse and install; publishing means copying files into
 your webdir, and it will still work when today's hosting fashions are gone.
 

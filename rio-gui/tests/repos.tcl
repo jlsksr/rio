@@ -395,7 +395,9 @@ ok "window: row gone after remove"  [rowidx syntax zz] -1
 after 100 {
 	.extsrc.add.url insert end http://e.example/more
 	extw_source_add
-	.extsrc.add.url insert end https://nope.example/tls
+	.extsrc.add.url insert end https://e.example/tls
+	extw_source_add
+	.extsrc.add.url insert end ftp://nope.example/old
 	extw_source_add
 	set ::src_mid [sources_load]
 	.extsrc.body.list selection set 0
@@ -405,9 +407,10 @@ after 100 {
 }
 extw_sources_dialog
 ok "sources dialog: http added"     [expr {"http://e.example/more" in $::src_mid}] 1
-ok "sources dialog: https refused"  [string match "*https is not supported yet*" [mb_last]] 1
-ok "sources dialog: only http kept" [llength $::src_mid] 1
-ok "sources dialog: remove removes" $::src_after {}
+ok "sources dialog: https added too" [expr {"https://e.example/tls" in $::src_mid}] 1
+ok "sources dialog: ftp refused"    [string match "*starts with http:// or https://*ftp://*" [mb_last]] 1
+ok "sources dialog: only the two kept" [llength $::src_mid] 2
+ok "sources dialog: remove removes" $::src_after {https://e.example/tls}
 destroy .extw
 
 # ===================================================================================
@@ -507,6 +510,24 @@ ledger_save ; set ::ext_ledger {} ; ledger_load
 ok "anysource: survives the ledger" [ext_anysource syntax/up] 1
 ext_anysource_set syntax/up 0
 ok "anysource: off again"           [dict get $::ext_updates syntax/up to] 1.1.0
+
+# --- the same repository, moved to https (D109) --------------------------------------
+# The scheme is how a repository is reached, not which one it is. A user who switches U
+# to https keeps U's updates — without needing the any-source switch just turned off,
+# which would also admit V.
+set Us https://u.example/repo
+foreach k [array names ::fix $U/*] {
+	set ::fix($Us[string range $k [string length $U] end]) $::fix($k)
+}
+sources_save [list $Us]
+repo_scan_all
+ok "https move: U's update survives"  [dict exists $::ext_updates syntax/up] 1
+ok "https move: offered from https"   [dict get [dict get $::ext_updates syntax/up variant] source] $Us
+ok "https move: same repository"      [list [source_same $U $Us] [source_same HTTPS://u.example/repo $U]] {1 1}
+ok "https move: another host is not"  [source_same $U https://v.example/repo] 0
+ok "https move: another path is not"  [source_same $U https://u.example/other] 0
+sources_save [list $U]
+repo_scan_all
 
 # --- Update All: one consent for the batch -------------------------------------------
 sources_save [list $U]

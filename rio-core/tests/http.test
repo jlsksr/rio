@@ -1,14 +1,16 @@
-# Tests for the bounded plain-HTTP GET (rio::http, AGENTS.md D39) and the
+# Tests for the bounded HTTP GET (rio::http, AGENTS.md D39, D109) and the
 # repo.fetch op over it. NO network, not even loopback: only the pure logic is
 # tested here — Location resolution, scheme refusal, parameter validation, the
 # dispatch registration. The wire-level behaviour (redirect chains, the 2 MB
 # cap, timeouts) is exercised against a real webdir at release verification
-# (D39); the GUI suite stubs repo.fetch entirely.
+# (D39); https over a real loopback connection is tls.test's; the GUI suite
+# stubs repo.fetch entirely.
 package require tcltest
 namespace import ::tcltest::*
 
 source [file join [file dirname [info script]] .. error.tcl]
 source [file join [file dirname [info script]] .. dispatch.tcl]
+source [file join [file dirname [info script]] .. tls.tcl]
 source [file join [file dirname [info script]] .. http.tcl]
 namespace eval rio::ops {}   ;# normally created by document.tcl, not loaded here
 source [file join [file dirname [info script]] .. ops-repo.tcl]
@@ -34,17 +36,34 @@ test http-resolve-protocol-relative {//host/path keeps the scheme (http)} -body 
 	rio::http::_resolve http://a.example/x //b.example/z
 } -result http://b.example/z
 
-test http-resolve-https-passes {an https Location passes through untouched —
-		`get` then refuses it honestly rather than rewriting it} -body {
-	rio::http::_resolve http://a.example/x https://b.example/z
-} -result https://b.example/z
+test http-resolve-scheme-change-passes {a Location with another scheme passes through
+		untouched — whether to follow it is `get`'s call (D109), not resolution's} -body {
+	list [rio::http::_resolve http://a.example/x https://b.example/z] \
+		[rio::http::_resolve https://a.example/x http://b.example/z]
+} -result {https://b.example/z http://b.example/z}
+
+test http-resolve-https-origin {an https base keeps its origin, scheme included} -body {
+	list [rio::http::_resolve https://a.example:8443/x/y /z] \
+		[rio::http::_resolve https://a.example/x/y z]
+} -result {https://a.example:8443/z https://a.example/x/z}
+
+test http-resolve-protocol-relative-https {//host/path inherits https from an https base —
+		a scheme-relative redirect is never a downgrade} -body {
+	list [rio::http::_resolve https://a.example/x //b.example/z] \
+		[rio::http::_resolve HTTPS://a.example/x //b.example/z]
+} -result {https://b.example/z https://b.example/z}
 
 # --- scheme refusal in the fetcher itself -------------------------------------
-test http-get-refuses-non-http {get itself refuses a non-http url: io_error, no
-		connection attempted} -body {
-	catch {rio::http::get https://example.org/repo} e opts
-	list [rio::error::code_of $opts] [string match "not an http:// url*" $e]
+test http-get-refuses-other-schemes {get itself refuses a url that is neither http nor
+		https: io_error, no connection attempted} -body {
+	catch {rio::http::get ftp://example.org/repo} e opts
+	list [rio::error::code_of $opts] [string match "not an http:// or https:// url*" $e]
 } -result {io_error 1}
+
+test http-scheme {the scheme, case-folded; "" for anything else} -body {
+	list [rio::http::_scheme http://a] [rio::http::_scheme HTTPS://a] \
+		[rio::http::_scheme ftp://a] [rio::http::_scheme https:a]
+} -result {http https {} {}}
 
 # --- body decoding (pure: the seam is the decoder, not the socket) ------------
 # A repository is a plain webdir, which declares no charset — so ::http::data
@@ -90,10 +109,16 @@ test repo-fetch-requires-url {a missing url is bad_request} -body {
 	rio::error::code_of $opts
 } -result bad_request
 
-test repo-fetch-https-refused {https is refused up front — rio does no TLS (D39)} -body {
+test repo-fetch-https-accepted {https is a first-class url now (D109): it reaches the
+		fetcher, which here reports the missing tcltls — not a bad_request} -setup {
+	rename rio::tls::ensure _real_ensure
+	proc rio::tls::ensure {} { error {can't find package tls} }
+} -body {
 	catch {rio::ops::repo_fetch {url https://example.org/repo}} e opts
-	list [rio::error::code_of $opts] [string match "*https is not supported yet*" $e]
-} -result {bad_request 1}
+	list [rio::error::code_of $opts] [string match "*needs tcltls*" $e]
+} -cleanup {
+	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+} -result {io_error 1}
 
 test repo-fetch-scheme-refused {a non-http scheme is bad_request} -body {
 	catch {rio::ops::repo_fetch {url ftp://example.org/repo}} e opts

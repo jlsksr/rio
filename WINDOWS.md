@@ -31,7 +31,8 @@ That one command:
    `-Yes` to skip the prompt, or `-NoInstall` to be told how to do it by hand
    instead). §2 covers the manual route if you'd rather, or if winget isn't available.
 2. **Verifies the toolchain actually loads** by running `package require` in `tclsh` —
-   Tk and json are required, tls only matters if you'll use the Claude agent — and
+   Tk and json are required, tls only matters for HTTPS (a hosted agent provider, or an
+   `https://` extension repository) — and
    reports each by name.
 3. **Sets up persistence** (§3) so rio remembers your preferences and last session.
 4. **Prints the launch command**, with the full path to `wish.exe`.
@@ -56,7 +57,8 @@ safe to re-run.
 
 Skip this if §1 worked. rio needs **Tk** and **tcllib** (for the `json`/`md5` packages
 the wire protocol and sessions use); `http` ships with Tcl itself, and you do **not**
-need `tcltls` unless you later use the Claude agent. **`tkdnd`** is optional — it enables
+need `tcltls` unless you later use a hosted agent provider or an `https://` extension
+repository. **`tkdnd`** is optional — it enables
 dragging a file onto the window to open it (D86); the Magicsplat distribution below
 bundles it, and rio runs fine without it (drag-to-open just does nothing).
 
@@ -191,6 +193,15 @@ because it needs the least. What each adds:
   of the key file is a POSIX no-op on NTFS, so the key file inherits your user-profile
   permissions rather than being explicitly restricted — fine for a personal machine,
   worth knowing.
+- **HTTPS certificates (the agent, and `https://` repositories)** — rio trusts the
+  **Windows certificate store** when your `tls` is **1.8 or newer on OpenSSL 3.2+**
+  (`tclsh`: `package require tls` prints the version, `tls::version` the OpenSSL one).
+  An older build has no way into the store, so a connection is refused as untrusted —
+  set **`SSL_CERT_FILE`** to a PEM bundle (curl's `cacert.pem` is the usual one) before
+  starting rio. An `https://` repository additionally needs `tls` 1.8+ to check host
+  names, and says so if it's older; plain `http://` repositories need no `tls` at all.
+  *Not yet verified on a Windows machine* — the store path is from tcltls's own
+  documentation (INSTALL.md §1 has the full order).
 - **Remote core (Windows client → Linux core)** — the most capable path, and the one
   with the least Windows-native risk. The GUI is a thin client; connected to a remote
   core it supports **whatever that core supports**, and since the core runs on Linux the

@@ -2521,6 +2521,8 @@ dependency (INSTALL.md's promise that a GUI-only box needs no tcltls holds).
 **Plain `http://` only — rio implements no TLS of its own** (user decision:
 operators front a webdir with relayd/nginx if they want https; rio-side TLS
 is a ROADMAP deferral; `https://` is a clean `bad_request` with that advice).
+*[Superseded by D109: `https://` is supported beside http, verified against the
+core host's own CA store; http remains first-class.]*
 Themes install core-side through new ops — `theme.list` / `theme.put`
 (validated before written) / `theme.delete` (user dir only; shipped themes
 are the installation, not user state) — which also turned the GUI's
@@ -5978,6 +5980,84 @@ changed, and the label promising to seed from a multi-line selection. The item l
 `docs/editor.md` prints is a **derived fact** and joins §7's register — `docs.tcl` builds
 the real menu and holds the page against it both ways.
 
+### D109 — https repositories, beside http, trusted from the host's own store
+
+**jka (2026-09-12):** bring https to the extension store, *"use the OS cert store for
+each platform"* — and *"pure HTTP should be a first-class supported way anyways. like
+with debian sources, https is an option, not an obligation."* D39 had made repositories
+plain-http only and named "https via tcltls" as the deferred candidate; tcltls was
+already a core dependency for the agent, so no new dependency was needed.
+
+**Where TLS was before: one private copy.** `plugins/lib/transport.tcl` (the providers'
+transport) set `-require 1` and picked a `-cafile` from three Unix paths. On **Windows**
+none of them exist, so it demanded verification with nothing to verify against — a
+hosted provider there depended on wherever the build's OpenSSL happened to look, which is
+usually nowhere. Nobody had noticed, because every suite is offline. The same seam
+serves both callers, so it moved into the core.
+
+**`rio-core/tls.tcl` (`rio::tls`) owns the policy for every https connection the core
+makes** — a repository fetch and an agent turn verify identically. CA source, first match:
+`SSL_CERT_FILE`/`SSL_CERT_DIR` (OpenSSL's own override, passed *explicitly* so it means
+the same on tcltls 1.7 and on LibreSSL); the system bundle; on Windows,
+`-castore org.openssl.winstore://` when tcltls is 1.8+ on OpenSSL 3.2+; otherwise
+nothing — **and `-require 1` regardless**, so the handshake fails closed. `ca_opts` is a
+pure function of platform, environment and versions, so every branch is tested on any host.
+
+**A bundled CA store was rejected, not deferred.** The bytes are trivial; the upkeep is
+not: rio would become a certificate distributor with a refresh duty, a stale bundle
+either breaks sites or trusts revoked roots, and it would ignore the roots an admin
+installed — precisely the self-hosted, private-CA publisher rio's repositories are for.
+On Unix "the OS store" *is* a file the package manager maintains; using it is free.
+
+**Host names — found by testing, not assumed.** A trusted chain only proves a CA vouched
+for *some* name. A loopback probe established that tcltls **1.8.0 checks the name**
+(`-servername` → `SSL_add1_host`; a trusted certificate for `other.example` served to
+`localhost` fails *hostname mismatch*), and 1.7.22 carries no such call. So an https
+**repository** requires tcltls 1.8 and says so otherwise — an https URL that doesn't
+verify the host would be a promise rio can't keep. The **agent** on a 1.7 core is left
+as it was (it verifies the chain, not the name): tightening it would break existing
+hosted-provider users, and that is jka's call — **open**, see below.
+
+**http stays first-class, concretely.** tcltls loads lazily on the first https
+connection, so a core without it serves http repositories exactly as before (a test
+proves a plain fetch never asks for it). No warning, badge or nudge attaches to http
+anywhere; the sources dialog accepts both schemes with the same words. **One redirect
+rule protects the user's choice: https → http is refused** (apt refuses it too), http →
+https is followed, and a scheme-relative `//host` Location inherits the base's scheme.
+
+**Two things the UI had to learn.** A refused certificate reached the user as http's
+*"failed to use socket"* — for the agent, *"Couldn't reach Claude — check your
+connection"*, which sends them to the wrong problem. tcltls 1.8's `-command` callback
+carries the real reason; `rio::tls::explain` puts it back (*self-signed certificate*,
+*hostname mismatch*) and names `SSL_CERT_FILE` when trusting a CA is the fix. (Only on
+1.8: 1.7's `-command` still answers certificate verdicts, so an ignoring callback would
+not be harmless there.) And **source identity ignores the scheme** — D107 offers updates
+only from the repository an extension was installed from, compared as a URL string, so
+moving `http://host/rio` to `https://host/rio` would have turned every installed
+extension foreign overnight. `source_same` compares without the scheme, at all four
+places identity is decided (update, Update All's grouping, `[installed]`, "older than").
+
+**Guards.** New `rio-core/tests/tls.test` (22): every CA branch, the explanation, the
+missing-tcltls and too-old-tcltls refusals, the lazy load — and a **real loopback
+half**, a child server (`tls-server.tcl`) with throwaway certificates `openssl`
+generates per run: a verified fetch, an untrusted certificate refused with the hint, a
+*trusted* certificate for the wrong name refused, the downgrade refused, the upgrade
+followed, and `-require` present with no CA source at all (skipped, not failed, without
+tcltls 1.8 or `openssl`). `http.test` gained the https `_resolve` cases; `repos.tcl`
+the https source and the scheme-move. Six injections, each failing by name: the
+downgrade allowed, `-require` dropped, tcltls loaded eagerly, `//host` hard-wired to
+http, the 1.8 gate removed, and `source_same` reverted to `eq` — plus a seventh for the
+register row, an undocumented bundle path. Core 640 → 665; the
+providers' and plugins/lib suites unchanged (14/14 with `transport.tcl` now sourcing
+`tls.tcl` standalone). INSTALL's list of trusted locations is a derived fact and joins
+§7's register, guarded from `tls.test`.
+
+**Open, for jka:** (1) the agent on tcltls 1.7 still accepts a trusted certificate for
+the wrong host — refuse like repositories do, or leave it; (2) the Windows store path is
+from tcltls's documentation and has not run on Windows; (3) the pre-configured
+`http://rio.skylm.org/rio` stays http — switching it is a one-line change once that host
+serves https, and `source_same` means nobody's installs notice.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -6509,6 +6589,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
 | the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
 | the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
+| `rio::tls::bundles` (D109) | the system CA locations INSTALL.md §1 lists | `tls.test` — both directions |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
@@ -6586,7 +6667,7 @@ status changes, rather than pretending a test could hold it.
 - **MCP** — Model Context Protocol; a JSON-RPC standard for exposing
   tools/resources to LLM apps. Candidate basis for rio's provider/tool
   interfaces (D20, O12).
-- **extension repository** — a plain http-served directory carrying
+- **extension repository** — a plain directory served over http or https, carrying
   `rio-repository.conf`, an optional `index`, and one subdirectory per
   extension; named in the user's `sources.list`. No central index (D39).
 - **provenance ledger** — the GUI-side record of installed extensions

@@ -6,8 +6,8 @@
 #
 # Trust posture: like exec.run, this op is as open as the channel it arrives
 # on (D30 — whoever may talk to the core may use its network). It fetches
-# from PLAIN http:// only; https is refused up front — rio implements no TLS
-# for repositories (front the webdir with relayd/nginx, or wait; ROADMAP).
+# http:// or https:// (D109): plain http is first-class, https an option that
+# needs tcltls 1.8+ on the core's host (rio::http / rio::tls say so when absent).
 #
 # Re-entrancy: a fetch pumps the event loop while it waits (rio::http header),
 # and touches no document state — other requests interleaving with it is safe.
@@ -21,12 +21,8 @@ proc rio::ops::repo_fetch {params} {
 		rio::error::raise bad_request "repo.fetch requires url"
 	}
 	set url [dict get $params url]
-	if {[regexp -nocase {^https://} $url]} {
-		rio::error::raise bad_request \
-			"https is not supported yet — use an http:// repository (or front it with a proxy)"
-	}
-	if {![regexp -nocase {^http://} $url]} {
-		rio::error::raise bad_request "repo.fetch takes an http:// url, got: $url"
+	if {![regexp -nocase {^https?://} $url]} {
+		rio::error::raise bad_request "repo.fetch takes an http:// or https:// url, got: $url"
 	}
 	set timeout [expr {[dict exists $params timeout] ? [dict get $params timeout] : 15000}]
 	if {![string is integer -strict $timeout] || $timeout <= 0} {
