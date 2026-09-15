@@ -21,7 +21,8 @@
 # theme, not an archive, and the wire protocol carries the text onward. A
 # COMPLETED exchange is data, whatever the status (a 404 tells the scanner "no
 # index file here — try autoindex"); only not getting an answer — connection
-# failure, timeout, the size cap, a redirect loop — raises io_error.
+# failure, timeout, the size cap, a redirect loop — raises io_error; a certificate
+# rio::tls refused raises untrusted_cert instead (D111).
 #
 # Re-entrancy: the synchronous ::http::geturl pumps the event loop while it
 # waits (its internal vwait), so other requests can arrive mid-fetch. That is
@@ -107,6 +108,27 @@ proc rio::http::_require_tls {} {
 	}
 }
 
+# Raise a failed fetch. For https, put the certificate's reason back into http's "failed to
+# use socket" (rio::tls::explain), and when rio::tls refused the certificate itself say so
+# with its own code, untrusted_cert (D111): that is the one failure the user can act on
+# from the Extensions window — review the certificate and accept it — so a client must be
+# able to tell it apart without reading the prose.
+proc rio::http::_fail {here scheme why} {
+	if {$scheme eq "https"} {
+		set why [rio::tls::explain $why]
+		set origin [rio::tls::origin_of $here]
+		set r [rio::tls::take_refusal $origin]
+		if {$r ne ""} {
+			if {[dict get $r changed]} {
+				append why ". It is NOT the certificate you accepted for $origin — the server's certificate has changed since"
+			}
+			append why ". You can review the certificate and accept it in the Extensions window"
+			rio::error::raise untrusted_cert "fetch $here failed: $why"
+		}
+	}
+	rio::error::raise io_error "fetch $here failed: $why"
+}
+
 proc rio::http::get {url {timeout_ms 15000}} {
 	variable maxhops
 	set here $url
@@ -121,23 +143,23 @@ proc rio::http::get {url {timeout_ms 15000}} {
 		}
 		if {$scheme eq "https"} { _require_tls }
 		set prev $scheme
+		if {$scheme eq "https"} { rio::tls::take_refusal [rio::tls::origin_of $here] }
 		if {[catch {
 			::http::geturl $here -timeout $timeout_ms \
 				-progress rio::http::_progress
 		} tok]} {
-			if {$scheme eq "https"} { set tok [rio::tls::explain $tok] }
-			rio::error::raise io_error "fetch $here failed: $tok"
+			_fail $here $scheme $tok
 		}
 		if {[::http::status $tok] ne "ok"} {
 			set why [::http::error $tok]
 			if {$why eq ""} { set why [::http::status $tok] }
 			::http::cleanup $tok
-			if {$scheme eq "https"} { set why [rio::tls::explain [lindex $why 0]] }
+			if {$scheme eq "https"} { set why [lindex $why 0] }
 			if {$why eq "toobig"} {
 				variable maxbody
 				set why "response exceeds the $maxbody byte cap"
 			}
-			rio::error::raise io_error "fetch $here failed: $why"
+			_fail $here $scheme $why
 		}
 		set ncode [::http::ncode $tok]
 		if {$ncode in {301 302 303 307 308}} {

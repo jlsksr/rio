@@ -7555,7 +7555,7 @@ proc session_restore {} {
 set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed ?anysource?} (ledger_load)
 set ::provider_api_max 1 ;# highest provider-api the core loads (provider.list; D66)
 set ::repo_variants {}  ;# every installable variant found by the last scan
-set ::repo_dead {}      ;# {url error} per unreachable/non-repository source
+set ::repo_dead {}      ;# {url error code} per unreachable/non-repository source
 set ::repo_srcinfo {}   ;# source url -> {name description} from its manifest
 set ::ext_core_providers {} ;# name -> {version source} from provider.list (D107)
 set ::ext_installed {} ;# "kind/name" -> {version source} — what is installed, ledger + core
@@ -7759,15 +7759,17 @@ proc ledger_save {} {
 # --- fetching & scanning ------------------------------------------------------
 
 # The one fetch seam: repo.fetch through the core, never throwing — the return
-# is {ok 1 status <n> text <t>} or {ok 0 error <msg>}. Tests stub THIS proc
-# with a fixture table (no network in tests, D39).
+# is {ok 1 status <n> text <t>} or {ok 0 error <msg> code <code>}. `code` is the
+# taxonomy's (D11) — untrusted_cert is the one the window acts on (D111). Tests stub
+# THIS proc with a fixture table (no network in tests, D39).
 proc repo_fetch {url} {
 	set resp [rio_call repo.fetch [dict create url $url]]
 	if {[dict get $resp ok]} {
 		return [dict create ok 1 status [dict get $resp result status] \
 			text [dict get $resp result text]]
 	}
-	return [dict create ok 0 error [dict get $resp error message]]
+	return [dict create ok 0 error [dict get $resp error message] \
+		code [dict get $resp error code]]
 }
 
 # The `index` file: one extension-subdir name per line, # comments. A line
@@ -7807,7 +7809,8 @@ proc repo_source_scan {base} {
 	set base [string trimright $base /]
 	set r [repo_fetch $base/rio-repository.conf]
 	if {![dict get $r ok]} {
-		return [dict create ok 0 error [dict get $r error]]
+		return [dict create ok 0 error [dict get $r error] \
+			code [expr {[dict exists $r code] ? [dict get $r code] : ""}]]
 	}
 	if {[dict get $r status] != 200
 			|| [catch {rio::conf::parse [dict get $r text]} conf]
@@ -7883,7 +7886,8 @@ proc repo_scan_all {{progress ""}} {
 		if {$progress ne ""} { {*}$progress $src $n [llength $srcs] }
 		set s [repo_source_scan $src]
 		if {![dict get $s ok]} {
-			lappend ::repo_dead [list $src [dict get $s error]]
+			lappend ::repo_dead [list $src [dict get $s error] \
+				[expr {[dict exists $s code] ? [dict get $s code] : ""}]]
 			continue
 		}
 		dict set ::repo_srcinfo $src [dict create \
@@ -8528,7 +8532,7 @@ proc extw_rows_build {} {
 			variants $vars desc $desc]
 	}
 	foreach d $::repo_dead {
-		lappend rows [dict create dead 1 url [lindex $d 0] error [lindex $d 1]]
+		lappend rows [dict create dead 1 url [lindex $d 0] error [lindex $d 1] code [lindex $d 2]]
 	}
 	return $rows
 }
@@ -8550,7 +8554,8 @@ proc extw_fill {} {
 		if {[dict exists $row dead]} {
 			if {$filter ne "" && ![string match *$filter* [string tolower [dict get $row url]]]} continue
 			lappend ::extw_rows $row
-			.extw.body.list insert end "!! [dict get $row url] — unreachable"
+			.extw.body.list insert end "!! [dict get $row url] — [expr {
+				[dict get $row code] eq "untrusted_cert" ? "certificate not trusted" : "unreachable"}]"
 			.extw.body.list itemconfigure end -foreground [dict get $c error]
 			continue
 		}
@@ -8632,6 +8637,16 @@ proc extw_select {} {
 			-text "[dict get $row url]\n[dict get $row error]" \
 			-background [dict get $c ui.bg] -foreground [dict get $c error]
 		pack $det.err -fill x
+		# A refused certificate is the one dead source the user can do something about
+		# here: look at it, and accept it if it is theirs (D111). Offered for an https
+		# source only — an http one refused on a redirect has no certificate of its own
+		# to show, and its message already names the certificate that was refused.
+		if {[dict get $row code] eq "untrusted_cert" && [regexp -nocase {^https://} [dict get $row url]]} {
+			button $det.review -text "Review certificate…" -font RioUIFont \
+				-state [expr {$::repo_busy ? "disabled" : "normal"}] \
+				-command [list extw_cert_review [dict get $row url] [dict get $row error]]
+			pack $det.review -anchor w -pady {4 0}
+		}
 		return
 	}
 	set head "[dict get $row name] — [dict get $row kind]"
@@ -8918,6 +8933,231 @@ proc extw_source_remove {} {
 	set url [.extsrc.body.list get $sel]
 	sources_save [lsearch -all -inline -not -exact [sources_load] $url]
 	.extsrc.body.list delete $sel
+}
+
+# --- a certificate that doesn't verify (AGENTS.md D111) ------------------------------------
+#
+# The browser's "Your connection is not private … Advanced" path. A repository whose
+# certificate the core refused lists as "certificate not trusted"; its detail pane offers
+# Review certificate…, which asks the CORE for the certificate (tls.inspect — the core's
+# network is the one that matters, D30) and shows what is wrong with it in plain words, its
+# details, and two buttons: Go Back, the default, and Accept the Risk and Continue.
+#
+# Accept sends the fingerprint THIS DIALOG SHOWED, never a fresh one: a server that swapped
+# certificates between the look and the click would otherwise get the second one accepted.
+# Modal, because it asks a question; opened only by the user's click, never by a scan or
+# the start-up check — one dialog per refused source is the cumbersome part avoided.
+
+# The inspect seam: tls.inspect through the core, never throwing. Tests stub THIS.
+proc tls_inspect {url} {
+	set resp [rio_call tls.inspect [dict create url $url]]
+	if {[dict get $resp ok]} { return [dict create ok 1 cert [dict get $resp result]] }
+	return [dict create ok 0 error [dict get $resp error message]]
+}
+
+# The problems tls.inspect reports, as sentences a user can weigh.
+proc cert_problem_lines {cert} {
+	set host [dict get $cert host]
+	set lines {}
+	foreach p [dict get $cert problems] {
+		switch -- $p {
+			changed {
+				set lines [linsert $lines 0 "This is NOT the certificate you accepted for $host:[dict get $cert port]. If you didn't replace it on the server, someone may be impersonating it."]
+			}
+			untrusted {
+				lappend lines "It is issued by an authority this system doesn't trust — it is self-signed, or from a private certificate authority."
+			}
+			expired {
+				lappend lines "It expired on [dict get $cert not_after]."
+			}
+			not_yet_valid {
+				lappend lines "It isn't valid until [dict get $cert not_before]."
+			}
+			name_mismatch {
+				set names [join [dict get $cert names] ", "]
+				if {$names eq ""} { set names [dict get $cert subject] }
+				lappend lines "It was issued for $names, not for $host."
+			}
+			default {
+				lappend lines "It was refused: [join [dict get $cert reasons] {; }]."
+			}
+		}
+	}
+	return $lines
+}
+
+proc extw_cert_review {url {fetch_error ""}} {
+	if {$::repo_busy} return
+	extw_busy 1
+	extw_status "getting the certificate of [host_of $url]…"
+	update idletasks
+	set r [tls_inspect $url]
+	extw_busy 0
+	extw_status ""
+
+	set w .extcert
+	destroy $w
+	toplevel $w
+	wm title $w "Certificate not trusted"
+	wm transient $w [expr {[winfo exists .extw] ? ".extw" : "."}]
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set wrap 460
+	set ::extw_cert_choice ""
+	set cert [expr {[dict get $r ok] ? [dict get $r cert] : {}}]
+	set askable [expr {$cert ne "" && [llength [dict get $cert problems]] && ![dict get $cert accepted]}]
+
+	frame $w.btns -background [dict get $c ui.bg]
+	if {$askable} {
+		set origin "[dict get $cert host]:[dict get $cert port]"
+		label $w.head -anchor w -justify left -wraplength $wrap -font RioUIFont \
+			-text "rio can't confirm that $origin is the server it claims to be. Someone could be impersonating it — or it is a server whose certificate isn't signed by an authority this system knows, such as your own." \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		pack $w.head -fill x -padx 8 -pady {8 4}
+		set i 0
+		foreach line [cert_problem_lines $cert] {
+			label $w.p$i -anchor w -justify left -wraplength $wrap -font RioUIFont \
+				-text "•  $line" -background [dict get $c ui.bg] -foreground [dict get $c error]
+			pack $w.p$i -fill x -padx 8 -pady 1
+			incr i
+		}
+		# The details are data to read and compare, so they sit in a bordered box, apart
+		# from the sentences around them (D68); selectable, so a fingerprint can be copied.
+		text $w.det -height 6 -width 64 -wrap word -font RioUIFont -relief solid \
+			-borderwidth 1 -highlightthickness 0 \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		set names [join [dict get $cert names] ", "]
+		foreach {k v} [list "Issued to" [dict get $cert subject] "Names" $names \
+				"Issued by" [dict get $cert issuer] \
+				"Valid" "[dict get $cert not_before] – [dict get $cert not_after]" \
+				"SHA-256" [dict get $cert sha256]] {
+			if {$v eq ""} continue
+			$w.det insert end [format "%-10s %s\n" $k: $v]
+		}
+		$w.det delete "end-1c" end
+		$w.det configure -state disabled
+		pack $w.det -fill x -padx 8 -pady {6 4}
+		label $w.hint -anchor w -justify left -wraplength $wrap -font RioUIFont \
+			-text "Accept only if you know this is the server's own certificate — for example, compare the SHA-256 fingerprint with the one on the server. rio then trusts exactly this certificate for $origin, and asks again if it ever changes. To trust every server of a private certificate authority instead, set SSL_CERT_FILE on the core's host." \
+			-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+		pack $w.hint -fill x -padx 8 -pady {2 6}
+		button $w.btns.back -text "Go Back" -font RioUIFont -default active \
+			-command [list destroy $w]
+		button $w.btns.accept -text "Accept the Risk and Continue" -font RioUIFont \
+			-command [list apply {{w} { set ::extw_cert_choice accept ; destroy $w }} $w]
+		pack $w.btns.back -side right
+		pack $w.btns.accept -side left
+		set focus $w.btns.back
+	} else {
+		if {$cert eq ""} {
+			set msg "rio couldn't get the certificate: [dict get $r error]"
+		} elseif {[dict get $cert accepted]} {
+			set msg "This certificate is already accepted for [dict get $cert host]:[dict get $cert port]. Refresh the list to fetch from it."
+		} else {
+			set msg "The certificate of [dict get $cert host]:[dict get $cert port] verifies, so the refused one belongs to another server — perhaps one this repository redirects to — and rio can't show it here."
+		}
+		if {$fetch_error ne ""} { append msg "\n\n$fetch_error" }
+		label $w.head -anchor w -justify left -wraplength $wrap -font RioUIFont -text $msg \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		pack $w.head -fill x -padx 8 -pady {8 6}
+		button $w.btns.back -text Close -font RioUIFont -default active -command [list destroy $w]
+		pack $w.btns.back -side right
+		set focus $w.btns.back
+	}
+	pack $w.btns -fill x -padx 8 -pady {2 8}
+	bind $w <Escape> [list destroy $w]
+	bind $w <Return> [list destroy $w]
+	catch {grab $w}
+	focus $focus
+	tkwait window $w
+
+	if {$::extw_cert_choice ne "accept"} return
+	set resp [rio_call tls.accept [dict create host [dict get $cert host] \
+		port [dict get $cert port] sha256 [dict get $cert sha256] subject [dict get $cert subject]]]
+	if {![dict get $resp ok]} {
+		report_error "Couldn't accept the certificate: [dict get $resp error message]"
+		return
+	}
+	if {[winfo exists .extw]} { extw_refresh }
+}
+
+# Preferences ▸ Extensions ▸ Accepted certificates…: every exception the core holds, and a
+# way to take one back — a browser always offers that, and so does rio (D111). The list is
+# the core's certificates.conf, read through tls.accepted each time it is filled.
+proc certs_dialog {} {
+	set w .certs
+	destroy $w
+	toplevel $w
+	wm title $w "Accepted certificates"
+	wm transient $w [expr {[winfo exists .prefs] ? ".prefs" : "."}]
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.hint -anchor w -justify left -wraplength 480 -font RioUIFont \
+		-text "Certificates you accepted although they did not verify. Each is trusted only on its own host and port, and only while the server presents that exact certificate. They are kept in certificates.conf on the core's host." \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.certs.body.list yview}
+	listbox $w.body.list -height 6 -width 72 -activestyle none -exportselection 0 \
+		-borderwidth 1 -relief solid -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg] \
+		-yscrollcommand {autoscroll .certs.body.sb .certs.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+	label $w.status -anchor w -justify left -wraplength 480 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c error]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.rm    -text "Remove selected" -font RioUIFont -command certs_remove
+	button $w.btns.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right
+	pack $w.btns.rm    -side left
+	grid $w.hint   -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
+	grid $w.body   -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.status -row 2 -column 0 -sticky we   -padx 8
+	grid $w.btns   -row 3 -column 0 -sticky we   -padx 8 -pady {4 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	certs_fill
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.body.list
+	tkwait window $w
+}
+
+set ::certs_rows {}   ;# the exceptions behind .certs.body.list, in its order
+
+proc certs_fill {} {
+	if {![winfo exists .certs]} return
+	.certs.body.list delete 0 end
+	set ::certs_rows {}
+	set resp [rio_call tls.accepted {}]
+	# The call pumps the event loop, and the dialog may have been closed meanwhile.
+	if {![winfo exists .certs]} return
+	if {![dict get $resp ok]} {
+		.certs.status configure -text "The core couldn't list accepted certificates: [dict get $resp error message]"
+		return
+	}
+	.certs.status configure -text ""
+	foreach e [dict get $resp result exceptions] {
+		lappend ::certs_rows $e
+		set line "[dict get $e host]:[dict get $e port]"
+		if {[dict get $e subject] ne ""} { append line "  —  [dict get $e subject]" }
+		append line "  —  SHA-256 [string range [dict get $e sha256] 0 22]…"
+		if {[dict get $e accepted] ne ""} { append line "  (accepted [dict get $e accepted])" }
+		.certs.body.list insert end $line
+	}
+}
+
+proc certs_remove {} {
+	set sel [.certs.body.list curselection]
+	if {$sel eq ""} return
+	set e [lindex $::certs_rows $sel]
+	set resp [rio_call tls.forget [dict create host [dict get $e host] port [dict get $e port]]]
+	if {![winfo exists .certs]} return
+	if {![dict get $resp ok]} {
+		.certs.status configure -text "Couldn't remove it: [dict get $resp error message]"
+		return
+	}
+	certs_fill
 }
 
 # ---------------------------------------------------------------------------
@@ -10166,6 +10406,8 @@ proc prefs_fill_extensions {f} {
 	grid [prefs_button $f.ext "Extensions…" extensions_window] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
+		-row [incr r] -column 0 -sticky w -pady {2 2}
+	grid [prefs_button $f.certs "Accepted certificates…" certs_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 

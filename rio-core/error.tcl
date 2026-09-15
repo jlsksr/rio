@@ -13,6 +13,8 @@
 #   no_path     — a save needs a path and the buffer has none
 #   bad_index   — a line.col index is out of range or malformed
 #   io_error    — a file could not be read or written
+#   untrusted_cert — an https server's certificate did not verify and no exception
+#                 accepts it (D111); tls.inspect shows it, tls.accept accepts it
 #   internal    — an unexpected failure (an uncaught Tcl error); a bug
 #
 # `internal` is the catch-all the dispatcher assigns to any error raised WITHOUT
@@ -20,7 +22,7 @@
 # still reaches the client as a clean reply instead of leaking a stack trace.
 
 namespace eval rio::error {
-	variable codes {bad_request unknown_op no_buffer no_path bad_index io_error internal}
+	variable codes {bad_request unknown_op no_buffer no_path bad_index io_error untrusted_cert internal}
 }
 
 # Raise a failure carrying a taxonomy code. Called inside op handlers; the

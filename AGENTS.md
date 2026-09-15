@@ -6123,6 +6123,149 @@ matches text, so a new provider on an old core simply never takes it.
   branch removed.
 - Suite totals: core 665 → 673, plugins/lib 14 → 20, claude 54 → 55, openai 57 → 58.
 
+### D111 — a certificate that doesn't verify can be accepted, that one, like a browser does
+
+**jka (2026-09-15):** *"what about certificates that expired? or certificates that are
+not validated by a 'global' CA? the extension browser should behave like a web browser
+with such cases: let the user decide to accept the 'risky' path (.. accept the privately
+issued cert etc..) Security by default, but not cumbersome."*
+
+**Before this,** an https repository whose certificate failed verification was simply
+dead. The only remedy was `SSL_CERT_FILE` on the core's host plus a restart, which suits
+a private CA but cannot help an expired certificate or one issued for another name.
+
+**The browser model, adopted whole:**
+- Refuse by default.
+- Say why, and show the certificate.
+- Make **Go Back** the default button, beside **Accept the Risk and Continue**.
+- Remember the exception, and let it be taken back.
+
+**What an exception is: a pin, not a switch.** It is the SHA-256 fingerprint of the
+server's own (leaf) certificate, filed under `host:port`:
+- It covers every way *that certificate* fails: an untrusted issuer, expiry, another
+  name.
+- A different certificate on the same host and port is refused, and the message and the
+  review both say it **changed**. That is the one moment an impersonator becomes
+  visible, so it is said first, in the error colour.
+- A certificate that verifies normally never consults exceptions, so a stale one can't
+  break a site that later gets a real certificate.
+- A pin on one port says nothing about another.
+
+"Trust this host" was rejected because it would accept whatever certificate the host
+presents next, which is exactly the impersonation the refusal exists to stop.
+
+**Where it lives: the core, in `rio::tls`.**
+- **Core-side:** the certificate is the one the core sees on its own network (D30), so
+  the file is `$XDG_CONFIG_HOME/rio/certificates.conf` on the core's host.
+  - One section per `host:port`, in the D21 format, parsed and never executed.
+  - A malformed file, or an entry without a valid fingerprint, is no exception, so every
+    way the file can be wrong falls to the refusing side.
+  - It is read each time a chain fails, so a hand edit counts without a restart.
+- **In `rio::tls`, not the repository code,** because a pin is a statement about a
+  server's certificate, not about which feature dials it. Every https connection the core
+  makes honours it, the agent's included. Scoping it to repositories was also impractical:
+  both callers share one `http::register` handler, so it would have needed a caller flag
+  threaded through http's event loop, which is racy.
+- **The API-key worry doesn't apply.** The agent only ever reaches a pinned server by
+  dialling that exact host and port and being handed that exact certificate.
+
+**How a chain is judged — probed first, not assumed.** tcltls 1.8's `-validatecommand` is
+called per certificate, top of the chain first. Probing 1.8.0 on OpenSSL 3.4 against
+self-signed, wrong-name, expired, and private-CA chains (via `openssl s_server`, since
+tcltls's server sends only the leaf) established:
+- the last call is always at depth 0, for the leaf;
+- the certificate data includes `sha256_hash`;
+- a callback that raises fails the handshake.
+
+So a failure higher in the chain passes provisionally, and only if that `host:port` has
+an exception at all. The verdict comes at depth 0, against the leaf. Faults inside the
+check refuse. On tcltls 1.7, which lacks the option, nothing changes; repositories refuse
+there anyway (D109).
+
+**Reviewing sends nothing.** `rio::tls::inspect` completes a handshake with a callback
+that accepts everything and records every failure, then closes before any request. A
+loopback test counts the server's requests to prove it. It opens a plain TCP connection
+first and stacks TLS on top, because a tcltls socket opened `-async` never reports a
+refused connection: the review would have sat out its whole timeout (found by probe).
+
+**The fingerprint accepted is the one the user was shown.** `tls.accept` takes host,
+port and fingerprint from the dialog. It never fetches the certificate afresh, which
+would let a server swap certificates between the look and the click. The GUI calls
+inspect exactly once, and a test makes a second call return a different certificate.
+
+**A client can tell this failure apart.** The error taxonomy (D11/O2) gains
+`untrusted_cert`, raised by `rio::http` when `rio::tls` itself refused the chain. It is
+the only failure where a client does something different, so a code rather than prose.
+The message still carries OpenSSL's reason, the `SSL_CERT_FILE` hint, and the way to
+accept. The noise reason *"no digest set"*, OpenSSL echoing the callback's refusal, is
+dropped from the explanation.
+
+**Not cumbersome, specifically:**
+- Nothing pops up during a scan or the start-up update check (D107); one dialog per
+  refused source is the cumbersome part avoided.
+- The source lists as *certificate not trusted* rather than *unreachable*, and its
+  detail pane offers **Review certificate…**.
+- The problems are sentences: "It expired on …", "It was issued for other.example, not
+  for repo.example".
+- The details (issued to, names, issued by, validity, SHA-256) sit in a bordered,
+  selectable box (D68), so the fingerprint can be copied and compared.
+- *Preferences ▸ Extensions ▸ Accepted certificates…* lists every exception and removes
+  one through the core.
+
+**Known limits:**
+- **Redirects.** If a repository redirects to *another* https server that refuses, the
+  review inspects the repository's own origin, which verifies. The dialog says so and
+  offers no Accept, rather than guessing.
+- **http sources.** An http source refused on a redirect gets no review button.
+- **The agent.** It honours exceptions but has no prompt of its own (ROADMAP).
+- **No revocation, by design.** An accepted certificate is trusted until it changes or is
+  removed. That is the browser's behaviour too.
+
+**Ops, all core-side (`rio-core/ops-tls.tcl`):**
+- `tls.inspect {url ?timeout?}`
+- `tls.accept {host port sha256 ?subject?}`
+- `tls.accepted {}`
+- `tls.forget {host port}`
+
+Encoders for `tls.inspect` and `tls.accepted` name their keys, and each has a wire guard
+(the D110 lesson).
+
+**Guards.**
+- **`tls.test`** 22 → 45:
+  - pure: fingerprint forms, origins, the file round trip, bad entries, a fault refusing,
+    the provisional-above-leaf rule;
+  - loopback: inspect (self-signed with no request sent, wrong name, expired, verified,
+    changed, unreachable in under the timeout), and exceptions (accepted by its
+    fingerprint, another certificate refused as changed, per port, wrong name, expired, a
+    verified certificate ignoring a stale pin, a malformed file, a chain failing above the
+    leaf accepted only on the leaf's pin and not the CA's);
+  - the callback's presence on 1.8 and absence on 1.7.
+  - The expired case needs `openssl req -not_after`, and the chain case `openssl
+    s_server`; each is skipped where missing.
+- **New `tls-ops.test`** (11): accept/list/forget, bad requests, the inspect op's origin
+  and failures, both wire guards, the taxonomy.
+- **`repos.tcl`** +29: the row wording, Review only for a refused https source, Go Back
+  default with focus and nothing stored, the problems and details shown, Accept storing
+  the shown fingerprint after one inspect and refetching, `certificates.conf` readable,
+  changed said first in the error colour, no Accept when nothing can be accepted, and the
+  Accepted certificates dialog listing and removing.
+- **`prefs_window.tcl`** +1.
+- **Twelve injections,** each failing by name:
+  - a pin accepting any leaf;
+  - a failure above the leaf unrecorded;
+  - a pin across ports;
+  - a verified chain consulting pins;
+  - a malformed file read leniently;
+  - `untrusted_cert` reverted to `io_error`;
+  - the wire dropping `names`;
+  - Accept re-inspecting;
+  - Accept as the default;
+  - Review offered for any dead source;
+  - Accept offered with no problem;
+  - the row wording.
+- **Suite totals:** core 673 → 707; the GUI suites 1737 checks, all passing; providers
+  and plugins/lib unchanged.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -6283,7 +6426,8 @@ Both renderings come from the **same** region model (D13) and layout policy
   `{code, message}`, not a bare string: a stable machine-readable `code` clients
   branch on, plus a human `message` for display/logging. The vocabulary is
   deliberately small — `bad_request`, `unknown_op`, `no_buffer`, `no_path`,
-  `bad_index`, `io_error`, `internal` (the catch-all for any uncaught Tcl error,
+  `bad_index`, `io_error`, `untrusted_cert` (added by D111: the one failure a client
+  acts on differently), `internal` (the catch-all for any uncaught Tcl error,
   so an overlooked failure still returns a clean reply, never a stack trace). An
   op raises `rio::error::raise <code> <message>`, which rides the code on Tcl's
   `-errorcode`; `dispatch` reads it back and shapes the reply (`rio-core/error.tcl`,

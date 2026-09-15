@@ -15,7 +15,8 @@
 # repo.fetch {url ?timeout?} -> {status <ncode> url <final-url> text <body>}
 # A completed exchange is data whatever the status (a 404 is an answer); only
 # not getting an answer — connect failure, timeout, cap, redirect loop — is an
-# io_error. `timeout` is in milliseconds.
+# io_error, or untrusted_cert when it was an https certificate the core refused
+# (D111: the client can offer tls.inspect / tls.accept). `timeout` is in milliseconds.
 proc rio::ops::repo_fetch {params} {
 	if {![dict exists $params url]} {
 		rio::error::raise bad_request "repo.fetch requires url"
