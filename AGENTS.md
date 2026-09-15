@@ -6016,7 +6016,8 @@ for *some* name. A loopback probe established that tcltls **1.8.0 checks the nam
 **repository** requires tcltls 1.8 and says so otherwise — an https URL that doesn't
 verify the host would be a promise rio can't keep. The **agent** on a 1.7 core is left
 as it was (it verifies the chain, not the name): tightening it would break existing
-hosted-provider users, and that is jka's call — **open**, see below.
+hosted-provider users, and that is jka's call — **open**, see below. *[Decided by D110:
+the agent refuses too, unless the user allows it in Preferences ▸ Agent.]*
 
 **http stays first-class, concretely.** tcltls loads lazily on the first https
 connection, so a core without it serves http repositories exactly as before (a test
@@ -6053,10 +6054,74 @@ providers' and plugins/lib suites unchanged (14/14 with `transport.tcl` now sour
 §7's register, guarded from `tls.test`.
 
 **Open, for jka:** (1) the agent on tcltls 1.7 still accepts a trusted certificate for
-the wrong host — refuse like repositories do, or leave it; (2) the Windows store path is
-from tcltls's documentation and has not run on Windows; (3) the pre-configured
-`http://rio.skylm.org/rio` stays http — switching it is a one-line change once that host
-serves https, and `source_same` means nobody's installs notice.
+the wrong host — refuse like repositories do, or leave it *[decided: D110]*; (2) the
+Windows store path is from tcltls's documentation and has not run on Windows; (3) the
+pre-configured `http://rio.skylm.org/rio` stays http — switching it is a one-line change
+once that host serves https, and `source_same` means nobody's installs notice.
+
+### D110 — the agent refuses https it can't fully verify, unless the user allows it
+
+**jka (2026-09-15),** on D109's first open item: *"Make this a settings option for the
+user — default to the more secure behaviour."*
+
+**The gap.** A tcltls older than 1.8 checks a certificate's chain but never compares its
+name with the host (D109 proved which versions do). On such a core the agent would accept
+any certificate a trusted CA issued for *any* host as though it were the provider's.
+Repositories already refused there; the agent was left alone only because refusing breaks
+hosted providers for anyone who can't upgrade tcltls.
+
+**Decision: refuse by default, with one opt-out.** On a tcltls < 1.8 an `https://` agent
+request is refused before anything is dialled, with a message that names both ways out —
+install tcltls 1.8+, or turn on *Preferences ▸ Agent ▸ "Allow https without host-name
+checks"*. The option changes nothing on a tcltls that checks names, and **plain `http://`
+is never gated**: a local Ollama or llama-server has nothing to verify and keeps working
+on any tcltls.
+
+**Agent only — repositories get no such switch.** The option exists for a compatibility
+case, and only the agent has one: hosted providers worked on 1.7 cores before today.
+https repositories arrived in D109, nobody depends on them, and http remains a
+first-class choice there, so the strict answer costs nothing.
+
+**The choice is the core's, stored in a file.** The tcltls in question is the core's
+(D30): for a remote core it is the server's, shared by every frontend attached to it —
+the same reasoning that puts the API key and the allow-list there. It lives in
+`$XDG_CONFIG_HOME/rio/agent/agent.conf`, beside `providers/`, in the flat D21/D24 format:
+`tls_unchecked_hostnames = allow`. That is the agent's own settings file — a provider's
+`.conf` keeps the keys that provider declares (D106), this one keeps the keys the core
+does. Only the word `allow` allows; absent, `refuse`, a typo, or a malformed file all read
+as refuse, so every failure falls to the secure side. It is read on every https request,
+not cached, so a hand edit counts without a restart.
+
+**Where the gate sits.** `plugins/lib/transport.tcl`'s `_ensure_tls` now takes the URL,
+for both seams — the streamed turn and the model-list GET. It asks
+`rio::agent::tls_unchecked_ok` at request time through `info commands`, so the transport
+stays standalone and load-order-free, and with no such command the answer is refuse. Ops:
+`agent.tls.set {unchecked}` writes the file (a non-boolean is a bad_request);
+`agent.status` gains `tls_unchecked`, which the GUI already reads on attach. The GUI's
+checkbox only asks the core and shows what the core stored, putting itself back on a
+refusal.
+
+**Two things found on the way.** The `agent.status` wire encoder lists its keys by name,
+so the new field was dropped on the way to the GUI while every core test passed (they
+call the op, not the wire). A new guard encodes the real op's result and demands the same
+key set, so the next field added can't vanish the same way. And both providers wrapped a
+status-0 error as *"Couldn't reach … — check your connection"*, which is exactly the
+wrong advice for a refusal that never dialled. Both now pass it through as its own
+`tls_unchecked` error: claude 1.1.2, openai 1.1.4. No provider-api bump: the branch only
+matches text, so a new provider on an old core simply never takes it.
+
+**Guards.**
+- `transport.test` +6: refused by default, refused when not allowed, allowed, the GET seam,
+  plain http ungated, and a name-checking tcltls ungated.
+- `agent-options.test` +8: the file's place and round trip, provider files untouched, the
+  refuse default, only `allow` allows, malformed reads as refuse, the op persisting both
+  ways, bad requests, and the wire guard.
+- One test in each provider; `prefs_window.tcl` +10.
+- Nine injections, each failing by name: the default flipped, the transport's
+  absent-command default flipped, the gate on http, the GET ungated, the wire field
+  dropped, the GUI writer not calling the core, attach not mirroring, and each provider's
+  branch removed.
+- Suite totals: core 665 → 673, plugins/lib 14 → 20, claude 54 → 55, openai 57 → 58.
 
 ---
 

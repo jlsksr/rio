@@ -380,18 +380,38 @@ proc rio::ops::agent_mode_set {params} {
 }
 rio::dispatch::register agent.mode.set rio::ops::agent_mode_set
 
-# agent.status -> {provider, auto_accept, mode, key_set} ; the agent's current settings,
-# so a frontend renders its menus/dialogs without holding the state itself (D3).
-# `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless one
-# like echo); per-provider key state is in agent.providers. All leaves are
-# strings — the default wire encoder applies.
+# agent.tls.set {unchecked} -> {unchecked} ; whether the agent may use https on a core
+# whose tcltls cannot check that a certificate belongs to the host it came from (older
+# than 1.8, D110). Off is the default and refuses such a connection. Stored in the core's
+# agent.conf — the tcltls in question is the core's, so the choice is this core's, for
+# every frontend attached to it. Changes nothing on a tcltls that checks host names.
+proc rio::ops::agent_tls_set {params} {
+	if {![dict exists $params unchecked]} {
+		rio::error::raise bad_request "agent.tls.set requires unchecked"
+	}
+	set v [dict get $params unchecked]
+	if {![string is boolean -strict $v]} {
+		rio::error::raise bad_request "agent.tls.set: unchecked must be 0 or 1, got: $v"
+	}
+	set on [rio::agent::set_tls_unchecked $v]
+	return [dict create result [dict create unchecked $on]]
+}
+rio::dispatch::register agent.tls.set rio::ops::agent_tls_set
+
+# agent.status -> {provider, auto_accept, mode, key_set, options, tls_unchecked} ; the
+# agent's current settings, so a frontend renders its menus/dialogs without holding the
+# state itself (D3). `key_set` is whether the ACTIVE provider has a key stored (0 for a
+# keyless one like echo); per-provider key state is in agent.providers. `tls_unchecked`
+# is agent.tls.set's choice (D110). All leaves are strings — the default wire encoder
+# applies.
 proc rio::ops::agent_status {params} {
 	return [dict create result [dict create \
 		provider    [rio::agent::provider_name] \
 		auto_accept [rio::agent::auto_accept] \
 		mode        [rio::agent::mode] \
 		key_set     [rio::agent::key_status] \
-		options     [rio::agent::options_summary]]]
+		options     [rio::agent::options_summary] \
+		tls_unchecked [rio::agent::tls_unchecked_ok]]]
 }
 rio::dispatch::register agent.status rio::ops::agent_status
 

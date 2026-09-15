@@ -216,6 +216,12 @@ Consequences:
 
 - **`tcltls` must be installed on the core's host.** A core without it fails the first
   hosted-provider turn with *"can't find package tls"* (the message names the fix).
+  With a `tcltls` **older than 1.8** — which never checks that a certificate belongs to
+  the host it came from — the agent **refuses https** by default (D110) and says so.
+  Upgrade `tcltls`, or, if that isn't possible on that host, allow it in
+  *Preferences ▸ Agent ▸ "Allow https without host-name checks"* (stored on the core's
+  host as `tls_unchecked_hostnames = allow` in `~/.config/rio/agent/agent.conf`). A
+  local model server over plain `http://` is unaffected either way.
 - **The API key is stored by the core**, in a 0600 file under
   `$XDG_DATA_HOME/rio/secrets/` (default `~/.local/share/rio/secrets/`) **on the core's
   host** — one file per provider (Claude's is `claude-api.secret`) — never in the GUI,
@@ -231,7 +237,7 @@ Consequences:
 
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,
 `agent.key.set` / `clear`, `agent.autoaccept.set`, `agent.mode.set`,
-`agent.option.set`, `agent.status`), so they behave the same against a local or
+`agent.option.set`, `agent.tls.set`, `agent.status`), so they behave the same against a local or
 remote core.
 
 ---

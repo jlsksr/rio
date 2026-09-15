@@ -208,6 +208,7 @@ set ::agent_mode_ui review ;# plan|review|auto — the two flags above as the th
                            ;# UI offers; DERIVED by agent_mode_sync, never a truth of its own (D102)
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
+set ::agent_tls_unchecked 0 ;# the core's choice: https on a tcltls without host-name checks (D110)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
@@ -4490,7 +4491,8 @@ proc adopt_agent_status {} {
 	set ::agent_provider    [dict get $st provider]
 	set ::agent_auto_accept [dict get $st auto_accept]
 	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
-	providers_menu_fill     ;# refresh the cache + the provider/key menus from the core
+	if {[dict exists $st tls_unchecked]} { set ::agent_tls_unchecked [dict get $st tls_unchecked] }
+	providers_menu_fill    ;# refresh the cache + the provider/key menus from the core
 	agent_options_refresh   ;# what this provider lets us choose, and what it chose (D106)
 	agent_mode_sync         ;# and the mode control, which repaints the strip
 }
@@ -4653,6 +4655,21 @@ proc agent_mode_set {} {
 		set ::agent_auto_accept $on
 	}
 	agent_mode_sync
+}
+
+# The writer behind Preferences ▸ Agent ▸ "Allow https without host-name checks" (D110).
+# The choice is the CORE's — its tcltls is the one in question, and every frontend attached
+# to it shares the answer — so the checkbutton only asks, and shows what the core stored.
+# A refusal puts the box back rather than leave it claiming a setting that isn't in force.
+proc agent_tls_set {} {
+	set want $::agent_tls_unchecked
+	set ::agent_tls_unchecked [expr {!$want}]
+	set r [rio_call agent.tls.set [dict create unchecked $want]]
+	if {![dict get $r ok]} {
+		report_error [dict get $r error message] [dict get $r error code]
+		return
+	}
+	set ::agent_tls_unchecked [dict get $r result unchecked]
 }
 
 # The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
@@ -10110,6 +10127,12 @@ proc prefs_fill_agent {f} {
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady 1
 	}
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
+	# The one security trade-off the agent offers (D110), off by default. It lives here, not
+	# in Settings: a fast switch it is not. The hint says what ticking it gives away.
+	grid [prefs_check $f.tls "Allow https without host-name checks (tcltls older than 1.8)" \
+		::agent_tls_unchecked agent_tls_set] -row [incr r] -column 0 -sticky w -pady {8 1}
+	grid [prefs_hint $f.tlshint "Off: on a core whose tcltls is older than 1.8, the agent refuses https — that tcltls accepts a valid certificate issued for any host, not just the provider's. Turn on only if tcltls can't be upgraded there. A newer tcltls always checks, and plain http is never affected."] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	set i 0
 	foreach p $::agent_providers {
 		if {![dict get $p keyed]} continue

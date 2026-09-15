@@ -141,6 +141,32 @@ ok "agent: the core is planning"    [dict get [rio_result agent.status {}] mode]
 .prefs.body.agent.mreview invoke
 ok "agent: and back to building"    [dict get [rio_result agent.status {}] mode] build
 
+# https without host-name checks (D110): a checkbox whose truth is the core's, off by
+# default, written to the core's agent.conf (the sandboxed XDG dir here) and mirrored back.
+set tlsconf [file join $::env(XDG_CONFIG_HOME) rio agent agent.conf]
+proc tlsconf_says {path} {
+	if {![file exists $path]} { return absent }
+	set fh [open $path] ; set t [read $fh] ; close $fh
+	return [expr {[regexp {tls_unchecked_hostnames = (\w+)} $t -> v] ? $v : "unset"}]
+}
+ok "tls: checkbox present"          [winfo class .prefs.body.agent.tls]      Checkbutton
+ok "tls: off by default"            $::agent_tls_unchecked                   0
+ok "tls: the core agrees"           [dict get [rio_result agent.status {}] tls_unchecked] 0
+ok "tls: hint present"              [winfo exists .prefs.body.agent.tlshint] 1
+.prefs.body.agent.tls invoke
+ok "tls: on reaches the core"       [dict get [rio_result agent.status {}] tls_unchecked] 1
+ok "tls: the box shows it"          $::agent_tls_unchecked                   1
+ok "tls: stored in agent.conf"      [tlsconf_says $tlsconf]                   allow
+.prefs.body.agent.tls invoke
+ok "tls: off reaches the core"      [dict get [rio_result agent.status {}] tls_unchecked] 0
+ok "tls: stored as refuse"          [tlsconf_says $tlsconf]                   refuse
+# Another frontend (or a hand edit) changed it: attaching again mirrors the core, not the box.
+rio_result agent.tls.set {unchecked 1}
+adopt_agent_status
+ok "tls: adopt mirrors the core"    $::agent_tls_unchecked                   1
+rio_result agent.tls.set {unchecked 0}
+adopt_agent_status
+
 # --- opening twice reuses the window rather than erroring --------------------------
 ok "reopen: no second toplevel"  [catch {preferences_window}]          0
 ok "reopen: window still there"  [winfo exists .prefs]                 1

@@ -66,7 +66,11 @@ proc rio::agent::settings::path {provider} {
 # starting, so the line error is swallowed and the defaults stand (the file is still
 # there, and the user's next write rewrites it correctly).
 proc rio::agent::settings::load {provider} {
-	set p [path $provider]
+	return [_load_file [path $provider]]
+}
+
+# The parse behind `load` and `agent_get`, for a file at `p` ("" = nowhere).
+proc rio::agent::settings::_load_file {p} {
 	if {$p eq "" || ![file isfile $p]} { return [dict create] }
 	if {[catch {rio::conf::read_file $p} conf]} { return [dict create] }
 	# Top-level keys only — a provider's settings are one flat block, so anything
@@ -85,22 +89,50 @@ proc rio::agent::settings::get {provider key {default ""}} {
 # must be one line — the format has no quoting or continuation, so a newline would
 # silently produce a different file than the one asked for (D21: no quiet corruption).
 proc rio::agent::settings::store {provider key value} {
+	return [_store_file [path $provider] \
+		"# rio — settings for the `$provider` agent provider." $key $value]
+}
+
+# The validated rewrite behind `store` and `agent_store`: merge key into the file at `p`
+# ("" = nowhere to persist, returns "") under a one-line `header` comment.
+proc rio::agent::settings::_store_file {p header key value} {
 	if {![_safe $key]} {
 		rio::error::raise bad_request "settings key must be \[A-Za-z0-9_-\]+: $key"
 	}
 	if {[string first "\n" $value] >= 0} {
 		rio::error::raise bad_request "settings value must be a single line"
 	}
-	set p [path $provider]
 	if {$p eq ""} { return "" }   ;# nowhere to persist — the live value still stands
-	set d [load $provider]
+	set d [_load_file $p]
 	dict set d $key $value
 	file mkdir [file dirname $p]
 	set fh [open $p w 0600]
 	fconfigure $fh -encoding utf-8
-	puts $fh "# rio — settings for the `$provider` agent provider."
+	puts $fh $header
 	puts $fh "# Written by rio and hand-editable: one `key = value` per line."
 	foreach k [lsort [dict keys $d]] { puts $fh "$k = [dict get $d $k]" }
 	close $fh
 	return $p
+}
+
+# --- the agent's own settings, whichever provider is live (D110) --------------
+#
+# A few choices belong to the agent as a whole rather than to one provider — today only
+# whether https may go ahead on a tcltls that cannot check host names. They sit in
+# agent.conf beside providers/, same format, same rules. The core owns these keys, which
+# is the difference from a provider's file.
+
+proc rio::agent::settings::agent_path {} {
+	set d [_dir]
+	if {$d eq ""} { return "" }
+	return [file join $d agent.conf]
+}
+
+proc rio::agent::settings::agent_get {key {default ""}} {
+	set d [_load_file [agent_path]]
+	return [expr {[dict exists $d $key] ? [dict get $d $key] : $default}]
+}
+
+proc rio::agent::settings::agent_store {key value} {
+	return [_store_file [agent_path] "# rio — settings for the agent, whichever provider is live." $key $value]
 }

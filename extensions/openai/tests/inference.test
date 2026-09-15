@@ -208,6 +208,14 @@ test openai-tls-missing {status 0 from a missing tcltls is a distinct, actionabl
 	list [lindex $t 1] [string match {*install tcltls*} [lindex $t 2]]
 } -result {tls_unavailable 1}
 
+test openai-tls-unchecked {the transport's refusal on a tcltls without host-name checks is shown as said — not "check your connection" (D110)} -body {
+	run_infer [list ""] 0 "tcltls 1.7.22 on the core's host does not check that a certificate belongs to the server it came from, so the agent refused https to api.openai.com. Install tcltls 1.8 or newer"
+	set t [terminal]
+	list [lindex $t 1] \
+		[string match {*Install tcltls 1.8*} [lindex $t 2]] \
+		[string match {*check your connection*} [lindex $t 2]]
+} -result {tls_unchecked 1 0}
+
 test openai-inband-error {an in-band {error} object becomes a classified post error} -body {
 	run_infer [list "data: {\"error\":{\"message\":\"context length exceeded\",\"type\":\"context_length\"}}\n\n"] 200
 	terminal

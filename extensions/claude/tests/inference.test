@@ -183,6 +183,14 @@ test claude-tls-missing {status 0 from a missing tcltls is a distinct, actionabl
 		[string match {*check your connection*} [lindex $t 2]]
 } -result {tls_unavailable 1 0}
 
+test claude-tls-unchecked {the transport's refusal on a tcltls without host-name checks is shown as said — not "check your connection" (D110)} -body {
+	run_infer [list ""] 0 "tcltls 1.7.22 on the core's host does not check that a certificate belongs to the server it came from, so the agent refused https to api.anthropic.com. Install tcltls 1.8 or newer"
+	set t [terminal]
+	list [lindex $t 1] \
+		[string match {*Install tcltls 1.8*} [lindex $t 2]] \
+		[string match {*check your connection*} [lindex $t 2]]
+} -result {tls_unchecked 1 0}
+
 # --- auth header passthrough -------------------------------------------------
 
 test claude-auth-header-passed {the face's auth pair is sent as a request header} -body {

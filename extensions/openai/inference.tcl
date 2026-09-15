@@ -273,6 +273,10 @@ proc rio::openai::_done {sid status err} {
 			if {[string match {*can't find package tls*} $err]} {
 				{*}$postcmd error tls_unavailable \
 					"The core can't load the TLS library the LLM's HTTPS needs — install tcltls where the core runs (apt/apk: tcl-tls; OpenBSD: tcltls) and restart it. This is the core's host, not yours, when it's remote ($err)"
+			} elseif {[string match {*the agent refused https to*} $err]} {
+				# The transport's own refusal (D110): nothing was dialled, so the connection
+				# is not what to check — the message already says what is.
+				{*}$postcmd error tls_unchecked $err
 			} else {
 				{*}$postcmd error network "Couldn't reach the LLM — check your connection, or the server URL for a local model ($err)"
 			}

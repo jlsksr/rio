@@ -27,7 +27,19 @@ if {![llength [info commands rio::tls::socket]]} {
 
 namespace eval rio::llm::http {}
 
-proc rio::llm::http::_ensure_tls {} { rio::tls::ensure }
+# Load tcltls, and refuse an https URL this core cannot verify properly (D110). A tcltls
+# older than 1.8 checks the certificate's chain but never its name, so any trusted
+# certificate for any host would do. That goes ahead only when the user allowed it —
+# rio::agent::tls_unchecked_ok, asked at request time so it is the core's current choice;
+# with no such command (this transport standalone) the answer is the safe one. Plain
+# http is not this gate's business: nothing is being verified there.
+proc rio::llm::http::_ensure_tls {url} {
+	rio::tls::ensure
+	if {![regexp -nocase {^https://([^/?#]*)} $url -> host]} return
+	if {[rio::tls::checks_hostname]} return
+	if {[llength [info commands ::rio::agent::tls_unchecked_ok]] && [::rio::agent::tls_unchecked_ok]} return
+	error "tcltls [package present tls] on the core's host does not check that a certificate belongs to the server it came from, so the agent refused https to $host. Install tcltls 1.8 or newer and restart the core — or, to accept this, turn on Preferences ▸ Agent ▸ \"Allow https without host-name checks\""
+}
 
 # Split a flat header list into the Content-Type (-> ctypeVar) and the rest.
 proc rio::llm::http::_headers {headers ctypeVar} {
@@ -42,7 +54,7 @@ proc rio::llm::http::_headers {headers ctypeVar} {
 
 # --- streaming POST (the SSE completions API) --------------------------------
 proc rio::llm::http::stream {req on_chunk on_done} {
-	if {[catch {_ensure_tls} e]} { {*}$on_done 0 $e ; return }
+	if {[catch {_ensure_tls [dict get $req url]} e]} { {*}$on_done 0 $e ; return }
 	set hlist [_headers [dict get $req headers] ctype]
 	# -timeout is the WHOLE-request budget, and a streaming turn (a long
 	# generation, or several tool round-trips) can legitimately take minutes —
@@ -68,7 +80,7 @@ proc rio::llm::http::stream {req on_chunk on_done} {
 # reply arrives on the callback, in the event loop.
 #   get req on_done   — on_done <status> <err> <body>; status 0 = couldn't connect
 proc rio::llm::http::get {req on_done} {
-	if {[catch {_ensure_tls} e]} { {*}$on_done 0 $e "" ; return }
+	if {[catch {_ensure_tls [dict get $req url]} e]} { {*}$on_done 0 $e "" ; return }
 	set hlist [_headers [dict get $req headers] ctype]
 	set timeout [expr {[dict exists $req timeout] ? [dict get $req timeout] : 30000}]
 	if {[catch {

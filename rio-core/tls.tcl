@@ -23,7 +23,9 @@
 # that the name is the server's own is what tcltls 1.8 added (-servername → SSL_add1_host,
 # verified against 1.8.0: a trusted certificate for another name fails "hostname
 # mismatch"). tcltls 1.7 sends the name for SNI and never compares it. `checks_hostname`
-# reports which one this core has; callers decide what to do with a 1.7.
+# reports which one this core has; callers decide what to do with a 1.7 — a repository
+# fetch refuses outright (rio::http), the agent refuses unless the user allowed it
+# (plugins/lib/transport.tcl, D110).
 #
 # tcltls is loaded LAZILY, by `ensure`, on the first https connection — a core without it
 # serves plain-http repositories exactly as before. Tk-free (D1); standalone (sourced by

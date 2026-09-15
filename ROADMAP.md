@@ -218,8 +218,8 @@ for later:
 - **https repositories** — *landed* (AGENTS.md D109). `https://` sources beside
   `http://`, which stays first-class; verified against the core host's own CA
   store (system bundle, the Windows store, or `SSL_CERT_FILE`), needing tcltls
-  1.8+ for host-name checks. **Still open:** whether the agent on a tcltls 1.7
-  core should refuse the same way; a first run on Windows.
+  1.8+ for host-name checks (the agent too, unless the user allows otherwise —
+  D110). **Still open:** a first run on Windows.
 - **Other repository transports** — *deferred.* ssh-fetched repositories, and
   git-backed sources (dropped from v1 — see the D19 annotation).
 - **`.well-known/rio-repository` badges** — *planned.* The host-validation
