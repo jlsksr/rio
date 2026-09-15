@@ -4,12 +4,16 @@
 #
 #   tclsh tls-server.tcl <certdir>
 #
-# <certdir> holds good.pem/good.key (for "localhost") and wrong.pem/wrong.key (for
-# "other.example"). Listens on three OS-assigned ports and prints them on one line:
-#   <https-good> <https-wrong> <http>
+# <certdir> holds good.pem/good.key (for "localhost"), wrong.pem/wrong.key (for
+# "other.example"), other.pem/other.key (a second, different "localhost") and, when
+# openssl could make it, expired.pem/expired.key (a "localhost" that expired in 2020).
+# Listens on OS-assigned ports and prints them on one line (an absent certificate: "-"):
+#   <https-good> <https-wrong> <http> <https-expired> <https-other>
 # then serves until its stdin closes (the test closes the pipe — no kill, so Windows too).
 #
 # Routes, the same on every port:
+#   /count 200, the body is how many requests this server has answered, this one included
+#          — how a test proves a certificate probe sent no request (D111)
 #   /ok    200, the body names the scheme ("hello over https" / "hello over http")
 #   /down  302 to http://localhost:<http>/ok     — https → http, which rio must refuse
 #   /up    302 to https://localhost:<https-good>/ok — http → https, which rio follows
@@ -39,8 +43,15 @@ proc serve {tls chan} {
 	if {[eof $chan]} { catch {close $chan} }
 }
 
+set ::requests 0   ;# every request line served, /count included
+
 proc reply {chan tls path} {
+	incr ::requests
 	switch -- $path {
+		/count {
+			set body $::requests
+			set head "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: [string length $body]\r\n"
+		}
 		/ok {
 			set body "hello over [expr {$tls ? "https" : "http"}]"
 			set head "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: [string length $body]\r\n"
@@ -65,15 +76,17 @@ proc reply {chan tls path} {
 	}
 }
 
-foreach {name cert} {good good wrong wrong} {
+foreach name {good wrong expired other} {
+	# expired.pem needs an openssl that can backdate; without it that port is "-".
+	if {![file exists [file join $certdir $name.pem]]} { set ::ports($name) - ; continue }
 	set s [tls::socket -server [list accept 1] \
-		-certfile [file join $certdir $cert.pem] -keyfile [file join $certdir $cert.key] 0]
+		-certfile [file join $certdir $name.pem] -keyfile [file join $certdir $name.key] 0]
 	set ::ports($name) [lindex [fconfigure $s -sockname] 2]
 }
 set s [socket -server [list accept 0] 0]
 set ::ports(http) [lindex [fconfigure $s -sockname] 2]
 
-puts "$::ports(good) $::ports(wrong) $::ports(http)"
+puts "$::ports(good) $::ports(wrong) $::ports(http) $::ports(expired) $::ports(other)"
 flush stdout
 fconfigure stdin -blocking 0
 fileevent stdin readable { read stdin ; if {[eof stdin]} exit }

@@ -12,6 +12,7 @@ package require tcltest
 namespace import ::tcltest::*
 
 source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. conf.tcl]
 source [file join [file dirname [info script]] .. tls.tcl]
 source [file join [file dirname [info script]] .. http.tcl]
 
@@ -19,6 +20,19 @@ set ::tmp [file join [temporaryDirectory] rio-tls-test-[pid]]
 file mkdir $::tmp
 set ::bundle [file join $::tmp bundle.pem]
 set f [open $::bundle w] ; close $f
+# Exceptions (D111) go to a file of the test's own, never the user's certificates.conf.
+set ::certconf [file join $::tmp certificates.conf]
+set ::rio::tls::override_path $::certconf
+
+# Run a script with exactly these exceptions on file (a {host:port fingerprint …} list),
+# and none afterwards.
+proc excepting {pins script} {
+	file delete $::certconf
+	foreach {origin fp} $pins { rio::tls::exception_add $origin $fp }
+	set rc [catch {uplevel 1 $script} r opts]
+	file delete $::certconf
+	return -options $opts $r
+}
 set ::real_bundles $::rio::tls::bundles
 
 # --- where the CA certificates come from (pure) ---------------------------------------
@@ -101,6 +115,70 @@ test tls-explain-cleared-by-success {a later handshake that completes clears old
 	rio::tls::explain "timeout"
 } -result timeout
 
+# --- exceptions, the file and the names (pure, D111) -----------------------------------
+test tls-fingerprint-forms {colon-hex, bare, any case: one normalized form; anything else ""} -body {
+	set hex [string repeat ab 32]
+	list [rio::tls::fingerprint_norm [join [regexp -all -inline .. [string toupper $hex]] :]] \
+		[rio::tls::fingerprint_norm $hex] [rio::tls::fingerprint_norm [string range $hex 2 end]] \
+		[rio::tls::fingerprint_norm [string repeat zz 32]] \
+		[string range [rio::tls::fingerprint_show $hex] 0 7]
+} -result [list [string repeat ab 32] [string repeat ab 32] {} {} AB:AB:AB]
+
+test tls-origin-of {an https URL's host:port — port 443 by default, host lower-cased, IPv6
+		without brackets; not https, no origin} -body {
+	list [rio::tls::origin_of https://Repo.Example/rio] [rio::tls::origin_of https://repo.example:8443] \
+		[rio::tls::origin_of {https://[::1]:8443/x}] [rio::tls::origin_of http://repo.example/rio] \
+		[rio::tls::origin_of https:///x]
+} -result {repo.example:443 repo.example:8443 ::1:8443 {} {}}
+
+test tls-exceptions-file {accept, read back, replace, remove — a readable file in between} -body {
+	file delete $::certconf
+	set a [string repeat 1a 32] ; set b [string repeat 2b 32]
+	rio::tls::exception_add repo.example:443 $a "CN=repo.example"
+	rio::tls::exception_add other.example:8443 $a
+	rio::tls::exception_add repo.example:443 $b
+	set got [rio::tls::exception_get repo.example:443]
+	set f [open $::certconf] ; set text [read $f] ; close $f
+	set removed [list [rio::tls::exception_remove other.example:8443] [rio::tls::exception_remove nowhere:1]]
+	list [expr {$got eq $b}] [expr {[string first "\[repo.example:443\]\nsha256 = 2B:2B:" $text] >= 0}] \
+		$removed [dict keys [rio::tls::exceptions]]
+} -cleanup { file delete $::certconf } -result {1 1 {1 0} repo.example:443}
+
+test tls-exceptions-bad-entries {an entry without a valid fingerprint, or not under host:port,
+		is no exception} -body {
+	set f [open $::certconf w]
+	puts $f "\[a.example:443\]\nsha256 = not-a-fingerprint\n\[b.example\]\nsha256 = [string repeat cc 32]"
+	puts $f "\[c.example:443\]\nsubject = CN=c"
+	close $f
+	dict keys [rio::tls::exceptions]
+} -cleanup { file delete $::certconf } -result {}
+
+test tls-exception-add-refuses-garbage {a malformed fingerprint is never written} -body {
+	file delete $::certconf
+	list [catch {rio::tls::exception_add a.example:443 nope}] [file exists $::certconf]
+} -result {1 0}
+
+test tls-verify-refuses-on-fault {a fault inside the exception check refuses the certificate} -body {
+	# A cert dict without sha256_hash at depth 0, after a failure, with an exception on file.
+	excepting [list f.example:443 [string repeat dd 32]] {
+		rio::tls::_verify f.example:443 9001 verify chan0 0 {subject CN=x} 0 "self-signed certificate"
+	}
+} -result 0
+
+test tls-verify-provisional-above-leaf {a failure above the leaf passes provisionally only when
+		the host has an exception; the leaf decides} -body {
+	set leaf [dict create sha256_hash [string repeat ee 32]]
+	set out [list [rio::tls::_verify g.example:443 9002 verify c 1 {} 0 "self-signed certificate in certificate chain"]]
+	excepting [list g.example:443 [string repeat ee 32]] {
+		lappend out [rio::tls::_verify g.example:443 9003 verify c 1 {} 0 "self-signed certificate in certificate chain"]
+		lappend out [rio::tls::_verify g.example:443 9003 verify c 0 $leaf 1 ok]
+		# The same failing chain ending in a different leaf: refused at depth 0.
+		lappend out [rio::tls::_verify g.example:443 9004 verify c 1 {} 0 "self-signed certificate in certificate chain"]
+		lappend out [rio::tls::_verify g.example:443 9004 verify c 0 [dict create sha256_hash [string repeat ff 32]] 1 ok]
+	}
+	lappend out [dict get [rio::tls::take_refusal g.example:443] changed]
+} -result {0 1 1 1 0 1}
+
 # --- https in the fetcher, before any connection (stubbed tcltls) ----------------------
 test http-https-without-tcltls {no tcltls: an io_error that names the package — and http://} -setup {
 	rename rio::tls::ensure _real_ensure
@@ -143,25 +221,44 @@ test http-plain-never-loads-tcltls {an http:// fetch never reaches for tcltls} -
 testConstraint tls18 [expr {![catch {package require tls}] && [package vsatisfies [package present tls] 1.8-]}]
 testConstraint openssl [expr {[auto_execok openssl] ne ""}]
 
-proc mkcert {name cn} {
-	exec openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+proc mkcert {name cn args} {
+	if {![llength $args]} { set args {-days 1} }
+	exec openssl req -x509 -newkey rsa:2048 -nodes {*}$args \
 		-keyout [file join $::tmp $name.key] -out [file join $::tmp $name.pem] \
 		-subj /CN=$cn -addext subjectAltName=DNS:$cn 2>@1
 }
 
+# The certificate's SHA-256 fingerprint as openssl itself reports it — the independent
+# answer every exception test compares rio's against.
+proc fingerprint {name} {
+	regexp {=([0-9A-F:]+)} [exec openssl x509 -in [file join $::tmp $name.pem] \
+		-noout -fingerprint -sha256 2>@1] -> fp
+	return $fp
+}
+
 set ::srv ""
+testConstraint expired 0
 if {[testConstraint tls18] && [testConstraint openssl]} {
 	if {[catch {
 		mkcert good localhost
 		mkcert wrong other.example
+		mkcert other localhost
+		# Backdating needs -not_before/-not_after (OpenSSL 3.4+); older: no expired port.
+		catch {mkcert expired localhost -not_before 20200101000000Z -not_after 20200201000000Z}
 		set ::srv [open |[list [info nameofexecutable] \
 			[file join [file dirname [info script]] tls-server.tcl] $::tmp] r+]
-		lassign [gets $::srv] ::p_good ::p_wrong ::p_http
-		if {$::p_http eq ""} { error "the loopback server did not start" }
+		lassign [gets $::srv] ::p_good ::p_wrong ::p_http ::p_expired ::p_other
+		if {$::p_other eq ""} { error "the loopback server did not start" }
+		testConstraint expired [expr {$::p_expired ne "-"}]
 	} e]} {
 		puts stderr "tls.test: loopback half skipped — $e"
 		testConstraint openssl 0
 	}
+}
+
+
+proc requests {} {
+	dict get [rio::http::get http://localhost:$::p_http/count 5000] text
 }
 
 # The trust a test grants: the throwaway cert as the whole CA store, via the override.
@@ -179,19 +276,21 @@ test tls-loop-verified-fetch {https with a trusted certificate for the right nam
 	list [dict get $r status] [dict get $r text]
 } -result {200 {hello over https}}
 
-test tls-loop-untrusted {a certificate nobody trusts is refused, with the reason and the fix} -constraints {tls18 openssl} -body {
+test tls-loop-untrusted {a certificate nobody trusts is refused — as untrusted_cert, with the
+		reason, the CA fix, and the way to accept it (D111)} -constraints {tls18 openssl} -body {
 	set ::rio::tls::bundles {}
 	catch {rio::http::get https://localhost:$::p_good/ok 5000} e opts
 	list [rio::error::code_of $opts] [string match "*certificate was refused*" $e] \
-		[string match "*SSL_CERT_FILE*" $e]
-} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {io_error 1 1}
+		[string match "*SSL_CERT_FILE*" $e] [string match "*accept it in the Extensions window*" $e] \
+		[string match "*no digest set*" $e]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {untrusted_cert 1 1 1 0}
 
 test tls-loop-wrong-name {a TRUSTED certificate for another name is still refused} -constraints {tls18 openssl} -body {
 	trusting wrong {
 		catch {rio::http::get https://localhost:$::p_wrong/ok 5000} e opts
 	}
 	list [rio::error::code_of $opts] [string match "*hostname mismatch*" $e]
-} -result {io_error 1}
+} -result {untrusted_cert 1}
 
 test tls-loop-no-downgrade {an https repository redirecting to plain http is refused} -constraints {tls18 openssl} -body {
 	trusting good {
@@ -221,6 +320,178 @@ test tls-loop-opts-fail-closed {with no CA source at all, verification is still 
 	list [dict get $o -require] [dict exists $o -cafile] [dict exists $o -castore]
 } -cleanup { set ::rio::tls::bundles $::real_bundles } -result {1 0 0}
 
+# --- inspecting a certificate (D111) — the review a user sees before accepting ---------
+test tls-inspect-self-signed {a self-signed certificate: its details, "untrusted", openssl's
+		own fingerprint — and not one request sent} -constraints {tls18 openssl} -body {
+	set before [requests]
+	set r [rio::tls::inspect localhost $::p_good 5000]
+	set after [requests]
+	list [dict get $r problems] [dict get $r subject] [dict get $r names] \
+		[expr {[dict get $r sha256] eq [fingerprint good]}] [dict get $r accepted] \
+		[expr {$after - $before}]
+} -result {untrusted CN=localhost localhost 1 0 1}
+
+test tls-inspect-wrong-name {a trusted certificate issued for another name: only name_mismatch,
+		and the names it was issued for} -constraints {tls18 openssl} -body {
+	trusting wrong {
+		set r [rio::tls::inspect localhost $::p_wrong 5000]
+	}
+	list [dict get $r problems] [dict get $r names]
+} -result {name_mismatch other.example}
+
+test tls-inspect-expired {an expired certificate says so, with its dates} -constraints {tls18 openssl expired} -body {
+	set r [rio::tls::inspect localhost $::p_expired 5000]
+	list [expr {"expired" in [dict get $r problems]}] [dict get $r not_after]
+} -result {1 {2020-02-01 00:00 UTC}}
+
+test tls-inspect-verified {a certificate that verifies has no problems} -constraints {tls18 openssl} -body {
+	trusting good {
+		set r [rio::tls::inspect localhost $::p_good 5000]
+	}
+	dict get $r problems
+} -result {}
+
+test tls-inspect-changed {an exception for a different certificate is reported as changed, and
+		not as accepted} -constraints {tls18 openssl} -body {
+	excepting [list localhost:$::p_good [fingerprint other]] {
+		set r [rio::tls::inspect localhost $::p_good 5000]
+	}
+	list [dict get $r problems] [dict get $r accepted]
+} -result {{untrusted changed} 0}
+
+test tls-inspect-unreachable {nothing listening: an error at once, not after the timeout} -constraints {tls18} -body {
+	set t0 [clock milliseconds]
+	set rc [catch {rio::tls::inspect 127.0.0.1 1 8000} e]
+	list $rc [expr {[clock milliseconds] - $t0 < 4000}] [string match "*refused*" $e]
+} -result {1 1 1}
+
+# --- exceptions: accepting that exact certificate (D111) --------------------------------
+test tls-exception-accepts-that-certificate {refused, then accepted by its own fingerprint} -constraints {tls18 openssl} -body {
+	catch {rio::http::get https://localhost:$::p_good/ok 5000} e opts
+	excepting [list localhost:$::p_good [fingerprint good]] {
+		set r [rio::http::get https://localhost:$::p_good/ok 5000]
+	}
+	list [rio::error::code_of $opts] [dict get $r status] [dict get $r text]
+} -result {untrusted_cert 200 {hello over https}}
+
+test tls-exception-another-certificate {an exception for another certificate refuses, and says
+		the certificate changed} -constraints {tls18 openssl} -body {
+	excepting [list localhost:$::p_good [fingerprint other]] {
+		catch {rio::http::get https://localhost:$::p_good/ok 5000} e opts
+	}
+	list [rio::error::code_of $opts] [string match "*NOT the certificate you accepted for localhost:$::p_good*" $e]
+} -result {untrusted_cert 1}
+
+test tls-exception-per-port {a certificate accepted on one port is not accepted on another} -constraints {tls18 openssl} -body {
+	# `other`'s certificate accepted — but for good's port. The server on other's port
+	# presents exactly that certificate, and must still be refused.
+	excepting [list localhost:$::p_good [fingerprint other]] {
+		catch {rio::http::get https://localhost:$::p_other/ok 5000} e opts
+	}
+	rio::error::code_of $opts
+} -result untrusted_cert
+
+test tls-exception-wrong-name {a certificate for another name, once accepted, is accepted} -constraints {tls18 openssl} -body {
+	trusting wrong {
+		excepting [list localhost:$::p_wrong [fingerprint wrong]] {
+			set r [rio::http::get https://localhost:$::p_wrong/ok 5000]
+		}
+	}
+	dict get $r status
+} -result 200
+
+test tls-exception-expired {an expired certificate, once accepted, is accepted} -constraints {tls18 openssl expired} -body {
+	excepting [list localhost:$::p_expired [fingerprint expired]] {
+		set r [rio::http::get https://localhost:$::p_expired/ok 5000]
+	}
+	dict get $r status
+} -result 200
+
+test tls-exception-verified-never-consults {a certificate that verifies ignores a stale
+		exception for a different one} -constraints {tls18 openssl} -body {
+	trusting good {
+		excepting [list localhost:$::p_good [fingerprint other]] {
+			set r [rio::http::get https://localhost:$::p_good/ok 5000]
+		}
+	}
+	dict get $r status
+} -result 200
+
+test tls-exception-malformed-file {a certificates.conf that doesn't parse accepts nothing, even
+		with the right fingerprint in it} -constraints {tls18 openssl} -body {
+	set f [open $::certconf w]
+	puts $f "\[localhost:$::p_good\]\nsha256 = [fingerprint good]\nthis line is not key = value-less"
+	puts $f "garbage"
+	close $f
+	catch {rio::http::get https://localhost:$::p_good/ok 5000} e opts
+	rio::error::code_of $opts
+} -cleanup { file delete $::certconf } -result untrusted_cert
+
+# A chain whose problem is ABOVE the leaf: a leaf signed by a CA nobody trusts, served with
+# that CA. tcltls's own server sends only the leaf, so `openssl s_server` serves this one.
+# It ignores its stdin closing, so it is told how many connections to take (-naccept, the
+# test's three fetches) and exits after them; the pipe is closed non-blocking, so a test
+# that fails early never waits on it, and on Unix it is also killed.
+testConstraint s_server 0
+if {[testConstraint tls18] && [testConstraint openssl]} {
+	catch {
+		exec openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+			-keyout [file join $::tmp ca.key] -out [file join $::tmp ca.pem] -subj /CN=rio-test-ca \
+			-addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign 2>@1
+		exec openssl req -newkey rsa:2048 -nodes -keyout [file join $::tmp leaf.key] \
+			-out [file join $::tmp leaf.csr] -subj /CN=localhost 2>@1
+		set f [open [file join $::tmp leaf.ext] w] ; puts $f subjectAltName=DNS:localhost ; close $f
+		exec openssl x509 -req -in [file join $::tmp leaf.csr] -CA [file join $::tmp ca.pem] \
+			-CAkey [file join $::tmp ca.key] -CAcreateserial -days 1 \
+			-out [file join $::tmp leaf.pem] -extfile [file join $::tmp leaf.ext] 2>@1
+		# An OS-assigned port can't be read back from s_server; borrow one, then free it.
+		set probe [socket -server {apply {args {}}} 0]
+		set ::p_chain [lindex [fconfigure $probe -sockname] 2]
+		close $probe
+		set ::chainsrv [open |[list openssl s_server -accept $::p_chain -naccept 3 -www \
+			-cert [file join $::tmp leaf.pem] -key [file join $::tmp leaf.key] \
+			-cert_chain [file join $::tmp ca.pem] 2>@1] r]
+		# It prints ACCEPT once it listens — no test connection, which -naccept would count.
+		while {[gets $::chainsrv line] >= 0} {
+			if {$line eq "ACCEPT"} { testConstraint s_server 1 ; break }
+		}
+	}
+}
+
+test tls-exception-chain-above-the-leaf {a failure above the leaf passes only on the LEAF's
+		fingerprint — refused without one, refused on the CA's, accepted on the leaf's} -constraints {tls18 openssl s_server} -body {
+	set out {}
+	foreach pin [list "" [fingerprint ca] [fingerprint leaf]] {
+		set pins [expr {$pin eq "" ? {} : [list localhost:$::p_chain $pin]}]
+		excepting $pins {
+			if {[catch {rio::http::get https://localhost:$::p_chain/ 5000} r opts]} {
+				lappend out [rio::error::code_of $opts]
+			} else {
+				lappend out [dict get $r status]
+			}
+		}
+	}
+	set out
+} -result {untrusted_cert untrusted_cert 200}
+
+test tls-exception-not-on-17 {a tcltls that cannot check names gets no exception callback} -constraints {tls18} -setup {
+	rename rio::tls::checks_hostname _real_checks
+	proc rio::tls::checks_hostname {} { return 0 }
+} -body {
+	dict exists [rio::tls::socket_opts localhost 443] -validatecommand
+} -cleanup {
+	rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
+} -result 0
+
+test tls-exception-callback-on-18 {with names checked, every connection to a host gets it} -constraints {tls18} -body {
+	list [dict exists [rio::tls::socket_opts localhost 443] -validatecommand] \
+		[dict exists [rio::tls::socket_opts] -validatecommand]
+} -result {1 0}
+
+if {[info exists ::chainsrv]} {
+	if {$::tcl_platform(platform) eq "unix"} { catch {exec kill {*}[pid $::chainsrv]} }
+	catch {fconfigure $::chainsrv -blocking 0 ; close $::chainsrv}
+}
 if {$::srv ne ""} { catch {close $::srv} }
 file delete -force $::tmp
 cleanupTests

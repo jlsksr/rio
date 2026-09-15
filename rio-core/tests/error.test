@@ -27,6 +27,6 @@ test error-code-of-runtime {a runtime fault (bad dict key) is classed internal} 
 
 test error-codes-vocabulary {the documented vocabulary is the published set} -body {
 	set rio::error::codes
-} -result {bad_request unknown_op no_buffer no_path bad_index io_error internal}
+} -result {bad_request unknown_op no_buffer no_path bad_index io_error untrusted_cert internal}
 
 cleanupTests

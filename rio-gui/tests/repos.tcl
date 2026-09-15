@@ -45,8 +45,13 @@ proc ok {label got want} {
 array set ::fix {}
 set ::fetches 0        ;# every fetch the GUI asks for — the start-up check must make NONE
                        ;# while its preference is off (D107)
+array set ::fixerr {}  ;# url -> {code message}: a fetch the core refused with that code
 proc repo_fetch {url} {
 	incr ::fetches
+	if {[info exists ::fixerr($url)]} {
+		lassign $::fixerr($url) code msg
+		return [dict create ok 0 error $msg code $code]
+	}
 	if {[info exists ::fix($url)]} {
 		lassign $::fix($url) status text
 		return [dict create ok 1 status $status text $text]
@@ -648,6 +653,156 @@ ok "window: Update installs it"           [dict get $::ext_ledger syntax/up vers
 ok "window: nothing pending after"        [.extw.hdr.upall cget -text] "Update All"
 ok "window: Update All goes dead at zero" [.extw.hdr.upall cget -state] disabled
 destroy .extw
+
+# ===================================================================================
+# A certificate that doesn't verify (AGENTS.md D111)
+#
+# The browser model: the source lists as "certificate not trusted"; Review certificate…
+# shows what is wrong and the certificate itself; Go Back is the default and stores
+# nothing; Accept stores the fingerprint the dialog SHOWED, in the real core (sandboxed
+# certificates.conf); Preferences' Accepted certificates… takes it back. The fetch and the
+# inspect are stubbed (no network, D39); accept, list and forget are the real core's.
+# ===================================================================================
+set T https://t.example/rio
+set H http://h.example/rio
+set ::fixerr($T/rio-repository.conf) [list untrusted_cert \
+	"fetch $T/rio-repository.conf failed: failed to use socket — the server's certificate was refused (self-signed certificate)"]
+set ::fixerr($H/rio-repository.conf) [list untrusted_cert \
+	"fetch https://h.example/rio/rio-repository.conf failed: … (self-signed certificate)"]
+sources_save [list $T $H $DEAD]
+
+set FP1 [join [lrepeat 32 1A] :]
+set FP2 [join [lrepeat 32 2B] :]
+set ::inspect_calls {}
+set ::inspect_answers {}
+# Each call takes the next queued answer; the last one repeats. A second call would get a
+# DIFFERENT certificate — so an Accept that asked again would store the wrong fingerprint.
+proc tls_inspect {url} {
+	lappend ::inspect_calls $url
+	set a [lindex $::inspect_answers 0]
+	if {[llength $::inspect_answers] > 1} { set ::inspect_answers [lrange $::inspect_answers 1 end] }
+	return $a
+}
+proc cert {args} {
+	return [dict create ok 1 cert [dict merge [dict create host t.example port 443 \
+		subject CN=t.example issuer CN=t.example names t.example \
+		not_before {2026-01-01 00:00 UTC} not_after {2027-01-01 00:00 UTC} sha256 $::FP1 \
+		problems untrusted reasons {{self-signed certificate}} accepted 0] $args]]
+}
+proc accepted_now {} {
+	set out {}
+	foreach e [dict get [rio_call tls.accepted {}] result exceptions] {
+		lappend out "[dict get $e host]:[dict get $e port] [dict get $e sha256]"
+	}
+	return $out
+}
+proc deadrow {url} {
+	for {set i 0} {$i < [llength $::extw_rows]} {incr i} {
+		set r [lindex $::extw_rows $i]
+		if {[dict exists $r dead] && [dict get $r url] eq $url} { return $i }
+	}
+	return -1
+}
+proc select_row {i} {
+	.extw.body.list selection clear 0 end
+	.extw.body.list selection set $i
+	extw_select
+}
+# Open the review from the selected row, run `script` inside the dialog, and let the
+# script close it (a button's invoke).
+proc review {script} {
+	after 100 $script
+	.extw.det.review invoke
+}
+
+extensions_window
+ok "cert: the refused source says so" \
+	[string match "*$T — certificate not trusted" [.extw.body.list get [deadrow $T]]] 1
+ok "cert: an unreachable one still says unreachable" \
+	[string match "*$DEAD — unreachable" [.extw.body.list get [deadrow $DEAD]]] 1
+select_row [deadrow $DEAD]
+ok "cert: no review for an unreachable source" [winfo exists .extw.det.review] 0
+select_row [deadrow $H]
+ok "cert: no review for an http source"        [winfo exists .extw.det.review] 0
+select_row [deadrow $T]
+ok "cert: review offered for the refused one"  [winfo exists .extw.det.review] 1
+
+# Go Back: the default, and nothing is stored.
+set ::inspect_answers [list [cert problems {untrusted expired}]]
+review {
+	set ::dlg [list [.extcert.btns.back cget -default] [.extcert.btns.accept cget -default] \
+		[.extcert.p0 cget -text] [.extcert.p1 cget -text] [.extcert.det get 1.0 end] \
+		[bind .extcert <Escape>] [bind .extcert <Return>] [focus]]
+	.extcert.btns.back invoke
+}
+ok "cert: inspected the source's URL"      $::inspect_calls [list $T]
+ok "cert: Go Back is the default button"   [lrange $::dlg 0 1] {active disabled}
+ok "cert: the untrusted issuer, in words"  [string match "*authority this system doesn't trust*" [lindex $::dlg 2]] 1
+ok "cert: the expiry, with its date"       [lindex $::dlg 3] "•  It expired on 2027-01-01 00:00 UTC."
+ok "cert: the fingerprint is shown"        [string match "*SHA-256: *$FP1*" [lindex $::dlg 4]] 1
+ok "cert: the issuer is shown"             [string match "*Issued by: CN=t.example*" [lindex $::dlg 4]] 1
+ok "cert: Go Back stores nothing"          [accepted_now] {}
+ok "cert: Escape and Return close it, focus on Go Back" [lrange $::dlg 5 7] {{destroy .extcert} {destroy .extcert} .extcert.btns.back}
+
+# Accept: the SHOWN fingerprint reaches the core, and the list is fetched again.
+set ::inspect_calls {}
+set ::inspect_answers [list [cert] [cert sha256 $FP2]]
+set before $::fetches
+review { .extcert.btns.accept invoke }
+ok "cert: accept stores the shown fingerprint" [accepted_now] [list "t.example:443 $FP1"]
+ok "cert: inspected once, not again at accept" [llength $::inspect_calls] 1
+ok "cert: accepting refetches the repositories" [expr {$::fetches > $before}] 1
+set f [open [file join $::env(XDG_CONFIG_HOME) rio certificates.conf]] ; set text [read $f] ; close $f
+ok "cert: it is certificates.conf, readable" \
+	[expr {[string first "\[t.example:443\]\nsha256 = $FP1" $text] >= 0}] 1
+
+# A certificate that changed since it was accepted: said first, and loudly.
+select_row [deadrow $T]
+set ::inspect_answers [list [cert sha256 $FP2 problems {untrusted changed}]]
+review {
+	set ::dlg [list [.extcert.p0 cget -text] [.extcert.p0 cget -foreground]]
+	.extcert.btns.back invoke
+}
+ok "cert: a changed certificate is said first" [string match "•  This is NOT the certificate you accepted for t.example:443*" [lindex $::dlg 0]] 1
+ok "cert: in the error colour"                 [lindex $::dlg 1] [dict get $::theme_colors error]
+
+# Nothing to accept: the certificate verifies (the refused one was elsewhere), or none came.
+select_row [deadrow $T]
+set ::inspect_answers [list [cert problems {} reasons {}]]
+review {
+	set ::dlg [list [winfo exists .extcert.btns.accept] [.extcert.btns.back cget -text] [.extcert.head cget -text]]
+	.extcert.btns.back invoke
+}
+ok "cert: a verifying certificate offers no Accept" [lrange $::dlg 0 1] {0 Close}
+ok "cert: and says why, with the fetch's error"     [string match "*verifies, so the refused one belongs to another server*self-signed certificate*" [lindex $::dlg 2]] 1
+select_row [deadrow $T]
+set ::inspect_answers [list [dict create ok 0 error "connection refused"]]
+review {
+	set ::dlg [list [winfo exists .extcert.btns.accept] [.extcert.head cget -text]]
+	.extcert.btns.back invoke
+}
+ok "cert: no certificate, no Accept, the reason"    [list [lindex $::dlg 0] [string match "rio couldn't get the certificate: connection refused*" [lindex $::dlg 1]]] {0 1}
+ok "cert: still one exception"                      [llength [accepted_now]] 1
+destroy .extw
+
+# Preferences ▸ Extensions ▸ Accepted certificates…: listed, and removed through the core.
+# The dialog fills itself through the core, so wait for the list before touching it.
+proc certs_drive {tries} {
+	if {(![winfo exists .certs.body.list] || ![.certs.body.list size]) && $tries > 0} {
+		after 50 [list certs_drive [incr tries -1]]
+		return
+	}
+	set ::certs_seen [list [.certs.body.list size] [.certs.body.list get 0]]
+	.certs.body.list selection set 0
+	certs_remove
+	set ::certs_after [.certs.body.list size]
+	destroy .certs
+}
+after 50 [list certs_drive 60]
+certs_dialog
+ok "certs: the accepted one is listed" [lindex $::certs_seen 0] 1
+ok "certs: by host:port and subject"   [string match "t.example:443  —  CN=t.example  —  SHA-256 1A:1A:*" [lindex $::certs_seen 1]] 1
+ok "certs: Remove takes it back"       [list $::certs_after [accepted_now]] {0 {}}
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

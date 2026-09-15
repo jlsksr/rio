@@ -323,6 +323,28 @@ proc rio::wire::_result_workspace_get {result} {
 }
 rio::wire::result_encoder workspace.get rio::wire::_result_workspace_get
 
+# tls.inspect: string leaves, and three arrays of strings — the certificate's names, the
+# problem classes, and OpenSSL's reasons (D111). Keys named, so a new one is added here.
+proc rio::wire::_result_tls_inspect {result} {
+	set parts {}
+	foreach k {host port subject issuer not_before not_after sha256 accepted} {
+		lappend parts "[str $k]:[str [dict get $result $k]]"
+	}
+	foreach k {names problems reasons} {
+		lappend parts "[str $k]:[strarr [dict get $result $k]]"
+	}
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder tls.inspect rio::wire::_result_tls_inspect
+
+# tls.accepted: `exceptions` is an array of flat {host,port,sha256,subject,accepted} objects.
+proc rio::wire::_result_tls_accepted {result} {
+	set items {}
+	foreach e [dict get $result exceptions] { lappend items [obj $e] }
+	return "{\"exceptions\":[arr $items]}"
+}
+rio::wire::result_encoder tls.accepted rio::wire::_result_tls_accepted
+
 # A response dict {id, ok, result|error, ?op?} -> a JSON line. `op` (present on
 # ok replies) selects a shape-specific result encoder; without one, the result
 # is a flat object.

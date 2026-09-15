@@ -219,7 +219,10 @@ for later:
   `http://`, which stays first-class; verified against the core host's own CA
   store (system bundle, the Windows store, or `SSL_CERT_FILE`), needing tcltls
   1.8+ for host-name checks (the agent too, unless the user allows otherwise —
-  D110). **Still open:** a first run on Windows.
+  D110). A certificate that doesn't verify can be reviewed and accepted, exactly
+  that one, browser-style (D111). **Still open:** a first run on Windows; a way to
+  accept a certificate from the agent's side, which today only honours one accepted
+  in the Extensions window.
 - **Other repository transports** — *deferred.* ssh-fetched repositories, and
   git-backed sources (dropped from v1 — see the D19 annotation).
 - **`.well-known/rio-repository` badges** — *planned.* The host-validation

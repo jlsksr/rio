@@ -60,6 +60,9 @@ ok "keyboard body exists"        [winfo exists .prefs.body.keyboard]   1
 ok "update check exists"         [winfo exists .prefs.body.extensions.chk] 1
 ok "update check is off"         $::ext_check_updates                  0
 ok "update check binds the flag" [.prefs.body.extensions.chk cget -variable] ::ext_check_updates
+# D111: the way to take back a certificate accepted in the Extensions window.
+ok "accepted certificates button" [list [winfo exists .prefs.body.extensions.certs] \
+	[.prefs.body.extensions.certs cget -command]] {1 certs_dialog}
 
 # --- two-door sync: the window control binds the SAME global the menu entry does ---
 ok "wrap: same var as menu"      [.prefs.body.view.wrap cget -variable] \

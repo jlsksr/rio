@@ -1,0 +1,148 @@
+# Tests for the tls.* ops (rio-core/ops-tls.tcl, AGENTS.md D111): accepting a certificate,
+# listing and forgetting what was accepted, the requests each op refuses, and the wire
+# shape of the two results with arrays in them. Pure: tls.inspect's handshake is covered
+# for real by tls.test's loopback half; here rio::tls::inspect is replaced, so these run
+# with no network and no tcltls.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. core.tcl]
+source [file join [file dirname [info script]] .. wire.tcl]
+package require json
+
+set ::tmp [file join [temporaryDirectory] rio-tls-ops-test-[pid]]
+file mkdir $::tmp
+set ::rio::tls::override_path [file join $::tmp certificates.conf]
+
+proc op {name params} {
+	set resp [dict get [rio::core::call $name $params] response]
+	if {[dict get $resp ok]} { return [list ok [dict get $resp result]] }
+	return [list [dict get $resp error code] [dict get $resp error message]]
+}
+
+set ::fp [string repeat 3c 32]
+set ::FP [join [regexp -all -inline .. [string toupper $::fp]] :]
+
+test tls-ops-accept-list-forget {accept, list, forget — host lower-cased, fingerprint shown
+		colon-hex, forgetting twice finds nothing the second time} -body {
+	file delete $::rio::tls::override_path
+	set a [op tls.accept [dict create host Repo.Example port 8443 sha256 $::fp subject CN=repo.example]]
+	set l [op tls.accepted {}]
+	set e [lindex [dict get [lindex $l 1] exceptions] 0]
+	set f1 [op tls.forget [dict create host repo.example port 8443]]
+	set f2 [op tls.forget [dict create host repo.example port 8443]]
+	list $a [dict get $e host] [dict get $e port] [dict get $e sha256] [dict get $e subject] \
+		[string match {????-??-??} [dict get $e accepted]] $f1 $f2 [op tls.accepted {}]
+} -cleanup { file delete $::rio::tls::override_path } -result [list \
+	[list ok [list host repo.example port 8443 sha256 $::FP]] repo.example 8443 $::FP CN=repo.example 1 \
+	{ok {removed 1}} {ok {removed 0}} {ok {exceptions {}}}]
+
+test tls-ops-accept-bad-requests {tls.accept refuses what it can't store faithfully} -body {
+	set out {}
+	foreach p [list \
+		[dict create port 443 sha256 $::fp] \
+		[dict create host a.example sha256 $::fp] \
+		[dict create host a.example port 443] \
+		[dict create host a.example port 443 sha256 abc] \
+		[dict create host a.example port 0 sha256 $::fp] \
+		[dict create host a.example port x sha256 $::fp] \
+		[dict create host "a example" port 443 sha256 $::fp] \
+		[dict create host a.example/x port 443 sha256 $::fp]] {
+		lappend out [lindex [op tls.accept $p] 0]
+	}
+	list $out [file exists $::rio::tls::override_path]
+} -result {{bad_request bad_request bad_request bad_request bad_request bad_request bad_request bad_request} 0}
+
+test tls-ops-forget-bad-requests {tls.forget needs a host and a port} -body {
+	list [lindex [op tls.forget {}] 0] [lindex [op tls.forget [dict create host a.example]] 0]
+} -result {bad_request bad_request}
+
+test tls-ops-inspect-bad-requests {tls.inspect takes an https URL and a positive timeout} -body {
+	list [lindex [op tls.inspect {}] 0] \
+		[lindex [op tls.inspect [dict create url http://repo.example/rio]] 0] \
+		[lindex [op tls.inspect [dict create url https://repo.example/rio timeout -1]] 0]
+} -result {bad_request bad_request bad_request}
+
+# rio::tls::inspect replaced: what the op passes it and what it returns, without a network.
+proc with_inspect {body script} {
+	rename rio::tls::inspect _real_inspect
+	rename rio::tls::ensure _real_ensure
+	rename rio::tls::checks_hostname _real_checks
+	proc rio::tls::ensure {} {}
+	proc rio::tls::checks_hostname {} { return 1 }
+	proc rio::tls::inspect {host port timeout} $body
+	set rc [catch {uplevel 1 $script} r opts]
+	rename rio::tls::inspect {} ; rename _real_inspect rio::tls::inspect
+	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+	rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
+	return -options $opts $r
+}
+
+set ::inspected [dict create host repo.example port 8443 subject CN=repo.example \
+	issuer CN=repo.example names {repo.example www.repo.example} \
+	not_before {2026-01-01 00:00 UTC} not_after {2027-01-01 00:00 UTC} sha256 $::FP \
+	problems {untrusted name_mismatch} reasons {{self-signed certificate} {hostname mismatch}} \
+	accepted 0]
+
+test tls-ops-inspect-origin {the op inspects the URL's host and port, default 443} -body {
+	with_inspect {return [list $host $port $timeout]} {
+		list [lindex [op tls.inspect [dict create url https://Repo.Example/rio]] 1] \
+			[lindex [op tls.inspect [dict create url https://repo.example:8443/rio timeout 500]] 1]
+	}
+} -result {{repo.example 443 10000} {repo.example 8443 500}}
+
+test tls-ops-inspect-failure {a probe that can't connect is an io_error naming the origin} -body {
+	with_inspect {error "connection refused"} {
+		op tls.inspect [dict create url https://repo.example/rio]
+	}
+} -result {io_error {couldn't get the certificate of repo.example:443: connection refused}}
+
+test tls-ops-inspect-needs-18 {a tcltls that can't check names can't review a certificate either} -body {
+	with_inspect {error "not reached"} {
+		proc rio::tls::checks_hostname {} { return 0 }
+		namespace eval :: { package provide tls 1.7.22 }
+		set r [op tls.inspect [dict create url https://repo.example/rio]]
+		package forget tls
+		list [lindex $r 0] [string match "*tcltls 1.8 or newer*" [lindex $r 1]]
+	}
+} -result {io_error 1}
+
+# --- the wire: both encoders name their keys, so a key they forget vanishes (D110's lesson)
+proc wire_result {name result} {
+	set line [rio::wire::response [dict create id 1 ok 1 op $name result $result]]
+	return [dict get [json::json2dict $line] result]
+}
+
+test tls-ops-wire-inspect-keeps-every-field {every key the op returns reaches the client, and
+		the arrays arrive as arrays} -body {
+	with_inspect [list return $::inspected] {
+		set r [lindex [op tls.inspect [dict create url https://repo.example:8443/]] 1]
+	}
+	set w [wire_result tls.inspect $r]
+	list [lsort [dict keys $w]] [expr {[lsort [dict keys $w]] eq [lsort [dict keys $r]]}] \
+		[dict get $w names] [dict get $w problems] [llength [dict get $w reasons]]
+} -result {{accepted host issuer names not_after not_before port problems reasons sha256 subject} 1 {repo.example www.repo.example} {untrusted name_mismatch} 2}
+
+test tls-ops-wire-inspect-empty-arrays {a certificate with no problems sends empty arrays} -body {
+	set r [dict merge $::inspected {problems {} reasons {} names {}}]
+	string match {*"problems":\[\]*"reasons":\[\]*} [rio::wire::response \
+		[dict create id 1 ok 1 op tls.inspect result $r]]
+} -result 1
+
+test tls-ops-wire-accepted {tls.accepted arrives as an array of whole objects} -body {
+	file delete $::rio::tls::override_path
+	op tls.accept [dict create host a.example port 443 sha256 $::fp subject {CN=a "quoted"}]
+	op tls.accept [dict create host b.example port 8443 sha256 $::fp]
+	set r [lindex [op tls.accepted {}] 1]
+	set w [wire_result tls.accepted $r]
+	set first [lindex [dict get $w exceptions] 0]
+	list [llength [dict get $w exceptions]] [lsort [dict keys $first]] [dict get $first subject] \
+		[expr {[dict get $w exceptions] eq [dict get $r exceptions]}]
+} -cleanup { file delete $::rio::tls::override_path } -result {2 {accepted host port sha256 subject} {CN=a "quoted"} 1}
+
+test tls-ops-untrusted-cert-in-taxonomy {untrusted_cert is a code the protocol knows (D11)} -body {
+	expr {"untrusted_cert" in $::rio::error::codes}
+} -result 1
+
+file delete -force $::tmp
+cleanupTests

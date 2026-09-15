@@ -45,6 +45,19 @@ host's own store, the one the package manager keeps current:
 A refused certificate is reported with OpenSSL's reason (*self-signed certificate*,
 *hostname mismatch*, …), and names `SSL_CERT_FILE` when trusting a CA would fix it.
 
+**Accepting one certificate, like a browser does (D111).** A repository whose
+certificate doesn't verify — self-signed, from a private CA, expired, or issued for
+another name — lists in the Extensions window as *certificate not trusted*. **Review
+certificate…** shows what is wrong with it and its SHA-256 fingerprint; **Accept the Risk
+and Continue** trusts *exactly that certificate* on *that host and port*, and nothing
+else. If the server's certificate later changes, it is refused again and said to have
+changed. Accepted certificates are kept on the core's host in
+`~/.config/rio/certificates.conf` (hand-editable; delete a section to take one back) and
+listed under *Preferences ▸ Extensions ▸ Accepted certificates…*. An accepted certificate
+counts for every https connection the core makes to that host and port, the agent's
+included. It needs `tcltls` 1.8+. To trust *every* server of a private CA, `SSL_CERT_FILE`
+remains the better tool.
+
 > `http` (used by the TLS transport) ships with Tcl itself — no separate package.
 
 **Optional — `tkdnd`** (drag a file onto the window to open it, D86). rio-gui loads it if
@@ -238,7 +251,8 @@ Consequences:
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,
 `agent.key.set` / `clear`, `agent.autoaccept.set`, `agent.mode.set`,
 `agent.option.set`, `agent.tls.set`, `agent.status`), so they behave the same against a local or
-remote core.
+remote core. So are accepted certificates (`tls.inspect`, `tls.accept`, `tls.accepted`,
+`tls.forget`, D111): the certificate that matters is the one the core sees.
 
 ---
 
