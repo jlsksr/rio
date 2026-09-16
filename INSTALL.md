@@ -38,12 +38,19 @@ host's own store, the one the package manager keeps current:
 - **Windows** — the Windows certificate store, when the Tcl distribution's `tcltls` is
   1.8+ built on OpenSSL 3.2+. With an older build there is no route to the store:
   set `SSL_CERT_FILE` (below) to a PEM bundle instead.
-- **Your own CA, anywhere** — set **`SSL_CERT_FILE`** (a PEM file) or **`SSL_CERT_DIR`**
-  in the core's environment. It takes precedence over the system store, for the agent
-  and repositories alike.
+- **Your own CA** — add it to the system store, and rio trusts it with no further
+  setup: `update-ca-certificates` on Debian and Alpine (the file goes in
+  `/usr/local/share/ca-certificates/`), `trust anchor` on RHEL-family systems, the Trusted Root store on Windows. Where there
+  is no such tool, set **`SSL_CERT_FILE`** (a PEM file) or **`SSL_CERT_DIR`** in the
+  core's environment. It **replaces** the system store rather than adding to it, for the
+  agent and repositories alike — so it must hold the public CAs as well as yours, or
+  every public server, your agent's provider included, stops verifying.
 
 A refused certificate is reported with OpenSSL's reason (*self-signed certificate*,
-*hostname mismatch*, …), and names `SSL_CERT_FILE` when trusting a CA would fix it.
+*hostname mismatch*, …), and says how to trust a CA when that would fix it.
+
+**No revocation checking.** rio does not consult CRLs or OCSP (D109): tcltls offers
+neither, and a revoked certificate is best handled by replacing it on the server.
 
 **Accepting one certificate, like a browser does (D111).** A repository whose
 certificate doesn't verify — self-signed, from a private CA, expired, or issued for
@@ -55,8 +62,8 @@ changed. Accepted certificates are kept on the core's host in
 `~/.config/rio/certificates.conf` (hand-editable; delete a section to take one back) and
 listed under *Preferences ▸ Extensions ▸ Accepted certificates…*. An accepted certificate
 counts for every https connection the core makes to that host and port, the agent's
-included. It needs `tcltls` 1.8+. To trust *every* server of a private CA, `SSL_CERT_FILE`
-remains the better tool.
+included. It needs `tcltls` 1.8+. To trust *every* server of a private CA, adding the CA to the
+store (above) remains the better tool.
 
 > `http` (used by the TLS transport) ships with Tcl itself — no separate package.
 

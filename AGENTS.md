@@ -6059,6 +6059,22 @@ Windows store path is from tcltls's documentation and has not run on Windows; (3
 pre-configured `http://rio.skylm.org/rio` stays http — switching it is a one-line change
 once that host serves https, and `source_same` means nobody's installs notice.
 
+**Addendum (2026-09-16, jka: "should we support a CRL? don't bloat it up").**
+- **No revocation checking — rejected, not deferred.** tcltls 1.8 exposes no CRL or
+  OCSP option, so it would mean rio's own signature checks or shelling out to
+  `openssl`, plus fetching, caching and refreshing lists — the distributor duty that
+  ruled out a bundled CA store above. Public CAs are moving from revocation to short
+  lifetimes, and a compromised certificate is fixed by replacing it, which already
+  makes a D111 exception refuse. What an unverified http repository actually lacks is
+  package signing (ROADMAP), which revocation would not give.
+- **The private-CA hint no longer walks into a trap.** `SSL_CERT_FILE` *replaces* the
+  system bundle; the old hint ("set SSL_CERT_FILE … to its PEM bundle") led to a file
+  holding only the private CA, which silently cuts the core off from every public
+  server, the agent's provider included. `explain`, the review dialog and INSTALL now
+  send the user to the host's own store first (`update-ca-certificates`,
+  `trust anchor`, the Windows Trusted Root) and say the file must carry the public CAs
+  too. Guard: `tls-explain-hint-keeps-public-cas`, failing by name on the old wording.
+
 ### D110 — the agent refuses https it can't fully verify, unless the user allows it
 
 **jka (2026-09-15),** on D109's first open item: *"Make this a settings option for the

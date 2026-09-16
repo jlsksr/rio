@@ -9038,7 +9038,7 @@ proc extw_cert_review {url {fetch_error ""}} {
 		$w.det configure -state disabled
 		pack $w.det -fill x -padx 8 -pady {6 4}
 		label $w.hint -anchor w -justify left -wraplength $wrap -font RioUIFont \
-			-text "Accept only if you know this is the server's own certificate — for example, compare the SHA-256 fingerprint with the one on the server. rio then trusts exactly this certificate for $origin, and asks again if it ever changes. To trust every server of a private certificate authority instead, set SSL_CERT_FILE on the core's host." \
+			-text "Accept only if you know this is the server's own certificate — for example, compare the SHA-256 fingerprint with the one on the server. rio then trusts exactly this certificate for $origin, and asks again if it ever changes. To trust every server of a private certificate authority instead, add it to the certificate store on the core's host." \
 			-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 		pack $w.hint -fill x -padx 8 -pady {2 6}
 		button $w.btns.back -text "Go Back" -font RioUIFont -default active \

@@ -103,6 +103,16 @@ test tls-explain-reason-and-hint {an untrusted issuer gets the reason and the fi
 		[string match "*set SSL_CERT_FILE*" $m] $::rio::tls::last_reasons
 } -result {1 1 {}}
 
+# SSL_CERT_FILE replaces the system bundle, so advice to point it at the private CA alone
+# would cut the core off from every public server. The store comes first; the file is
+# said to need the public CAs too.
+test tls-explain-hint-keeps-public-cas {the CA hint prefers the store and warns about the bundle} -body {
+	rio::tls::_note error sock1 "self-signed certificate"
+	set m [rio::tls::explain "failed to use socket"]
+	list [string match "*add it to the core host's certificate store*or set SSL_CERT_FILE*" $m] \
+		[string match "*holding it and the public CAs*" $m]
+} -result {1 1}
+
 test tls-explain-hostname-no-hint {a name mismatch is not fixed by trusting a CA} -body {
 	rio::tls::_note error sock1 "hostname mismatch"
 	set m [rio::tls::explain "failed to use socket"]

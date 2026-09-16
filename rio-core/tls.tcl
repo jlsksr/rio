@@ -468,7 +468,9 @@ proc rio::tls::explain {err} {
 	set last_reasons {}
 	set msg "$err — the server's certificate was refused ($why)"
 	if {[regexp -nocase {local issuer|self-signed|unable to get} $why]} {
-		append msg ". To trust a private CA, set SSL_CERT_FILE on the core's host to its PEM bundle and restart the core"
+		# SSL_CERT_FILE replaces the system bundle rather than adding to it, so a file holding
+		# only the private CA would cut off every public server, the agent's provider included.
+		append msg ". To trust a private CA, add it to the core host's certificate store (update-ca-certificates, trust anchor); or set SSL_CERT_FILE to a PEM bundle holding it and the public CAs, and restart the core"
 	}
 	return $msg
 }
