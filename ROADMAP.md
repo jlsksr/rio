@@ -239,14 +239,16 @@ for later:
   are written when it is built). It extends D39's apt-style trust model (the sources
   list is the trust list) without a central authority, the way D109/D111 did for
   transport. Decided:
-  - **Format: OpenSSH signatures, checked in pure Tcl.** Publishers sign with an ed25519
-    SSH key, as git does: `ssh-keygen -Y sign -f key -n rio-repository SHA256SUMS`.
-    rio parses the SSHSIG armour and checks Ed25519 and SHA-512 itself, so there's no
-    new dependency and it works on Windows. The check is held to the RFC 8032 and
-    FIPS 180-4 vectors, negative cases (s ≥ L, non-canonical points, tampered message,
-    wrong key or namespace) and a cross-check with `ssh-keygen -Y verify` where present.
-    Measure one verification early; if pure Tcl is too slow, fall back to running
-    `ssh-keygen`.
+  - **Format: OpenSSH signatures, checked by `ssh-keygen`.** Publishers sign with an
+    ed25519 SSH key, as git does: `ssh-keygen -Y sign -f key -n rio-repository
+    SHA256SUMS`. The core verifies by running the same tool, `ssh-keygen -Y verify -f
+    <allowed_signers> -I <source> -n rio-repository -s SHA256SUMS.sig < SHA256SUMS`,
+    rather than owning Ed25519 and SHA-512 code (revised 2026-09-16 on review: pure-Tcl
+    crypto was the heavier, less POSIX road). OpenSSH is on every POSIX host rio targets
+    and ships with Windows 10 (1809) and later. **Without `ssh-keygen` a signature can't
+    be verified:** a source with a trusted key is refused, saying what to install; any
+    other source is marked *unsigned* — the fail-closed shape of https without tcltls
+    (D109). The SHA-256 file hashes stay in Tcl (tcllib `sha256`).
   - **What is signed:** one repository-level `SHA256SUMS` (the format `sha256sum` and
     `sha256 -r` print) covering `rio-repository.conf`, `index`, and every manifest and
     payload. That is apt's Release-file shape, and publishers need no rio tooling.
@@ -261,15 +263,18 @@ for later:
     with the core-team key already trusted. jka generates that key and hands over the
     `.pub` line when the build starts.
   - **Split (D30):** the core's `repo.fetch` also returns the raw body's `sha256`
-    (before decoding), and a pure `sig.verify` op lives in a Tk-free
-    `rio-core/sign.tcl`. The GUI verifies `SHA256SUMS` at scan time and checks every
+    (before decoding), and a `sig.verify` op runs `ssh-keygen` core-side (the core's
+    host is where the tool must be, as with tcltls). The GUI verifies `SHA256SUMS` at scan time and checks every
     manifest and payload hash before writing anything; the ledger records `signed_by`.
   - **Known limits:** no freshness check (a replayed older `SHA256SUMS` only freezes
     updates, and D107 never downgrades); rotation is the "changed" step, with no
     cross-signing; no revocation (D109 addendum).
-  - **Tests:** `sign.test`, plus `repos.tcl` cases for signed, unsigned, a tampered
-    payload or manifest, a changed key, a refused downgrade, and the seed. Fixtures
-    come from a test-only Tcl signer, so no tool is needed at test time.
+  - **Tests:** the core's verify against committed fixtures (a test key's `.pub` and
+    signatures made once with `ssh-keygen`), run with the real tool and skipped where it
+    is absent, like `openssl` in `tls.test`: good, tampered, wrong key, wrong namespace,
+    and no `ssh-keygen` on the path. `repos.tcl` stubs the verify seam for signed,
+    unsigned, a tampered payload or manifest, a changed key, a refused downgrade, and
+    the seed.
 - **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
   B", successor to D19). `provider` is a `kind` in the **same** repositories — one
   infrastructure, a publisher adds `kind = provider` (plus `provider-api` and
