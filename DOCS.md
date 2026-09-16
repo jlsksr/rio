@@ -41,8 +41,10 @@ Ten groups of checks. Each exists because something drifted once.
    chords; a shortcut table written by hand is how this started going wrong.
 4. **`preferences.md` matches what `prefs_save` writes.** Every key the code persists
    is documented, and the page invents no key.
-5. **"Where everything lives" matches the paths the code builds** — config and data
-   directories, both directions.
+5. **"Where everything lives" matches the paths the code builds** — every file below
+   the config and data directories, compared as a whole path, both directions. A row
+   with `<name>` or `*` matches as a pattern. Comparing only the first folder let two
+   files under `agent/` go undocumented behind a third.
 6. **Every `Menu ▸ Item` path the docs quote is a real menu entry.** The check walks
    the live Tk menubar widgets, not the source text.
 7. **Every menu the docs *name* exists.** A capitalised word in front of *menu*,
@@ -130,7 +132,8 @@ temporary `.tcl` file.
 it is one, says what it will cover, and points at the document that has the facts
 today — it never leaves the reader with nothing. Currently stubs:
 `files-and-projects.md`, `find-and-replace.md`, `panels-and-layout.md`,
-`editing-modes.md`, `extensions.md`, `remote.md`, `troubleshooting.md`.
+`editing-modes.md`, `remote.md`, `troubleshooting.md`, and `extensions.md` apart from its
+section on certificates that aren't trusted.
 
 **Keep the Markdown restrained.** Headings, paragraphs, lists, links, bold, italic,
 inline code, fenced code, simple tables, blockquotes. No HTML, no images, no footnotes,
