@@ -1,0 +1,27 @@
+# Tests for the registry's by-name lookups (AGENTS.md D32, D112). Pure Tcl, runs headless.
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [info script]]
+source [file join $here .. registry.tcl]
+source [file join $here .. html.tcl]
+source [file join $here .. make.tcl]
+
+test names-lists-registered {names lists every registered language, sorted} -body {
+	set n [rio::syntax::names]
+	list [expr {"HTML" in $n}] [expr {"Makefile" in $n}] [expr {$n eq [lsort -dictionary $n]}]
+} -result {1 1 1}
+
+test for_lang-matches-for_path {a language's scanner by name is the one its extension resolves to} -body {
+	expr {[rio::syntax::for_lang HTML] eq [rio::syntax::for_path index.html]}
+} -result 1
+
+test for_lang-filename-language {a language registered only by file name resolves by name} -body {
+	expr {[rio::syntax::for_lang Makefile] eq [rio::syntax::for_path Makefile]}
+} -result 1
+
+test for_lang-unknown {an unregistered name has no scanner} -body {
+	rio::syntax::for_lang "No Such Language"
+} -result {}
+
+cleanupTests

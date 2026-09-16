@@ -6282,6 +6282,49 @@ Encoders for `tls.inspect` and `tls.accepted` name their keys, and each has a wi
 - **Suite totals:** core 673 → 707; the GUI suites 1737 checks, all passing; providers
   and plugins/lib unchanged.
 
+### D112 — a buffer's language can be picked by hand (View ▸ Language…)
+
+**jka (2026-09-16):** *"should we implement a submenu under view that lets the user
+manually set the current language for syntax highlighting. this could be handy for pasted
+code in a new buffer that has no file extension or when rio recognizes the language
+wrong."*
+
+**Before this,** the highlighter came from the file name alone (D32, D46): the exact
+basename, then the extension, then the rootname. rio never looks at content (no shebang,
+no modeline). An untitled buffer was always plain text, and a misnamed file had no remedy.
+
+**The decision:**
+- **A picker, not a submenu.** The list is every shipped language plus every installed
+  syntax extension (D39), so it is data-driven and unbounded. D92 retired the last menu of
+  that shape because of the X11 over-tall-menu caveat, so **View ▸ Language…** opens the
+  shared `pick_dialog`, beside Theme…. Rows: *Auto-detect (what the name gives)*, *Plain
+  Text*, then the languages; it opens on the current choice.
+- **Per buffer.** The choice is `lang` in the GUI's `::buffers`: `""` detects by name,
+  `plain` turns highlighting off, anything else names a language. It is view state like
+  `modified` (D22), so the core is untouched, and it follows the buffer to another group.
+- **It sticks** through Save As and renames until the user picks Auto-detect again.
+- **Not persisted.** A session restores paths only, and an untitled buffer isn't restored
+  at all; a restart detecting by name again is the unsurprising default.
+- **A vanished language** (its syntax extension removed) falls back to detection, no error.
+- **No content sniffing** in this step. A shebang fallback would help extension-less
+  scripts, but it is a separate question; the pick covers pasted code.
+
+**A bug fixed on the way.** Save As and a rename changed a buffer's path without
+re-picking its highlighter, so an untitled buffer saved as `foo.tcl` stayed plain until a
+tab switch. Both now call `hl_refresh_buffer`.
+
+**Implemented:**
+- `syntax/registry.tcl`: `rio::syntax::names` and `rio::syntax::for_lang`.
+- `rio-gui.tcl`: `hl_select` honours `lang`; `hl_refresh_buffer`, `set_buffer_lang`,
+  `language_pick_rows`, `language_pick_dialog`; the View entry; `do_save_as` and
+  `retarget_buffers` repaint.
+- Tests: `syntax/tests/registry.test` (4); `highlight.tcl` +18 (pick on an untitled
+  buffer, plain, auto, an unknown name, Save As keeping the pick, the picker rows, the
+  menu entry, Save As highlighting by the new name); `split.tcl` +1 (the pick follows a
+  moved tab). Injections, each failing by name: `hl_select` ignoring `lang` (8 + 1
+  checks); `do_save_as` not repainting (2).
+- **Suite totals:** syntax 532 → 536; core 708 unchanged; every GUI suite passes.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

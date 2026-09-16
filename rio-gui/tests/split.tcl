@@ -98,7 +98,9 @@ set fileC [tmpbytes "CCC\n"]
 do_open $fileC                           ;# opens in focused group A -> A = [A, C]
 ok "move: setup A has two tabs"  [llength [gorder $gA]] 2
 set movedC $::cur
+set_buffer_lang $movedC HTML             ;# a hand-picked language belongs to the buffer (D112)
 move_tab_other
+ok "move: picked language follows" [gget $gB hl_lang] HTML
 ok "move: still two groups"      [llength $::groups] 2
 ok "move: C left group A"        [expr {[lsearch -exact [gorder $gA] $movedC] < 0}] 1
 ok "move: C now in group B"      [expr {[lsearch -exact [gorder $gB] $movedC] >= 0}] 1

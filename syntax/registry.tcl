@@ -123,6 +123,22 @@ proc rio::syntax::lang_for_path {path} {
 	return [_resolve $path $filelang $extlang]
 }
 
+# Every registered language display name, sorted — what the frontend offers when the
+# user picks a buffer's language by hand instead of by file name (View ▸ Language…).
+proc rio::syntax::names {} {
+	variable langs
+	return [lsort -dictionary [dict keys $langs]]
+}
+
+# The scanner proc registered under language display NAME `lang`, or "" when no
+# highlighter carries that name. The by-name counterpart of for_path; a later
+# registration under the same name wins here too.
+proc rio::syntax::for_lang {lang} {
+	variable langs
+	if {![dict exists $langs $lang scanner]} { return "" }
+	return [dict get $langs $lang scanner]
+}
+
 # Scan one line with a scanner. A one-line indirection so callers never invoke the
 # scanner proc by hand — the contract stays stated in exactly one place.
 proc rio::syntax::scan_line {scan line state param} {

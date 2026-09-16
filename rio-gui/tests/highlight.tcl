@@ -138,6 +138,46 @@ do_theme acme
 ok "theme: acme recolours comment" [::rio_real_t tag cget syn:comment -foreground] "#6a6a3a"
 do_theme default
 
+# --- the language picked by hand (D112) --------------------------------------
+do_new
+.ed.t insert 1.0 "# a comment\nset x 1\n"
+update ; update idletasks
+ok "pick: untitled starts plain"   [gget $::focus hl_lang] ""
+set_buffer_lang $::cur Tcl
+ok "pick: untitled set to Tcl"     [gget $::focus hl_lang] Tcl
+ok "pick: Tcl comment painted"     [has_tag_at comment 1.0] 1
+ok "pick: status shows Tcl"        [string match *Tcl* [.status cget -text]] 1
+set sp [file join $::hldir picked.txt]
+do_save_as $sp
+ok "pick: Save As keeps the pick"  [gget $::focus hl_lang] Tcl
+ok "pick: still painted after save" [has_tag_at comment 1.0] 1
+
+do_open $hp
+set_buffer_lang $::cur plain
+ok "pick: plain turns HTML off"    [gget $::focus hl_lang] ""
+ok "pick: plain clears the tags"   [has_tag_at comment 1.0] 0
+ok "pick: status shows plain text" [string match {*plain text*} [.status cget -text]] 1
+set_buffer_lang $::cur ""
+ok "pick: auto restores HTML"      [gget $::focus hl_lang] HTML
+ok "pick: auto repaints the tags"  [has_tag_at comment 1.0] 1
+set_buffer_lang $::cur "No Such Language"
+ok "pick: unknown name detects"    [gget $::focus hl_lang] HTML
+set_buffer_lang $::cur ""
+
+set rows [language_pick_rows]
+ok "pick rows: auto names detected" [lindex $rows 0] {auto {Auto-detect (HTML)}}
+ok "pick rows: plain second"       [lindex $rows 1 0] plain
+ok "pick rows: languages follow"   [expr {[lsearch -exact -index 0 $rows lang:Tcl] > 1}] 1
+ok "menu: View has Language…"      [expr {![catch {.m.view index "Language…"}]}] 1
+
+# --- Save As of an untitled buffer picks the highlighter by the new name ------
+do_new
+.ed.t insert 1.0 "# fresh\n"
+update ; update idletasks
+do_save_as [file join $::hldir fresh.tcl]
+ok "saveas: new name highlights"   [gget $::focus hl_lang] Tcl
+ok "saveas: comment painted"       [has_tag_at comment 1.0] 1
+
 file delete -force $::hldir
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

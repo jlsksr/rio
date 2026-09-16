@@ -819,9 +819,10 @@ proc register_buffer {id path meta {g ""}} {
 	# gone_ack: "the user said to keep this buffer though the file is gone" (D94). It lives
 	# here rather than in the core because a deleted file cannot be re-stamped core-side —
 	# there is nothing to stat — and because it is exactly the kind of view-local answer
-	# `modified` already is (D22).
+	# `modified` already is (D22). lang: the language picked by hand (D112) — "" detects
+	# by file name, "plain" turns highlighting off, else a registered language name.
 	dict set ::buffers $id \
-		[dict create path $path meta $meta modified 0 cursor 1.0 yview 0.0 gone_ack 0]
+		[dict create path $path meta $meta modified 0 cursor 1.0 yview 0.0 gone_ack 0 lang ""]
 	gset $g order [linsert [gorder $g] end $id]
 }
 
@@ -1720,6 +1721,7 @@ proc retarget_buffers {old new} {
 		}
 		bufset $id path $np
 		rio_call buffer.setpath [dict create buffer $id path $np]
+		hl_refresh_buffer $id   ;# a new extension may mean a new highlighter (D112)
 		set touched 1
 	}
 	if {$touched} refresh_all
@@ -5171,6 +5173,7 @@ proc do_save_as {path} {
 	}
 	bufset $::cur path $path
 	bufset $::cur gone_ack 0   ;# it is on disk again (D94)
+	hl_refresh_buffer $::cur   ;# the new name may pick a highlighter (D112)
 	clear_modified
 	refresh_dock   ;# the new/renamed file (and its git flag) now shows in the pane
 	return 1
@@ -7219,18 +7222,70 @@ proc modes_menu_fill {} {
 	}
 }
 
-# Pick the scanner for group `g`'s active buffer by its file extension ("" = no
-# highlighter, e.g. a scratch buffer or a plain-text file). Runs on open / switch.
-# The scanner + language name live in the group's cache, one per editor widget (D33).
+# Pick the scanner for group `g`'s active buffer ("" = no highlighter, e.g. a scratch
+# buffer or a plain-text file). Runs on open / switch. A language the user picked by
+# hand (the buffer's `lang`, D112) wins; otherwise the file name decides. A picked
+# language that is no longer registered (its extension removed) falls back to the file
+# name rather than erroring. The scanner + language name live in the group's cache, one
+# per editor widget (D33).
 proc hl_select {g} {
 	gset $g hl_scan "" ; gset $g hl_lang ""
 	if {[info procs rio::syntax::for_path] eq ""} return
 	set id [gcur $g]
 	if {$id eq "" || ![dict exists $::buffers $id]} return
+	set lang [expr {[dict exists $::buffers $id lang] ? [bufget $id lang] : ""}]
+	if {$lang eq "plain"} return
+	if {$lang ne "" && [rio::syntax::for_lang $lang] ne ""} {
+		gset $g hl_scan [rio::syntax::for_lang $lang]
+		gset $g hl_lang $lang
+		return
+	}
 	set path [bufget $id path]
 	if {$path ne ""} {
 		gset $g hl_scan [rio::syntax::for_path $path]
 		gset $g hl_lang [rio::syntax::lang_for_path $path]
+	}
+}
+
+# Re-pick and repaint the highlighter in every group showing buffer `id` — after its
+# path changed (Save As, a rename) or its language was picked by hand (D112).
+proc hl_refresh_buffer {id} {
+	foreach g $::groups {
+		if {[gcur $g] eq $id} { hl_select $g ; hl_full $g }
+	}
+}
+
+# Set buffer `id`'s language by hand (D112): "" = detect by file name, "plain" = no
+# highlighting, else a registered language name. View state only, like `modified`.
+proc set_buffer_lang {id lang} {
+	if {![dict exists $::buffers $id]} return
+	bufset $id lang $lang
+	hl_refresh_buffer $id
+	refresh_status
+}
+
+# View ▸ Language… (D112): pick the current buffer's highlighter by hand, for pasted
+# code in an untitled buffer or a file the name guesses wrong. The shared bounded picker,
+# not a cascade — the list grows with every installed syntax extension (D92). Payloads
+# are never "" because pick_dialog returns "" on Cancel.
+proc language_pick_rows {} {
+	set p [bufget $::cur path]
+	set detected [expr {$p ne "" ? [rio::syntax::lang_for_path $p] : ""}]
+	if {$detected eq ""} { set detected "plain text" }
+	set rows [list [list auto "Auto-detect ($detected)"] [list plain "Plain Text"]]
+	foreach name [rio::syntax::names] { lappend rows [list lang:$name $name] }
+	return $rows
+}
+proc language_pick_dialog {} {
+	if {$::cur eq "" || [info procs rio::syntax::names] eq ""} { bell ; return }
+	set lang [bufget $::cur lang]
+	set initial [expr {$lang eq "" ? "auto" : $lang eq "plain" ? "plain" : "lang:$lang"}]
+	set pick [pick_dialog "Language" [language_pick_rows] $initial]
+	switch -glob -- $pick {
+		""      { return }
+		auto    { set_buffer_lang $::cur "" }
+		plain   { set_buffer_lang $::cur plain }
+		lang:*  { set_buffer_lang $::cur [string range $pick 5 end] }
 	}
 }
 
@@ -11115,6 +11170,9 @@ menu .m.view.layout -tearoff 0
 # Theme… opens the bounded picker (D92), not a cascade: the theme list grows with every
 # installed theme (D39), so it was the one menu here with no size bound at all.
 .m.view add command -label "Theme…" -command theme_pick_dialog
+# Language… (D112) picks the current buffer's highlighter by hand. Also a bounded picker:
+# the language list grows with every installed syntax extension, just like themes.
+.m.view add command -label "Language…" -command language_pick_dialog
 # Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
 # installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
 
