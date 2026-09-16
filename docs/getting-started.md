@@ -46,7 +46,7 @@ From the top down:
   `Ctrl+Shift+A`. See [the agent](agent.md).
 - **The status bar** — the bottom strip, which always tells you about the buffer
   you are in: its path, its text encoding, its line endings (`lf` or `crlf`),
-  whether it has unsaved changes, its detected language, the caret position as
+  whether it has unsaved changes, its language (detected from the name, or [picked by hand](editor.md#syntax-highlighting)), the caret position as
   `Ln 12, Col 5`, and how many buffers you have open. In vi or emacs mode it also
   shows the mode's own indicator, such as `-- INSERT --`.
 

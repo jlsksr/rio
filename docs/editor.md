@@ -1,7 +1,8 @@
 # The editor
 
 The text area and everything around it: tabs, undo, the split view, line wrap,
-line numbers, column editing, and the side-by-side compare view.
+line numbers, syntax highlighting, column editing, and the side-by-side compare
+view.
 
 ## Tabs
 
@@ -130,6 +131,37 @@ choice persists and overrides whatever the active theme would have used.
 
 This is the *document* font only — the menus and dialogs keep the system UI font,
 so zooming in on code doesn't reflow the whole application.
+
+## Syntax highlighting
+
+rio picks a buffer's highlighter from its **file name**, and from nothing else:
+
+1. the whole name, for build files that carry no extension — `Makefile`,
+   `Dockerfile`;
+2. otherwise the extension — `.tcl`, `.py`, `.json`;
+3. otherwise the name without its last extension, so `Dockerfile.prod` and
+   `Makefile.inc` still count as build files.
+
+Matching ignores case. rio never looks inside the file — a `#!` line or an editor
+modeline does not change the language. A name that matches nothing, and a new tab
+that has no name yet, stay plain text. Saving under a new name with
+***File ▸ Save As…***, or renaming the file in the Files pane, picks again straight
+away. The status bar shows the language in use.
+
+When the name gets it wrong — code pasted into a new tab, a script with no
+extension — ***View ▸ Language…*** sets the language by hand. It lists:
+
+- **Auto-detect**, with what the file name would give in brackets — go back to
+  choosing by name;
+- **Plain Text** — no highlighting at all;
+- every language rio has, including highlighters you have
+  [installed](extensions.md).
+
+The list opens on the current choice. It applies to the **current buffer only**,
+and it sticks: saving under another name or renaming the file keeps it until you
+choose Auto-detect again. It is not remembered when rio restarts — the reopened
+file is detected by name again. If you remove the extension that provided the
+chosen language, the buffer quietly goes back to detection.
 
 ## Column (block) editing
 

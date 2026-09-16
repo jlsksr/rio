@@ -14,7 +14,7 @@ jump to the topic you need.
 - [Getting started](getting-started.md) — launching rio, the window explained,
   your first edit and save.
 - [The editor](editor.md) — typing, selecting, undo, tabs, the split view,
-  line wrap, columns.
+  line wrap, syntax highlighting, columns.
 - [Files & projects](files-and-projects.md) — the file tree, opening a folder,
   creating and renaming files, sessions.
 
