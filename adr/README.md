@@ -28,9 +28,23 @@ of the same material.
    number.
 2. Record the decision in AGENTS.md as the next D number as well, so the two
    series stay aligned.
-3. Do not rewrite an accepted record to reflect a later change of mind. Write a
+3. Add a row to the index below. The row carries the record's own title, status
+   and date; `check.tcl` holds the two together.
+4. Do not rewrite an accepted record to reflect a later change of mind. Write a
    new record, and update only the **Status** line of the old one
-   ("Superseded by ADR-NNNN", "Amended by ADR-NNNN").
+   ("Superseded by ADR-NNNN", "Amended by ADR-NNNN") — and its index row.
+
+## Checking the set
+
+```sh
+tclsh adr/check.tcl
+```
+
+It must print `ALL PASS`. It holds the index below against the records themselves —
+title, status and date, in both directions — and the D numbers in AGENTS.md against the
+record numbers, so a record without a row, a row whose status was edited in one place
+only, or a D entry nobody wrote up all fail by name. It reads files and nothing else:
+no Tk, no display, no network. Run it before committing anything in this directory.
 
 ## Statuses
 
@@ -50,20 +64,20 @@ of the same material.
 | [0002](0002-protocol-first-core-api.md) | The core API is a transport-independent message protocol | Accepted; amended by 0030 | 2026-06-24 |
 | [0003](0003-core-owns-the-document.md) | The core owns the document; frontends are views | Accepted | 2026-06-24 |
 | [0004](0004-tcl-tk-and-ck.md) | Tcl/Tk for core and GUI, Ck for the TUI | Accepted; the TUI is deferred by 0112 | 2026-06-24 |
-| [0005](0005-keyboard-only-tui.md) | The TUI is keyboard-only | Accepted, not implemented | 2026-06-24 |
-| [0006](0006-windows-tui-via-cygwin.md) | Windows TUI through Cygwin, PDCurses as fallback | Accepted, not implemented | 2026-06-24 |
+| [0005](0005-keyboard-only-tui.md) | The TUI is keyboard-only | Accepted, not implemented (the TUI is deferred, 0112) | 2026-06-24 |
+| [0006](0006-windows-tui-via-cygwin.md) | Windows TUI through Cygwin, PDCurses as fallback | Accepted, not implemented (the TUI is deferred, 0112) | 2026-06-24 |
 | [0007](0007-git-by-shelling-out.md) | Git by shelling out to `git` | Accepted | 2026-06-24 |
 | [0008](0008-llm-provider-interface.md) | LLM access behind a stable provider interface | Accepted | 2026-06-24 |
-| [0009](0009-layout-policy-as-shared-function.md) | The responsive layout rule is a shared pure function | Accepted, not implemented | 2026-06-24 |
+| [0009](0009-layout-policy-as-shared-function.md) | The responsive layout rule is a shared pure function | Accepted, not implemented (the TUI is deferred, 0112) | 2026-06-24 |
 | [0010](0010-async-via-event-loop.md) | Asynchrony through the event loop and coroutines | Accepted | 2026-06-24 |
 | [0011](0011-jsonl-wire-protocol.md) | Newline-delimited JSON wire protocol | Accepted; amended by 0113 | 2026-06-24 |
 | [0012](0012-document-model-lines.md) | Document model: a list of lines, `line.col` positions | Accepted | 2026-06-24 |
 | [0013](0013-layout-regions.md) | Fixed layout regions and a collapsible section stack | Accepted; amended by 0035 | 2026-06-24 |
-| [0014](0014-responsive-tiers.md) | Responsive tiers and the unified-diff fallback | Accepted, not implemented | 2026-06-24 |
+| [0014](0014-responsive-tiers.md) | Responsive tiers and the unified-diff fallback | Accepted, not implemented (the TUI is deferred, 0112) | 2026-06-24 |
 | [0015](0015-no-terminal-pane.md) | No terminal pane; a headless command primitive only | Accepted | 2026-06-25 |
-| [0016](0016-plugins-as-protocol-participants.md) | A plugin is a protocol participant | Accepted, not implemented | 2026-06-24 |
-| [0017](0017-contribution-points.md) | Contribution points for extensions | Accepted, not implemented | 2026-06-24 |
-| [0018](0018-declarative-ui-contributions.md) | UI contributions are declarative | Accepted, not implemented | 2026-06-24 |
+| [0016](0016-plugins-as-protocol-participants.md) | A plugin is a protocol participant | Accepted, not implemented (the general plugin platform is deferred) | 2026-06-24 |
+| [0017](0017-contribution-points.md) | Contribution points for extensions | Accepted, not implemented (the general plugin platform is deferred) | 2026-06-24 |
+| [0018](0018-declarative-ui-contributions.md) | UI contributions are declarative | Accepted, not implemented (the general plugin platform is deferred) | 2026-06-24 |
 | [0019](0019-plugin-manifest-and-permissions.md) | Plugin manifest and permissions; no marketplace platform | Accepted; distribution amended by 0039 | 2026-06-24 |
 | [0020](0020-agent-orchestration-in-core.md) | Agent orchestration in the core, providers and tools outside | Accepted | 2026-06-24 |
 | [0021](0021-plain-text-config-xdg.md) | Plain-text configuration in XDG locations, never executed | Accepted; session storage amended by 0031 | 2026-06-25 |
@@ -104,7 +118,7 @@ of the same material.
 | [0056](0056-editor-font-override.md) | The editor font is a user override on the theme font | Accepted | 2026-09-03 |
 | [0057](0057-tab-overflow.md) | Tab overflow: page, wrap, or list | Accepted; amended by 0074, 0078 | 2026-09-03 |
 | [0058](0058-preferences-window.md) | A Preferences window that owns no state | Accepted; amended by 0085, 0092 | 2026-09-03 |
-| [0059](0059-menu-hover-patch-reverted.md) | Patching Tk's menu click behaviour | Rejected | 2026-09-04 |
+| [0059](0059-menu-hover-patch-reverted.md) | Patching Tk's menu click behaviour | Rejected (shipped, then reverted) | 2026-09-04 |
 | [0060](0060-current-line-highlight.md) | Current-line highlight | Accepted | 2026-09-04 |
 | [0061](0061-gutter-line-selection.md) | Click a line number to select the line | Accepted | 2026-09-04 |
 | [0062](0062-hide-dotfiles.md) | Hide dotfiles in the files pane by default | Accepted | 2026-09-04 |

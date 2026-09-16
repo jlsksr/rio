@@ -1,7 +1,7 @@
 # ADR-0035: Tool windows live in dock sites, not in the document tabs
 
 - **Status:** Accepted
-- **Date:** 2026-07-12 (direction); built 2026-08-20
+- **Date:** 2026-07-12
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D35
 
@@ -65,3 +65,5 @@ The build settled these points:
 - Layout is queryable state, so the placement logic is testable without a mapped
   window. The feel of dragging still needs a live check.
 - Plugin-contributed panels wait for the plugin interface (ADR-0018).
+- The direction was settled on the date above; the dock sites themselves were built on
+  2026-08-20.
