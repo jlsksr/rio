@@ -5,14 +5,38 @@
 # the turn's content streams back as agent.* events (D26). agent.reset and
 # agent.history are ordinary request/response ops over the conversation state.
 
-# agent.send {text} -> {started, turn} ; streams agent.delta -> agent.message
-# (or agent.error). The reply is an ack — the content is the events, not the
-# response (D26).
+# agent.send {text, ?buffer, start, end?} -> {started, turn} ; streams agent.delta ->
+# agent.message (or agent.error). The reply is an ack — the content is the events, not
+# the response (D26). `buffer` with `start`/`end` scopes the turn to that range of an
+# open buffer (D113) — flat, the way buffer.replace names a range, since params are a
+# flat object (D25). The core reads the range itself, and the turn's only changing tool
+# is replace_selection. A buffer that doesn't exist, or a range that doesn't exist or
+# is empty, is refused before any turn starts.
 proc rio::ops::agent_send {params emit} {
 	if {![dict exists $params text]} {
 		rio::error::raise bad_request "agent.send requires text"
 	}
-	return [rio::agent::send [dict get $params text] $emit]
+	set scope {}
+	if {[dict exists $params buffer]} {
+		foreach k {start end} {
+			if {![dict exists $params $k]} {
+				rio::error::raise bad_request "agent.send with a buffer requires $k"
+			}
+		}
+		set id [dict get $params buffer]
+		if {![rio::doc::exists $id]} {
+			rio::error::raise bad_request "agent.send: no such buffer: $id"
+		}
+		set start [dict get $params start] ; set end [dict get $params end]
+		if {[catch {rio::doc::range_text $id $start $end} text]} {
+			rio::error::raise bad_request "agent.send: $text"
+		}
+		if {$text eq ""} {
+			rio::error::raise bad_request "agent.send: the selection is empty"
+		}
+		set scope [dict create buffer $id start $start end $end original $text]
+	}
+	return [rio::agent::send [dict get $params text] $emit $scope]
 }
 rio::dispatch::register_stream agent.send rio::ops::agent_send
 

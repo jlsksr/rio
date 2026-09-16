@@ -209,6 +209,7 @@ set ::agent_mode_ui review ;# plan|review|auto — the two flags above as the th
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
 set ::agent_tls_unchecked 0 ;# the core's choice: https on a tcltls without host-name checks (D110)
+set ::agent_selection_menu 1 ;# offer "Change with Agent…" in the editor's context menu (prefs.json; D113)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
 set ::rio_started 0       ;# false during boot: view-state/workspace writes wait until startup finishes (D31)
@@ -2791,13 +2792,22 @@ proc chat_send {} {
 	set text [string trim [.chat.input get 1.0 end]]
 	if {$text eq ""} return
 	.chat.input delete 1.0 end
+	chat_send_text $text
+}
+
+# The one path a turn leaves the GUI by — the composer above, and Change with Agent…
+# (D113), which passes the selection's `scope` {buffer start end} and a `note` saying
+# what the request is about, shown muted under the user's words.
+proc chat_send_text {text {scope {}} {note ""}} {
 	# Sending a new message abandons any proposal still awaiting a decision; the core
 	# seals the dangling tool call, so dismiss its review UI here to match (D28).
 	if {$::pending_turn ne ""} { approve_bar 0 ; compare_close ; plan_close }
 	chat_label you-label "You"
 	chat_log "$text\n"
+	if {$note ne ""} { chat_log "· $note\n" tool }
 	set ::chat_turn_open 0
-	set resp [rio_call agent.send [dict create text $text]]
+	set params [dict merge [dict create text $text] $scope]
+	set resp [rio_call agent.send $params]
 	if {![dict get $resp ok]} {
 		set e [dict get $resp error]
 		chat_label error-label "Error"
@@ -7455,6 +7465,7 @@ proc prefs_load {} {
 	if {[dict exists $d show_hidden]} { set ::show_hidden [expr {[dict get $d show_hidden] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d check_updates]} { set ::ext_check_updates [expr {[dict get $d check_updates] ? 1 : 0}] }
+	if {[dict exists $d agent_selection_menu]} { set ::agent_selection_menu [expr {[dict get $d agent_selection_menu] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
 		set tl [dict get $d tab_layout]
 		if {$tl eq "scroll" || $tl eq "multi"} { set ::tab_layout $tl }
@@ -7502,6 +7513,7 @@ proc prefs_save {} {
 			show_hidden $::show_hidden \
 			column_edit $::col_on \
 			check_updates $::ext_check_updates \
+			agent_selection_menu $::agent_selection_menu \
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
 			font_size   $::editor_font_size \
@@ -9663,6 +9675,88 @@ proc editor_context_build {m g} {
 	$m add command -label "Replace…" -accelerator [key_accel replace] -command {find_open 1}
 	$m add command -label [editor_search_label $w] \
 		-accelerator [key_accel search] -command search_open
+	# Change with Agent… (D113), last and behind its own separator. An AI entry must not
+	# get in the way of people who don't use one, so it appears only while a real provider
+	# is selected (Echo can't change anything) and the preference hasn't hidden it. The
+	# grey is honest: it needs a selection, and a turn that isn't already under way.
+	if {$::agent_selection_menu && $::agent_provider ne "echo"} {
+		set ok [expr {[agent_selection_scope $g] ne "" && !$::chat_busy && $::pending_turn eq ""}]
+		$m add separator
+		$m add command -label "Change with Agent…" -state [expr {$ok ? "normal" : "disabled"}] \
+			-command [list agent_change_dialog $g]
+	}
+}
+
+# Group `g`'s selection as agent.send's scope {buffer start end} (D113), or "" when
+# there is none. Indices are the widget's own — the core's line.col is the same form (D12).
+proc agent_selection_scope {g} {
+	set w [gget $g path]
+	if {[catch {list [$w index sel.first] [$w index sel.last]} r]} { return "" }
+	lassign $r a b
+	if {[$w compare $a >= $b]} { return "" }
+	return [dict create buffer [gcur $g] start $a end $b]
+}
+
+# "foo.tcl, lines 12–20" — where a scope is, as the dialog and the transcript say it.
+# A selection ending at column 0 doesn't count that last line (the D38 block rule).
+proc agent_scope_label {scope} {
+	set l1 [lindex [split [dict get $scope start] .] 0]
+	lassign [split [dict get $scope end] .] l2 c2
+	if {$l2 > $l1 && $c2 == 0} { incr l2 -1 }
+	return "[tab_name [dict get $scope buffer]], [expr {$l1 == $l2 ? "line $l1" : "lines $l1–$l2"}]"
+}
+
+# Send the instruction as a turn scoped to `scope`: the Agent pane comes into view,
+# because the review bar and the transcript live there.
+proc agent_change_send {text scope} {
+	set text [string trim $text]
+	if {$text eq ""} return
+	if {![rio::layout::shown chat]} { panel_reveal chat }
+	chat_send_text $text $scope "on the selection in [agent_scope_label $scope]"
+}
+
+# The small dialog behind the entry: where the selection is, what to do with it, Send.
+# The scope is taken when the dialog opens, so the request is about what was selected
+# when the user asked; the core checks it again before anything changes.
+proc agent_change_dialog {g} {
+	set scope [agent_selection_scope $g]
+	if {$scope eq ""} { bell ; return }
+	set w .agentchg
+	destroy $w
+	toplevel $w
+	wm title $w "Change with Agent"
+	wm transient $w .
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.where -text "Selection: [agent_scope_label $scope]" -anchor w -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	label $w.hint -text "Enter sends · Shift+Enter starts a new line" -anchor w -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	text $w.input -width 56 -height 5 -wrap word -undo 1 -font RioUIFont \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.fg] -highlightthickness 1
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.send   -text Send   -font RioUIFont -default active \
+		-command [list agent_change_submit $w $scope]
+	button $w.btns.cancel -text Cancel -font RioUIFont -command [list destroy $w]
+	pack $w.btns.cancel $w.btns.send -side right -padx 3
+	grid $w.where -row 0 -column 0 -sticky w  -padx 8 -pady {8 2}
+	grid $w.input -row 1 -column 0 -sticky nsew -padx 8 -pady 2
+	grid $w.hint  -row 2 -column 0 -sticky w  -padx 8 -pady {0 2}
+	grid $w.btns  -row 3 -column 0 -sticky e  -padx 5 -pady {2 8}
+	grid rowconfigure $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	bind $w.input <Return>       "[list agent_change_submit $w $scope] ; break"
+	bind $w.input <Shift-Return> { %W insert insert "\n" ; break }
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.input
+}
+proc agent_change_submit {w scope} {
+	set text [$w.input get 1.0 end]
+	if {[string trim $text] eq ""} { bell ; return }
+	destroy $w
+	agent_change_send $text $scope
 }
 
 # The Search entry's label for the current selection (see above). 20 characters
@@ -10422,6 +10516,13 @@ proc prefs_fill_agent {f} {
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady 1
 	}
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
+	# The editor's one AI entry (D113). On by default, yet only ever seen with a real
+	# provider selected — so someone who never installs one never meets it, and someone
+	# who does can still keep their context menu to plain editing.
+	grid [prefs_check $f.selmenu "Show “Change with Agent…” in the editor's context menu" \
+		::agent_selection_menu prefs_save] -row [incr r] -column 0 -sticky w -pady {8 1}
+	grid [prefs_hint $f.selhint "Shown only while a provider other than Echo is selected. It asks the agent to change the selected text and nothing else."] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	# The one security trade-off the agent offers (D110), off by default. It lives here, not
 	# in Settings: a fast switch it is not. The hint says what ticking it gives away.
 	grid [prefs_check $f.tls "Allow https without host-name checks (tcltls older than 1.8)" \

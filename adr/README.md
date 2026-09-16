@@ -180,3 +180,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0116](0116-verification-policy.md) | Verification is automated, offline, and proven against injected faults | Accepted | 2026-09-11 |
 | [0117](0117-derived-facts-register.md) | A fact kept in two places must have a guard | Accepted | 2026-09-10 |
 | [0118](0118-language-picked-by-hand.md) | A buffer's language can be picked by hand | Accepted | 2026-09-16 |
+| [0119](0119-change-with-agent.md) | Change with Agent: a request about the selected text, and only that | Accepted | 2026-09-16 |

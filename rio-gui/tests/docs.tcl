@@ -528,15 +528,31 @@ ok "every #anchor names a real heading" $lost {}
 # that section **bold marks a menu entry**, so an entry the page forgot and a name
 # the page invented are both caught. Bold anything else there and this check will
 # say so.
-menu .docsmenu -tearoff 0
-[gget 0 path] tag remove sel 1.0 end
-editor_context_build .docsmenu 0
-set ::ctxlabels {}
-for {set i 0} {$i <= [.docsmenu index end]} {incr i} {
-	if {[.docsmenu type $i] eq "separator"} continue
-	lappend ::ctxlabels [.docsmenu entrycget $i -label]
+#
+# The menu is built twice. This suite runs with Echo, and Change with Agent… (D113)
+# appears only while a real provider is selected — built once, the page could invent
+# that entry or forget it and nothing would notice. So the second build names a
+# provider other than Echo and turns the preference on; the union of both builds is
+# what the page must list.
+proc ctx_labels {} {
+	menu .docsmenu -tearoff 0
+	[gget 0 path] tag remove sel 1.0 end
+	editor_context_build .docsmenu 0
+	set out {}
+	for {set i 0} {$i <= [.docsmenu index end]} {incr i} {
+		if {[.docsmenu type $i] eq "separator"} continue
+		lappend out [.docsmenu entrycget $i -label]
+	}
+	destroy .docsmenu
+	return $out
 }
-destroy .docsmenu
+set ::ctxlabels [ctx_labels]
+set saved_ctx [list $::agent_provider $::agent_selection_menu]
+set ::agent_provider docs-real-provider ; set ::agent_selection_menu 1
+set ctxreal [ctx_labels]
+lassign $saved_ctx ::agent_provider ::agent_selection_menu
+ok "a real provider adds context-menu entries" [expr {[llength $ctxreal] > [llength $::ctxlabels]}] 1
+set ::ctxlabels [lsort -unique [concat $::ctxlabels $ctxreal]]
 ok "the context menu has entries" [expr {[llength $::ctxlabels] > 5}] 1
 
 set ed [slurp [file join $::docs editor.md]]

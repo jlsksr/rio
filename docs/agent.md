@@ -143,6 +143,46 @@ left behind, since every change had to pass the gate first; the request already
 sent to the provider is still paid for, so stop it because you changed your mind,
 not to save a fraction of a cent.
 
+## Changing just the selection
+
+Select some text in the editor, right-click it and choose **Change with Agent…**.
+A small window names what you selected — *Selection: parser.tcl, lines 12–20*
+(a selection that ends at the very start of a line doesn't count that line) — and
+takes your instruction: "rename `tok` to `token`", "make this loop iterative".
+`Enter` sends it, `Shift+Enter` starts a new line, and **Cancel** or `Esc` drops it.
+
+Sending brings the agent pane into view, because the review happens there. Your
+request shows as an ordinary **You** message, with a muted line underneath saying
+which selection it is about.
+
+**The agent can change the selected text and nothing else.** As with plan mode,
+this is a restriction, not a request: for that one turn the agent is handed a single
+changing tool, which replaces exactly the selected text. It has no way to edit
+another part of the file, touch another file, create one or run a command. It can
+still read your project, for context. In plan mode it can only read and present a
+plan, as always.
+
+The change goes through the same gate as any edit — a diff with **Approve** and
+**Reject**, the compare view for a complex one, and no question at all when you have
+chosen auto-accept. The editor stays live while you decide:
+
+- if you changed the **selected text itself** in the meantime, the edit is refused
+  and nothing is replaced — select it again and ask again;
+- if you only edited above it, so the text merely moved, the edit still lands on it
+  (as long as that text appears only once in the buffer).
+
+One `Ctrl+Z` takes the whole replacement back. A buffer with a file is saved the way
+any approved agent edit is; an untitled buffer works too, and is never saved.
+
+The restriction lasts for that turn only: the next message you type in the chat is
+an ordinary request again.
+
+**Where the entry appears.** Only while a provider other than Echo is selected, and
+only while *Preferences ▸ Agent ▸ "Show “Change with Agent…” in the editor's context
+menu"* is ticked, which it is by default. Untick it and the editor's right-click menu
+is plain editing again. The entry is greyed when nothing is selected, and while a
+turn is still working or waiting for your approval.
+
 ## Planning before building
 
 For anything bigger than a small fix, you can ask to see the plan first.

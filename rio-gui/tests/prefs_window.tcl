@@ -170,6 +170,22 @@ ok "tls: adopt mirrors the core"    $::agent_tls_unchecked                   1
 rio_result agent.tls.set {unchecked 0}
 adopt_agent_status
 
+# --- Change with Agent… in the editor's context menu (D113) --------------------------
+# A GUI preference (prefs.json), on by default — the entry itself also needs a real
+# provider, which the context-menu test covers. Ticking it saves at once and survives a load.
+ok "selmenu: checkbox present"      [winfo class .prefs.body.agent.selmenu]  Checkbutton
+ok "selmenu: on by default"         $::agent_selection_menu                  1
+ok "selmenu: hint present"          [winfo exists .prefs.body.agent.selhint] 1
+.prefs.body.agent.selmenu invoke
+ok "selmenu: the box turns it off"  $::agent_selection_menu                  0
+set ::agent_selection_menu 1
+prefs_load
+ok "selmenu: off survives a load"   $::agent_selection_menu                  0
+.prefs.body.agent.selmenu invoke
+set ::agent_selection_menu 0
+prefs_load
+ok "selmenu: on survives a load"    $::agent_selection_menu                  1
+
 # --- opening twice reuses the window rather than erroring --------------------------
 ok "reopen: no second toplevel"  [catch {preferences_window}]          0
 ok "reopen: window still there"  [winfo exists .prefs]                 1

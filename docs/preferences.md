@@ -56,6 +56,7 @@ separate "make this the default" step and no "save settings" button.
   | `editmode` | `windows`, `vi` or `emacs` — the last two only take effect once installed as extensions |
   | `project` | the folder that was open at the last launch, reopened on the next one (local cores only) |
   | `check_updates` | `"1"` looks for newer versions of your installed extensions shortly after start-up, `"0"` (the default) never touches the network unasked |
+  | `agent_selection_menu` | `"1"` (the default) offers **Change with Agent…** in the editor's right-click menu while a provider other than Echo is selected, `"0"` never shows it — see [the agent](agent.md#changing-just-the-selection) |
   | `layout` | a **nested object** holding the whole dock arrangement: which panes sit left, right or bottom, which are hidden, and their sizes |
 
   `layout` is fiddly to write by hand, so toggle it from the **View** menu and let

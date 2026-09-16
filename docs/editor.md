@@ -76,24 +76,32 @@ allowed; the `●` marker tells you whether what's on screen matches the disk.
 
 Right-click in the text and you get the actions you reach for most, without going
 to the menu bar: **Undo** and **Redo**, then **Cut**, **Copy** and **Paste**, then
-**Select All**, and finally **Find…**, **Replace…** and **Search…**.
+**Select All**, then **Find…**, **Replace…** and **Search…**.
+
+While a real agent provider is selected — any provider but Echo — one more entry
+comes last, on its own: **Change with Agent…**, which asks the agent to change the
+selected text and nothing else (see [the agent](agent.md#changing-just-the-selection)).
+It is not there at all with Echo, and you can hide it for good with *Preferences ▸
+Agent ▸ "Show “Change with Agent…” in the editor's context menu"*.
 
 The click itself follows the usual convention, and it matters for what the menu
 then does:
 
 - right-click *inside* a selection and the selection stays exactly as it is — so
-  Cut, Copy and the search entries act on the text you can see is highlighted;
+  Cut, Copy, the search entries and Change with Agent… act on the text you can
+  see is highlighted;
 - right-click anywhere else and the selection is dropped and the caret moves to
   where you pointed — so Paste lands there.
 
-With a word or phrase selected, the last entry names it (*Search for “needle”*)
+With a word or phrase selected, the Search entry names it (*Search for “needle”*)
 and opens the [project-wide search](find-and-replace.md) already filled in; Find
 and Replace seed themselves from the selection the same way. A selection that
 spans several lines seeds nothing, and the entry says so by going back to its
 plain name.
 
 Entries you cannot use right now are greyed — Cut and Copy without a selection,
-Select All in an empty buffer. Undo and Redo are always offered: the undo history
+Select All in an empty buffer, Change with Agent… without a selection or while an
+agent turn is still working or waiting for your approval. Undo and Redo are always offered: the undo history
 lives in the core, and rio does not claim to know whether there is anything left
 to undo until it asks.
 
