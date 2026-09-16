@@ -69,8 +69,16 @@ Things worth knowing:
 - **An exception counts for every https connection the core makes** to that host and
   port, the [agent's](agent.md) included.
 - **For a private certificate authority, trust the authority instead.** Accepting is
-  for one server; to trust every server a private CA signs, set `SSL_CERT_FILE` on the
-  core's host to its PEM bundle and restart the core ([INSTALL.md](../INSTALL.md)).
+  for one server; to trust every server a private CA signs, add the CA to the
+  certificate store on the core's host — `update-ca-certificates` on Debian and Alpine,
+  `trust anchor` on RHEL-family systems, the Trusted Root store on Windows. Only where
+  that isn't possible, set `SSL_CERT_FILE` to a PEM bundle holding your CA *and* the
+  public ones, then restart the core. That variable replaces the host's store rather
+  than adding to it, so a file holding only your CA cuts the core off from every public
+  server, your agent's provider included ([INSTALL.md](../INSTALL.md)).
+- **No revocation checking.** rio does not consult CRLs or OCSP, so a certificate the
+  authority has revoked still verifies. The fix is to replace it on the server — and
+  once it is replaced, an exception you accepted for the old one no longer matches.
 - **It needs `tcltls` 1.8 or newer** on the core's host — as every https repository
   does.
 - **A redirect to another server.** If the repository redirects to a different https
