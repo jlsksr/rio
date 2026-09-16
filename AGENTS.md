@@ -6392,6 +6392,9 @@ be unique in the file, and could reach any other file or run commands just the s
   first one wrote.
 
 **Rejected:**
+- **Hidden by default (opt-in), or always shown.** Opt-in would hide the entry from
+  exactly the people who installed a provider to use it. Always shown would put an AI
+  entry in front of people who have none.
 - **Prompt-only scoping.** A normal turn told to "touch only this" can still edit
   elsewhere, and then the review bar is the only guard.
 - **A nested `scope` object on the wire.** The flat encoder would have carried it as a
