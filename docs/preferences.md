@@ -83,8 +83,12 @@ rather than failing.
 ## Your repository list, by hand
 
 The URLs you add under *Settings ▸ Extensions… ▸ Repositories…* are just an
-apt-style sources file you can edit yourself: `sources.list`, **one `http://` base
-URL per line**, with `#` comments and blank lines allowed. The dialog reads and
+apt-style sources file you can edit yourself: `sources.list`, **one base URL per
+line**, `http://` or `https://`, with `#` comments and blank lines allowed. Like a
+Debian source, https is an option, not an obligation: plain http is just as
+supported. An https repository needs `tcltls` 1.8 or newer on the core's host (see
+[INSTALL.md](../INSTALL.md)), and one whose certificate doesn't verify can be
+[reviewed and accepted](extensions.md#a-certificate-that-isnt-trusted). The dialog reads and
 writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
 picked up the next time the Extensions window scans.
 
@@ -96,7 +100,9 @@ Otherwise it's optional: no file means no repositories.
 
 What you have actually installed, and from where, is tracked separately in a
 provenance ledger, `extensions.json` — rio writes it, and each entry records the
-source URL and version a `kind/name` came from.
+source URL and version a `kind/name` came from. The scheme is not part of that
+identity, so moving a repository from `http://host/rio` to `https://host/rio` keeps
+the updates for everything you installed from it.
 
 ## Checking for extension updates
 
@@ -119,6 +125,10 @@ what it found. It is **off** by default. A version that doesn't follow semver �
 a date stamp, say — is shown but never compared, and never claimed to be out of
 date.
 
+*Preferences ▸ Extensions ▸ Accepted certificates…* lists the certificates you
+accepted for https repositories although they did not verify, and removes them —
+see [extensions](extensions.md#a-certificate-that-isnt-trusted).
+
 ## Where everything lives
 
 There is **no single `~/.riorc`**: rio follows the XDG base-directory layout and
@@ -132,7 +142,8 @@ bookkeeping, machine-written, not meant for hand-editing).
 | ---- | ----- | ------------- |
 | `prefs.json` | GUI preferences — every key is listed [above](#setting-a-default-is-just-setting-the-value) | yes — plain JSON (above); `layout` best left to the View menu |
 | `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes — see [keyboard shortcuts](keyboard.md) |
-| `sources.list` | extension-repository URLs, one `http://` base per line | yes (above) |
+| `sources.list` | extension-repository URLs, one `http://` or `https://` base per line | yes (above) |
+| `certificates.conf` | certificates you accepted although they did not verify, one section per `host:port` — on the **core's** host | yes — delete a section to take one back; see [extensions](extensions.md#a-certificate-that-isnt-trusted) |
 | `themes/` | user theme files, read by the **core** | drop-in / installed |
 | `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
 | `modes/` | installed editing modes — vi, emacs (`*.tcl`) | drop-in / installed |
@@ -142,6 +153,8 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `agent/providers/<name>.md` | a **per-provider prompt**, applied only while that provider is live | yes — plain Markdown |
 | `agent/allow.list` | trusted commands for **all projects** — one rule per line | yes — plain text |
 | `agent/providers/<name>.allow.list` | trusted commands active only while that provider is live | yes — plain text |
+| `agent/providers/<name>.conf` | the choices that provider remembers, such as model and effort — see [the agent](agent.md#choosing-a-model-and-how-hard-it-thinks) | yes — `key = value` |
+| `agent/agent.conf` | the agent's own settings, whichever provider is live — today only `tls_unchecked_hostnames` (see [the agent](agent.md#https-on-an-older-tcltls)) | yes — `key = value` |
 
 **Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**
 

@@ -21,6 +21,17 @@ rather than repeat them:
 On Windows, [WINDOWS.md](../WINDOWS.md) also covers getting an error message out of
 `wish`, which prints none for an uncaught error.
 
+Two messages already have their answer written down:
+
+- **`certificate not trusted`** on a repository in the Extensions window — see
+  [a certificate that isn't trusted](extensions.md#a-certificate-that-isnt-trusted).
+- **The agent refused https**, naming `tcltls` and host-name checks — see
+  [HTTPS on an older tcltls](agent.md#https-on-an-older-tcltls). A repository says
+  `https needs tcltls 1.8 or newer` for the same reason, and has no switch: upgrade
+  `tcltls` on the core's host, or use the repository's `http://` URL.
+
+## Further reading
+
 - [Preferences](preferences.md#where-everything-lives) — every config file, so you
   can look at (or move aside) the one you suspect.
 - [Working remotely](remote.md) — what a remote core does and doesn't change.

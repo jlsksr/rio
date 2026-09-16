@@ -168,52 +168,79 @@ ok "preferences.md invents no prefs.json key" $phantom {}
 # have caught the agent files (added to the code, never to the table) and the
 # provider store, both of which were missing when docs/ was first written.
 
+# Compared as WHOLE paths below the root, not as first segments. The first version reduced
+# every row to its top directory, so everything under `agent/` was one entry: a new file
+# there (agent.conf, D110; providers/<name>.conf, D106) passed as documented while the
+# table never mentioned it. Each producer is now the proc that builds one concrete file or
+# directory; a per-provider or per-key file is built for a sample name, and the table
+# writes that name as `<name>` or `*`.
+
 # proc to call -> which XDG root its result hangs under
 set producers {
-	{prefs_path}                        config
-	{keys_path}                         config
-	{sources_path}                      config
-	{hl_user_dir}                       config
-	{modes_user_dir}                    config
-	{lindex [rio::theme::searchdirs] 0} config
-	{rio::agent::prompt::_userdir}      config
-	{rio::agent::allow::_dir}           config
-	{ledger_path}                       data
-	{rio::secret::_dir}                 data
-	{rio::workspace::_dir}              data
-	{rio::provider::_dir}               data
+	{prefs_path}                                 config
+	{keys_path}                                  config
+	{sources_path}                               config
+	{rio::tls::exceptions_path}                  config
+	{hl_user_dir}                                config
+	{modes_user_dir}                             config
+	{lindex [rio::theme::searchdirs] 0}          config
+	{rio::agent::prompt::path base}              config
+	{rio::agent::prompt::path plan}              config
+	{rio::agent::prompt::path system}            config
+	{rio::agent::prompt::path provider claude}   config
+	{rio::agent::allow::_global_file}            config
+	{rio::agent::allow::_provider_file claude}   config
+	{rio::agent::settings::path claude}          config
+	{rio::agent::settings::agent_path}           config
+	{ledger_path}                                data
+	{rio::secret::_path claude}                  data
+	{rio::workspace::_dir}                       data
+	{rio::provider::_dir}                        data
 }
 
-# The first path segment of a table cell — `agent/providers/<name>.md` and
-# `secrets/*.secret` both reduce to what the code actually names.
-proc first_seg {p} { return [lindex [split [string trimright $p /] /] 0] }
-
-# The two XDG tables, sliced apart so a config path can't satisfy a data row.
-proc doc_segs {text from to} {
+# The two XDG tables, sliced apart so a config path can't satisfy a data row. Each cell
+# becomes a `string match` pattern: a trailing / dropped, and `<name>` read as `*`.
+proc doc_cells {text from to} {
 	set body [string range $text [string first $from $text] \
 		[expr {[string first $to $text] - 1}]]
 	set out {}
 	foreach {_ cell} [regexp -all -inline -line {^\| `([^`]+)` \|} $body] {
-		lappend out [first_seg $cell]
+		lappend out [regsub -all {<[^>]*>} [string trimright $cell /] *]
 	}
 	return [lsort -unique $out]
 }
-set doc(config) [doc_segs $prefs "**Config —" "**Data —"]
-set doc(data)   [doc_segs $prefs "**Data —"   "**Project-local"]
+set doc(config) [doc_cells $prefs "**Config —" "**Data —"]
+set doc(data)   [doc_cells $prefs "**Data —"   "**Project-local"]
+set xdgroot(config) [file join $::env(XDG_CONFIG_HOME) rio]
+set xdgroot(data)   [file join $::env(XDG_DATA_HOME) rio]
 
 set missing {}
 set produced(config) {} ; set produced(data) {}
 foreach {call root} $producers {
-	set seg [file tail [uplevel #0 $call]]
-	lappend produced($root) $seg
-	if {[lsearch -exact $doc($root) $seg] < 0} { lappend missing "$root/$seg ($call)" }
+	set p [uplevel #0 $call]
+	set pre "$xdgroot($root)/"
+	if {[string first $pre $p] != 0} {
+		lappend missing "$root: $call built $p, outside $xdgroot($root)"
+		continue
+	}
+	set rel [string range $p [string length $pre] end]
+	lappend produced($root) $rel
+	set found 0
+	foreach pat $doc($root) {
+		if {[string match $pat $rel]} { set found 1 ; break }
+	}
+	if {!$found} { lappend missing "$root/$rel ($call)" }
 }
 ok "every config & data path is documented" $missing {}
 
 set orphaned {}
 foreach root {config data} {
-	foreach seg $doc($root) {
-		if {[lsearch -exact $produced($root) $seg] < 0} { lappend orphaned "$root/$seg" }
+	foreach pat $doc($root) {
+		set built 0
+		foreach rel $produced($root) {
+			if {[string match $pat $rel]} { set built 1 ; break }
+		}
+		if {!$built} { lappend orphaned "$root/$pat" }
 	}
 }
 ok "no documented path the code never builds" $orphaned {}

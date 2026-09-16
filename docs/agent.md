@@ -92,6 +92,32 @@ made on the server and the key is stored there — which is a real consideration
 that machine isn't yours. rio says so plainly when you connect. See
 [working remotely](remote.md).
 
+## HTTPS on an older tcltls
+
+A hosted provider is reached over https, from the **core**, with the core's
+`tcltls`. A `tcltls` older than 1.8 checks that a certificate was issued by a
+trusted authority but never that it was issued *for the provider* — any valid
+certificate for any host would pass. So on such a core the agent **refuses https**
+before it connects, and the error names both ways out:
+
+- install `tcltls` 1.8 or newer on the core's host and restart the core (see
+  [INSTALL.md](../INSTALL.md)); or
+- if that host can't be upgraded, tick *Preferences ▸ Agent ▸ "Allow https without
+  host-name checks (tcltls older than 1.8)"*.
+
+The box is **off** by default. It changes nothing on a `tcltls` that checks names,
+and plain `http://` — a local Ollama or llama-server — is never affected.
+
+It is the core's setting, not the window's: it is stored on the core's host in
+`$XDG_CONFIG_HOME/rio/agent/agent.conf` as `tls_unchecked_hostnames = allow`, and
+every window attached to that core sees the same answer. Only the word `allow`
+allows — a missing file, a typo or a malformed line all mean refuse. The file is read
+on every request, so a hand edit counts without restarting.
+
+A certificate you [accepted for a repository](extensions.md#a-certificate-that-isnt-trusted)
+counts for the agent too, on that same host and port; the agent has no review of its
+own.
+
 ## A turn, step by step
 
 You type a request and press **▶** (or `Enter`). The agent streams its reply into
