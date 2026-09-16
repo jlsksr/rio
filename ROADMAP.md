@@ -206,6 +206,12 @@ Each entry notes its state:
   now incremental, so per-edit cost is already small; viewport would only cap the
   one-time whole-file scan on very large files and needs scroll-event machinery not
   yet warranted.
+- **Language from the shebang** — *deferred* (AGENTS.md D112). Detection is by file
+  name only; an extension-less script (`bin/foo` starting `#!/usr/bin/env perl`) stays
+  plain unless picked by hand (View ▸ Language…). A first-line fallback, used only when
+  the name matches nothing, would need modules to register interpreter names
+  (`perl`, `sh`, `tclsh`, `python3`, …) beside their extensions, and a re-check when
+  line 1 is edited or the text is first loaded.
 - **Highlight the compare/diff panes** — *deferred.* v1 highlights the main editor
   only; the side-by-side compare view is still plain.
 
