@@ -229,10 +229,41 @@ for later:
   file is specced (CONTRIBUTING) and costs publishers one line; consuming it —
   a "host-validated" badge in the Extensions window, and an official-approval
   marking on top — is not built.
-- **Signing / trust beyond provenance** — *design.* v1's trust model is apt's
-  (your sources list is your trust list, provenance shown, code named as
-  code). Anything stronger — signatures, pinning — needs a design that works
-  without a central authority.
+- **Signing** — *planned* (designed with jka 2026-09-16; the D number and its reasoning
+  are written when it is built). It extends D39's apt-style trust model (the sources
+  list is the trust list) without a central authority, the way D109/D111 did for
+  transport. Decided:
+  - **Format: OpenSSH signatures, checked in pure Tcl.** Publishers sign with an ed25519
+    SSH key, as git does: `ssh-keygen -Y sign -f key -n rio-repository SHA256SUMS`.
+    rio parses the SSHSIG armour and checks Ed25519 and SHA-512 itself, so there's no
+    new dependency and it works on Windows. The check is held to the RFC 8032 and
+    FIPS 180-4 vectors, negative cases (s ≥ L, non-canonical points, tampered message,
+    wrong key or namespace) and a cross-check with `ssh-keygen -Y verify` where present.
+    Measure one verification early; if pure Tcl is too slow, fall back to running
+    `ssh-keygen`.
+  - **What is signed:** one repository-level `SHA256SUMS` (the format `sha256sum` and
+    `sha256 -r` print) covering `rio-repository.conf`, `index`, and every manifest and
+    payload. That is apt's Release-file shape, and publishers need no rio tooling.
+  - **Unsigned repositories stay allowed**, marked *unsigned* in the detail pane and the
+    install consent, as http stays first-class. **No downgrade:** once a source has a
+    trusted key, a missing or bad signature is refused.
+  - **Key trust: first use, with a pre-trusted seed.** `rio-repository.conf` publishes
+    `key = ssh-ed25519 …`. The first scan trusts it and shows its `SHA256:` fingerprint,
+    kept GUI-side in `repository-keys.conf` and compared scheme-less like
+    `source_same`. A different key later is refused as **changed**, with an explicit
+    trust-the-new-key step (D111's pattern). The default `rio.skylm.org` source ships
+    with the core-team key already trusted. jka generates that key and hands over the
+    `.pub` line when the build starts.
+  - **Split (D30):** the core's `repo.fetch` also returns the raw body's `sha256`
+    (before decoding), and a pure `sig.verify` op lives in a Tk-free
+    `rio-core/sign.tcl`. The GUI verifies `SHA256SUMS` at scan time and checks every
+    manifest and payload hash before writing anything; the ledger records `signed_by`.
+  - **Known limits:** no freshness check (a replayed older `SHA256SUMS` only freezes
+    updates, and D107 never downgrades); rotation is the "changed" step, with no
+    cross-signing; no revocation (D109 addendum).
+  - **Tests:** `sign.test`, plus `repos.tcl` cases for signed, unsigned, a tampered
+    payload or manifest, a changed key, a refused downgrade, and the seed. Fixtures
+    come from a test-only Tcl signer, so no tool is needed at test time.
 - **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
   B", successor to D19). `provider` is a `kind` in the **same** repositories — one
   infrastructure, a publisher adds `kind = provider` (plus `provider-api` and
