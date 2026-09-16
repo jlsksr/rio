@@ -6813,8 +6813,10 @@ contributors, agents):
 
 - **AGENTS.md** (this file) — design & decision log for agents/contributors.
 - **`adr/`** — the same decisions as formal architecture decision records, one file
-  each. ADR-0001…0111 match D1…D111; ADR-0112 onward record settled questions and
-  project policy that never had a D number. A new decision gets both.
+  each. ADR-0001…0111 match D1…D111; ADR-0112…0117 record settled questions and
+  project policy that never had a D number. From D112 on a decision takes the next free
+  record number (D112 is ADR-0118), named in its "Decision log" line. A new decision
+  gets both.
 - **README.md** — user-facing intro, status, quickstart.
 - **INSTALL.md** — the **canonical home for install & deployment**: requirements,
   the two deploy scripts, local vs. remote (server mode over SSH), where the
