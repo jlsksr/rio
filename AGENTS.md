@@ -6325,6 +6325,117 @@ tab switch. Both now call `hl_refresh_buffer`.
   checks); `do_save_as` not repainting (2).
 - **Suite totals:** syntax 532 → 536; core 708 unchanged; every GUI suite passes.
 
+### D113 — Change with Agent…: a request about the selected text, and only that
+
+**jka (2026-09-16):** *"what about a "change this code" feature where the user selects text
+in the editor and can then give a prompt for the current agent, so that the agent works
+only on the selected text? if we implement something like that, I want a preference that
+lets the user show/hide this feature in the context menu - as I don't want to get AI
+features in the way of users that don't need them. (especially regarding context menus)"*
+
+**Before this,** the only way to point the agent at some code was to describe it in the
+chat. The agent then used `propose_edit`, which takes a path and an `old_string` that must
+be unique in the file, and could reach any other file or run commands just the same.
+
+**jka's two decisions:**
+- **Visibility.** The entry appears only while a **real provider** is selected (not Echo,
+  the stub that cannot change anything), and a preference hides it even then.
+- **Scope.** "Only the selected text" is **enforced by the core**, not asked for in the
+  prompt, for the reason plan mode's tool list is (D101).
+
+**The decision:**
+- **One door, in the context menu.** *Change with Agent…* comes last in the editor's
+  context menu (D108), after a separator. It is not on the menubar, so the preference hides
+  the feature completely. The grey is honest: it needs a selection, and a turn that is
+  neither working (`::chat_busy`) nor waiting on a decision (`::pending_turn`).
+- **The preference** is a GUI setting, `agent_selection_menu` in prefs.json. It is **on by
+  default**, because the provider rule already keeps it out of sight for anyone without a
+  real provider. It lives in Preferences ▸ Agent, the agent's config home (D85), with a
+  muted hint (D68) naming the Echo rule.
+- **The dialog** is small and modal: *Selection: foo.tcl, lines 12–20*, a multi-line
+  instruction (Enter sends, Shift+Enter breaks a line, as in the composer), Send and Cancel.
+  The scope is taken when the dialog opens. Send brings the Agent pane into view, because
+  the transcript and the review bar live there. The turn appears as an ordinary *You*
+  block, plus a muted line saying which selection it is about. Both doors now leave through
+  `chat_send_text`.
+- **The wire.** `agent.send {text, ?buffer, start, end?}`. The range is flat, named the way
+  `buffer.replace` names one, because request params are a flat object (D25). The core
+  reads the text from **its own** buffer (`rio::doc::range_text`, which refuses an
+  out-of-range index instead of clamping it). It refuses a missing buffer, a range that
+  isn't there, or an empty selection before any turn starts.
+- **What the model sees.** The user's instruction, then a block naming the buffer and
+  lines, with the selected text fenced. The fence is longer than any backtick run in the
+  text, so selected Markdown can't close it. It is part of the recorded user message, so
+  `agent.history` shows exactly what was sent (D105).
+- **The scoped tool list.** `rio::agent::tools::specs mode scoped`:
+  - A scoped turn drops every `write` and `exec` tool except **`replace_selection
+    {text}`**, which exists in no other turn. There is no `propose_edit`, no
+    `propose_create` and no `run_command`.
+  - Reads stay, for context, and `present_plan` follows the usual rule.
+  - The two narrowings compose: a scoped turn in plan mode gets reads plus `present_plan`.
+  - `replace_selection` names no path and no match, because the core already holds the
+    range, so there is nothing to aim elsewhere.
+  - The scope lives in `scopes($turn)` and dies with the turn: when it ends, is stopped,
+    reset or abandoned. The next chat message is an ordinary turn.
+- **The gate is the existing one.** `_do_write` gives the diff, the approve bar, the compare
+  view for a complex edit and auto-accept. `original`/`proposed` are the whole buffer, so
+  compare needs no change. **At prepare and again at approval** the selection is
+  re-anchored:
+  - where it was, if the range still holds the text;
+  - else at the text's one occurrence, if an edit above moved it;
+  - else **refused** ("changed since proposal"). Nothing is guessed, just as D26 refuses a
+    stale `propose_edit`.
+
+  The replacement is one `buffer.replace` (`coalesce 0`, so one undo step). It is saved
+  under the usual disk rule, and a buffer with no file is never saved. The scope then moves
+  onto the new text, so a second `replace_selection` in the same turn replaces what the
+  first one wrote.
+
+**Rejected:**
+- **Prompt-only scoping.** A normal turn told to "touch only this" can still edit
+  elsewhere, and then the review bar is the only guard.
+- **A nested `scope` object on the wire.** The flat encoder would have carried it as a
+  string that only happened to parse back as a Tcl dict: shape by accident, which D25 rules
+  out.
+
+**Implemented:**
+- `rio-core/document.tcl`: `rio::doc::range_text`.
+- `ops-agent.tcl`: the scope on `agent.send`.
+- `agent.tcl`: `scopes`, `_scope_block`, and specs and `_do_write` scope-aware.
+- `agent-tools.tcl`: `replace_selection`, `scoped_only`, `bufname`, `_anchor`,
+  `_prepare_selection`, `_apply_selection`.
+- `rio-gui.tcl`: `::agent_selection_menu` (prefs load/save, Preferences ▸ Agent);
+  `chat_send_text`; `agent_selection_scope`, `agent_scope_label`, `agent_change_send`,
+  `agent_change_dialog`, `agent_change_submit`; the context-menu entry.
+- **Tests:** `agent.test` +13:
+  - the scoped, unscoped and scoped-plan tool lists;
+  - six bad scopes;
+  - the recorded message and the next turn being unscoped;
+  - the fence;
+  - approve with one undo, on an untitled buffer that is not saved;
+  - re-anchoring; changed and not-unique refusals;
+  - auto-accept with a second call;
+  - a file-backed save;
+  - `replace_selection` refused in an ordinary turn.
+
+  `context_menu.tcl` +19 covers hidden with Echo, shown with a provider, the three greys,
+  hidden by the preference, the scope and its labels, and the dialog end to end over the
+  real channel to the core's Echo provider (the recorded scoped message, the pane revealed,
+  the transcript note). `prefs_window.tcl` +7 covers the checkbox, the hint, and
+  persistence both ways.
+- **Injections, each failing by name:**
+  - scoped specs keeping `propose_edit` (2);
+  - apply skipping the anchor check (3);
+  - no re-anchoring (1);
+  - the scope outliving its turn (1);
+  - an empty selection accepted (1);
+  - the menu ignoring the preference (2);
+  - the menu ignoring the Echo rule (6);
+  - the grey ignoring a turn under way (2);
+  - the dialog sending unscoped (1).
+- **Suite totals:** core 708 → 721; syntax 536 unchanged; every GUI suite passes. docs.tcl
+  waits on the manual documenting `agent_selection_menu`.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

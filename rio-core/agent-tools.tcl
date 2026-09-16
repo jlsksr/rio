@@ -8,7 +8,8 @@
 # Kinds, split on safety:
 #   read  (fs_list/fs_read/buffer_list/buffer_text) — inspection; auto-executed,
 #         never mutates, rendered as transparency (slice 4).
-#   write (propose_edit/propose_create) — mutation; NEVER auto-run. The loop
+#   write (propose_edit/propose_create, and replace_selection in a turn scoped to a
+#         selection, D113) — mutation; NEVER auto-run. The loop
 #         surfaces a diff and waits for the user's approval before apply_write
 #         touches anything (slice 5). On approval the edit applies to the open
 #         buffer (undoable) and, by default, is written to disk.
@@ -28,6 +29,9 @@ namespace eval rio::agent::tools {
 	# name -> {kind, op, description, schema}. kind is read|write. The Claude-facing
 	# name uses underscores — the Messages API tool-name grammar forbids '.'.
 	variable specs {}
+
+	# Tools that exist only inside a selection-scoped turn (D113).
+	variable scoped_only {}
 }
 
 proc rio::agent::tools::_def {name kind op description schema} {
@@ -59,6 +63,14 @@ rio::agent::tools::_def propose_create write "" \
 	"Propose creating a new file in the project with the given content. Fails if the file already exists (use propose_edit instead). Parent folders are created. The user reviews and approves before the file is written." \
 	{{"type":"object","properties":{"path":{"type":"string","description":"New file path relative to the project root."},"content":{"type":"string","description":"The file's contents."}},"required":["path","content"]}}
 
+# The selection tool (D113): offered ONLY in a turn the user scoped to a selection, and
+# in such a turn it is the only tool that changes anything. It names no path and no
+# match — the core already holds the range — so the model can't aim it anywhere else.
+rio::agent::tools::_def replace_selection write "" \
+	"Replace the text the user selected (quoted in their message) with new text. This is the only way to change anything in this request, and it changes exactly the selection — nothing before or after it, no other buffer or file. Pass the whole replacement for the selected text, not a fragment of it. The user reviews a diff and approves or rejects before anything changes. Calling it again replaces what the previous call wrote." \
+	{{"type":"object","properties":{"text":{"type":"string","description":"The complete replacement for the selected text."}},"required":["text"]}}
+lappend rio::agent::tools::scoped_only replace_selection
+
 rio::agent::tools::_def run_command exec "" \
 	"Run a command in the open project and return its exit code, stdout, and stderr — for tests, a linter, a build, git, and the like. `command` is an ARGUMENT VECTOR, not a shell line: pass the program and each argument as separate array elements (e.g. \[\"pytest\",\"-q\",\"tests/\"\]). There is NO shell, so pipes, redirects, globs, quotes, ~, environment-variable expansion and `&&`/`;` do NOT work — chain steps by calling the tool again. The user reviews the exact command and approves or rejects before it runs; a run always waits for the human. A non-zero exit is a normal result (its code is data). cwd is confined to the project; the command is killed if it exceeds its timeout." \
 	{{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"description":"The command as an argument vector: the program followed by each argument as a separate string. Not a shell string."},"cwd":{"type":"string","description":"Working directory relative to the project root (omit for the root). Must stay within the project."},"timeout":{"type":"integer","description":"Seconds before the command is killed (default 120, max 600)."}},"required":["command"]}}
@@ -81,12 +93,21 @@ rio::agent::tools::_def present_plan plan "" \
 # file instead. Planning is a thing the user asks for, not a mode they must remember to
 # enter first. Plan mode still has all its teeth: it is the mode that withholds every
 # changing tool, which is a different guarantee from being able to present a plan.
-proc rio::agent::tools::specs {{mode build}} {
+#
+# A turn `scoped` to a selection (D113) narrows it the same way, and for the same reason
+# — the restriction is real, not a request in the prompt: every write and exec tool goes
+# except replace_selection, which in turn exists in no other turn. Reads stay, for
+# context. The two narrowings compose: scoped plan mode is reads + present_plan.
+proc rio::agent::tools::specs {{mode build} {scoped 0}} {
 	variable specs
+	variable scoped_only
 	set out {}
 	dict for {name s} $specs {
 		set kind [dict get $s kind]
 		if {$mode eq "plan" && $kind ni {read plan}} continue
+		if {$scoped} {
+			if {$kind in {write exec} && $name ni $scoped_only} continue
+		} elseif {$name in $scoped_only} continue
 		lappend out [dict create name $name \
 			description [dict get $s description] \
 			input_schema [dict get $s schema]]
@@ -141,7 +162,8 @@ proc rio::agent::tools::run {name input} {
 # Returns {ok 1, name, path, diff, plan} for the loop to surface and later apply,
 # or {ok 0, content, summary} when the proposal can't be formed (so the model gets
 # an actionable tool_result without anything being touched).
-proc rio::agent::tools::prepare_write {name input} {
+proc rio::agent::tools::prepare_write {name input {scope {}}} {
+	if {$name eq "replace_selection"} { return [_prepare_selection $input $scope] }
 	if {![dict exists $input path]} { return [_err "missing path" "error: missing path"] }
 	set guard [_confine [dict get $input path]]
 	if {[dict get $guard ok] == 0} { return $guard }
@@ -200,6 +222,7 @@ proc rio::agent::tools::prepare_write {name input} {
 # the same unique-match contract the user reviewed and refuses if it no longer
 # holds; a create refuses if the file has appeared. Never apply at a stale position.
 proc rio::agent::tools::apply_write {plan} {
+	if {[dict get $plan kind] eq "replace"} { return [_apply_selection $plan] }
 	set abs  [dict get $plan abs]
 	set rel  [_rel $abs]
 	set disk [rio::agent::writes_disk]
@@ -250,6 +273,99 @@ proc rio::agent::tools::apply_write {plan} {
 	}
 	return [dict create ok 1 content "edited $rel" summary "edited $rel (disk)" \
 		events [dict get $out events]]
+}
+
+# --- write: the selection (D113) ----------------------------------------------
+# replace_selection edits the range agent.send was scoped to, in the open buffer,
+# never a path. It keeps propose_edit's two promises: nothing applies at a stale
+# position, and what applies is what the user reviewed.
+
+# A buffer as the user knows it: its path (relative when inside the project), or its
+# name when it has none — an untitled buffer can be scoped too.
+proc rio::agent::tools::bufname {id} {
+	set meta [rio::doc::meta $id]
+	if {[dict exists $meta path] && [dict get $meta path] ne ""} {
+		set p [dict get $meta path]
+		if {![catch {_rel $p} rel]} { return $rel }
+		return $p
+	}
+	foreach b [rio::doc::inventory] {
+		if {[dict get $b buffer] eq $id} { return [dict get $b name] }
+	}
+	return $id
+}
+
+# Where the selection is NOW: {ok 1 start end}, or {ok 0}. Its own range if that still
+# holds the text; else the text's one occurrence in the buffer (an edit above it moved
+# it); else nowhere — changed, or no longer unique, and the caller refuses.
+proc rio::agent::tools::_anchor {id start end old} {
+	if {![catch {rio::doc::range_text $id $start $end} got] && $got eq $old} {
+		return [dict create ok 1 start $start end $end]
+	}
+	set loc [_locate [rio::doc::text $id] $old]
+	if {[dict get $loc ok]} {
+		return [dict create ok 1 start [dict get $loc start] end [dict get $loc end]]
+	}
+	return [dict create ok 0]
+}
+
+proc rio::agent::tools::_prepare_selection {input scope} {
+	if {![llength $scope]} {
+		return [_err "replace_selection works only on a selection the user scoped the request to — there is none in this turn" "error: no selection"]
+	}
+	if {![dict exists $input text]} { return [_err "replace_selection requires text" "error: missing text"] }
+	set id  [dict get $scope buffer]
+	set old [dict get $scope original]
+	if {![rio::doc::exists $id]} {
+		return [_err "the buffer holding the selection was closed" "error: buffer closed"]
+	}
+	set at [_anchor $id [dict get $scope start] [dict get $scope end] $old]
+	if {![dict get $at ok]} {
+		return [_err "the selected text was changed in the editor — ask the user to select it again" \
+			"error: selection changed"]
+	}
+	set new [dict get $input text]
+	set proposed [join [lindex [rio::doc::_splice [rio::doc::lines $id] \
+		[dict get $at start] [dict get $at end] $new] 0] "\n"]
+	return [dict create ok 1 name replace_selection path [bufname $id] \
+		diff [_difftext $old $new] original [rio::doc::text $id] proposed $proposed \
+		plan [dict create kind replace buffer $id \
+			start [dict get $at start] end [dict get $at end] old $old new $new]]
+}
+
+# Apply after approval: anchor afresh (the editor stayed live), replace through
+# buffer.replace (one undo step), save under the same rule as any agent edit — a buffer
+# with no file is never saved. Returns the moved scope for the turn to keep.
+proc rio::agent::tools::_apply_selection {plan} {
+	set id  [dict get $plan buffer]
+	set old [dict get $plan old]
+	set new [dict get $plan new]
+	if {![rio::doc::exists $id]} {
+		return [_err "the buffer holding the selection was closed while the edit awaited approval" "error: buffer closed"]
+	}
+	set name [bufname $id]
+	set at [_anchor $id [dict get $plan start] [dict get $plan end] $old]
+	if {![dict get $at ok]} {
+		return [_err "the selection in $name changed while the edit awaited approval — nothing was replaced" \
+			"error: changed since proposal"]
+	}
+	set start [dict get $at start]
+	set out [rio::core::call buffer.replace [dict create buffer $id \
+		start $start end [dict get $at end] text $new coalesce 0]]
+	if {![_ok $out msg]} {
+		return [_err "couldn't replace the selection in $name: $msg" "error: edit failed"]
+	}
+	set events [dict get $out events]
+	set scope [dict create buffer $id start $start end [rio::doc::_advance $start $new] original $new]
+	set meta [rio::doc::meta $id]
+	set saved [expr {[rio::agent::writes_disk] && [dict exists $meta path] && [dict get $meta path] ne ""}]
+	if {$saved && ![_ok [rio::core::call file.save [dict create buffer $id]] msg]} {
+		return [dict create ok 0 content "replaced the selection in the buffer but saving $name failed: $msg" \
+			summary "error: save failed" events $events scope $scope]
+	}
+	return [dict create ok 1 content "replaced the selection in $name" \
+		summary "replaced the selection in $name ([expr {$saved ? {buffer+disk} : {buffer}}])" \
+		events $events scope $scope]
 }
 
 # --- plan: prepare (shape it, and keep a copy) -------------------------------

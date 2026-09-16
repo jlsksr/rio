@@ -67,6 +67,26 @@ proc rio::doc::linecount {id} {
 	return [llength [lines $id]]
 }
 
+# The text spanning [start, end). STRICT, unlike `replace`: an index past its line's
+# end or an end before start is a bad_index, not clamped — a caller asking for a
+# range it believes exists (the agent's selection scope, D113) must hear that it
+# doesn't, rather than be handed a different span.
+proc rio::doc::range_text {id start end} {
+	set lines [lines $id]
+	lassign [_idx $start] sl sc
+	lassign [_idx $end]   el ec
+	set n [llength $lines]
+	if {$sl < 1 || $sl > $n || $el < 1 || $el > $n
+			|| $sc > [string length [lindex $lines $sl-1]]
+			|| $ec > [string length [lindex $lines $el-1]]} {
+		rio::error::raise bad_index "index out of range: $start/$end"
+	}
+	if {$sl > $el || ($sl == $el && $sc > $ec)} {
+		rio::error::raise bad_index "end before start: $start > $end"
+	}
+	return [_range $lines [expr {$sl - 1}] $sc [expr {$el - 1}] $ec]
+}
+
 # A summary of every open buffer, in creation order — the registry's key order,
 # which Tcl dicts preserve. Each entry is a flat dict {buffer name path
 # linecount}; `path` is "" for a buffer not backed by a file. View-local state

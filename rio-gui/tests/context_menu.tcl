@@ -191,6 +191,65 @@ if {[catch {clipboard clear ; clipboard append "x" ; clipboard get}]} {
 	ok "Copy fills the clipboard" [clipboard get] "alpha"
 }
 
+# --- Change with Agent… (D113) ---------------------------------------------------------
+# The one AI entry: absent unless a real provider is selected AND the preference allows
+# it, greyed unless there is a selection and no turn under way. Sending goes over the real
+# channel to the core, which runs its built-in Echo provider — offline — so the checks see
+# the scoped message the core recorded, not a stub's idea of it.
+
+# A fresh buffer, typed through the proxy the way keystrokes arrive: the core reads
+# the range from ITS copy, so the widget and the core must agree on the text.
+do_new
+set w [gget 0 path]
+$w insert 1.0 "alpha beta\n"
+update ; update idletasks
+set ::agent_selection_menu 1
+set ::agent_provider echo
+build 0
+ok "agent: hidden with Echo"          [lsearch -exact [labels] "Change with Agent…"] -1
+set ::agent_provider claude            ;# only the entry's rule reads this; nothing is called
+build 0
+ok "agent: shown with a real provider" [lrange [labels] end-1 end] {- {Change with Agent…}}
+ok "agent: no selection, greyed"      [state "Change with Agent…"] disabled
+$w tag add sel 1.0 1.5                 ;# "alpha"
+build 0
+ok "agent: a selection, offered"      [state "Change with Agent…"] normal
+set ::chat_busy 1 ; build 0
+ok "agent: a turn working, greyed"    [state "Change with Agent…"] disabled
+set ::chat_busy 0 ; set ::pending_turn 7 ; build 0
+ok "agent: a turn waiting, greyed"    [state "Change with Agent…"] disabled
+set ::pending_turn ""
+set ::agent_selection_menu 0 ; build 0
+ok "agent: the preference hides it"   [lsearch -exact [labels] "Change with Agent…"] -1
+ok "agent: and the rest is unchanged" [lrange [labels] 0 end] \
+	{Undo Redo - Cut Copy Paste - {Select All} - Find… Replace… {Search for “alpha”}}
+set ::agent_selection_menu 1
+
+ok "agent: scope of the selection"    [agent_selection_scope 0] [dict create buffer [gcur 0] start 1.0 end 1.5]
+ok "agent: a line label"              [agent_scope_label [dict create buffer [gcur 0] start 1.0 end 1.5]] "[tab_name [gcur 0]], line 1"
+ok "agent: a trailing column 0 drops" [agent_scope_label [dict create buffer [gcur 0] start 1.0 end 3.0]] "[tab_name [gcur 0]], lines 1–2"
+
+$w tag add sel 1.0 1.5
+build 0
+.tm invoke "Change with Agent…"
+ok "agent: the dialog opens"          [winfo exists .agentchg] 1
+ok "agent: it says where"             [.agentchg.where cget -text] "Selection: [tab_name [gcur 0]], line 1"
+catch {grab release .agentchg}
+agent_change_submit .agentchg [agent_selection_scope 0]
+ok "agent: empty instruction stays"   [winfo exists .agentchg] 1
+.agentchg.input insert 1.0 "shout it"
+.agentchg.btns.send invoke
+ok "agent: Send closes the dialog"    [winfo exists .agentchg] 0
+set deadline [expr {[clock milliseconds] + 3000}]
+while {$::chat_busy && [clock milliseconds] < $deadline} { update ; after 20 }
+set msgs [dict get [rio_result agent.history {}] messages]
+set asked ""
+foreach m $msgs { if {[dict get $m role] eq "user"} { set asked [dict get $m text] } }
+ok "agent: the core scoped the turn"  [string match "shout it\n\n*line 1)*\n```\nalpha\n```" $asked] 1
+ok "agent: the pane came into view"   [rio::layout::shown chat] 1
+ok "agent: the transcript says where" [string match "*· on the selection in [tab_name [gcur 0]], line 1*" [.chat.log get 1.0 end]] 1
+set ::agent_provider echo
+
 catch {destroy .tm}
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -47,6 +47,7 @@ namespace eval rio::agent {
 	variable mode              build                ;# build | plan — which tools exist (D101)
 	variable proposals                              ;# array: turn -> {name,path,original,proposed} awaiting review
 	variable running                                ;# array: turn -> {coro token} a run_command in flight (D83)
+	variable scopes                                 ;# array: turn -> {buffer start end original} a selection-scoped turn (D113)
 
 	# The named-provider registry (D26/D30). A provider is known by NAME so a
 	# frontend can pick one over the channel (agent.provider.set) without ever
@@ -365,7 +366,8 @@ proc rio::agent::_abort {t} {
 		catch {rename $live($t) {}}
 		set was 1
 	}
-	unset -nocomplain live($t) pending($t) proposals($t) running($t)
+	variable scopes
+	unset -nocomplain live($t) pending($t) proposals($t) running($t) scopes($t)
 	return $was
 }
 
@@ -428,12 +430,22 @@ proc rio::agent::_seal_dangling {} {
 # Start a turn: record the user message, kick off the orchestration coroutine,
 # and return the ack {started, turn}. The turn's content arrives afterward as
 # agent.* events on `emit` (D26).
-proc rio::agent::send {text emit} {
+#
+# `scope` (D113) is {buffer start end original} from agent.send, or {} for an ordinary
+# turn. A scoped turn's user message carries the selection VISIBLY — the instruction,
+# then where the text is and the text itself — so agent.history shows exactly what the
+# model was given (D105). The scope lives for this turn only.
+proc rio::agent::send {text emit {scope {}}} {
 	variable conversation
 	variable turnseq
+	variable scopes
 	set seal [_seal_dangling]
 	variable live
 	set turn [incr turnseq]
+	if {[llength $scope]} {
+		set scopes($turn) $scope
+		append text "\n\n" [_scope_block $scope]
+	}
 	lappend conversation [dict create role user \
 		content [concat $seal [list [dict create type text text $text]]]]
 	# Registered BEFORE the coroutine runs: `coroutine` executes the body up to its first
@@ -450,11 +462,29 @@ proc rio::agent::send {text emit} {
 # the only thing that clears the entry — `stop` unsets it too, and both are idempotent.
 proc rio::agent::_run_guarded {turn emit} {
 	variable live
+	variable scopes
 	try {
 		_run $turn $emit
 	} finally {
-		unset -nocomplain live($turn)
+		unset -nocomplain live($turn) scopes($turn)
 	}
+}
+
+# The selection a scoped turn is about, as the model reads it (D113): which buffer,
+# which lines, the text fenced, and the one rule the tool list enforces anyway. The
+# fence is longer than any backtick run in the text, so selected Markdown can't close it.
+proc rio::agent::_scope_block {scope} {
+	set id  [dict get $scope buffer]
+	set old [dict get $scope original]
+	set l1 [lindex [split [dict get $scope start] .] 0]
+	lassign [split [dict get $scope end] .] l2 c2
+	if {$l2 > $l1 && $c2 == 0} { incr l2 -1 }
+	set where [expr {$l1 == $l2 ? "line $l1" : "lines $l1–$l2"}]
+	set fence "```"
+	while {[string first $fence $old] >= 0} { append fence "`" }
+	return "The request is about this selection in [rio::agent::tools::bufname $id]\
+		(buffer $id, $where). Change only the selected text: replace_selection is the\
+		only tool that edits, and it replaces exactly this text.\n\n$fence\n$old\n$fence"
 }
 
 # Stop a turn in flight (agent.stop, D104) — the frontend's Stop button, and the only way
@@ -516,13 +546,14 @@ proc rio::agent::_close_interrupted {} {
 proc rio::agent::_run {turn emit} {
 	variable conversation
 	variable provider
+	variable scopes
 	set co [info coroutine]
 	while {1} {
 		# Recomputed EVERY step, not once per turn: approving a plan flips the mode
 		# mid-turn (D101), and the model has to see the tools it just earned on the very
 		# next call — otherwise it goes on planning with a stale list. The system prompt
 		# follows for the same reason (the plan layer drops away with the mode).
-		set toolspecs [rio::agent::tools::specs [mode]]
+		set toolspecs [rio::agent::tools::specs [mode] [info exists scopes($turn)]]
 		set system [rio::agent::prompt::compose [rio::agent::provider_name] [mode]]
 		set acc ""
 		set calls {}        ;# tool calls this step: {id name input raw} dicts
@@ -615,7 +646,9 @@ proc rio::agent::_do_write {turn id name input emit co} {
 	variable pending
 	variable auto_accept
 	variable proposals
-	set prep [rio::agent::tools::prepare_write $name $input]
+	variable scopes
+	set scope [expr {[info exists scopes($turn)] ? $scopes($turn) : {}}]
+	set prep [rio::agent::tools::prepare_write $name $input $scope]
 	if {[dict get $prep ok] == 0} {
 		{*}$emit [dict create event agent.tool_result \
 			params [dict create turn $turn id $id name $name ok 0 \
@@ -641,6 +674,11 @@ proc rio::agent::_do_write {turn id name input emit co} {
 		return [dict create ok 0 content "The user rejected this edit." summary "rejected by user"]
 	}
 	set r [rio::agent::tools::apply_write [dict get $prep plan]]
+	# A selection replaced is still the selection (D113): the scope moves onto the new
+	# text, so a second replace_selection in this turn replaces what the first wrote.
+	if {[dict exists $r scope] && [info exists scopes($turn)]} {
+		set scopes($turn) [dict get $r scope]
+	}
 	if {[dict exists $r events]} {
 		foreach ev [dict get $r events] { {*}$emit $ev }
 	}

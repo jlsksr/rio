@@ -1226,6 +1226,218 @@ test agent-control-ops-registered {the new control ops are in the live registry}
 		&& "agent.status" in $ops && "agent.providers" in $ops}
 } -result 1
 
+# --- a turn scoped to a selection (D113) --------------------------------------
+# agent.send with a scope makes the turn about one range of one buffer: the core reads
+# the range itself, the model is handed replace_selection and no other changing tool,
+# and approval replaces exactly that range — re-anchored if an edit above moved it,
+# refused if the text itself changed. The scope dies with the turn.
+
+# A provider that records the tool names each pass was handed into ::seen, then calls
+# replace_selection with each text in ::sel_texts in turn (one per pass), then ends.
+proc sel_provider {conversation tools system post} {
+	set names {}
+	foreach t $tools { lappend names [dict get $t name] }
+	lappend ::seen $names
+	set done 0
+	foreach m $conversation {
+		foreach b [dict get $m content] {
+			if {[dict get $b type] eq "tool_result"} { incr done }
+		}
+	}
+	if {$done < [llength $::sel_texts]} {
+		set t [lindex $::sel_texts $done]
+		{*}$post tool s[incr done] replace_selection [dict create text $t] {{}}
+		{*}$post done tool_use
+	} else {
+		{*}$post delta "ok" ; {*}$post done end_turn
+	}
+}
+# Send a scoped turn and run it to the first gate or its end.
+proc start_scoped {bid start end turnVar} {
+	upvar 1 $turnVar turn
+	set ::evs {} ; set ::stop {} ; set ::seen {}
+	set ack [rio::core::call_stream agent.send [dict create text "shout it" \
+		buffer $bid start $start end $end] ev_until_stop]
+	set turn [dict get $ack result turn]
+	set tm [after 3000 {set ::stop timeout}] ; vwait ::stop ; after cancel $tm
+	return $::stop
+}
+# A buffer's text with its newlines shown as `|`, so a result reads on one line.
+proc buftext {bid} {
+	string map {\n |} [dict get [rio::core::call buffer.text [dict create buffer $bid]] response result text]
+}
+proc names_of {specs} { lmap t $specs {dict get $t name} }
+# An untitled buffer holding `text`.
+proc scratch {text} {
+	set bid [dict get [rio::core::call buffer.new {}] response result buffer]
+	rio::core::call buffer.replace [dict create buffer $bid start 1.0 end 1.0 text $text]
+	return $bid
+}
+
+test agent-scope-specs {a scoped turn: replace_selection and reads, no other changing tool} -body {
+	set n [names_of [rio::agent::tools::specs build 1]]
+	list [expr {"replace_selection" in $n}] [expr {"propose_edit" in $n}] \
+		[expr {"propose_create" in $n}] [expr {"run_command" in $n}] \
+		[expr {"fs_read" in $n}] [expr {"buffer_text" in $n}] [expr {"present_plan" in $n}]
+} -result {1 0 0 0 1 1 1}
+
+test agent-scope-specs-unscoped {replace_selection exists in no ordinary turn, in either mode} -body {
+	list [expr {"replace_selection" in [names_of [rio::agent::tools::specs build]]}] \
+		[expr {"replace_selection" in [names_of [rio::agent::tools::specs plan]]}]
+} -result {0 0}
+
+test agent-scope-specs-plan {scoped plan mode keeps plan mode's teeth: reads + present_plan} -body {
+	set n [names_of [rio::agent::tools::specs plan 1]]
+	list [expr {"replace_selection" in $n}] [expr {"present_plan" in $n}] [expr {"fs_read" in $n}]
+} -result {0 1 1}
+
+test agent-scope-bad {a scope naming no buffer, a range that isn't there, or nothing is refused} -setup {
+	rio::core::call agent.reset {}
+	set ::bid [scratch "abc\ndef"]
+} -body {
+	set out {}
+	foreach s [list \
+			[dict create buffer 99999 start 1.0 end 1.1] \
+			[dict create buffer $::bid start 1.0 end 1.9] \
+			[dict create buffer $::bid start 3.0 end 3.1] \
+			[dict create buffer $::bid start 2.1 end 1.0] \
+			[dict create buffer $::bid start 1.1 end 1.1] \
+			[dict create buffer $::bid start 1.0]] {
+		set r [rio::core::call_stream agent.send [dict merge {text x} $s] collect_ev]
+		lappend out [dict get $r error code]
+	}
+	set out
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } \
+	-result {bad_request bad_request bad_request bad_request bad_request bad_request}
+
+test agent-scope-message {the model reads the core's text for the range, and only that turn is scoped} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {}
+	set ::bid [scratch "one\ntwo\nthree"]
+} -body {
+	set s [start_scoped $::bid 2.0 2.3 turn]
+	set msg [dict get [lindex [rio::agent::history] end-1] text]
+	set first [lindex $::seen 0]
+	set scoped_left [llength [array names rio::agent::scopes]]
+	# The next, ordinary turn is handed the ordinary tools.
+	set ::evs {} ; set ::stop {} ; set ::seen {}
+	rio::core::call_stream agent.send {text again} ev_until_stop
+	set tm [after 3000 {set ::stop timeout}] ; vwait ::stop ; after cancel $tm
+	list $s [string match "shout it\n\n*\n```\ntwo\n```" $msg] [string match "*line 2)*" $msg] \
+		[expr {"replace_selection" in $first}] [expr {"propose_edit" in $first}] $scoped_left \
+		[expr {"replace_selection" in [lindex $::seen 0]}] [expr {"propose_edit" in [lindex $::seen 0]}]
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } -result {done 1 1 1 0 0 0 1}
+
+test agent-scope-fence {a selection holding a fence is quoted in a longer one} -body {
+	string match "*\n````\na ``` b\n````" [rio::agent::_scope_block \
+		[dict create buffer [set b [scratch "a ``` b"]] start 1.0 end 1.7 original "a ``` b"]]
+} -cleanup { rio::core::call buffer.close [dict create buffer $b] } -result 1
+
+test agent-scope-approve {approval replaces exactly the range; one undo takes it back; untitled is not saved} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {TWO}
+	set ::bid [scratch "one two\ntwo\nthree two"]
+} -body {
+	set s1 [start_scoped $::bid 2.0 2.3 turn]
+	set p [ev_propose s1]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	set s2 [wait_done]
+	set after [buftext $::bid]
+	rio::core::call edit.undo [dict create buffer $::bid]
+	list $s1 [dict get $p name] [dict get $p path] $s2 $after [buftext $::bid] [ev_summary s1]
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } \
+	-result {propose replace_selection untitled done {one two|TWO|three two} {one two|two|three two} {replaced the selection in untitled (buffer)}}
+
+test agent-scope-reanchor {an edit above the selection moves it; approval applies at the new spot} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {BETA}
+	set ::bid [scratch "alpha\nbeta\ngamma"]
+} -body {
+	start_scoped $::bid 2.0 2.4 turn
+	rio::core::call buffer.replace [dict create buffer $::bid start 1.0 end 1.0 text "new\n"]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	wait_done
+	buftext $::bid
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } -result {new|alpha|BETA|gamma}
+
+test agent-scope-changed {a selection edited while the edit waits is refused, untouched} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {BETA}
+	set ::bid [scratch "alpha\nbeta\ngamma"]
+} -body {
+	start_scoped $::bid 2.0 2.4 turn
+	rio::core::call buffer.replace [dict create buffer $::bid start 2.0 end 2.1 text "z"]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	wait_done
+	list [buftext $::bid] [ev_summary s1]
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } \
+	-result {alpha|zeta|gamma {error: changed since proposal}}
+
+test agent-scope-not-unique {a moved selection whose text now occurs twice is refused, not guessed} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 0
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {X}
+	set ::bid [scratch "ab\ncd"]
+} -body {
+	start_scoped $::bid 2.0 2.2 turn
+	rio::core::call buffer.replace [dict create buffer $::bid start 1.0 end 1.0 text "cd\n"]
+	rio::core::call agent.approve [dict create turn $turn decision approve]
+	wait_done
+	list [buftext $::bid] [ev_summary s1]
+} -cleanup { rio::core::call buffer.close [dict create buffer $::bid] } \
+	-result {cd|ab|cd {error: changed since proposal}}
+
+test agent-scope-twice-auto {auto-accept applies; a second call replaces what the first wrote} -setup {
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 1
+	rio::agent::set_provider sel_provider
+	set ::sel_texts [list "B\nB" "C"]
+	set ::bid [scratch "a b c"]
+} -body {
+	# Auto-accept still announces each proposal, which is where the sink stops; run on.
+	set s [start_scoped $::bid 1.2 1.3 turn]
+	while {$s eq "propose"} { set s [wait_done] }
+	list $s [buftext $::bid] [ev_summary s1] [ev_summary s2]
+} -cleanup {
+	rio::agent::set_auto_accept 0
+	rio::core::call buffer.close [dict create buffer $::bid]
+} -result {done {a C c} {replaced the selection in untitled (buffer)} {replaced the selection in untitled (buffer)}}
+
+test agent-scope-file-saved {a file-backed selection is saved under the usual disk rule} -setup {
+	set ::pdir [makeDirectory agsel]
+	makeFile "keep\nfix me\nkeep" s.txt $::pdir
+	rio::project::open $::pdir
+	rio::core::call agent.reset {}
+	rio::agent::set_auto_accept 1
+	rio::agent::set_provider sel_provider
+	set ::sel_texts {fixed}
+	set ::bid [dict get [rio::core::call file.open \
+		[dict create path [rio::project::resolve s.txt]]] response result buffer]
+} -body {
+	set s [start_scoped $::bid 2.0 2.6 turn]
+	while {$s eq "propose"} { set s [wait_done] }
+	list $s [dict get [ev_propose s1] path] [ev_summary s1] \
+		[string map {\n |} [string trim [dict get [rio::fs::read [file join $::pdir s.txt]] text]]]
+} -cleanup {
+	rio::agent::set_auto_accept 0
+	rio::core::call buffer.close [dict create buffer $::bid]
+	rio::project::close
+} -result {done s.txt {replaced the selection in s.txt (buffer+disk)} keep|fixed|keep}
+
+test agent-scope-unscoped-call {replace_selection called in an ordinary turn is refused} -body {
+	set r [rio::agent::tools::prepare_write replace_selection [dict create text x]]
+	list [dict get $r ok] [dict get $r summary]
+} -result {0 {error: no selection}}
+
 # --- wire encoding (D11/D25) -------------------------------------------------
 
 test agent-delta-wire {an agent.delta event encodes to JSON} -body {
