@@ -14,10 +14,12 @@ of the same material.
 
 - **ADR-0001 to ADR-0111 correspond one-to-one to D1 to D111.** Source comments
   and documents that cite "D30" refer to the decision recorded in ADR-0030.
-- **ADR-0112 onwards** record decisions that were settled without a D number of
-  their own: in the open-questions section of AGENTS.md, in `spike/`, or as
-  standing project policy. Their dates are the dates the decisions were taken,
-  not the dates the records were written.
+- **ADR-0112 onwards** each take the next free number. ADR-0112 to ADR-0117
+  record decisions that were settled without a D number of their own: in the
+  open-questions section of AGENTS.md, in `spike/`, or as standing project
+  policy. From D112 on, a D entry's record is not numbered after it; its
+  **Decision log** line names the D number. Dates are the dates the decisions
+  were taken, not the dates the records were written.
 - AGENTS.md remains the working log and carries the implementation detail (test
   counts, proc names, bug narratives). An ADR carries the decision and its
   reasoning, and should still read correctly once that detail has changed.
@@ -177,3 +179,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0115](0115-dependency-policy.md) | Hard dependencies are minimal; optional ones must degrade cleanly | Accepted | 2026-09-09 |
 | [0116](0116-verification-policy.md) | Verification is automated, offline, and proven against injected faults | Accepted | 2026-09-11 |
 | [0117](0117-derived-facts-register.md) | A fact kept in two places must have a guard | Accepted | 2026-09-10 |
+| [0118](0118-language-picked-by-hand.md) | A buffer's language can be picked by hand | Accepted | 2026-09-16 |
