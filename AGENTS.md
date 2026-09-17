@@ -6439,6 +6439,90 @@ be unique in the file, and could reach any other file or run commands just the s
 - **Suite totals:** core 708 → 721; syntax 536 unchanged; every GUI suite passes. docs.tcl
   waits on the manual documenting `agent_selection_menu`.
 
+### D114 — one core-wide switch for https without host-name checks, repositories too
+
+**Amends D110** (the switch's scope, storage, ops and place in the GUI) **and D109** (https
+repositories are no longer refused outright on a tcltls older than 1.8).
+
+**jka (2026-09-17),** reading the CAVEATS entry for a tcltls older than 1.8, which said
+https repositories get no opt-out: *"why don't we let the user opt-out?"*
+
+**Why D110's reason doesn't hold.** D110 gave repositories no switch because nobody
+depended on https ones and http is first-class. Two things weigh against that:
+- **Unchecked https is never weaker than plain http,** which repositories already accept
+  for code the core then runs. The chain is still checked; only the name isn't.
+- **A repository that serves https only** can't be used at all on such a core.
+
+**Decision: one switch, the core's, for every https connection it makes.** On a tcltls
+older than 1.8, the agent's transport and the repository fetch ask the same question,
+`rio::tls::unchecked_ok`, and refuse unless the user said yes. It is off by default. The
+setting sits with the rest of the core's TLS policy (D109) rather than with either
+feature, because the tcltls in question is the core's whichever feature dials.
+- **Storage:** `$XDG_CONFIG_HOME/rio/tls.conf`, beside `certificates.conf`, D21 format:
+  `unchecked_hostnames = allow`. Only that top-level line allows; absent, another value, a
+  `[section]`, or a malformed file refuses. It is read on every connection.
+- **Ops:** `tls.settings {}` → `{unchecked checks_hostname tcltls}`, and
+  `tls.settings.set {unchecked}` (a non-boolean is a bad_request; nowhere to write is an
+  io_error). `checks_hostname` and the version let a client say whether the switch matters
+  on the core it is attached to.
+- **The messages:** a refused repository fetch names three ways out (upgrade tcltls, the
+  http URL, the switch). The agent's refusal keeps *"the agent refused https to"*, which
+  both providers match, so **no provider release** is needed; only the menu path in it
+  changed.
+- **GUI:** a new Preferences category, **Network**, between Extensions and Keyboard. It
+  holds the checkbox, a muted hint (D68) that says whether this core's tcltls makes the
+  switch matter, and **Accepted certificates…**, moved from Extensions: D111's exceptions
+  also apply to every https connection the core makes. The Agent pane loses its https rows.
+  `adopt_tls_settings` mirrors the core at every attach, next to `adopt_agent_status`, and
+  quietly does nothing against a core without the op.
+
+**D111 stays 1.8-only.** Accepting one certificate relies on a verification an older
+tcltls can't do (`-validatecommand`); nothing here changes that.
+
+**A clean move, no migration (jka's choice).** `agent.tls.set`, `tls_unchecked` in
+`agent.status`, `rio::agent::tls_unchecked_ok`, and `agent/agent.conf` with its
+`agent_path`/`agent_get`/`agent_store` (nothing else used them) are gone. An `allow` stored
+in the old file is not carried over: it reads as refuse until ticked again, which is the
+secure side. No protocol bump: GUI and core ship together. An older GUI on this core fails
+only when it toggles the switch, and says so.
+
+**Rejected.**
+- **Two switches, one per feature.** The risk is the same (the core's tcltls, the same
+  network), so two boxes would only let them disagree about one fact.
+- **Keeping the agent's names for a core-wide setting.** The file, the op and the
+  preference would all say "agent" about something that is not the agent's.
+- **Placing it under Agent or Extensions.** Either would hide half of what it governs.
+
+**Guards.**
+- **`tls.test` +9:**
+  - the repository gate refusing by default with the three ways out, refusing when off,
+    allowing when on, and never gating a name-checking tcltls;
+  - `tls.conf`: its place, round trip, the refuse default, only `allow` allows, a
+    malformed file and a `[section]` both refuse.
+- **`tls-ops.test` +5:** the ops persisting both ways, bad requests, the reported tcltls,
+  the wire guard, and the agent's copy being gone.
+- **`agent-options.test`:** the eight D110 tests moved out; its `agent.status` wire guard
+  stays.
+- **`transport.test`:** its six cases re-pointed at `rio::tls::unchecked_ok`, the message
+  now also checked for the Network path.
+- **`prefs_window.tcl`:** six categories; Network's checkbox, hint and certificates button;
+  none left in Agent or Extensions; toggling reaches the core and `tls.conf` both ways;
+  attach mirrors a core-side change; the hint follows `checks_hostname`.
+- **Injections, each failing by name:**
+  - the repository gate ignoring the switch;
+  - the default flipped;
+  - the transport asking the old agent proc;
+  - plain http gated;
+  - the refusal phrase changed (the provider contract);
+  - the op taking a non-boolean;
+  - the GUI writer not calling the core;
+  - attach not mirroring;
+  - the hint ignoring `checks_hostname`.
+- **Suite totals:** core 728, plugins/lib 20, claude 55, openai 58, all passing; every GUI
+  suite passes once the manual documents `tls.conf`. `repos.tcl` once failed its dialog
+  focus check under a full run, then passed three times alone. That dialog is untouched
+  here.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

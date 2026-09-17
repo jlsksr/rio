@@ -27,8 +27,9 @@ need `tcltls` — all of rio's HTTPS happens wherever the *core* runs. Extension
 repositories (D39) served over plain **`http://` add no dependency anywhere**: the
 core fetches them with Tcl's own `http` package. An **`https://`** repository is
 equally supported (D109) and needs `tcltls` **1.8 or newer** on the core's host — the
-first version that checks a certificate's name against the host; an older one is
-refused with a message saying so, never used unverified.
+first version that checks a certificate's name against the host. With an older one it is
+refused by default, with a message saying so; the core-wide switch described in §5
+can allow it without that check (D114).
 
 **Where certificates are trusted from.** rio ships no CA bundle; it uses the core
 host's own store, the one the package manager keeps current:
@@ -60,7 +61,7 @@ and Continue** trusts *exactly that certificate* on *that host and port*, and no
 else. If the server's certificate later changes, it is refused again and said to have
 changed. Accepted certificates are kept on the core's host in
 `~/.config/rio/certificates.conf` (hand-editable; delete a section to take one back) and
-listed under *Preferences ▸ Extensions ▸ Accepted certificates…*. An accepted certificate
+listed under *Preferences ▸ Network ▸ Accepted certificates…*. An accepted certificate
 counts for every https connection the core makes to that host and port, the agent's
 included. It needs `tcltls` 1.8+. To trust *every* server of a private CA, adding the CA to the
 store (above) remains the better tool.
@@ -237,11 +238,12 @@ Consequences:
 - **`tcltls` must be installed on the core's host.** A core without it fails the first
   hosted-provider turn with *"can't find package tls"* (the message names the fix).
   With a `tcltls` **older than 1.8** — which never checks that a certificate belongs to
-  the host it came from — the agent **refuses https** by default (D110) and says so.
-  Upgrade `tcltls`, or, if that isn't possible on that host, allow it in
-  *Preferences ▸ Agent ▸ "Allow https without host-name checks"* (stored on the core's
-  host as `tls_unchecked_hostnames = allow` in `~/.config/rio/agent/agent.conf`). A
-  local model server over plain `http://` is unaffected either way.
+  the host it came from — the agent and https extension repositories **refuse https** by
+  default (D110, D114) and say so. Upgrade `tcltls`, or, if that isn't possible on that
+  host, allow it in *Preferences ▸ Network ▸ "Allow https without host-name checks"*. It
+  is one switch for both, stored on the core's host as `unchecked_hostnames = allow` in
+  `~/.config/rio/tls.conf`. A local model server and repositories over plain `http://`
+  are unaffected either way.
 - **The API key is stored by the core**, in a 0600 file under
   `$XDG_DATA_HOME/rio/secrets/` (default `~/.local/share/rio/secrets/`) **on the core's
   host** — one file per provider (Claude's is `claude-api.secret`) — never in the GUI,
@@ -257,9 +259,10 @@ Consequences:
 
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,
 `agent.key.set` / `clear`, `agent.autoaccept.set`, `agent.mode.set`,
-`agent.option.set`, `agent.tls.set`, `agent.status`), so they behave the same against a local or
+`agent.option.set`, `agent.status`), so they behave the same against a local or
 remote core. So are accepted certificates (`tls.inspect`, `tls.accept`, `tls.accepted`,
-`tls.forget`, D111): the certificate that matters is the one the core sees.
+`tls.forget`, D111) and the https switch (`tls.settings`, `tls.settings.set`, D114): the
+certificate and the `tcltls` that matter are the core's.
 
 ---
 
