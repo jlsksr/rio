@@ -23,6 +23,12 @@ set f [open $::bundle w] ; close $f
 # Exceptions (D111) go to a file of the test's own, never the user's certificates.conf.
 set ::certconf [file join $::tmp certificates.conf]
 set ::rio::tls::override_path $::certconf
+# And the https switch (D114) to one of its own, never the user's tls.conf.
+set ::tlsconf [file join $::tmp tls.conf]
+set ::rio::tls::settings_override $::tlsconf
+proc writefile {path text} {
+	set f [open $path w] ; puts -nonewline $f $text ; close $f
+}
 
 # Run a script with exactly these exceptions on file (a {host:port fingerprint …} list),
 # and none afterwards.
@@ -200,20 +206,91 @@ test http-https-without-tcltls {no tcltls: an io_error that names the package �
 	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
 } -result {io_error 1}
 
-test http-https-needs-hostname-checks {a tcltls that can't check names: refused, not trusted} -setup {
+# A repository fetch on a tcltls that can't check names, with the switch in `allow`
+# (1, 0 or "absent" for no tls.conf). ::http::geturl only records that it was reached,
+# so nothing is dialled. Returns {dialled code message}.
+proc repo_gate {checks allow} {
+	file delete $::tlsconf
+	if {$allow ne "absent"} { rio::tls::set_unchecked $allow }
+	package require http
 	rename rio::tls::ensure _real_ensure
 	rename rio::tls::checks_hostname _real_checks
+	rename ::http::geturl ::_real_geturl
 	proc rio::tls::ensure {} {}
-	proc rio::tls::checks_hostname {} { return 0 }
+	proc rio::tls::checks_hostname {} [list return $checks]
+	proc ::http::geturl {args} { set ::dialled 1 ; error "not dialled in this test" }
 	namespace eval :: { package provide tls 1.7.22 }
-} -body {
-	catch {rio::http::get https://repo.example/rio} e opts
-	list [rio::error::code_of $opts] [string match "*tcltls 1.8 or newer*does not check*" $e]
-} -cleanup {
-	rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
-	rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
-	package forget tls
-} -result {io_error 1}
+	set ::dialled 0
+	try {
+		catch {rio::http::get https://repo.example/rio} e opts
+	} finally {
+		rename rio::tls::ensure {} ; rename _real_ensure rio::tls::ensure
+		rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
+		rename ::http::geturl {} ; rename ::_real_geturl ::http::geturl
+		package forget tls
+		file delete $::tlsconf
+	}
+	return [list $::dialled [rio::error::code_of $opts] $e]
+}
+
+test http-https-needs-hostname-checks {a tcltls that can't check names: refused, not trusted —
+		naming the upgrade, the http URL and the switch} -body {
+	lassign [repo_gate 0 absent] dialled code msg
+	list $dialled $code [string match "*tcltls 1.8 or newer*does not check*http:// URL*Preferences ▸ Network ▸*Allow https without host-name checks*" $msg]
+} -result {0 io_error 1}
+
+test http-https-switch-off-refuses {the switch stored as off refuses the same} -body {
+	lrange [repo_gate 0 0] 0 1
+} -result {0 io_error}
+
+test http-https-switch-allows {the switch on lets a repository fetch through to the dial (D114)} -body {
+	lindex [repo_gate 0 1] 0
+} -result 1
+
+test http-https-checking-tcltls-ungated {a tcltls that checks names is never gated, whatever the switch} -body {
+	list [lindex [repo_gate 1 absent] 0] [lindex [repo_gate 1 0] 0]
+} -result {1 1}
+
+# --- the switch itself: tls.conf (D114) ------------------------------------------------
+test tls-settings-default-refuses {no tls.conf: refuse} -body {
+	file delete $::tlsconf
+	rio::tls::unchecked_ok
+} -result 0
+
+test tls-settings-round-trip {set_unchecked writes tls.conf both ways, and it reads back} -body {
+	set a [rio::tls::set_unchecked 1] ; set ra [rio::tls::unchecked_ok]
+	set b [rio::tls::set_unchecked 0] ; set rb [rio::tls::unchecked_ok]
+	list $a $ra $b $rb [file tail $::tlsconf]
+} -cleanup { file delete $::tlsconf } -result {1 1 0 0 tls.conf}
+
+test tls-settings-only-allow-allows {only the word `allow` lets it through — refuse, yes, 1 and junk do not} -body {
+	set out {}
+	foreach v {allow refuse yes 1 junk} {
+		writefile $::tlsconf "unchecked_hostnames = $v\n"
+		lappend out [rio::tls::unchecked_ok]
+	}
+	set out
+} -cleanup { file delete $::tlsconf } -result {1 0 0 0 0}
+
+test tls-settings-malformed-refuses {a malformed tls.conf reads as refuse, even with allow in it} -body {
+	writefile $::tlsconf "unchecked_hostnames = allow\nno equals sign here\n"
+	rio::tls::unchecked_ok
+} -cleanup { file delete $::tlsconf } -result 0
+
+test tls-settings-section-ignored {allow under a [section] is not the top-level switch} -body {
+	writefile $::tlsconf "\[somewhere\]\nunchecked_hostnames = allow\n"
+	rio::tls::unchecked_ok
+} -cleanup { file delete $::tlsconf } -result 0
+
+test tls-settings-beside-certificates {the real path is tls.conf in rio's config dir} -body {
+	set ::rio::tls::settings_override ""
+	set save [array get ::env XDG_CONFIG_HOME]
+	set ::env(XDG_CONFIG_HOME) /cfg
+	set p [rio::tls::settings_path]
+	if {[llength $save]} { array set ::env $save } else { unset ::env(XDG_CONFIG_HOME) }
+	set ::rio::tls::settings_override $::tlsconf
+	set p
+} -result /cfg/rio/tls.conf
 
 test http-plain-never-loads-tcltls {an http:// fetch never reaches for tcltls} -setup {
 	rename rio::tls::ensure _real_ensure

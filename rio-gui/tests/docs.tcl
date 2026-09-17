@@ -191,7 +191,7 @@ set producers {
 	{rio::agent::allow::_global_file}            config
 	{rio::agent::allow::_provider_file claude}   config
 	{rio::agent::settings::path claude}          config
-	{rio::agent::settings::agent_path}           config
+	{rio::tls::settings_path}                    config
 	{ledger_path}                                data
 	{rio::secret::_path claude}                  data
 	{rio::workspace::_dir}                       data

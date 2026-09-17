@@ -23,9 +23,9 @@
 # that the name is the server's own is what tcltls 1.8 added (-servername → SSL_add1_host,
 # verified against 1.8.0: a trusted certificate for another name fails "hostname
 # mismatch"). tcltls 1.7 sends the name for SNI and never compares it. `checks_hostname`
-# reports which one this core has; callers decide what to do with a 1.7 — a repository
-# fetch refuses outright (rio::http), the agent refuses unless the user allowed it
-# (plugins/lib/transport.tcl, D110).
+# reports which one this core has. On a 1.7 both callers — a repository fetch (rio::http)
+# and the agent (plugins/lib/transport.tcl) — refuse https unless the user allowed it with
+# the one core-wide switch, `unchecked_ok` (D110, widened to repositories by D114).
 #
 # EXCEPTIONS — a certificate the user accepted though it does not verify (D111). The
 # browser model: refuse by default, show why (`inspect`, a handshake that sends nothing),
@@ -56,6 +56,7 @@ if {[llength [info commands rio::tls::socket]]} { return }
 namespace eval rio::tls {
 	variable ready 0
 	variable override_path ""   ;# tests pin certificates.conf here
+	variable settings_override "" ;# tests pin tls.conf here (D114)
 	variable seq 0              ;# one token per connection, for _verify's per-chain state
 	variable chains {}          ;# token -> {failed 0|1 reasons {…}}, trimmed as it grows
 	variable refused {}         ;# host:port -> {reasons {…} changed 0|1}, the last refusal
@@ -287,6 +288,60 @@ proc rio::tls::_exceptions_write {all} {
 	}
 	close $fh
 	return $p
+}
+
+# --- settings: tls.conf (D114) -----------------------------------------------------------
+#
+# One choice today: whether https may go ahead on a tcltls that cannot check host names
+# (older than 1.8). Core-wide — the agent's transport and the repository fetch both ask it,
+# because the tcltls in question is the core's, whichever feature dials. Kept in
+# $XDG_CONFIG_HOME/rio/tls.conf beside certificates.conf (D21 format, top-level keys):
+#     unchecked_hostnames = allow
+# Anything else — absent, another value, a malformed or unreadable file, no conf parser —
+# refuses. Read afresh on every call, so a hand edit counts without a restart.
+
+proc rio::tls::settings_path {} {
+	variable settings_override
+	if {$settings_override ne ""} { return $settings_override }
+	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
+		return [file join $::env(XDG_CONFIG_HOME) rio tls.conf]
+	} elseif {[info exists ::env(HOME)]} {
+		return [file join $::env(HOME) .config rio tls.conf]
+	}
+	return ""
+}
+
+proc rio::tls::unchecked_ok {} {
+	set p [settings_path]
+	if {$p eq "" || ![file isfile $p] || ![llength [info commands ::rio::conf::read_file]]} {
+		return 0
+	}
+	if {[catch {::rio::conf::read_file $p} conf]} { return 0 }
+	if {![dict exists $conf "" unchecked_hostnames]} { return 0 }
+	return [expr {[dict get $conf "" unchecked_hostnames] eq "allow"}]
+}
+
+# Store the choice; returns it as 0|1. Raises when there is nowhere to write — a switch
+# that claims to be on while nothing remembers it would be a quiet lie.
+proc rio::tls::set_unchecked {on} {
+	set on [expr {$on ? 1 : 0}]
+	set p [settings_path]
+	if {$p eq ""} { error "no config directory: neither XDG_CONFIG_HOME nor HOME is set" }
+	file mkdir [file dirname $p]
+	set fh [open $p w]
+	fconfigure $fh -encoding utf-8
+	puts $fh "# rio — how the core's https connections are verified (AGENTS.md D114)."
+	puts $fh "# unchecked_hostnames = allow lets https go ahead on a tcltls older than 1.8, which"
+	puts $fh "# checks a certificate's chain but not that it belongs to the host. Anything else refuses."
+	puts $fh "unchecked_hostnames = [expr {$on ? "allow" : "refuse"}]"
+	close $fh
+	return $on
+}
+
+# The version of tcltls this core would use, loading it if needed; "" when there is none.
+proc rio::tls::present {} {
+	if {[catch {ensure}]} { return "" }
+	return [package present tls]
 }
 
 # --- inspect: what a server's certificate is, and what is wrong with it ----------------

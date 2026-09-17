@@ -208,7 +208,9 @@ set ::agent_mode_ui review ;# plan|review|auto — the two flags above as the th
                            ;# UI offers; DERIVED by agent_mode_sync, never a truth of its own (D102)
 set ::compare_shown 0     ;# compare/diff view active? (.cmp shown instead of .ed; D28)
 set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (Settings; D28)
-set ::agent_tls_unchecked 0 ;# the core's choice: https on a tcltls without host-name checks (D110)
+set ::tls_unchecked 0     ;# the core's choice: https on a tcltls without host-name checks (D114)
+set ::tls_checks_hostname 1 ;# does the core's tcltls check names? (tls.settings; picks the hint)
+set ::tls_version ""      ;# the core's tcltls version, "" when it has none
 set ::agent_selection_menu 1 ;# offer "Change with Agent…" in the editor's context menu (prefs.json; D113)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
@@ -4503,10 +4505,25 @@ proc adopt_agent_status {} {
 	set ::agent_provider    [dict get $st provider]
 	set ::agent_auto_accept [dict get $st auto_accept]
 	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
-	if {[dict exists $st tls_unchecked]} { set ::agent_tls_unchecked [dict get $st tls_unchecked] }
 	providers_menu_fill    ;# refresh the cache + the provider/key menus from the core
 	agent_options_refresh   ;# what this provider lets us choose, and what it chose (D106)
 	agent_mode_sync         ;# and the mode control, which repaints the strip
+	adopt_tls_settings      ;# the core-wide https switch sits beside it at every attach (D114)
+}
+
+# Mirror the core's https switch (D114) and what its tcltls can check. Same rule as the
+# agent's settings: read at attach, never written then. Quiet on failure — a core that
+# predates tls.settings just leaves the Network pane showing its defaults.
+proc adopt_tls_settings {} {
+	set r [rio_call tls.settings {}]
+	if {![dict get $r ok]} return
+	set st [dict get $r result]
+	set ::tls_unchecked       [dict get $st unchecked]
+	set ::tls_checks_hostname [dict get $st checks_hostname]
+	set ::tls_version         [dict get $st tcltls]
+	if {[winfo exists .prefs.body.network.hint]} {
+		.prefs.body.network.hint configure -text [tls_unchecked_hint]
+	}
 }
 
 # The chat status strip (under the Send button): which agent is live and whether
@@ -4669,19 +4686,33 @@ proc agent_mode_set {} {
 	agent_mode_sync
 }
 
-# The writer behind Preferences ▸ Agent ▸ "Allow https without host-name checks" (D110).
-# The choice is the CORE's — its tcltls is the one in question, and every frontend attached
-# to it shares the answer — so the checkbutton only asks, and shows what the core stored.
-# A refusal puts the box back rather than leave it claiming a setting that isn't in force.
-proc agent_tls_set {} {
-	set want $::agent_tls_unchecked
-	set ::agent_tls_unchecked [expr {!$want}]
-	set r [rio_call agent.tls.set [dict create unchecked $want]]
+# The writer behind Preferences ▸ Network ▸ "Allow https without host-name checks" (D110,
+# core-wide since D114: the agent and extension repositories alike). The choice is the
+# CORE's — its tcltls is the one in question, and every frontend attached to it shares the
+# answer — so the checkbutton only asks, and shows what the core stored. A refusal puts
+# the box back rather than leave it claiming a setting that isn't in force.
+proc tls_unchecked_set {} {
+	set want $::tls_unchecked
+	set ::tls_unchecked [expr {!$want}]
+	set r [rio_call tls.settings.set [dict create unchecked $want]]
 	if {![dict get $r ok]} {
 		report_error [dict get $r error message] [dict get $r error code]
 		return
 	}
-	set ::agent_tls_unchecked [dict get $r result unchecked]
+	set ::tls_unchecked [dict get $r result unchecked]
+}
+
+# The hint under that checkbox: what ticking it gives away, and whether it matters on the
+# core this GUI is attached to.
+proc tls_unchecked_hint {} {
+	set what "Off: on a core whose tcltls is older than 1.8, the agent and https extension repositories refuse https — that tcltls accepts a valid certificate issued for any host, not just the server's. Turn on only on a network you trust, if tcltls can't be upgraded there. Plain http is never affected."
+	if {$::tls_checks_hostname} {
+		return "This core's tcltls checks host names, so this changes nothing here. $what"
+	}
+	if {$::tls_version ne ""} {
+		return "This core has tcltls $::tls_version. $what"
+	}
+	return $what
 }
 
 # The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
@@ -9148,7 +9179,7 @@ proc extw_cert_review {url {fetch_error ""}} {
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
-# Preferences ▸ Extensions ▸ Accepted certificates…: every exception the core holds, and a
+# Preferences ▸ Network ▸ Accepted certificates…: every exception the core holds, and a
 # way to take one back — a browser always offers that, and so does rio (D111). The list is
 # the core's certificates.conf, read through tls.accepted each time it is filled.
 proc certs_dialog {} {
@@ -10523,12 +10554,6 @@ proc prefs_fill_agent {f} {
 		::agent_selection_menu prefs_save] -row [incr r] -column 0 -sticky w -pady {8 1}
 	grid [prefs_hint $f.selhint "Shown only while a provider other than Echo is selected. It asks the agent to change the selected text and nothing else."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
-	# The one security trade-off the agent offers (D110), off by default. It lives here, not
-	# in Settings: a fast switch it is not. The hint says what ticking it gives away.
-	grid [prefs_check $f.tls "Allow https without host-name checks (tcltls older than 1.8)" \
-		::agent_tls_unchecked agent_tls_set] -row [incr r] -column 0 -sticky w -pady {8 1}
-	grid [prefs_hint $f.tlshint "Off: on a core whose tcltls is older than 1.8, the agent refuses https — that tcltls accepts a valid certificate issued for any host, not just the provider's. Turn on only if tcltls can't be upgraded there. A newer tcltls always checks, and plain http is never affected."] \
-		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	set i 0
 	foreach p $::agent_providers {
 		if {![dict get $p keyed]} continue
@@ -10563,8 +10588,22 @@ proc prefs_fill_extensions {f} {
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}
+}
+
+# Network category (D114): how the core's https connections are verified — for the agent
+# and extension repositories alike, so neither of their panes owns it. The one security
+# trade-off (D110), off by default; it lives here, not in Settings: a fast switch it is
+# not. And the certificates accepted one by one (D111), which also apply to every https
+# connection the core makes.
+proc prefs_fill_network {f} {
+	adopt_tls_settings
+	set r 0
+	grid [prefs_check $f.tls "Allow https without host-name checks (tcltls older than 1.8)" \
+		::tls_unchecked tls_unchecked_set] -row [incr r] -column 0 -sticky w -pady 1
+	grid [prefs_hint $f.hint [tls_unchecked_hint]] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	grid [prefs_button $f.certs "Accepted certificates…" certs_dialog] \
-		-row [incr r] -column 0 -sticky w -pady {2 2}
+		-row [incr r] -column 0 -sticky w -pady {8 2}
 }
 
 # Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
@@ -10597,11 +10636,11 @@ proc preferences_window {} {
 		-activestyle none -highlightthickness 0 -borderwidth 1 -relief solid \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg]
-	foreach cat {View Editor Agent Extensions Keyboard} { $w.cats insert end $cat }
+	foreach cat {View Editor Agent Extensions Network Keyboard} { $w.cats insert end $cat }
 	bind $w.cats <<ListboxSelect>> [list prefs_show_cat $w]
 
 	frame $w.body -background [dict get $c ui.bg]
-	foreach cat {view editor agent extensions keyboard} {
+	foreach cat {view editor agent extensions network keyboard} {
 		frame $w.body.$cat -background [dict get $c ui.bg]
 		grid $w.body.$cat -row 0 -column 0 -sticky nsew
 	}
@@ -10609,6 +10648,7 @@ proc preferences_window {} {
 	prefs_fill_editor     $w.body.editor
 	prefs_fill_agent      $w.body.agent
 	prefs_fill_extensions $w.body.extensions
+	prefs_fill_network    $w.body.network
 	prefs_fill_keyboard   $w.body.keyboard
 
 	# Extensions… mirrors the Settings menu, where it sits right under Preferences…

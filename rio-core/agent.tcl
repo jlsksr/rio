@@ -84,20 +84,6 @@ proc rio::agent::set_mode {m} {
 }
 proc rio::agent::mode {} { variable mode ; return $mode }
 
-# May the agent use https on a tcltls that cannot check host names (D110)? A tcltls older
-# than 1.8 accepts a trusted certificate issued for any host, so the answer is no unless
-# the user said otherwise: 1 only for `tls_unchecked_hostnames = allow` in agent.conf.
-# Read from the file on every call, so a hand edit counts without a restart; a missing or
-# malformed file reads as refuse. The transport (plugins/lib) asks this at request time.
-proc rio::agent::tls_unchecked_ok {} {
-	return [expr {[rio::agent::settings::agent_get tls_unchecked_hostnames] eq "allow"}]
-}
-proc rio::agent::set_tls_unchecked {on} {
-	set on [expr {$on ? 1 : 0}]
-	rio::agent::settings::agent_store tls_unchecked_hostnames [expr {$on ? "allow" : "refuse"}]
-	return $on
-}
-
 # Swap the active provider directly — a command prefix obeying the contract in
 # _run. The low-level hook used by the core's own tests; frontends pick a provider
 # by NAME through use_provider (the registry), which also keeps the live name.

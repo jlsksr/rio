@@ -290,7 +290,7 @@ rio::wire::result_encoder agent.options.list rio::wire::_result_agent_options_li
 # provider declares (D106) — an object of string leaves, declared rather than inferred.
 proc rio::wire::_result_agent_status {result} {
 	set parts {}
-	foreach k {provider auto_accept mode key_set tls_unchecked} {
+	foreach k {provider auto_accept mode key_set} {
 		lappend parts "[str $k]:[str [dict get $result $k]]"
 	}
 	lappend parts "\"options\":[obj [dict get $result options]]"

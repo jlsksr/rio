@@ -140,6 +140,55 @@ test tls-ops-wire-accepted {tls.accepted arrives as an array of whole objects} -
 		[expr {[dict get $w exceptions] eq [dict get $r exceptions]}]
 } -cleanup { file delete $::rio::tls::override_path } -result {2 {accepted host port sha256 subject} {CN=a "quoted"} 1}
 
+# --- the core-wide https switch (D114) --------------------------------------------------
+set ::rio::tls::settings_override [file join $::tmp tls.conf]
+
+test tls-ops-settings-persists {tls.settings.set writes tls.conf and tls.settings reports it, both ways} -body {
+	file delete $::rio::tls::settings_override
+	set s0 [dict get [lindex [op tls.settings {}] 1] unchecked]
+	set r1 [dict get [lindex [op tls.settings.set {unchecked 1}] 1] unchecked]
+	set s1 [dict get [lindex [op tls.settings {}] 1] unchecked]
+	set r2 [dict get [lindex [op tls.settings.set {unchecked 0}] 1] unchecked]
+	set s2 [dict get [lindex [op tls.settings {}] 1] unchecked]
+	set f [open $::rio::tls::settings_override] ; set t [read $f] ; close $f
+	list $s0 $r1 $s1 $r2 $s2 [regexp -line {^unchecked_hostnames = refuse$} $t]
+} -cleanup { file delete $::rio::tls::settings_override } -result {0 1 1 0 0 1}
+
+test tls-ops-settings-bad-request {tls.settings.set without a 0/1 `unchecked` is refused and writes nothing} -body {
+	file delete $::rio::tls::settings_override
+	list [lindex [op tls.settings.set {}] 0] [lindex [op tls.settings.set {unchecked maybe}] 0] \
+		[file exists $::rio::tls::settings_override]
+} -result {bad_request bad_request 0}
+
+test tls-ops-settings-reports-the-tcltls {checks_hostname and the version come from the core's tcltls} -setup {
+	rename rio::tls::present _real_present
+	rename rio::tls::checks_hostname _real_checks
+} -body {
+	set out {}
+	foreach {ver checks} {1.7.22 0 1.8.0 1 "" 0} {
+		proc rio::tls::present {} [list return $ver]
+		proc rio::tls::checks_hostname {} [list return $checks]
+		set r [lindex [op tls.settings {}] 1]
+		lappend out [dict get $r tcltls] [dict get $r checks_hostname]
+	}
+	set out
+} -cleanup {
+	rename rio::tls::present {} ; rename _real_present rio::tls::present
+	rename rio::tls::checks_hostname {} ; rename _real_checks rio::tls::checks_hostname
+} -result {1.7.22 0 1.8.0 1 {} 0}
+
+test tls-ops-wire-settings-keeps-every-field {every key tls.settings returns reaches the client} -body {
+	set r [lindex [op tls.settings {}] 1]
+	set w [wire_result tls.settings $r]
+	list [lsort [dict keys $w]] [expr {$w eq $r}]
+} -result {{checks_hostname tcltls unchecked} 1}
+
+test tls-ops-agent-copy-gone {the agent's own switch is gone: agent.tls.set is unknown, agent.status has no tls_unchecked} -body {
+	list [lindex [op agent.tls.set {unchecked 1}] 0] \
+		[dict exists [lindex [op agent.status {}] 1] tls_unchecked] \
+		[llength [info commands ::rio::agent::tls_unchecked_ok]]
+} -result {unknown_op 0 0}
+
 test tls-ops-untrusted-cert-in-taxonomy {untrusted_cert is a code the protocol knows (D11)} -body {
 	expr {"untrusted_cert" in $::rio::error::codes}
 } -result 1

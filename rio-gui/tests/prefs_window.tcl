@@ -3,7 +3,7 @@
 # Headless test for the Preferences window (AGENTS.md D58). The window owns no state:
 # each control drives the SAME global its menu twin binds and calls the SAME applier, so
 # it is live-apply and the two doors stay in sync for free. Checks that the window opens
-# with its five categories, that toggling a control there flips the global AND matches
+# with its six categories, that toggling a control there flips the global AND matches
 # the menu entry's -variable (the two-door sync), that changing the tab layout re-flows
 # the strip, that the category switch selects, that opening twice is safe, and that the
 # theme/mode radios are enumerated from the core/registry.
@@ -43,16 +43,18 @@ proc mkbuf {name} {
 	return $id
 }
 
-# --- the window opens with its five categories ------------------------------------
+# --- the window opens with its six categories -------------------------------------
 preferences_window
 update idletasks
 ok "window exists"               [winfo exists .prefs]                 1
-ok "five categories"             [.prefs.cats size]                    5
+ok "six categories"              [.prefs.cats size]                    6
 ok "view body exists"            [winfo exists .prefs.body.view]       1
 ok "editor body exists"          [winfo exists .prefs.body.editor]     1
 ok "agent body exists"           [winfo exists .prefs.body.agent]      1
 ok "extensions body exists"      [winfo exists .prefs.body.extensions] 1
+ok "network body exists"         [winfo exists .prefs.body.network]    1
 ok "keyboard body exists"        [winfo exists .prefs.body.keyboard]   1
+ok "network sits before keyboard" [.prefs.cats get 4]                  Network
 
 # The Extensions category (D107): the start-up update check is the one durable
 # decision about repositories, so it lives here, in the config home — and it is OFF
@@ -60,9 +62,8 @@ ok "keyboard body exists"        [winfo exists .prefs.body.keyboard]   1
 ok "update check exists"         [winfo exists .prefs.body.extensions.chk] 1
 ok "update check is off"         $::ext_check_updates                  0
 ok "update check binds the flag" [.prefs.body.extensions.chk cget -variable] ::ext_check_updates
-# D111: the way to take back a certificate accepted in the Extensions window.
-ok "accepted certificates button" [list [winfo exists .prefs.body.extensions.certs] \
-	[.prefs.body.extensions.certs cget -command]] {1 certs_dialog}
+# D111's certificates moved to Network with D114: they apply to every https connection.
+ok "extensions: no certificates button" [winfo exists .prefs.body.extensions.certs] 0
 
 # --- two-door sync: the window control binds the SAME global the menu entry does ---
 ok "wrap: same var as menu"      [.prefs.body.view.wrap cget -variable] \
@@ -144,31 +145,48 @@ ok "agent: the core is planning"    [dict get [rio_result agent.status {}] mode]
 .prefs.body.agent.mreview invoke
 ok "agent: and back to building"    [dict get [rio_result agent.status {}] mode] build
 
-# https without host-name checks (D110): a checkbox whose truth is the core's, off by
-# default, written to the core's agent.conf (the sandboxed XDG dir here) and mirrored back.
-set tlsconf [file join $::env(XDG_CONFIG_HOME) rio agent agent.conf]
+ok "agent: no https switch here"    [winfo exists .prefs.body.agent.tls]     0
+
+# --- Network (D114): the core-wide https switch and the accepted certificates ---------
+# The checkbox's truth is the core's, off by default, written to the core's tls.conf (the
+# sandboxed XDG dir here) and mirrored back; it covers the agent and repositories alike.
+set tlsconf [file join $::env(XDG_CONFIG_HOME) rio tls.conf]
 proc tlsconf_says {path} {
 	if {![file exists $path]} { return absent }
 	set fh [open $path] ; set t [read $fh] ; close $fh
-	return [expr {[regexp {tls_unchecked_hostnames = (\w+)} $t -> v] ? $v : "unset"}]
+	return [expr {[regexp -line {^unchecked_hostnames = (\w+)$} $t -> v] ? $v : "unset"}]
 }
-ok "tls: checkbox present"          [winfo class .prefs.body.agent.tls]      Checkbutton
-ok "tls: off by default"            $::agent_tls_unchecked                   0
-ok "tls: the core agrees"           [dict get [rio_result agent.status {}] tls_unchecked] 0
-ok "tls: hint present"              [winfo exists .prefs.body.agent.tlshint] 1
-.prefs.body.agent.tls invoke
-ok "tls: on reaches the core"       [dict get [rio_result agent.status {}] tls_unchecked] 1
-ok "tls: the box shows it"          $::agent_tls_unchecked                   1
-ok "tls: stored in agent.conf"      [tlsconf_says $tlsconf]                   allow
-.prefs.body.agent.tls invoke
-ok "tls: off reaches the core"      [dict get [rio_result agent.status {}] tls_unchecked] 0
-ok "tls: stored as refuse"          [tlsconf_says $tlsconf]                   refuse
+ok "tls: checkbox present"          [winfo class .prefs.body.network.tls]    Checkbutton
+ok "tls: binds the core's switch"   [list [.prefs.body.network.tls cget -variable] [.prefs.body.network.tls cget -command]] {::tls_unchecked tls_unchecked_set}
+ok "tls: off by default"            $::tls_unchecked                         0
+ok "tls: the core agrees"           [dict get [rio_result tls.settings {}] unchecked] 0
+ok "tls: hint present"              [winfo exists .prefs.body.network.hint]  1
+ok "certificates button"            [list [winfo exists .prefs.body.network.certs] \
+	[.prefs.body.network.certs cget -command]] {1 certs_dialog}
+.prefs.body.network.tls invoke
+ok "tls: on reaches the core"       [dict get [rio_result tls.settings {}] unchecked] 1
+ok "tls: the box shows it"          $::tls_unchecked                         1
+ok "tls: stored in tls.conf"        [tlsconf_says $tlsconf]                  allow
+.prefs.body.network.tls invoke
+ok "tls: off reaches the core"      [dict get [rio_result tls.settings {}] unchecked] 0
+ok "tls: stored as refuse"          [tlsconf_says $tlsconf]                  refuse
+ok "tls: nothing left in agent.conf" [file exists [file join $::env(XDG_CONFIG_HOME) rio agent agent.conf]] 0
 # Another frontend (or a hand edit) changed it: attaching again mirrors the core, not the box.
-rio_result agent.tls.set {unchecked 1}
+rio_result tls.settings.set {unchecked 1}
 adopt_agent_status
-ok "tls: adopt mirrors the core"    $::agent_tls_unchecked                   1
-rio_result agent.tls.set {unchecked 0}
+ok "tls: adopt mirrors the core"    $::tls_unchecked                         1
+rio_result tls.settings.set {unchecked 0}
 adopt_agent_status
+ok "tls: adopt mirrors it back"     $::tls_unchecked                         0
+# The hint says whether the switch matters on THIS core, from what tls.settings reports.
+set real [dict get [rio_result tls.settings {}] checks_hostname]
+ok "tls: adopt takes checks_hostname" $::tls_checks_hostname                 $real
+set ::tls_checks_hostname 1
+ok "tls: hint on a checking tcltls" [string match "*changes nothing here*" [tls_unchecked_hint]] 1
+set ::tls_checks_hostname 0 ; set ::tls_version 1.7.22
+ok "tls: hint on an older tcltls"   [string match "This core has tcltls 1.7.22.*agent and https extension repositories*" [tls_unchecked_hint]] 1
+adopt_agent_status
+ok "tls: the pane's hint follows"   [.prefs.body.network.hint cget -text]    [tls_unchecked_hint]
 
 # --- Change with Agent… in the editor's context menu (D113) --------------------------
 # A GUI preference (prefs.json), on by default — the entry itself also needs a real
