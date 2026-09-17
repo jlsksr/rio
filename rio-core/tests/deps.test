@@ -44,6 +44,57 @@ test deps-message-is-ascii {deps.tcl is sourced ABOVE the D54 encoding guard, so
 	regexp {[^\x00-\x7f]} $bytes
 } -result 0
 
+# --- the derived fact: INSTALL.md §1 names the same OS packages (AGENTS §7) ------------
+#
+# The `provides` table restates INSTALL.md §1's operating-system package names, so the two
+# can drift — and the drift is the bad kind: rio would tell someone to install a package
+# that no longer exists, in the one message they get. Compared as SETS of the names that
+# follow a "apt:"/"Alpine:"/"OpenBSD:"-style label on either side, which is the part that
+# actually has to agree; the surrounding prose is free to differ.
+proc install_md_packages {} {
+	set f [open [file join [file dirname [info script]] .. .. INSTALL.md]]
+	fconfigure $f -encoding utf-8
+	set text [read $f] ; close $f
+	set from [string first "The **core** needs:" $text]
+	set to   [string first "**A missing one says so" $text $from]
+	if {$from < 0 || $to <= $from} { return "SECTION NOT FOUND" }
+	set section [string range $text $from $to]
+	set out {}
+	foreach line [split $section "\n"] {
+		# The requirements table: Need | Package (apt/apk) | OpenBSD | Why. The Why column
+		# is prose and names Tcl packages (`json`), not OS ones — so it is dropped.
+		if {[regexp {^\|} $line]} {
+			set cells [lrange [split $line |] 1 3]
+			if {![regexp {tcllib|tcltls} [lindex $cells 0]]} continue
+			lappend out {*}[regexp -all -inline {`([^`]+)`} [join $cells " "]]
+		} elseif {[string match "*additionally needs*Tk*" $line]} {
+			lappend out {*}[regexp -all -inline {`([^`]+)`} $line]
+		}
+	}
+	# regexp -all -inline yields whole-match and group alternately; keep the groups.
+	set names {}
+	foreach {whole group} $out { lappend names $group }
+	return [lsort -unique $names]
+}
+proc deps_tcl_packages {} {
+	set out {}
+	foreach {pkg who} $::rio::deps::provides {
+		# every name that follows a "apt:" / "Alpine:" / "OpenBSD:" / "apk/pkg_add:" label
+		foreach {whole group} [regexp -all -inline {[A-Za-z/_]+:\s*([A-Za-z0-9._%-]+)} $who] {
+			lappend out $group
+		}
+		# …and the comma-separated continuation inside one label ("apt: tk, OpenBSD: tk%8.6"
+		# is covered above; "tcllib, Alpine: tcl-lib" needs the bare leading name too)
+		if {[regexp {^([a-z][A-Za-z0-9._%-]*)\s*\(} $who -> lead]} { lappend out $lead }
+	}
+	return [lsort -unique $out]
+}
+
+test deps-install-md-names-the-same-packages {the table and INSTALL.md §1 agree on the OS
+		package names, both directions — a rename in one and not the other fails} -body {
+	list [install_md_packages] [expr {[install_md_packages] eq [deps_tcl_packages]}]
+} -result [list [lsort -unique {tcllib tcl-lib tcl-tls tcltls tk tk%8.6}] 1]
+
 test deps-require-exits-with-a-sentence {a missing package: exit 1, the message on stderr,
 		and NO Tcl stack trace} -setup {
 	set script [file join [temporaryDirectory] rio-deps-child-[pid].tcl]

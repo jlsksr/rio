@@ -6631,7 +6631,12 @@ platform but one.
 
 **Guards** (new `deps.test`, 7 tests): the table for each package, the quoted package
 name, the INSTALL.md pointer, an unknown package still getting a sentence, the ASCII
-rule, and a **child tclsh** proving exit 1 with the message and no `while executing`.
+rule, a **child tclsh** proving exit 1 with the message and no `while executing`, and a
+**cross-check against INSTALL.md §1** — the table restates that section's OS package
+names, so the two are compared as sets, both directions (§7's register). Without it rio
+could tell someone to install a package that no longer exists, in the one message they
+get. Caught in review, not by the first pass, which asserted the table only against
+itself.
 Verified end to end by running both entry points with an emptied `auto_path`. Three
 injections: a wrong OS package, a non-ASCII literal, a `require` that throws instead of
 reporting. **Closes RELEASING.md Gate 3's graceful-failure box.**
@@ -7174,6 +7179,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
 | the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
 | `rio::tls::bundles` (D109) | the system CA locations INSTALL.md §1 lists | `tls.test` — both directions |
+| INSTALL.md §1's OS package names | `rio::deps::provides` (D116), which rio prints when one is missing | `deps.test` — both directions, as sets |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
