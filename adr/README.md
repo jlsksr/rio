@@ -169,7 +169,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0105](0105-shipped-prompt-visible.md) | rio's shipped prompt is complete and visible | Accepted | 2026-09-11 |
 | [0106](0106-model-and-effort-options.md) | Model and effort are provider-declared options | Accepted | 2026-09-12 |
 | [0107](0107-semver-extension-updates.md) | Extension versions are semver and are compared | Accepted | 2026-09-12 |
-| [0108](0108-editor-context-menu.md) | The editor has a context menu built from the Edit menu's table | Accepted | 2026-09-12 |
+| [0108](0108-editor-context-menu.md) | The editor has a context menu built from the Edit menu's table | Accepted; amended by 0121 | 2026-09-12 |
 | [0109](0109-https-repositories.md) | https beside http, trusted from the host's CA store | Accepted; amended by 0110, 0111, 0120 | 2026-09-12 |
 | [0110](0110-agent-https-hostname-checks.md) | The agent refuses https without host-name checks unless allowed | Accepted; amended by 0120 | 2026-09-15 |
 | [0111](0111-certificate-exceptions.md) | A certificate that fails verification can be accepted by fingerprint | Accepted; amended by 0120 | 2026-09-15 |
@@ -182,3 +182,5 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0118](0118-language-picked-by-hand.md) | A buffer's language can be picked by hand | Accepted | 2026-09-16 |
 | [0119](0119-change-with-agent.md) | Change with Agent: a request about the selected text, and only that | Accepted | 2026-09-16 |
 | [0120](0120-core-wide-unchecked-https-switch.md) | One core-wide switch for https without host-name checks | Accepted | 2026-09-17 |
+| [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted | 2026-09-17 |
+| [0122](0122-missing-dependency-names-its-package.md) | A missing dependency names the package to install | Accepted | 2026-09-17 |
