@@ -647,5 +647,79 @@ foreach p $::menu_docs {
 ok "every Preferences path in the docs exists" $stale {}
 destroy .prefs
 
+# --- 12. the menus outside the editor, and the page that lists them ------------
+#
+# Check 10's twin for D115. The editor's menu is one list the code decides; the other
+# two are `view_menu_build` (read-only text: the agent log, a diff, the compare panes,
+# a plan, this manual) and `input_menu_build` (every entry/text outside the editor).
+# getting-started.md writes them down, which makes them a derived fact with the same
+# failure mode: an entry added, renamed or dropped and the page keeps the old wording.
+#
+# Behaviour, not source text: the two builders are run against fixtures of this test's
+# own — a disabled text and a bare entry — so the check never depends on what some pane
+# happens to hold, and the labels come from the real menu widget.
+#
+# Both directions, on the convention check 10 established: inside *Right-click menus*
+# **bold marks a menu entry**, and nothing else. Emphasise a surface name there and this
+# check will call it an invented entry — italics are what that section uses for them.
+proc bare_labels {kind w} {
+	catch {destroy .docsbare}
+	menu .docsbare -tearoff 0
+	${kind}_menu_build .docsbare $w
+	set out {}
+	for {set i 0} {$i <= [.docsbare index end]} {incr i} {
+		if {[.docsbare type $i] eq "separator"} continue
+		lappend out [.docsbare entrycget $i -label]
+	}
+	destroy .docsbare
+	return $out
+}
+text  .docsview -state disabled
+entry .docsinput
+entry .docsmask -show •   ;# the provider API-key field's shape (D26): no Cut, no Copy
+.docsinput insert 0 "text" ; .docsmask insert 0 "secret"
+set ::barelabels [lsort -unique \
+	[concat [bare_labels view .docsview] [bare_labels input .docsinput]]]
+set ::masklabels [lsort -unique [bare_labels input .docsmask]]
+destroy .docsview .docsinput .docsmask
+ok "the bare-widget menus have entries" [expr {[llength $::barelabels] > 2}] 1
+ok "a read-only view offers fewer than an editable field" \
+	[expr {[llength [bare_labels view [text .docsview -state disabled]]] \
+		< [llength [bare_labels input [entry .docsinput]]]}] 1
+destroy .docsview .docsinput
+
+set gs [slurp [file join $::docs getting-started.md]]
+set sect ""
+regexp {\n## Right-click menus\n(.*?)(?:\n## |\Z)} $gs -> sect
+ok "getting-started.md has the right-click section" [expr {$sect ne ""}] 1
+
+proc md_bold {text} {
+	return [lsort -unique [lmap {_ b} [regexp -all -inline {\*\*([^*]+)\*\*} $text] {set b}]]
+}
+set bolded [md_bold $sect]
+
+set missing {}
+foreach l $::barelabels {
+	if {[lsearch -exact $bolded $l] < 0} { lappend missing $l }
+}
+ok "every entry of the menus outside the editor is documented" $missing {}
+
+set invented {}
+foreach b $bolded {
+	if {[lsearch -exact $::barelabels $b] < 0} { lappend invented $b }
+}
+ok "the section names no entry those menus lack" $invented {}
+
+# The masked field is the one place the list is deliberately shorter, so the page's
+# paragraph about it is held against that menu exactly — a Cut or a Copy appearing
+# there, or the paragraph claiming one, is the drift this catches.
+set maskpar ""
+foreach par [split [string map [list "\n\n" \x02] $sect] \x02] {
+	if {[string match *API-key* $par]} { set maskpar $par }
+}
+ok "the section covers the masked field" [expr {$maskpar ne ""}] 1
+ok "the masked field's entries are the ones documented" [md_bold $maskpar] \
+	[lsort -unique $::masklabels]
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

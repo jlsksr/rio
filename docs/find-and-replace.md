@@ -16,3 +16,5 @@ For now, the *Find & Replace* and *Search* entries under **What works now** in
 
 - [The editor](editor.md) — including why Replace All is one undo step.
 - [Keyboard shortcuts](keyboard.md) — the find and search chords.
+- [Right-click menus](getting-started.md#right-click-menus) — the editing menu the
+  find bar's and the Search panel's fields carry.

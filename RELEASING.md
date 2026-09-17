@@ -360,8 +360,16 @@ though the interactive behaviour is right.
 
 ## Gate 3 — First run & intake
 
-- [ ] Verify graceful failure when `tcllib` / `tcltls` is missing — a clear "install
+- [x] Verify graceful failure when `tcllib` / `tcltls` is missing — a clear "install
       X" message, not a stack trace. Cross-check against [INSTALL.md](INSTALL.md).
+      **Done (D116).** `tcltls` already behaved — `rio::tls::ensure` defers it and
+      reports it. The hard ones did not: a bare `package require json` at an entry
+      point gave a trace, and on Windows `wish.exe` turns that into the modal dialog
+      described under *Still open*. `rio-core/deps.tcl` now gates them — the message
+      names the OS package (INSTALL.md §1's own words, not the Tcl package name) and
+      exits 1. The GUI also puts it in a message box, since `wish` on Windows has no
+      console for stderr. Verified by running both entry points with an emptied
+      `auto_path`, and by `rio-core/tests/deps.test` (7 tests, 3 injections).
 - [ ] Add an issue-reporting path (a link in the README) and a short "alpha status"
       note: what's rough, save often, and that there is **no crash recovery yet**.
 

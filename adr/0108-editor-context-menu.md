@@ -1,6 +1,6 @@
 # ADR-0108: The editor has a context menu built from the Edit menu's table
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0121](0121-context-menu-outside-the-editor.md)
 - **Date:** 2026-09-12
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D108

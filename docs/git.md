@@ -49,6 +49,9 @@ new name, so the diff is where you see the whole of it: it names the file the
 change came from (`rename from old.txt`), and shows the edits too if the move
 carried any.
 
+The diff itself is read-only, but you can select in it and right-click for *Copy* —
+the way to lift a hunk or a changed line out of the pane.
+
 The same status flags appear in the **file tree**, one character in front of each
 row, so you can see which files changed without switching panes. A folder carries
 a `·` when something beneath it has changed.
@@ -92,6 +95,10 @@ that every git tool expects.
 
 An empty summary is refused on the spot, with the cursor left in the field; rio
 would rather say so than let git abort the commit for you.
+
+Both fields are ordinary text boxes: right-click either one for **Cut**, **Copy**,
+**Paste** and **Select All**, so a message written elsewhere can be pasted straight
+in ([right-click menus](getting-started.md#right-click-menus)).
 
 rio commits what is **staged**, like git does. There is no "commit all" shortcut
 that stages behind your back.

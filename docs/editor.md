@@ -109,6 +109,11 @@ The keyboard opens the same menu at the caret, with the `Menu` key (the one next
 to the right `Ctrl` on most keyboards) or `Shift+F10`. The menu works the same in
 every [editing mode](editing-modes.md) — in vi mode too, in any of its modes.
 
+This is the longest of rio's right-click menus, because the editor is where the
+most can be done. Every other text surface in the window has one too, shorter and
+following the same conventions — see
+[right-click menus](getting-started.md#right-click-menus).
+
 ## Line wrap
 
 ***View ▸ Wrap Lines*** (`Ctrl+Shift+W`) wraps long lines to the window width
@@ -193,8 +198,9 @@ kept aligned.
 - `Esc` (or ***Close Compare***) returns you to editing.
 
 The panes are read-only: compare is for *looking*, and rio would rather you edit
-in the editor than in a diff. The [agent](agent.md) opens complex proposed edits
-in this same view.
+in the editor than in a diff. You can still select in either pane and copy out of
+it, from the keyboard or with a [right-click](getting-started.md#right-click-menus).
+The [agent](agent.md) opens complex proposed edits in this same view.
 
 ## Encoding and line endings
 

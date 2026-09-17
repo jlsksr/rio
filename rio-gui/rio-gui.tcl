@@ -23,8 +23,15 @@
 #
 # Run:  wish rio-gui.tcl [file ...]
 
-package require Tk
-package require json
+# The hard dependencies, through the gate that reports a missing one as a sentence
+# rather than a stack trace (D116) — on Windows an uncaught one is a modal dialog
+# nobody can read past. Tk goes through the plain `require`: if Tk is what's missing
+# there is nothing to draw a dialog with, so stderr is all there is. json (tcllib)
+# then goes through `gui_require`, which also puts it in a message box — under wish
+# on Windows stderr has no console to land in.
+source [file join [file dirname [info script]] .. rio-core deps.tcl]
+rio::deps::require Tk
+rio::deps::gui_require json
 
 # OS file-drop (D86): plain Tk cannot receive a drop from the OS file manager — that
 # capability lives only in the external tkdnd extension. Load it OPTIONALLY: where it is
@@ -734,12 +741,23 @@ proc hello_core {{fatal 0}} {
 	set resp [rio_call session.hello {} 8000]
 	if {![dict get $resp ok]} {
 		set code [dict get $resp error code]
-		if {$code eq "timeout"} {
-			set msg [expr {$::core_remote \
+		if {$::core_remote} {
+			set msg [expr {$code eq "timeout" \
 				? "Connected to $::core_endpoint, but no rio core answered.\n\nThe socket opened — most likely a stale SSH tunnel, or no core is running behind it. Check that the tunnel is still up (ssh -L …) and a core is listening on the server." \
-				: "The local core started but never answered — the install may be broken."}]
+				: "The core didn't answer session.hello: [dict get $resp error message]"}]
 		} else {
-			set msg "The core didn't answer session.hello: [dict get $resp error message]"
+			# A SPAWNED core that never greets did not survive its own start-up — it
+			# exited (an `eof`, so `disconnected`) or wedged before the handshake. The
+			# generic "lost the connection" told the user nothing they could act on,
+			# and the child's stderr goes to a console that `wish` on Windows does not
+			# have. So hand them the command: run it themselves and the core's own
+			# complaint — a missing package, most often — is right there. (Capturing
+			# the child's stderr into the dialog was weighed and refused: it would put
+			# a temp file and its lifecycle on the spawn path that runs every start.)
+			set msg "rio could not start its core.\n\nThe core exited or stopped\
+				responding while starting up. To see why, run it by hand:\n\n \
+				[join $::core_cmd { }]\n\nA missing dependency is the usual cause —\
+				see INSTALL.md §1."
 		}
 		if {$fatal} { catch {wm withdraw .} ; report_error $msg $code ; exit 1 }
 		report_error $msg $code
@@ -1307,6 +1325,158 @@ proc rl_set_hover {b row} {
 	rl_paint $b
 }
 
+# ---------------------------------------------------------------------------
+# The menu Tk leaves bare (AGENTS.md D115) — the half D108 named and deferred.
+#
+# D108 gave the editor text its context menu and stopped there, deliberately: the
+# READ-ONLY views (agent log, compare panes, git diff, the manual, a plan) and every
+# entry/text widget OUTSIDE the editor were left for "its own later change". In all
+# of them Ctrl+C already works, through Tk's own class bindings — only the door was
+# missing, on surfaces where every neighbour in rio has one.
+#
+# THE COMMANDS ARE TK'S OWN VIRTUAL EVENTS. Unlike the editor, whose edits must
+# travel to the core through the group proxy (D3), these are ordinary local Tk
+# widgets whose Ctrl+X/C/V *is* the Entry/Text class binding. So the menu generates
+# that same event: <<Cut>> <<Copy>> <<Paste>> <<SelectAll>>. The menu and the
+# keystroke are then one implementation by construction — D38's anti-drift rule,
+# reached from the other side — and there is no second clipboard code path to keep
+# in step. (`-state disabled` blocks neither selection nor `tag add sel`; see the
+# rl_init note above. A disabled text takes <<Copy>> and <<SelectAll>> and ignores
+# <<Paste>>, which is exactly the behaviour these menus want.)
+#
+# Two families, because the widgets differ in what they can honestly offer:
+#   view   read-only  — Copy, Select All
+#   input  editable   — Cut, Copy, Paste, Select All
+# Both are applied at the widget's CREATION SITE via ctx_bind_view / ctx_bind_input,
+# the way every other binding in this file is, and both follow the D44 popup idiom:
+# a builder split from the popup so a headless test can read the entries without a
+# global grab nobody is there to dismiss.
+#
+# NOT here: the rl_* row lists (Files, Git, Search results, the manual's contents).
+# The first two have real row menus already; the other two have Button-3 bound to an
+# empty callback, and filling it means deciding what Copy or Open MEAN for a result
+# row — a Search and Help feature, not the missing door this change is about. And
+# rl_init kills text selection in those panes outright, so a Copy there could not be
+# the copy this menu offers anyway.
+# ---------------------------------------------------------------------------
+
+# Entry and Text answer "is anything selected?" and "is there anything at all?"
+# differently, and both families need both answers. One switch, in one place.
+proc ctx_has_sel {w} {
+	if {[winfo class $w] eq "Text"} { return [expr {[llength [$w tag ranges sel]] > 0}] }
+	return [expr {![catch {$w selection present} p] && $p}]
+}
+proc ctx_has_text {w} {
+	if {[winfo class $w] eq "Text"} { return [$w compare "end -1c" > 1.0] }
+	return [expr {[string length [$w get]] > 0}]
+}
+
+# A read-only view's menu: what you can do to text you cannot edit. No Cut and no
+# Paste — the widget would refuse them, and an entry that cannot work should not be
+# drawn (D108 greys only what it can compute honestly; here the honest answer is to
+# leave them out entirely).
+proc view_menu_build {m w} {
+	set sel  [expr {[ctx_has_sel $w]  ? "normal" : "disabled"}]
+	set some [expr {[ctx_has_text $w] ? "normal" : "disabled"}]
+	$m add command -label "Copy"       -state $sel  -command [list event generate $w <<Copy>>]
+	$m add command -label "Select All" -state $some -command [list event generate $w <<SelectAll>>]
+}
+
+# An editable widget's menu. Cut and Copy follow the selection and Select All follows
+# the content; PASTE STAYS ENABLED for D108's reason — probing the clipboard is a
+# blocking X round-trip to whichever application owns the selection, and an
+# unresponsive owner would stall the menu on its way up. An empty clipboard already
+# does nothing, silently.
+#
+# A MASKED field (the provider API key, -show •) offers Paste and Select All only.
+# Pasting a key is the thing people actually do; lifting plaintext out of a field
+# drawn as bullets is a surprise, and D26 treats a key as a secret.
+proc input_menu_build {m w} {
+	set sel    [expr {[ctx_has_sel $w]  ? "normal" : "disabled"}]
+	set some   [expr {[ctx_has_text $w] ? "normal" : "disabled"}]
+	set masked [expr {![catch {$w cget -show} s] && $s ne ""}]
+	if {!$masked} {
+		$m add command -label "Cut"  -state $sel -command [list event generate $w <<Cut>>]
+		$m add command -label "Copy" -state $sel -command [list event generate $w <<Copy>>]
+	}
+	$m add command -label "Paste" -state normal -command [list event generate $w <<Paste>>]
+	$m add separator
+	$m add command -label "Select All" -state $some -command [list event generate $w <<SelectAll>>]
+}
+
+# What a right-click settles before either menu appears. D108's convention, minus the
+# half a read-only view cannot keep: a click INSIDE the selection leaves it alone, so
+# Copy acts on what you can see is highlighted; a click outside clears it. The caret
+# does NOT move in a read-only view — a disabled text draws no insertion cursor, so
+# moving it would be a promise nothing on screen keeps. In an editable widget it does
+# move, exactly as in the editor, so Paste lands where you pointed.
+proc ctx_click {w x y editable} {
+	if {$editable} { focus $w }
+	set text [expr {[winfo class $w] eq "Text"}]
+	set idx [expr {$text ? [$w index @$x,$y] : [$w index @$x]}]
+	set inside 0
+	if {$text} {
+		foreach {from to} [$w tag ranges sel] {
+			if {[$w compare $idx >= $from] && [$w compare $idx < $to]} { set inside 1 ; break }
+		}
+	} elseif {[ctx_has_sel $w]} {
+		set inside [expr {$idx >= [$w index sel.first] && $idx < [$w index sel.last]}]
+	}
+	if {$inside} return
+	if {$text} { $w tag remove sel 1.0 end } else { $w selection clear }
+	if {$editable} {
+		if {$text} { $w mark set insert $idx } else { $w icursor $idx }
+	}
+}
+
+# Post a fresh menu at the pointer (the D44 idiom: rebuilt every time, so the greys
+# are current by construction).
+proc ctx_menu_post {w x y X Y kind} {
+	ctx_click $w $x $y [expr {$kind eq "input"}]
+	catch {destroy .ctxmenu}
+	menu .ctxmenu -tearoff 0
+	${kind}_menu_build .ctxmenu $w
+	tk_popup .ctxmenu $X $Y
+}
+
+# The keyboard route (Menu, Shift+F10). Nothing about the selection changes. An
+# editable widget posts at its caret, like the editor does; a read-only view has no
+# visible caret, so it posts at the start of the selection — the thing the menu is
+# about — and falls back to its own top-left corner when there is none.
+proc ctx_menu_key {w kind} {
+	set X [winfo rootx $w] ; set Y [winfo rooty $w]
+	set at [expr {$kind eq "input" ? "insert" : ""}]
+	if {$at eq "" && [ctx_has_sel $w]} {
+		set at [expr {[winfo class $w] eq "Text" ? "sel.first" : "insert"}]
+	}
+	if {$at ne "" && ![catch {$w bbox $at} bb] && [llength $bb] >= 4} {
+		lassign $bb bx by bw bh
+		set X [expr {$X + $bx}] ; set Y [expr {$Y + $by + $bh}]
+	}
+	catch {destroy .ctxmenu}
+	menu .ctxmenu -tearoff 0
+	${kind}_menu_build .ctxmenu $w
+	tk_popup .ctxmenu $X $Y
+}
+
+# Give a widget its menu. Called at the creation site. `break` so the widget binding
+# wins over anything the class or an editing mode puts on Button-3, the same
+# precedence the editor's own binding takes (D38).
+proc ctx_bind_view  {w} { ctx_bind $w view }
+proc ctx_bind_input {w} { ctx_bind $w input }
+proc ctx_bind {w kind} {
+	bind $w <Button-3>   [list ctx_menu_post %W %x %y %X %Y $kind]\;break
+	bind $w <Shift-F10>  [list ctx_menu_key %W $kind]\;break
+	bind $w <Key-Menu>   [list ctx_menu_key %W $kind]\;break
+}
+
+# A placeholder label sits PLACED ON TOP of its entry (the git commit bar's two), so
+# a right-click on an empty field hits the label and never reaches the widget below.
+# Forward it, the same way the label already forwards Button-1.
+proc ctx_bind_placeholder {lbl target kind} {
+	bind $lbl <Button-3> [list ctx_menu_post $target %x %y %X %Y $kind]\;break
+}
+
 # Repaint the files pane as a tree from the project root (D87): dirs then files at each
 # level (each group dictionary-sorted by the core already), an unfolded dir's children
 # rendered indented right below it. Each row is one line: a 2-char git-status gutter
@@ -1766,6 +1936,7 @@ proc name_prompt {title label prefill} {
 	set ::name_prompt_result ""
 	label $w.l -text $label -anchor w
 	entry $w.e -width 32
+	ctx_bind_input $w.e   ;# (D115)
 	$w.e insert 0 $prefill
 	frame $w.b
 	button $w.b.ok     -text OK     -width 8 -command [list name_prompt_done $w 1]
@@ -3670,6 +3841,7 @@ proc help_window {{topic ""}} {
 	frame $w.find
 	label $w.find.l -text "Find:" -font RioUIFont
 	entry $w.find.e -font RioUIFont -width 18
+	ctx_bind_input $w.find.e   ;# (D115)
 	pack $w.find.l -side left -padx {0 4}
 	pack $w.find.e -side left
 	bind $w.find.e <KeyRelease> help_find_changed
@@ -3699,6 +3871,7 @@ proc help_window {{topic ""}} {
 		-insertwidth 0 -borderwidth 0 -highlightthickness 0 -padx 8 -pady 4 \
 		-yscrollcommand {gridscroll .help.page.sb} \
 		-xscrollcommand {gridscroll .help.page.hsb}
+	ctx_bind_view $w.page.text   ;# Copy / Select All (D115)
 	grid $w.page.text -row 0 -column 0 -sticky nsew
 	grid $w.page.sb   -row 0 -column 1 -sticky ns
 	grid $w.page.hsb  -row 1 -column 0 -sticky we
@@ -4743,6 +4916,7 @@ proc provider_key_dialog {name} {
 	label $w.prompt -anchor w -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] -text $prompt
 	entry $w.e -show • -width 52 -font RioUIFont
+	ctx_bind_input $w.e   ;# masked, so Cut/Copy are left out (D115)
 	checkbutton $w.show -text "Show key" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
 		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg] \
@@ -4994,6 +5168,7 @@ proc prompt_view {which {name ""}} {
 	text $w.body.t -wrap word -width 82 -height 28 -state disabled -cursor arrow \
 		-padx 10 -pady 8 -borderwidth 0 -highlightthickness 0 \
 		-yscrollcommand [list $w.body.sb set]
+	ctx_bind_view $w.body.t   ;# Copy / Select All (D115)
 	scrollbar $w.body.sb -command [list $w.body.t yview]
 	pack $w.body.sb -side right -fill y
 	pack $w.body.t -side left -fill both -expand 1
@@ -5147,6 +5322,7 @@ proc agent_allow_dialog {} {
 	entry $w.add.e -font RioUIFont -width 34 \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor]
+	ctx_bind_input $w.add.e   ;# (D115)
 	button $w.add.b -text "Add" -font RioUIFont -command [list agent_allow_add_from_entry $w]
 	bind $w.add.e <Return> [list agent_allow_add_from_entry $w]
 	pack $w.add.e -side left -fill x -expand 1 -padx {0 6}
@@ -5994,6 +6170,7 @@ proc remote_browse_dialog {title mode {seed ""}} {
 	label $w.loclbl -anchor w -font RioUIFont -text "Location:" \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	entry $w.loc -font RioUIFont -width 54
+	ctx_bind_input $w.loc   ;# (D115)
 	bind $w.loc <Return> { rbrowse_go [string trim [.rbrowse.loc get]] }
 
 	# The listing (an auto-hiding scrollbar, like the dock file pane).
@@ -6022,6 +6199,7 @@ proc remote_browse_dialog {title mode {seed ""}} {
 		label $w.namelbl -anchor w -font RioUIFont -text "Name:" \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		entry $w.name -font RioUIFont -width 54
+		ctx_bind_input $w.name   ;# (D115)
 		$w.name insert end [file tail $seed]
 		grid $w.namelbl -row 3 -column 0 -sticky w  -padx 8
 		grid $w.name    -row 4 -column 0 -sticky we -padx 8
@@ -6134,6 +6312,7 @@ proc connect_remote_dialog {} {
 	label $w.prompt -anchor w -font RioUIFont -text "Remote core address (host:port):" \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	entry $w.e -width 40 -font RioUIFont
+	ctx_bind_input $w.e   ;# (D115)
 	$w.e insert end [expr {$::last_connect ne "" ? $::last_connect : "127.0.0.1:7711"}]
 	set ::connd_new 0
 	checkbutton $w.new -text "Open in a new window (keep this session)" \
@@ -7383,7 +7562,7 @@ proc hl_edit {g p} {
 	set added [expr {[llength [split [dict get $p text] "\n"]] - 1}]
 	set delta [expr {$added - ($el - $sl)}]
 	if {$delta > 0} {
-		set pad {} ; for {set i 0} {$i < $delta} {incr i} { lappend pad [list "￿dirty" ""] }
+		set pad {} ; for {set i 0} {$i < $delta} {incr i} { lappend pad [list "\xEF\xBF\xBFdirty" ""] }
 		set enter [linsert $enter $sl {*}$pad]
 	} elseif {$delta < 0} {
 		set enter [lreplace $enter $sl [expr {$sl - $delta - 1}]]
@@ -8488,6 +8667,7 @@ proc extensions_window {} {
 	label $w.hdr.flbl -text "Filter:" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	entry $w.hdr.filter -font RioUIFont -width 18
+	ctx_bind_input $w.hdr.filter   ;# (D115)
 	pack $w.hdr.repos $w.hdr.refresh $w.hdr.upall -side left -padx {0 4}
 	pack $w.hdr.filter $w.hdr.flbl -side right
 	bind $w.hdr.filter <KeyRelease> extw_fill
@@ -8982,6 +9162,7 @@ proc extw_sources_dialog {} {
 	pack $w.body.list -side left -fill both -expand 1
 	frame $w.add -background [dict get $c ui.bg]
 	entry $w.add.url -font RioUIFont -width 44
+	ctx_bind_input $w.add.url   ;# (D115)
 	button $w.add.add -text Add -font RioUIFont -command extw_source_add
 	pack $w.add.url -side left -fill x -expand 1
 	pack $w.add.add -side left -padx {4 0}
@@ -9124,6 +9305,7 @@ proc extw_cert_review {url {fetch_error ""}} {
 		text $w.det -height 6 -width 64 -wrap word -font RioUIFont -relief solid \
 			-borderwidth 1 -highlightthickness 0 \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+		ctx_bind_view $w.det   ;# Copy / Select All: the fingerprint is the point (D115)
 		set names [join [dict get $cert names] ", "]
 		foreach {k v} [list "Issued to" [dict get $cert subject] "Names" $names \
 				"Issued by" [dict get $cert issuer] \
@@ -9423,6 +9605,7 @@ text .pgit.well.body -width 26 -height 8 -wrap none -state disabled \
 text .pgit.diff -wrap none -width 26 -height 8 -state disabled \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black
+ctx_bind_view .pgit.diff   ;# Copy / Select All (D115)
 pack .pgit.well -side top -fill both -expand 1
 pack .pgit.well.body -side left -fill both -expand 1
 # .pgit.well.sb is packed on demand by autoscroll; .pgit.diff by git_show_diff.
@@ -9453,6 +9636,13 @@ bind  .pgit.commit.msg.ph <Button-1> {focus .pgit.commit.msg}
 label .pgit.commit.body.ph -text "Longer description (optional)" -font {monospace 9} \
 	-takefocus 0 -borderwidth 0
 bind  .pgit.commit.body.ph <Button-1> {focus .pgit.commit.body}
+# Cut/Copy/Paste/Select All on both fields (D115). The placeholder labels are PLACED ON
+# TOP of them, so a right-click on an empty commit bar would hit the label and never
+# reach the field — forward it, exactly as each label already forwards Button-1.
+ctx_bind_input .pgit.commit.msg
+ctx_bind_input .pgit.commit.body
+ctx_bind_placeholder .pgit.commit.msg.ph  .pgit.commit.msg  input
+ctx_bind_placeholder .pgit.commit.body.ph .pgit.commit.body input
 trace add variable git_commit_msg write git_commit_hint
 bind .pgit.commit.body <KeyRelease> git_commit_body_hint
 bind .pgit.commit.body <FocusIn>    git_commit_body_hint
@@ -9766,6 +9956,7 @@ proc agent_change_dialog {g} {
 	text $w.input -width 56 -height 5 -wrap word -undo 1 -font RioUIFont \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.fg] -highlightthickness 1
+	ctx_bind_input $w.input   ;# (D115)
 	frame $w.btns -background [dict get $c ui.bg]
 	button $w.btns.send   -text Send   -font RioUIFont -default active \
 		-command [list agent_change_submit $w $scope]
@@ -10916,6 +11107,7 @@ text .cmp.l.t -wrap none -state disabled -font {monospace 12} -width 40 -height 
 text .cmp.r.t -wrap none -state disabled -font {monospace 12} -width 40 -height 28 \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black -yscrollcommand {cmp_yscroll r}
+ctx_bind_view .cmp.l.t ; ctx_bind_view .cmp.r.t   ;# Copy / Select All (D115)
 scrollbar .cmp.sb -orient vertical -command cmp_yview
 # A top bar with a clear way out — the Esc binding alone isn't discoverable, so the
 # button names the shortcut (D27: a plain × glyph, widely covered).
@@ -10945,6 +11137,7 @@ label .plan.hdr -anchor w -font {monospace 9} -padx 4 -pady 2 -background "#dddd
 text .plan.text -wrap word -state disabled -font {monospace 12} -width 80 -height 28 \
 	-borderwidth 0 -highlightthickness 0 -padx 12 -pady 8 \
 	-background white -foreground black -yscrollcommand {.plan.sb set}
+ctx_bind_view .plan.text   ;# Copy / Select All (D115)
 scrollbar .plan.sb -orient vertical -command {.plan.text yview}
 frame .plan.bar
 button .plan.bar.close -text "× Close plan (Esc)" -font {monospace 9} -command plan_close
@@ -10987,6 +11180,7 @@ bind .chat.hdr.clear <Button-1> chat_clear
 text .chat.input -height 3 -wrap word -undo 1 -font {monospace 11} \
 	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
 	-background white -foreground black -insertbackground black
+ctx_bind_input .chat.input   ;# Cut / Copy / Paste / Select All (D115)
 button .chat.send -text "▶" -font {monospace 9} -command chat_send  ;# ▶ send (D27)
 # …and ■ stop while a turn is working (D104): the same button, because "send" and "stop"
 # are never both available — the turn is either yours to type into or the agent's to run.
@@ -11051,6 +11245,7 @@ text .chat.log -wrap word -state disabled -font {monospace 11} -cursor "" \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black \
 	-yscrollcommand {autoscroll .chat.sb .chat.log}
+ctx_bind_view .chat.log   ;# Copy / Select All (D115)
 scrollbar .chat.sb -command {.chat.log yview}
 .chat.log tag configure you-label   -font {monospace 9} -background "#c3d9ff" \
 	-spacing1 4 -spacing3 2
@@ -11084,6 +11279,7 @@ label .find.fl -text "Find:"    -font {monospace 9} -anchor e -background "#dddd
 label .find.rl -text "Replace:" -font {monospace 9} -anchor e -background "#dddddd"
 entry .find.e  -font {monospace 11} -width 24
 entry .find.re -font {monospace 11} -width 24
+ctx_bind_input .find.e ; ctx_bind_input .find.re   ;# Cut / Copy / Paste / Select All (D115)
 # ↓/↑ (U+2193/U+2191) step forward/backward through matches (top-to-bottom),
 # the find-widget idiom (D27); F3 / Shift+F3 are the keyboard path.
 button .find.next -text "↓" -width 2 -font {monospace 9} -command find_next
@@ -11147,6 +11343,7 @@ frame .results -borderwidth 1 -relief raised -background "#dddddd"
 frame .results.hdr -background "#dddddd"
 label .results.hdr.l -text "Search:" -font {monospace 9} -background "#dddddd"
 entry .results.hdr.e -font {monospace 11} -width 28
+ctx_bind_input .results.hdr.e   ;# (D115)
 # The scope option menu drives ::search_scope; each entry re-runs the query so a
 # scope change is live (like the option toggles). tk_optionMenu returns the menu.
 set _scopemenu [tk_optionMenu .results.hdr.scope ::search_scope "Project" "Open docs" "Current doc"]
@@ -11179,6 +11376,7 @@ pack .results.hdr -side bottom -fill x   ;# controls hug the bottom edge (compos
 frame .results.rep -background "#dddddd"
 label .results.rep.l -text "Replace:" -font {monospace 9} -background "#dddddd"
 entry .results.rep.e -font {monospace 11} -width 28
+ctx_bind_input .results.rep.e   ;# (D115)
 button .results.rep.all -text "Replace All" -font {monospace 9} -command search_replace_all
 pack .results.rep.l   -side left -padx {6 2} -pady {0 2}
 pack .results.rep.e   -side left -pady {0 2}

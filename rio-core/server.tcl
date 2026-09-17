@@ -31,7 +31,11 @@ if {[encoding system] ne "utf-8"} {
 	return
 }
 
-package require json
+# tcllib, through the gate that names the OS package instead of printing a trace
+# (D116). A core spawned over a pipe has nowhere to put a trace anyway: the GUI is
+# reading that channel for JSON, and stderr goes to a console the user may not have.
+source [file join [file dirname [info script]] deps.tcl]
+rio::deps::require json
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]

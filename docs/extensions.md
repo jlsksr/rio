@@ -49,7 +49,8 @@ start-up update check; it waits until you look.
 - what is wrong with the certificate, in plain words — "It expired on …", "It was
   issued for other.example, not for repo.example";
 - the certificate itself — issued to, its names, issued by, the dates it is valid,
-  and its **SHA-256 fingerprint**, which you can select and copy;
+  and its **SHA-256 fingerprint**, which you can select and copy (right-click the box
+  for *Copy*, since comparing that fingerprint is the whole point of the dialog);
 - two buttons: **Go Back**, the default, which changes nothing, and **Accept the
   Risk and Continue**.
 

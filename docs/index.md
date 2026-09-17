@@ -66,7 +66,9 @@ source. Links are live in there — click one to jump to the topic (or the headi
 it names, and `Alt+←` / `Alt+→` walk back and forward through where you have
 been. The **Find** box searches the whole manual: type a word and the contents
 list becomes the sections that mention it, so picking one takes you straight to
-that heading with the word highlighted. That intent shapes how they are written:
+that heading with the word highlighted. The page itself is read-only, but you can
+select in it and right-click for *Copy* — a command in a code block is meant to be
+lifted out. That intent shapes how they are written:
 
 - **One topic per file, and the filename is the topic's name.** Filenames are
   stable: they are how a page is linked to, and how rio finds a topic to show you.

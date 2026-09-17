@@ -184,11 +184,17 @@ Each entry notes its state:
   inside a selection it survives, outside it the caret moves where you pointed — and it
   focuses the group it was in, so a right-click in the other half of a split acts on that
   half. `Menu` and `Shift+F10` open it at the caret.
-  Still wanted, both deliberately out of scope at D108 (jka's call): a **Copy / Select All
-  menu on the read-only views** — the agent log, the compare panes, the git diff, the manual
-  (`Ctrl+C` already copies there through Tk's own class binding; only the menu is missing);
-  and the same for the **entry/text widgets outside the editor** — the find bar, the chat
-  input, dialog fields, which Tk leaves bare too.
+  The two items D108 deferred both **landed as D115**: a *Copy / Select All* menu on the
+  read-only views (agent log, compare panes, git diff, the manual, a plan), and
+  *Cut / Copy / Paste / Select All* on the entry and text widgets Tk leaves bare outside
+  the editor (find bar, chat composer, search rows, commit bar, dialog fields). The
+  commands are Tk's own `<<Cut>>`/`<<Copy>>`/`<<Paste>>`/`<<SelectAll>>`, so the menu and
+  the keystroke cannot drift. A masked field (the provider key) withholds Cut and Copy.
+  Remaining candidate: a row menu for the **`rl_*` lists that have none** — Search results
+  and the manual's contents, where Button-3 is bound to an empty callback. Left out of
+  D115 deliberately: it means deciding what *Copy* or *Open* mean for a result row, which
+  is a Search/Help feature rather than the missing door, and `rl_init` kills text
+  selection in those panes anyway.
 
 ## Syntax highlighting
 
