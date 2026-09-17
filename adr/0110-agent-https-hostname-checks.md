@@ -1,6 +1,6 @@
 # ADR-0110: The agent refuses https without host-name checks unless allowed
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0120](0120-core-wide-unchecked-https-switch.md)
 - **Date:** 2026-09-15
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D110

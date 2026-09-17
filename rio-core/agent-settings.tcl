@@ -69,7 +69,7 @@ proc rio::agent::settings::load {provider} {
 	return [_load_file [path $provider]]
 }
 
-# The parse behind `load` and `agent_get`, for a file at `p` ("" = nowhere).
+# The parse behind `load`, for a file at `p` ("" = nowhere).
 proc rio::agent::settings::_load_file {p} {
 	if {$p eq "" || ![file isfile $p]} { return [dict create] }
 	if {[catch {rio::conf::read_file $p} conf]} { return [dict create] }
@@ -93,7 +93,7 @@ proc rio::agent::settings::store {provider key value} {
 		"# rio — settings for the `$provider` agent provider." $key $value]
 }
 
-# The validated rewrite behind `store` and `agent_store`: merge key into the file at `p`
+# The validated rewrite behind `store`: merge key into the file at `p`
 # ("" = nowhere to persist, returns "") under a one-line `header` comment.
 proc rio::agent::settings::_store_file {p header key value} {
 	if {![_safe $key]} {
@@ -113,26 +113,4 @@ proc rio::agent::settings::_store_file {p header key value} {
 	foreach k [lsort [dict keys $d]] { puts $fh "$k = [dict get $d $k]" }
 	close $fh
 	return $p
-}
-
-# --- the agent's own settings, whichever provider is live (D110) --------------
-#
-# A few choices belong to the agent as a whole rather than to one provider — today only
-# whether https may go ahead on a tcltls that cannot check host names. They sit in
-# agent.conf beside providers/, same format, same rules. The core owns these keys, which
-# is the difference from a provider's file.
-
-proc rio::agent::settings::agent_path {} {
-	set d [_dir]
-	if {$d eq ""} { return "" }
-	return [file join $d agent.conf]
-}
-
-proc rio::agent::settings::agent_get {key {default ""}} {
-	set d [_load_file [agent_path]]
-	return [expr {[dict exists $d $key] ? [dict get $d $key] : $default}]
-}
-
-proc rio::agent::settings::agent_store {key value} {
-	return [_store_file [agent_path] "# rio — settings for the agent, whichever provider is live." $key $value]
 }

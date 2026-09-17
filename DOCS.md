@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Ten groups of checks. Each exists because something drifted once.
+Eleven groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -62,6 +62,11 @@ Ten groups of checks. Each exists because something drifted once.
    was edited afterwards.
 10. **`editor.md` lists exactly the editor's right-click menu.** The suite builds the
     real menu and holds the page against it both ways (D108).
+11. **Every *Preferences ▸ Category ▸ Control* path the docs quote is real.** The suite
+    opens the real Preferences window and matches each quoted path against its categories
+    and its controls' labels. It is check 6 for the window, and it came from D114: the old
+    Extensions path for Accepted certificates… stayed in two topics after the button moved
+    to Network. Like check 6, it relies on the path being in emphasis.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:

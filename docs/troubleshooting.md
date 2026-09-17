@@ -27,8 +27,9 @@ Two messages already have their answer written down:
   [a certificate that isn't trusted](extensions.md#a-certificate-that-isnt-trusted).
 - **The agent refused https**, naming `tcltls` and host-name checks — see
   [HTTPS on an older tcltls](agent.md#https-on-an-older-tcltls). A repository says
-  `https needs tcltls 1.8 or newer` for the same reason, and has no switch: upgrade
-  `tcltls` on the core's host, or use the repository's `http://` URL.
+  `https needs tcltls 1.8 or newer` for the same reason, with the same way out and one
+  more: upgrade `tcltls` on the core's host, use the repository's `http://` URL, or
+  turn on the switch, which covers both, in [Preferences ▸ Network](preferences.md#network-how-the-core-checks-https).
 
 ## Further reading
 

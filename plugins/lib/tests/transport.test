@@ -115,7 +115,7 @@ test transport-connect-fail {a connection that can't be made is status 0} -body 
 # A tcltls older than 1.8 never compares a certificate's name with the host, so the agent
 # refuses https there unless the core says the user allowed it. Driven with no network:
 # `checks_hostname` answers what a 1.7 would, `::http::geturl` only records that it was
-# reached, and the core's `rio::agent::tls_unchecked_ok` is present or absent per case.
+# reached, and the core-wide switch `rio::tls::unchecked_ok` (D114) answers per case.
 # (tcltls itself is really loaded first; a fake `package provide tls 1.7` cannot coexist
 # with the real one in the same interpreter.)
 rio::tls::ensure
@@ -125,7 +125,10 @@ proc gate {checks allow url {seam stream}} {
 	proc ::rio::tls::checks_hostname {} [list return $checks]
 	rename ::http::geturl ::_real_geturl
 	proc ::http::geturl {args} { set ::dialled 1 ; error "not dialled in this test" }
-	if {$allow ne "absent"} { namespace eval ::rio::agent {} ; proc ::rio::agent::tls_unchecked_ok {} [list return $allow] }
+	# "absent": the real switch, pointed at a tls.conf that doesn't exist.
+	set ::rio::tls::settings_override [file join [temporaryDirectory] rio-no-such-tls-[pid].conf]
+	rename ::rio::tls::unchecked_ok ::_real_unchecked
+	if {$allow ne "absent"} { proc ::rio::tls::unchecked_ok {} [list return $allow] } else { rename ::_real_unchecked ::rio::tls::unchecked_ok }
 	try {
 		set req [dict create url $url headers {} body {}]
 		if {$seam eq "stream"} {
@@ -136,11 +139,14 @@ proc gate {checks allow url {seam stream}} {
 	} finally {
 		rename ::rio::tls::checks_hostname {} ; rename ::_real_checks ::rio::tls::checks_hostname
 		rename ::http::geturl {} ; rename ::_real_geturl ::http::geturl
-		catch {rename ::rio::agent::tls_unchecked_ok {}}
+		if {[llength [info commands ::_real_unchecked]]} {
+			rename ::rio::tls::unchecked_ok {} ; rename ::_real_unchecked ::rio::tls::unchecked_ok
+		}
+		set ::rio::tls::settings_override ""
 	}
 	# refused-before-dialling? what did on_done say? did it name the way out?
 	list $::dialled [lindex $::gdone 0] \
-		[string match {*refused https to api.example.com*Install tcltls 1.8*Allow https without host-name checks*} [lindex $::gdone 1]]
+		[string match {*refused https to api.example.com*Install tcltls 1.8*Preferences ▸ Network ▸*Allow https without host-name checks*} [lindex $::gdone 1]]
 }
 
 test transport-gate-refuses-by-default {https on a tcltls without host-name checks is refused before dialling — with no core setting the answer is no} -body {

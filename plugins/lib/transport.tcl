@@ -30,15 +30,15 @@ namespace eval rio::llm::http {}
 # Load tcltls, and refuse an https URL this core cannot verify properly (D110). A tcltls
 # older than 1.8 checks the certificate's chain but never its name, so any trusted
 # certificate for any host would do. That goes ahead only when the user allowed it —
-# rio::agent::tls_unchecked_ok, asked at request time so it is the core's current choice;
-# with no such command (this transport standalone) the answer is the safe one. Plain
-# http is not this gate's business: nothing is being verified there.
+# rio::tls::unchecked_ok, the core-wide switch repositories share (D114), asked at request
+# time so it is the core's current choice. Plain http is not this gate's business: nothing
+# is being verified there. Providers match "the agent refused https to" in this message.
 proc rio::llm::http::_ensure_tls {url} {
 	rio::tls::ensure
 	if {![regexp -nocase {^https://([^/?#]*)} $url -> host]} return
 	if {[rio::tls::checks_hostname]} return
-	if {[llength [info commands ::rio::agent::tls_unchecked_ok]] && [::rio::agent::tls_unchecked_ok]} return
-	error "tcltls [package present tls] on the core's host does not check that a certificate belongs to the server it came from, so the agent refused https to $host. Install tcltls 1.8 or newer and restart the core — or, to accept this, turn on Preferences ▸ Agent ▸ \"Allow https without host-name checks\""
+	if {[rio::tls::unchecked_ok]} return
+	error "tcltls [package present tls] on the core's host does not check that a certificate belongs to the server it came from, so the agent refused https to $host. Install tcltls 1.8 or newer and restart the core — or, to accept this, turn on Preferences ▸ Network ▸ \"Allow https without host-name checks\""
 }
 
 # Split a flat header list into the Content-Type (-> ctypeVar) and the rest.

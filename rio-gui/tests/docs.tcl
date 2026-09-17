@@ -191,7 +191,7 @@ set producers {
 	{rio::agent::allow::_global_file}            config
 	{rio::agent::allow::_provider_file claude}   config
 	{rio::agent::settings::path claude}          config
-	{rio::agent::settings::agent_path}           config
+	{rio::tls::settings_path}                    config
 	{ledger_path}                                data
 	{rio::secret::_path claude}                  data
 	{rio::workspace::_dir}                       data
@@ -573,6 +573,79 @@ foreach b $bolded {
 	if {[lsearch -exact $::ctxlabels $b] < 0} { lappend invented $b }
 }
 ok "the section names no entry the menu lacks" $invented {}
+
+# --- 11. every "Preferences ▸ Category ▸ Control" the docs quote is real ------------
+#
+# Check 6's twin for the Preferences window, which check 6 deliberately skips: its paths
+# are a window's, not the menubar's. They drift the same way. D114 moved Accepted
+# certificates… from Extensions to a new Network category, and the old path sat in two
+# topics with every check green.
+#
+# Behaviour, not source text: open the real window and read its category list and the
+# -text of every control (checkbutton, radiobutton, button) in each category's pane. A
+# control's trailing parenthetical is a hint, as in check 6, so the label is also tried
+# without it. A control that is installed data (`<provider>` API Key…) is taken on trust.
+#
+# The category is the word after "Preferences ▸ "; the control, when a second ▸ follows,
+# runs to the emphasis that closes it — the same convention check 6 depends on.
+preferences_window
+update idletasks
+set ::prefcats {}
+for {set i 0} {$i < [.prefs.cats size]} {incr i} { lappend ::prefcats [.prefs.cats get $i] }
+ok "the Preferences window has categories" [expr {[llength $::prefcats] > 3}] 1
+
+proc pref_controls {w} {
+	set out {}
+	foreach c [winfo children $w] {
+		if {[winfo class $c] in {Button Checkbutton Radiobutton}} {
+			lappend out [$c cget -text]
+		}
+		lappend out {*}[pref_controls $c]
+	}
+	return $out
+}
+
+proc pref_paths {text} {
+	# A path wrapped across source lines, list indentation and all, is whole again.
+	set flat [regsub -all {\s+} [string map [list * \x01 ` \x01] $text] " "]
+	set out {}
+	foreach {_ rest} [regexp -all -inline {Preferences ▸ ([^\n]*?)(?=Preferences ▸ |$)} $flat] {
+		if {![regexp {^([A-Z][A-Za-z]*)(.*)$} $rest -> cat tail]} {
+			lappend out [list "" ""]
+			continue
+		}
+		set item ""
+		if {[string match " ▸ *" $tail]} {
+			set item [string trim [lindex [split [string trimleft [string range $tail 3 end] \x01] \x01] 0]]
+			set item [string trim $item "\"“”"]
+		}
+		lappend out [list $cat $item]
+	}
+	return $out
+}
+
+set stale {}
+foreach p $::menu_docs {
+	set page [file tail $p]
+	foreach pair [pref_paths [slurp $p]] {
+		lassign $pair cat item
+		if {[lsearch -exact $::prefcats $cat] < 0} {
+			lappend stale "$page: “Preferences ▸ $cat” (no such category)"
+			continue
+		}
+		if {$item eq "" || [string match *<* $item]} continue
+		set iw [menu_words $item]
+		set found 0
+		foreach l [pref_controls .prefs.body.[string tolower $cat]] {
+			foreach cand [list $l [regsub { *\([^)]*\)$} $l ""]] {
+				if {[menu_words $cand] eq $iw} { set found 1 }
+			}
+		}
+		if {!$found} { lappend stale "$page: “Preferences ▸ $cat ▸ $item” (no such control)" }
+	}
+}
+ok "every Preferences path in the docs exists" $stale {}
+destroy .prefs
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -94,7 +94,8 @@ proc rio::http::_scheme {url} {
 }
 
 # Before the first https connection: tcltls present, and new enough to check host
-# names (rio::tls). Either failure is an io_error that names the fix — including
+# names (rio::tls) — or the user allowed https without that check, the core-wide switch
+# the agent shares (D114). Either failure is an io_error that names the fix — including
 # the one that needs no install at all, the repository's http:// URL.
 proc rio::http::_require_tls {} {
 	if {[catch {rio::tls::ensure} e]} {
@@ -103,8 +104,8 @@ proc rio::http::_require_tls {} {
 		}
 		rio::error::raise io_error "https is unavailable on this core: $e"
 	}
-	if {![rio::tls::checks_hostname]} {
-		rio::error::raise io_error "https needs tcltls 1.8 or newer on the core's host — this core has tcltls [package present tls], which does not check that a certificate belongs to the server it came from. Upgrade it, or use the repository's http:// URL"
+	if {![rio::tls::checks_hostname] && ![rio::tls::unchecked_ok]} {
+		rio::error::raise io_error "https needs tcltls 1.8 or newer on the core's host — this core has tcltls [package present tls], which does not check that a certificate belongs to the server it came from. Upgrade it, use the repository's http:// URL, or, to accept this, turn on Preferences ▸ Network ▸ \"Allow https without host-name checks\""
 	}
 }
 

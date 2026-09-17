@@ -1,4 +1,5 @@
-# rio-core — the tls.* op namespace: certificates the user accepts (AGENTS.md D111).
+# rio-core — the tls.* op namespace: certificates the user accepts (AGENTS.md D111), and the
+# core-wide https setting (D114).
 #
 # A certificate that does not verify is refused (rio::tls). These ops are the browser's
 # "Advanced…" path, for a client to offer: look at the certificate and what is wrong with
@@ -13,6 +14,8 @@
 #   tls.accept   {host port sha256 ?subject?} -> {host port sha256}
 #   tls.accepted {}                    -> {exceptions [{host port sha256 subject accepted}]}
 #   tls.forget   {host port}           -> {removed 0|1}
+#   tls.settings {}                    -> {unchecked checks_hostname tcltls}
+#   tls.settings.set {unchecked}       -> {unchecked}
 #
 # tls.accept takes the fingerprint the user was SHOWN, never "whatever the server presents
 # now": fetching it afresh at accept time would let a server swap certificates between the
@@ -93,3 +96,29 @@ proc rio::ops::tls_forget {params} {
 		removed [rio::tls::exception_remove [rio::tls::origin $host $port]]]]
 }
 rio::dispatch::register tls.forget rio::ops::tls_forget
+
+# The core-wide switch (D114): may https go ahead on a tcltls that cannot check host names?
+# `checks_hostname` and `tcltls` (the version, "" without one) let a client say whether the
+# switch matters on THIS core — on 1.8+ it changes nothing. Stored in the core's tls.conf:
+# the tcltls in question is the core's, so the choice is too, for every frontend attached.
+proc rio::ops::tls_settings {params} {
+	set v [rio::tls::present]
+	return [dict create result [dict create unchecked [rio::tls::unchecked_ok] \
+		checks_hostname [expr {$v ne "" && [rio::tls::checks_hostname]}] tcltls $v]]
+}
+rio::dispatch::register tls.settings rio::ops::tls_settings
+
+proc rio::ops::tls_settings_set {params} {
+	if {![dict exists $params unchecked]} {
+		rio::error::raise bad_request "tls.settings.set requires unchecked"
+	}
+	set v [dict get $params unchecked]
+	if {![string is boolean -strict $v]} {
+		rio::error::raise bad_request "tls.settings.set: unchecked must be 0 or 1, got: $v"
+	}
+	if {[catch {rio::tls::set_unchecked $v} on]} {
+		rio::error::raise io_error "couldn't store the https setting: $on"
+	}
+	return [dict create result [dict create unchecked $on]]
+}
+rio::dispatch::register tls.settings.set rio::ops::tls_settings_set

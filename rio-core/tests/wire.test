@@ -214,13 +214,13 @@ test wire-roundtrip-agent-options {the encoded option list survives json2dict} -
 
 test wire-result-agent-status {agent.status nests the option summary as an object} -body {
 	rio::wire::response [dict create id 7 ok true op agent.status \
-		result [dict create provider claude auto_accept 0 mode build key_set 1 tls_unchecked 0 \
+		result [dict create provider claude auto_accept 0 mode build key_set 1 \
 			options [dict create model m1 effort high]]]
-} -result {{"id":"7","ok":true,"result":{"provider":"claude","auto_accept":"0","mode":"build","key_set":"1","tls_unchecked":"0","options":{"model":"m1","effort":"high"}}}}
+} -result {{"id":"7","ok":true,"result":{"provider":"claude","auto_accept":"0","mode":"build","key_set":"1","options":{"model":"m1","effort":"high"}}}}
 
 test wire-result-agent-status-empty {a provider with no options still shapes as an object} -body {
 	set d [json::json2dict [rio::wire::response [dict create id 8 ok true op agent.status \
-		result [dict create provider echo auto_accept 0 mode build key_set 0 tls_unchecked 1 options {}]]]]
+		result [dict create provider echo auto_accept 0 mode build key_set 0 options {}]]]]
 	dict get $d result options
 } -result {}
 

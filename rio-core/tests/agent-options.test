@@ -362,66 +362,6 @@ test settings-beside-the-prompts {the file sits in the agent dir's providers/ fo
 	list [file tail [file dirname $p]] [file tail $p]
 } -result {providers fake.conf}
 
-# --- the agent's own settings: https without host-name checks (D110) ----------
-#
-# agent.conf, beside providers/: whether the agent may use https on a tcltls that cannot
-# check host names. Refuse unless the user said `allow` — absent, malformed or anything
-# else is refuse.
-
-test agent-settings-file {agent.conf sits in the agent dir, not in providers/, and round-trips} -setup {
-	reset_opts
-} -body {
-	set p [rio::agent::settings::agent_store tls_unchecked_hostnames allow]
-	list [expr {[file dirname $p] eq $::optdir}] [file tail $p] \
-		[rio::agent::settings::agent_get tls_unchecked_hostnames] \
-		[rio::agent::settings::agent_get nothing fallback]
-} -result {1 agent.conf allow fallback}
-
-test agent-settings-leave-providers-alone {writing agent.conf touches no provider's file, and vice versa} -setup {
-	reset_opts
-} -body {
-	rio::agent::settings::store fake model m1
-	rio::agent::settings::agent_store tls_unchecked_hostnames allow
-	list [rio::agent::settings::load fake] [rio::agent::settings::agent_get model none]
-} -result {{model m1} none}
-
-test tls-unchecked-default-refuses {with no agent.conf the answer is no} -setup {
-	reset_opts
-} -body {
-	rio::agent::tls_unchecked_ok
-} -result 0
-
-test tls-unchecked-only-allow-allows {only the word `allow` lets it through — refuse, yes, 1 and junk do not} -setup {
-	reset_opts
-} -body {
-	set out {}
-	foreach v {allow refuse yes 1 junk} {
-		writefile [rio::agent::settings::agent_path] "tls_unchecked_hostnames = $v\n"
-		lappend out [rio::agent::tls_unchecked_ok]
-	}
-	set out
-} -result {1 0 0 0 0}
-
-test tls-unchecked-malformed-refuses {a malformed agent.conf reads as refuse, even with allow in it} -setup {
-	reset_opts
-} -body {
-	writefile [rio::agent::settings::agent_path] "tls_unchecked_hostnames = allow\nno equals sign here\n"
-	rio::agent::tls_unchecked_ok
-} -result 0
-
-test op-tls-set-persists {agent.tls.set writes agent.conf and agent.status reports it, both ways} -setup {
-	reset_opts
-} -body {
-	set s0 [dict get [rio::core::call agent.status {}] response result tls_unchecked]
-	set r1 [dict get [rio::core::call agent.tls.set {unchecked 1}] response result unchecked]
-	set f1 [rio::agent::settings::agent_get tls_unchecked_hostnames]
-	set s1 [dict get [rio::core::call agent.status {}] response result tls_unchecked]
-	set r2 [dict get [rio::core::call agent.tls.set {unchecked 0}] response result unchecked]
-	set f2 [rio::agent::settings::agent_get tls_unchecked_hostnames]
-	set s2 [dict get [rio::core::call agent.status {}] response result tls_unchecked]
-	list $s0 $r1 $f1 $s1 $r2 $f2 $s2
-} -result {0 1 allow 1 0 refuse 0}
-
 # The wire layer is not part of core.tcl (the server loads it); its agent.status encoder
 # names each key, so a field the op gains can vanish on the way to a frontend — it did.
 source [file join [file dirname [info script]] .. wire.tcl]
@@ -433,17 +373,8 @@ test op-status-wire-keeps-every-field {what agent.status returns is exactly what
 	set r [rio::ops::agent_status {}]
 	set j [json::json2dict [rio::wire::response \
 		[dict merge {id 1 ok true op agent.status} $r]]]
-	set want [lsort [dict keys [dict get $r result]]]
-	list [expr {"tls_unchecked" in $want}] [expr {$want eq [lsort [dict keys [dict get $j result]]]}]
-} -result {1 1}
-
-test op-tls-set-bad-request {agent.tls.set without a 0/1 `unchecked` is refused and changes nothing} -setup {
-	reset_opts
-} -body {
-	set a [dict get [rio::core::call agent.tls.set {}] response error code]
-	set b [dict get [rio::core::call agent.tls.set {unchecked maybe}] response error code]
-	list $a $b [file exists [rio::agent::settings::agent_path]]
-} -result {bad_request bad_request 0}
+	expr {[lsort [dict keys [dict get $r result]]] eq [lsort [dict keys [dict get $j result]]]}
+} -result 1
 
 file delete -force $::optdir
 cleanupTests
