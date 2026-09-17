@@ -6441,8 +6441,9 @@ be unique in the file, and could reach any other file or run commands just the s
 
 ### D114 — one core-wide switch for https without host-name checks, repositories too
 
-**Amends D110** (the switch's scope, storage, ops and place in the GUI) **and D109** (https
-repositories are no longer refused outright on a tcltls older than 1.8).
+**Amends D110** (the switch's scope, storage, ops and place in the GUI), **D109** (https
+repositories are no longer refused outright on a tcltls older than 1.8) **and D111**
+(Accepted certificates… moves from Preferences ▸ Extensions to Network).
 
 **jka (2026-09-17),** reading the CAVEATS entry for a tcltls older than 1.8, which said
 https repositories get no opt-out: *"why don't we let the user opt-out?"*
