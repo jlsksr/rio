@@ -6524,6 +6524,118 @@ only when it toggles the switch, and says so.
   focus check under a full run, then passed three times alone. That dialog is untouched
   here.
 
+### D115 — the context menu every surface but the editor was missing
+
+**Amends D108**, which built the editor's right-click menu and stopped there on purpose:
+jka's call then was that the read-only views (agent log, compare panes, git diff, the
+manual) stay out, where `Ctrl+C` already copies through Tk's own class binding and only
+the menu is absent, and that this "is its own later change". This is that change, taken
+now because it is **first-hour friction before a release**: every other surface in rio —
+file rows, git rows, tab handles, dock tabs, the editor — answers a right-click, and
+these do not.
+
+**Scope (jka, 2026-09-17):** the **text views only**. The `rl_*` row lists are out. Files
+and Git already have real row menus; **Search results and the manual's contents have
+Button-3 bound to an empty callback**, and filling it means deciding what *Copy* or
+*Open* mean for a result row — a Search and Help feature, not the door D108 left off.
+`rl_init` also kills text selection in those panes outright, so a Copy there could not be
+the copy this menu offers anyway.
+
+**The commands are Tk's own virtual events.** `event generate $w <<Copy>>` and its three
+neighbours, not rio's `editor_*` procs. The reasoning is D38's anti-drift rule reached
+from the other side: in the *editor* an edit must travel to the core through the group
+proxy (D3), so rio's own procs are the only correct route; these are **ordinary local Tk
+widgets whose `Ctrl+X/C/V` *is* the Entry/Text class binding**, so generating that event
+makes the menu and the keystroke one implementation by construction, with no second
+clipboard path to keep in step. (`-state disabled` blocks neither selection nor
+`tag add sel` — the file already asserts this at `rl_init` — so a read-only view takes
+`<<Copy>>` and `<<SelectAll>>` and ignores `<<Paste>>`, which is exactly what is wanted.)
+
+**Two families, because the widgets differ in what they can honestly offer:**
+
+| | widgets | entries |
+|---|---|---|
+| `view` | 8 read-only text views | Copy, Select All |
+| `input` | 15 entry/text widgets outside the editor | Cut, Copy, Paste, ─, Select All |
+
+- A read-only view is offered **no Cut and no Paste at all** — not greyed, absent. The
+  widget would refuse them, and an entry that can never work should not be drawn. (D108
+  greys only what it can compute honestly; here the honest answer is to leave them out.)
+- **Paste stays enabled** on an input, for D108's reason unchanged: probing the clipboard
+  is a blocking X round-trip to whichever application owns the selection, and an
+  unresponsive owner would stall the menu on its way up. An empty clipboard is already
+  silent.
+- **A masked field withholds Cut and Copy.** The provider API-key entry is drawn with
+  `-show`; pasting a key is what people actually do there, while lifting the plaintext
+  back out of a field drawn as bullets is a surprise, and D26 treats a key as a secret.
+
+**The click keeps D108's convention minus the half a read-only view cannot.** Inside a
+selection it survives, outside it is cleared — but the **caret moves only in an editable
+widget**, because a disabled text draws no insertion cursor and moving it would promise
+something nothing on screen keeps. The keyboard route (Menu, Shift+F10) posts at the
+caret for an input and at the selection's start for a view, falling back to the widget's
+top-left.
+
+**The commit bar's placeholder labels forward it.** `.pgit.commit.msg.ph` and its body
+twin are `place`d *on top of* their fields, so a right-click on an empty commit bar hits
+the label and never reaches the widget below — they forward Button-3 exactly as they
+already forward Button-1. Found by reading the widget tree, not by clicking.
+
+**Placement:** the helpers live beside `rl_*`, not beside D108's, because the widgets
+they bind are constructed long before the editor's procs are defined — a proc used at
+top-level widget-construction time has to exist by then. (Learned the direct way: the
+first arrangement put them after D108's block and the GUI would not start.)
+
+**Guards** (new `bare_menus.tcl`, 42 checks): both builders' entries, order and every
+grey; the two deliberate non-greys; the masked field; each command **actually acting**,
+including a Copy off a genuinely disabled widget; what the click settles, for both kinds;
+the bindings and the keyboard route; the placeholders. And a **drift guard** that sweeps
+the live widget tree rather than a list: *every* Entry and Text in the main window must
+carry a Button-3 binding — from here, from D108 or from `rl_init` — so a widget added
+bare later fails by existing.
+
+**Eight injections, each failing by name:** Paste greyed like its neighbours; Cut always
+enabled; the masked branch dropped; the read-only menu offering Paste; a new bare widget
+(the drift guard); the caret moving in a read-only view; the click clearing a selection
+it is inside; the placeholder forwarding removed. The caret injection **passed at first**
+and exposed a weak check — it parked the caret where the click would land, so a move and
+a non-move read alike; the check now starts it elsewhere.
+
+### D116 — a missing dependency says which package to install
+
+A bare `package require json` at an entry point met a host without tcllib with a **Tcl
+stack trace**. On Linux that is untidy; on Windows `wish.exe` turns an uncaught start-up
+error into a **modal dialog that blocks until someone clicks it**, with the trace inside
+(RELEASING.md's *Still open*). It is also the first thing a clone-and-run user can hit,
+which is why it is release work rather than tidying.
+
+**tcltls was already the model** — `rio::tls::ensure` defers it and reports what is
+missing in a sentence (D109/D110). This brings the *hard* dependencies up to that
+standard: `rio-core/deps.tcl` holds one table (package → the OS package that carries it,
+in INSTALL.md §1's own words) and one message. `message` is **pure**, so a test reads the
+text without a process dying for it; `require` reports and exits 1; `gui_require` also
+raises a message box, because under `wish` on Windows stderr has no console to land in.
+
+**The file is deliberately pure ASCII, comments included.** It is sourced *above* the D54
+encoding guard — it has to be, since it gates the very `package require` that guard's own
+file would die on — so its literals are decoded with the **system** encoding, cp1252 on
+Windows. A single em dash here would reach the user mojibake in the one message they must
+be able to read. A test asserts the file has no byte above 0x7f.
+
+**A spawned core that never greets now says so too.** `hello_core`'s local branch said
+only *"lost the connection to the core"*. It now names the command to run by hand, where
+the core's own complaint is already waiting. **Rejected: capturing the child's stderr**
+into the dialog — it would put a temp file and its lifecycle on the spawn path that runs
+on *every normal start*, to serve a failure that already prints to the terminal on every
+platform but one.
+
+**Guards** (new `deps.test`, 7 tests): the table for each package, the quoted package
+name, the INSTALL.md pointer, an unknown package still getting a sentence, the ASCII
+rule, and a **child tclsh** proving exit 1 with the message and no `while executing`.
+Verified end to end by running both entry points with an emptied `auto_path`. Three
+injections: a wrong OS package, a non-ASCII literal, a `require` that throws instead of
+reporting. **Closes RELEASING.md Gate 3's graceful-failure box.**
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
