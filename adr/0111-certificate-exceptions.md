@@ -1,6 +1,6 @@
 # ADR-0111: A certificate that fails verification can be accepted by fingerprint
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0120](0120-core-wide-unchecked-https-switch.md)
 - **Date:** 2026-09-15
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D111
