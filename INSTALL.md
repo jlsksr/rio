@@ -23,7 +23,14 @@ The **core** needs:
 | `git` *(optional)* | `git` | `git` | the git pane shells out to it |
 
 The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not**
-need `tcltls` — all of rio's HTTPS happens wherever the *core* runs. Extension
+need `tcltls` — all of rio's HTTPS happens wherever the *core* runs.
+
+**A missing one says so (D116).** rio checks these at start-up and stops with a
+sentence naming the Tcl package, the OS package above that carries it, and this
+section — never a stack trace. If the GUI's own **core** dies while starting, the
+error names the command to run by hand, which is where the core's own complaint is
+waiting. `tcltls` is the exception by design: it is loaded only when something needs
+HTTPS, so a host without it starts fine and reports it at the first https fetch. Extension
 repositories (D39) served over plain **`http://` add no dependency anywhere**: the
 core fetches them with Tcl's own `http` package. An **`https://`** repository is
 equally supported (D109) and needs `tcltls` **1.8 or newer** on the core's host — the
