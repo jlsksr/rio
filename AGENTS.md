@@ -6659,10 +6659,14 @@ Tk + tcllib + tcltls bar is untouched; tkimg would have broken it. Seven sizes a
 over at once and the WM picks; **`-default` covers every toplevel made later**, so the
 dialogs and the help window inherit it without repeating the call.
 
-**`icons/make-icons.sh` re-cuts the set from `source.png`.** Explicitly *not* a build
-step — the PNGs are committed and rio never runs it at start-up or install — it exists so
-swapping the artwork is one command. Needs ImageMagick, a *developer* tool only. What it
-encodes, learned by cutting this artwork and looking at the result magnified:
+**`icons/make-icons.sh` re-cuts the set.** Explicitly *not* a build step — the PNGs are
+committed and rio never runs it at start-up or install — it exists so trying an icon, or
+going back to one, is a single command. Needs ImageMagick, a *developer* tool only.
+**Candidates are kept, not overwritten:** every artwork rio has worn lives on under
+`icons/sources/`, and `icons/active` (one committed line) records which one the cut PNGs
+came from. So switching back is the same command with the other name, and a diff says
+plainly which icon a commit changed rio to. What the script encodes, learned by cutting
+this artwork and looking at the result magnified:
 
 - **Trim the source's transparent margin before scaling.** This one had 390×466 of
   content inside 512×512; at 16×16 that slack is whole pixels of the subject.
@@ -6671,13 +6675,21 @@ encodes, learned by cutting this artwork and looking at the result magnified:
 - A Windows `.ico` (16/32/48/256) alongside: `wm iconphoto` works there, but the taskbar
   and alt-tab render a real `.ico` better.
 
-**Known limit, recorded rather than fixed:** at **16px** — the title-bar and taskbar size,
-the one this decision exists for — the icon is legible on a *dark* title bar and washy on
-a *light* one, because the pale-yellow disc has little contrast against light chrome. The
-fix is a more saturated disc **in the source artwork**; it cannot be done downstream,
-because the disc's pale yellow and the statue's highlights are too close for a colour key
-to separate (tried: it bled into the statue). Swapping in a revised `source.png` and
-re-running the script is the whole remedy.
+**The artwork, and why the second one replaced the first.** The original
+(`redeemer-yellow`) had a known limit, recorded at the time: at **16px** — the title-bar
+and taskbar size, the one this decision exists for — it was legible on *dark* chrome and
+washy on *light*, because a pale-yellow disc has little contrast against a light title
+bar. It could not be fixed downstream: the disc's yellow and the statue's highlights are
+too close for a colour key to separate, and two attempts bled into the statue. jka
+supplied a second artwork the same day and **`redeemer-blue` is now active** — a
+mid-blue disc inside a dark outline, which holds on *both* light and dark chrome and
+gives the 16px cut a hard edge to survive on. Compared side by side at 16/24/32 over dark
+and light backgrounds before switching. The yellow one is kept under `icons/sources/`,
+one command away.
+
+**The general lesson, worth more than the icon:** an app icon's weakest point is 16px
+against the chrome you did *not* design for. Contrast at the **disc's edge** is what
+carries it; interior detail is noise at that size either way.
 
 **Guards** (6 checks in `smoke.tcl`): the sizes the loader asks for and the files on disk,
 held **both directions** — a size added to one and not the other otherwise falls back to

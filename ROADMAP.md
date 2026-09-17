@@ -60,14 +60,12 @@ Each entry notes its state:
   dialog idiom in the tree. Any of this would want a way to fetch several themes in one call
   before it's worth doing.
 - **Window / taskbar icon** — *landed* (AGENTS.md **D117**). `wm iconphoto . -default` with
-  seven sizes (16–256) cut from `rio-gui/icons/source.png`, plus a Windows `.ico`; soft, so
-  a checkout without `icons/` still starts. The artwork is Christ the Redeemer, a pun on
-  the name. Confirmed as a *raster* asset distinct from the mono-Unicode in-UI rule (D27).
-  Remaining refinement: at **16px** it reads well on a dark title bar and washes out on a
-  light one — the pale-yellow disc has little contrast against light chrome. The fix is a
-  more saturated disc **in the source artwork** (it cannot be done by post-processing: the
-  disc and the statue's highlights are too close for a colour key), then re-running
-  `icons/make-icons.sh`.
+  seven sizes (16–256) plus a Windows `.ico`; soft, so a checkout without `icons/` still
+  starts. The artwork is Christ the Redeemer, a pun on the name. Confirmed as a *raster*
+  asset distinct from the mono-Unicode in-UI rule (D27). The first version's 16px
+  light-chrome washout is **fixed**: `redeemer-blue`, whose dark-outlined blue disc holds
+  on light and dark chrome alike, is active; candidates live in `icons/sources/` with
+  `icons/active` naming the current one, so switching is `make-icons.sh <name>`.
 - **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). The

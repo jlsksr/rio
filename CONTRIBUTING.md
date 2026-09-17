@@ -48,23 +48,27 @@ the core. Keep the frontends dumb.
 
 ### The application icon
 
-`rio-gui/icons/` holds the window and taskbar icon: `source.png` (the artwork) and
-the sizes cut from it, all committed. To change it, drop in a new square PNG —
-512×512 or larger, with a transparent background — and run:
+`rio-gui/icons/` holds the window and taskbar icon: the candidate artworks under
+`sources/`, the sizes cut from the active one, and `active` naming which that is.
+All committed.
 
 ```sh
-./rio-gui/icons/make-icons.sh path/to/new-icon.png
+./rio-gui/icons/make-icons.sh --list            # what's available, and which is on
+./rio-gui/icons/make-icons.sh redeemer-yellow   # switch to another candidate
+./rio-gui/icons/make-icons.sh ~/my-icon.png     # adopt a new one (kept in sources/)
 ```
 
-That re-cuts every size and the Windows `.ico`, and copies your file over
-`source.png`. It needs ImageMagick, which **only contributors doing this** need —
-rio itself never runs the script, and reads the finished PNGs with Tk's own PNG
-support.
+Any square PNG, 512×512 or larger, with a transparent background. The script
+re-cuts every size and the Windows `.ico`. Nothing is overwritten — old artwork
+stays in `sources/`, so going back is the same command with the other name. It
+needs ImageMagick, which **only contributors doing this** need: rio never runs the
+script, and reads the finished PNGs with Tk's own PNG support.
 
-Look at the **16×16** before you commit: it is what the title bar and the taskbar
-actually show, and fine detail that looks good at 256 turns to mush there. Bold
-shapes and strong contrast against *both* light and dark window chrome are what
-survive.
+Look at the **16×16** before you commit — it is what the title bar and the taskbar
+actually show, and detail that looks good at 256 turns to mush there. The thing
+that decides whether an icon works at that size is **contrast at its outer edge**,
+against *both* light and dark window chrome; rio's first icon was replaced for
+failing exactly that on light title bars.
 
 ## A few house rules
 
