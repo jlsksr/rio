@@ -85,6 +85,44 @@ design limit that surprises, append it to the matching section.
   mode already does) would fix it but drop the OS-native chooser; that swap was considered and
   **declined** in favour of the native dialog.
 
+### A core with tcltls older than 1.8 can't fully verify https
+
+- **Symptom.** On a core whose `tcltls` is older than 1.8:
+  - A **hosted agent provider** (Claude, ChatGPT) fails its first turn with a refusal
+    naming two ways out.
+  - An **`https://` extension repository** is refused.
+  - **Accept the Risk and Continue** for a certificate that doesn't verify is not offered.
+
+  The same rio works on a core with a newer `tcltls`.
+- **Cause.** Before 1.8, `tcltls` checks that a certificate chains to a trusted CA but
+  **never compares its name with the host** it came from. Any valid certificate for *any*
+  domain would pass as the provider's. rio refuses to treat that as verified (D109, D110);
+  certificate exceptions are keyed on a verification that version cannot do (D111).
+- **Where it's fine.** Any core with `tcltls` 1.8 or newer. Also, **everything over plain
+  `http://`**, on any `tcltls`: a local model server (Ollama, llama-server) and http
+  repositories.
+
+  **Only the core's host counts** (D30): a GUI attached with `--connect` to a core that has
+  1.8+ has none of these limits, whatever `tcltls` the GUI's own machine has or lacks.
+- **Mitigation in rio.** Refuse by default, and say why and what to do. From cleanest:
+  1. **Run the core on a host with `tcltls` 1.8+,** and attach to it from the other
+     machine.
+  2. **Install a 1.8+ `tcltls`** on that host (building it against the host's OpenSSL if
+     the package manager lags). Its updates are then yours to track.
+  3. **Agent only:** *Preferences ▸ Agent ▸ "Allow https without host-name checks"*
+     (`tls_unchecked_hostnames = allow` in the core's `agent/agent.conf`).
+     - With it on, someone who can intercept the core's traffic (hostile Wi-Fi, DNS or ARP
+       spoofing) can present a valid certificate for their own domain. They can then read
+       the API key, the prompts and the code sent.
+     - Use it only on a network you trust.
+     - Repositories deliberately get no such switch (D110): **http** remains a first-class
+       choice there.
+  4. **Stay on http:** a local model and http repositories. http repositories have **no
+     transport integrity** until repository signing is built.
+- **Planned.** Nothing in rio: the gap closes as hosts ship `tcltls` 1.8+. Repository
+  signing ([ROADMAP.md](ROADMAP.md)) would give http repositories integrity independent of
+  TLS.
+
 ---
 
 ## Behavioural limitations
