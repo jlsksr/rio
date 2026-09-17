@@ -728,11 +728,17 @@ select_row [deadrow $T]
 ok "cert: review offered for the refused one"  [winfo exists .extw.det.review] 1
 
 # Go Back: the default, and nothing is stored.
+#
+# `focus -lastfor`, not bare `focus`: bare `focus` reports the focus window only while
+# the APPLICATION holds the input focus, and a headless run on Windows never does, so it
+# answers "" there regardless of what the dialog did. `-lastfor` asks the question the
+# check actually means — which widget this toplevel focuses — and still catches a dialog
+# that focused nothing, because that answers with the toplevel itself.
 set ::inspect_answers [list [cert problems {untrusted expired}]]
 review {
 	set ::dlg [list [.extcert.btns.back cget -default] [.extcert.btns.accept cget -default] \
 		[.extcert.p0 cget -text] [.extcert.p1 cget -text] [.extcert.det get 1.0 end] \
-		[bind .extcert <Escape>] [bind .extcert <Return>] [focus]]
+		[bind .extcert <Escape>] [bind .extcert <Return>] [focus -lastfor .extcert]]
 	.extcert.btns.back invoke
 }
 ok "cert: inspected the source's URL"      $::inspect_calls [list $T]

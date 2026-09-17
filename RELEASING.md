@@ -37,20 +37,34 @@ below; none of them blocks the platform claim.
 
 Windows 11 Pro 22631, Magicsplat Tcl/Tk 8.6.16, Git for Windows 2.55.0.5.
 **Every suite is now green on Windows**, with nothing hanging. Re-verified 2026-09-09
-against `697acd2`, which brought D56–D87 (providers as extensions, the agent's
-run-command tool and its allow-list, the tab strip, the files tree, drag-to-open):
+against `697acd2` (D56–D87), and again **2026-09-17 against `74f0517`**, which brought
+D88–D113 — the manual and its viewer, plan mode, the agent's model and effort, https
+repositories with certificate exceptions, syntax language picking, Change with Agent:
 
 | Suite | Result |
 |-------|--------|
-| `rio-core` | 478 total, **475 passed, 0 failed**, 3 skipped (the `unix`-constrained permission tests) |
-| `syntax` | **532 / 532** |
-| `plugins/lib` | **9 / 9** |
-| `extensions/claude` | **30 / 30** |
-| `extensions/openai` | **29 / 29** |
-| `rio-gui` | **1218 checks, 0 failed** across all 21 suites |
+| `rio-core` | 721 total, **718 passed, 0 failed**, 3 skipped (the `unix`-constrained permission tests) |
+| `syntax` | **536 / 536** |
+| `plugins/lib` | **20 / 20** |
+| `extensions/claude` | **55 / 55** |
+| `extensions/openai` | **58 / 58** |
+| `rio-gui` | **1780 checks, 0 failed** across all 26 suites |
+
+That run found four failures, all of them the test's assumptions rather than rio's
+behaviour: two from a `.test` whose non-ASCII literals were never `\u`-escaped, one
+asserting a CA-store outcome that only holds off Windows, and one asking `focus` a
+question a headless Windows app cannot answer. Findings 10–12 below; all fixed.
 
 The earlier note that `reconnect.tcl` hangs was already superseded by finding 7 below
 (it was the test's own teardown, fixed); it passes.
+
+**The D109–D111 TLS work is fully exercised here.** Its loopback half is gated on the
+`openssl` CLI, which is *not* on the PATH by default on this host — 19 tests were
+silently skipping. Git for Windows ships OpenSSL 3.5.7 at `C:\Program Files\Git\usr\bin`;
+with that on PATH the whole stack passes natively: real certificates minted and served
+over loopback, an untrusted issuer refused, a hostname mismatch refused, an expired
+certificate refused, an https→http redirect refused, an http→https one followed, and an
+accepted exception honoured for that host and port alone. See WINDOWS.md §8.
 
 What was **not** a problem, recorded so nobody re-investigates it: the spawned-core
 child + pipe transport (`pipe.tcl` green — `auto_execok tclsh`, the `wish`→`tclsh`
@@ -218,6 +232,51 @@ reads the exit code in that case (`format_exec` checks `timedout` first). The te
 asserts `timedout` plus *non-zero*, and the platform difference is logged in
 [CAVEATS.md](CAVEATS.md), as `exec.tcl`'s own comment asks.
 
+#### 10. The `-load` UTF-8 guard in the `all.tcl` runners never ran — **corrected**
+
+This one corrects a fix of my own. Finding 1's corollary — non-ASCII **expected values**
+in a `.test` must be `\u` escapes — is right, and `rio-core/tests/http.test` broke it when
+D106b added literal `é` and em-dash bytes as test *data*: on Windows they arrived as
+cp1252 mojibake and were compared against correctly-decoded results, so `_decode` looked
+broken when it was not.
+
+The reason that slipped through is the more useful half. Each `all.tcl` also carried
+`::tcltest::configure -load {catch {encoding system utf-8}}`, with a comment claiming it
+carried UTF-8 into every test file. **It does neither thing.** tcltest runs each `.test`
+in a *child* `tclsh`, which decodes that file at its own startup — before any option set
+by the parent could apply — and a `-load` script is evaluated by
+`::tcltest::loadTestedCommands`, which no rio `.test` calls, so it never ran at all.
+Measured both ways on tcltest 2.5.9 and 2.5.11: a probe variable set in the `-load`
+script was undefined inside the test file, and `encoding system` there was still cp1252.
+
+A `.test` cannot guard its own decoding the way an entry point can — the four-line
+re-source trick needs the file to be its own `[info script]`, and a test file is sourced
+by the harness. So the `\u`-escape rule is not a nicety, it is the *only* mechanism.
+The dead `-load` line is gone from all five runners and each now says what actually
+protects what.
+
+#### 11. The `openssl` constraint skipped 19 TLS tests silently
+
+Not a defect, but it cost a full suite's worth of coverage. `tls.test` mints its
+certificates with the `openssl` CLI and skips its whole loopback half without one.
+tcltest reports skips only as a count by constraint at the end, so "718 passed, 0 failed"
+looked complete while the newest and most security-sensitive code in the tree was
+untested here. Git for Windows ships OpenSSL 3.5.7 at `usr\bin` — off the PATH, the same
+stale-PATH shape as finding 0's Tcl and git. With it present: 718 → all green, 3 skips
+left, and those are the `unix` permission tests.
+
+#### 12. `focus` answers `""` unless the application has the input focus
+
+`repos.tcl` checked that the certificate-review dialog focuses **Go Back**, by reading
+`[focus]` while the dialog is up. Tk's `focus` returns the focus window only while the
+*application* holds the input focus; a headless Windows run never does, so it answered
+`""` no matter what the dialog did. X11 answers the widget, which is why this passed
+there. The dialog is correct — `extw_cert_review` does `focus $w.btns.back`.
+
+The test now asks `focus -lastfor .extcert`, which is the question it meant: *which
+widget does this toplevel focus?* It is not a weaker check — a dialog that focused
+nothing answers with the toplevel itself, not the button.
+
 #### Verified against a real remote core (2026-09-03)
 
 Windows GUI → the live `rio-core` on **vps01.jkdata.de** over an SSH tunnel, i.e. a
@@ -233,6 +292,14 @@ socket with a branch. Scratch files and buffers were removed afterwards.
 This is the cross-platform case the in-repo `remote.tcl` cannot cover (it uses a local
 daemon), so it stays a manual check — but the path is now exercised, not assumed.
 Re-run after D55 with all 22 green, including against a core older than that change.
+
+**Re-checked 2026-09-17, read-only.** The live vps01 core and this checkout agree
+exactly: protocol 2 both sides, the same 75 ops with no difference in either direction,
+`fsroot: /`. The ops D88–D113 added are all present and answer a *Windows* client
+correctly — `tls.accepted` (empty, so no exception is stored there), `agent.providers`,
+`provider.list` (the `openai` extension, v1.1.3, installed from `rio.skylm.org`) and
+`theme.list`. Every op used was a pure query: that core is shared with a live GUI
+session, so nothing was opened, joined, or written.
 
 One behaviour confirmed by accident and worth recording: with the SSH tunnel up but
 **no core listening behind it**, `ssh` accepts the local connection and the far end
