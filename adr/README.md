@@ -184,3 +184,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0120](0120-core-wide-unchecked-https-switch.md) | One core-wide switch for https without host-name checks | Accepted | 2026-09-17 |
 | [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted | 2026-09-17 |
 | [0122](0122-missing-dependency-names-its-package.md) | A missing dependency names the package to install | Accepted | 2026-09-17 |
+| [0123](0123-window-and-taskbar-icon.md) | rio has a window and taskbar icon | Accepted | 2026-09-18 |
