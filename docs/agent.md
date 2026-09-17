@@ -81,6 +81,9 @@ reach, and the file is on the server.
 
 ***Preferences ▸ Agent ▸ `<provider>` API Key…*** stores the key for a provider.
 
+The field is masked, so its right-click menu offers *Paste* and *Select All* only:
+you can put a key in, but not lift one back out as plain text.
+
 The key is never written into `prefs.json` or any other settings file. It lives on
 its own, mode `0600`, in rio's data directory — see
 [preferences](preferences.md#where-everything-lives) for the exact path. A local
@@ -142,6 +145,12 @@ left behind, since every change had to pass the gate first; the request already
 sent to the provider is still paid for, so stop it because you changed your mind,
 not to save a fraction of a cent.
 
+The transcript is read-only, but you can select in it and right-click for *Copy* —
+useful for lifting a path or a command out of a reply. The box you type in has the
+full editing menu, as does the instruction box of
+[Change with Agent…](#changing-just-the-selection); see
+[right-click menus](getting-started.md#right-click-menus).
+
 ## Changing just the selection
 
 Select some text in the editor, right-click it and choose **Change with Agent…**.
@@ -202,7 +211,8 @@ between the two: asking for a plan is a request, plan mode is a restriction.
 
 The plan opens **in the middle of the window**, where the editor sits, formatted
 the way the manual is — headings, lists, tables — because it is meant to be read
-rather than skimmed. The chat pane keeps the decision:
+rather than skimmed. That view is read-only — right-click it to copy a step out of
+it — and the chat pane keeps the decision:
 
 - **Approve ▾** starts the work, and asks how you want it to go — *review each
   edit*, or *auto-accept edits* from here on. You choose once you have read the
@@ -296,8 +306,9 @@ contract (reads are free, writes are proposed), how to work in someone else's
 codebase, how to run commands, what to verify before saying it works — and, in Plan
 mode, how to investigate and what a plan should contain.
 
-- **View rio's instructions…** opens the shipped text, rendered, read-only. The line
-  above it names the file, so you can also open it in any editor you like.
+- **View rio's instructions…** opens the shipped text, rendered, read-only — you can
+  still select in it and right-click for *Copy*. The line above it names the file, so
+  you can also open it in any editor you like.
 - **Show the whole prompt…** renders every active layer joined together — the exact
   string the provider is sent, with nothing summarised or paraphrased.
 - **Make my own copy…** writes that text to your own settings as an editable file

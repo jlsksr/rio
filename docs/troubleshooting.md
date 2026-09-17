@@ -21,8 +21,19 @@ rather than repeat them:
 On Windows, [WINDOWS.md](../WINDOWS.md) also covers getting an error message out of
 `wish`, which prints none for an uncaught error.
 
-Two messages already have their answer written down:
+Some messages already have their answer written down:
 
+- **`rio needs the Tcl package …, which isn't installed on this host`** — rio checks
+  what it cannot run without before it does anything else, and says which package is
+  missing, which OS package provides it (`tcllib` on Debian and the BSDs, `tcl-lib` on
+  Alpine, and so on), and that the full table is in
+  [INSTALL.md](../INSTALL.md) section 1. Install it and start rio again. The window
+  shows the same words in a message box, because on Windows there is no console for
+  them to land in.
+- **`rio could not start its core`** — the window starts its own core as a child
+  process, and this one exited or stopped answering while starting up. The message
+  names the exact command to run by hand: run it in a terminal and the core's own
+  complaint is right there, a missing dependency being the usual one.
 - **`certificate not trusted`** on a repository in the Extensions window — see
   [a certificate that isn't trusted](extensions.md#a-certificate-that-isnt-trusted).
 - **The agent refused https**, naming `tcltls` and host-name checks — see

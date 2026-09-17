@@ -54,6 +54,41 @@ The **window title** shows the current file, with a `●` after the name when it
 unsaved changes. Tabs carry the same dot, so you can see at a glance which of them
 still need saving.
 
+## Right-click menus
+
+Nearly every surface in rio answers a right-click, and what the menu holds depends
+on what the surface is.
+
+*Text you can type into* — the find and search fields, the agent's message box, the
+git commit bar, the boxes in dialogs — offers **Cut**, **Copy**, **Paste** and
+**Select All**. Cut and Copy are greyed when nothing is selected, Select All when
+the field is empty. Paste is always offered: finding out whether the clipboard
+holds anything means asking whichever application owns it, and rio would rather
+offer the entry than make you wait on a program that might not answer.
+
+*Text you can only read* — the agent's transcript, a diff, the compare panes, a
+plan, the pages of this manual — offers **Copy** and **Select All**. Cut and Paste
+are not greyed there, they are absent: there is nothing to change.
+
+*Rows* get a menu about the row rather than about its text — a file in the Files
+tree, a change in the git pane, an editor tab. [Files & projects](files-and-projects.md),
+[git](git.md) and [the editor](editor.md#tabs) each describe their own. Search
+results and the manual's contents list have none yet.
+
+The editor's text area has the longest menu of all: undo, the find and search
+commands, and the agent. See [the right-click menu](editor.md#the-right-click-menu).
+
+Two habits hold everywhere. Right-clicking *inside* a selection keeps it, so Copy
+takes the text you can see is highlighted; right-clicking anywhere else drops the
+selection, and in a field you can type into the caret moves to where you pointed,
+so Paste lands there. And the keyboard opens the same menu without the mouse — the
+`Menu` key, the one next to the right `Ctrl` on most keyboards, or `Shift+F10`.
+
+There is one deliberately shorter menu. The provider API-key field is drawn as
+bullets, so it offers **Paste** and **Select All** only: pasting a key is what the
+field is for, and lifting one back out as plain text is not, because rio treats a
+key as a secret ([the agent](agent.md#your-api-key)).
+
 ## Your first edit
 
 1. `Ctrl+N` opens a new empty tab, or `Ctrl+O` opens a file.
