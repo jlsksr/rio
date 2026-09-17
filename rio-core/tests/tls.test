@@ -236,7 +236,9 @@ proc repo_gate {checks allow} {
 test http-https-needs-hostname-checks {a tcltls that can't check names: refused, not trusted —
 		naming the upgrade, the http URL and the switch} -body {
 	lassign [repo_gate 0 absent] dialled code msg
-	list $dialled $code [string match "*tcltls 1.8 or newer*does not check*http:// URL*Preferences ▸ Network ▸*Allow https without host-name checks*" $msg]
+	# The menu path is matched by its words, not its ▸ separator: non-ASCII in a .test is
+	# decoded with the child tclsh's SYSTEM encoding (see http.test's note).
+	list $dialled $code [string match "*tcltls 1.8 or newer*does not check*http:// URL*Preferences*Network*Allow https without host-name checks*" $msg]
 } -result {0 io_error 1}
 
 test http-https-switch-off-refuses {the switch stored as off refuses the same} -body {

@@ -146,7 +146,7 @@ proc gate {checks allow url {seam stream}} {
 	}
 	# refused-before-dialling? what did on_done say? did it name the way out?
 	list $::dialled [lindex $::gdone 0] \
-		[string match {*refused https to api.example.com*Install tcltls 1.8*Preferences ▸ Network ▸*Allow https without host-name checks*} [lindex $::gdone 1]]
+		[string match {*refused https to api.example.com*Install tcltls 1.8*Preferences*Network*Allow https without host-name checks*} [lindex $::gdone 1]]
 }
 
 test transport-gate-refuses-by-default {https on a tcltls without host-name checks is refused before dialling — with no core setting the answer is no} -body {
