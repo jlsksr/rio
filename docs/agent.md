@@ -102,17 +102,16 @@ before it connects, and the error names both ways out:
 
 - install `tcltls` 1.8 or newer on the core's host and restart the core (see
   [INSTALL.md](../INSTALL.md)); or
-- if that host can't be upgraded, tick *Preferences ▸ Agent ▸ "Allow https without
+- if that host can't be upgraded, tick *Preferences ▸ Network ▸ "Allow https without
   host-name checks (tcltls older than 1.8)"*.
 
 The box is **off** by default. It changes nothing on a `tcltls` that checks names,
 and plain `http://` — a local Ollama or llama-server — is never affected.
 
-It is the core's setting, not the window's: it is stored on the core's host in
-`$XDG_CONFIG_HOME/rio/agent/agent.conf` as `tls_unchecked_hostnames = allow`, and
-every window attached to that core sees the same answer. Only the word `allow`
-allows — a missing file, a typo or a malformed line all mean refuse. The file is read
-on every request, so a hand edit counts without restarting.
+It is one switch for the whole core, not the agent's alone: https extension
+repositories obey the same box. It is stored on the core's host, in `tls.conf`, and
+every window attached to that core sees the same answer —
+[preferences](preferences.md#network-how-the-core-checks-https) has the details.
 
 A certificate you [accepted for a repository](extensions.md#a-certificate-that-isnt-trusted)
 counts for the agent too, on that same host and port; the agent has no review of its

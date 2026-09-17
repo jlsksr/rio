@@ -30,6 +30,13 @@ that server's name. rio ships no certificates of its own; it trusts what the cor
 host trusts. [INSTALL.md](../INSTALL.md) lists where that comes from, and what an
 https repository needs — `tcltls` 1.8 or newer on the core's host.
 
+A `tcltls` older than 1.8 cannot check that a certificate was issued for the server,
+so on such a core an https repository is refused with three ways out: upgrade
+`tcltls`, use the repository's `http://` URL, or turn on *Preferences ▸ Network ▸
+"Allow https without host-name checks"* — one switch for the whole core, the agent
+included, off by default (see
+[preferences](preferences.md#network-how-the-core-checks-https)).
+
 A repository whose certificate fails — self-signed, from a private certificate
 authority, expired, or issued for another name — is **refused**. It lists in the
 Extensions window as `!! <url> — certificate not trusted` rather than *unreachable*,
@@ -54,7 +61,7 @@ it is refused again, and the dialog says first that it is **not the certificate 
 accepted** — if you didn't replace it yourself, someone may be impersonating the
 server. A certificate that later verifies normally never needs the exception.
 
-**To take one back:** *Preferences ▸ Extensions ▸ Accepted certificates…* lists every
+**To take one back:** *Preferences ▸ Network ▸ Accepted certificates…* lists every
 certificate you accepted, with its host and port, and **Remove selected** forgets
 one. They are kept in `certificates.conf` in rio's config directory, which you may
 also edit by hand — delete a section to take it back (see
@@ -79,8 +86,9 @@ Things worth knowing:
 - **No revocation checking.** rio does not consult CRLs or OCSP, so a certificate the
   authority has revoked still verifies. The fix is to replace it on the server — and
   once it is replaced, an exception you accepted for the old one no longer matches.
-- **It needs `tcltls` 1.8 or newer** on the core's host — as every https repository
-  does.
+- **It needs `tcltls` 1.8 or newer** on the core's host. On an older one, allowing
+  https without host-name checks does not make a certificate reviewable: one that
+  doesn't verify stays refused.
 - **A redirect to another server.** If the repository redirects to a different https
   server and *that* certificate is refused, the review can only reach the repository's
   own address, whose certificate is fine. The dialog says so and offers **Close**

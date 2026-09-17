@@ -87,8 +87,9 @@ The URLs you add under *Settings ▸ Extensions… ▸ Repositories…* are just
 apt-style sources file you can edit yourself: `sources.list`, **one base URL per
 line**, `http://` or `https://`, with `#` comments and blank lines allowed. Like a
 Debian source, https is an option, not an obligation: plain http is just as
-supported. An https repository needs `tcltls` 1.8 or newer on the core's host (see
-[INSTALL.md](../INSTALL.md)), and one whose certificate doesn't verify can be
+supported. An https repository needs `tcltls` on the core's host — 1.8 or newer, or an
+older one with [the switch under Network](#network-how-the-core-checks-https) turned on
+(see [INSTALL.md](../INSTALL.md)) — and one whose certificate doesn't verify can be
 [reviewed and accepted](extensions.md#a-certificate-that-isnt-trusted). The dialog reads and
 writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
 picked up the next time the Extensions window scans.
@@ -126,9 +127,30 @@ what it found. It is **off** by default. A version that doesn't follow semver �
 a date stamp, say — is shown but never compared, and never claimed to be out of
 date.
 
-*Preferences ▸ Extensions ▸ Accepted certificates…* lists the certificates you
-accepted for https repositories although they did not verify, and removes them —
-see [extensions](extensions.md#a-certificate-that-isnt-trusted).
+## Network: how the core checks https
+
+*Preferences ▸ Network* holds the settings for every https connection the **core**
+makes — to a hosted agent provider and to an https extension repository alike. They
+are the core's, stored on the core's host, and every window attached to that core
+shares them.
+
+- ***Allow https without host-name checks (tcltls older than 1.8)*** — **off** by
+  default. A `tcltls` older than 1.8 checks that a certificate comes from a trusted
+  authority but never that it was issued *for the server* — any valid certificate for
+  any host would pass. So on such a core, the agent and https repositories **refuse
+  https** until you tick this. Tick it only on a network you trust, where `tcltls`
+  can't be upgraded. It changes nothing on a `tcltls` 1.8 or newer, and plain `http://`
+  is never affected. The muted line under it says which case you are in: *This core's
+  tcltls checks host names, so this changes nothing here*, or the version of `tcltls`
+  the core has.
+- ***Accepted certificates…*** lists the certificates you accepted although they did
+  not verify, with their host and port, and removes them — see
+  [extensions](extensions.md#a-certificate-that-isnt-trusted).
+
+The switch is kept in `tls.conf` in the core's config directory, as
+`unchecked_hostnames = allow`. Only that line, exactly, allows: a missing file, any
+other value, a line inside a `[section]` or a malformed file all mean refuse. The file
+is read on every connection, so a hand edit counts without restarting the core.
 
 ## Where everything lives
 
@@ -155,7 +177,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `agent/allow.list` | trusted commands for **all projects** — one rule per line | yes — plain text |
 | `agent/providers/<name>.allow.list` | trusted commands active only while that provider is live | yes — plain text |
 | `agent/providers/<name>.conf` | the choices that provider remembers, such as model and effort — see [the agent](agent.md#choosing-a-model-and-how-hard-it-thinks) | yes — `key = value` |
-| `agent/agent.conf` | the agent's own settings, whichever provider is live — today only `tls_unchecked_hostnames` (see [the agent](agent.md#https-on-an-older-tcltls)) | yes — `key = value` |
+| `tls.conf` | how the core's https connections are checked — today only `unchecked_hostnames`, on the **core's** host (see [above](#network-how-the-core-checks-https)) | yes — `key = value` |
 
 **Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**
 
