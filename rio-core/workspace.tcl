@@ -16,9 +16,14 @@
 # already required (the wire uses json). Pure: no Tk, no protocol; the op layer
 # (ops-workspace) adds project-root keying and stale-path pruning.
 
-package require json
-package require json::write
-package require md5
+# All three come from tcllib, through the D116 gate: a host with Tcl but no tcllib
+# is the common half-install, and it should say so rather than trace. Sourced here
+# rather than relied on from the entry point, because a test sources this module
+# directly. Re-sourcing the gate is harmless (it only defines procs).
+source [file join [file dirname [info script]] deps.tcl]
+rio::deps::require json
+rio::deps::require json::write
+rio::deps::require md5
 
 namespace eval rio::workspace {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path

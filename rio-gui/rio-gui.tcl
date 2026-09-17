@@ -23,8 +23,15 @@
 #
 # Run:  wish rio-gui.tcl [file ...]
 
-package require Tk
-package require json
+# The hard dependencies, through the gate that reports a missing one as a sentence
+# rather than a stack trace (D116) — on Windows an uncaught one is a modal dialog
+# nobody can read past. Tk goes through the plain `require`: if Tk is what's missing
+# there is nothing to draw a dialog with, so stderr is all there is. json (tcllib)
+# then goes through `gui_require`, which also puts it in a message box — under wish
+# on Windows stderr has no console to land in.
+source [file join [file dirname [info script]] .. rio-core deps.tcl]
+rio::deps::require Tk
+rio::deps::gui_require json
 
 # OS file-drop (D86): plain Tk cannot receive a drop from the OS file manager — that
 # capability lives only in the external tkdnd extension. Load it OPTIONALLY: where it is
@@ -734,12 +741,23 @@ proc hello_core {{fatal 0}} {
 	set resp [rio_call session.hello {} 8000]
 	if {![dict get $resp ok]} {
 		set code [dict get $resp error code]
-		if {$code eq "timeout"} {
-			set msg [expr {$::core_remote \
+		if {$::core_remote} {
+			set msg [expr {$code eq "timeout" \
 				? "Connected to $::core_endpoint, but no rio core answered.\n\nThe socket opened — most likely a stale SSH tunnel, or no core is running behind it. Check that the tunnel is still up (ssh -L …) and a core is listening on the server." \
-				: "The local core started but never answered — the install may be broken."}]
+				: "The core didn't answer session.hello: [dict get $resp error message]"}]
 		} else {
-			set msg "The core didn't answer session.hello: [dict get $resp error message]"
+			# A SPAWNED core that never greets did not survive its own start-up — it
+			# exited (an `eof`, so `disconnected`) or wedged before the handshake. The
+			# generic "lost the connection" told the user nothing they could act on,
+			# and the child's stderr goes to a console that `wish` on Windows does not
+			# have. So hand them the command: run it themselves and the core's own
+			# complaint — a missing package, most often — is right there. (Capturing
+			# the child's stderr into the dialog was weighed and refused: it would put
+			# a temp file and its lifecycle on the spawn path that runs every start.)
+			set msg "rio could not start its core.\n\nThe core exited or stopped\
+				responding while starting up. To see why, run it by hand:\n\n \
+				[join $::core_cmd { }]\n\nA missing dependency is the usual cause —\
+				see INSTALL.md §1."
 		}
 		if {$fatal} { catch {wm withdraw .} ; report_error $msg $code ; exit 1 }
 		report_error $msg $code

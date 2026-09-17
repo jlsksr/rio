@@ -1,0 +1,76 @@
+# Tests for the hard-dependency gate (rio-core/deps.tcl, AGENTS.md D116): a missing
+# tcllib must arrive as a sentence naming the OS package, not as a Tcl stack trace.
+#
+# Two halves. `message` is pure, so most of it is read directly. The half that matters
+# most cannot be — `require` calls `exit` — so it runs in a CHILD tclsh asking for a
+# package that cannot exist, and the parent checks the exit status and what came back
+# on stderr. No network, no files written outside the temp dir.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. deps.tcl]
+
+set ::deps_tcl [file normalize [file join [file dirname [info script]] .. deps.tcl]]
+
+test deps-message-names-the-os-package {each tcllib package points at tcllib, and Tk at Tk —
+		the package you `require` is rarely the package you install, which is the point} -body {
+	set out {}
+	foreach p {json json::write md5} {
+		lappend out [string match {*tcllib (apt/pkg_add: tcllib, Alpine: tcl-lib)*} [rio::deps::message $p]]
+	}
+	lappend out [string match {*apt: tk, OpenBSD: tk%8.6*} [rio::deps::message Tk]]
+	lappend out [string match {*apt: tcl-tls*} [rio::deps::message tls]]
+	set out
+} -result {1 1 1 1 1}
+
+test deps-message-names-the-package-asked-for {the message quotes the package that is missing} -body {
+	list [string match {*`json::write`*} [rio::deps::message json::write]] \
+		[string match {*`md5`*} [rio::deps::message md5]]
+} -result {1 1}
+
+test deps-message-cites-install-md {every message points at the full table} -body {
+	string match {*INSTALL.md section 1*} [rio::deps::message json]
+} -result 1
+
+test deps-message-unknown-package {a package with no table row still gets a sentence, not an error} -body {
+	set m [rio::deps::message nosuchpkg]
+	list [string match {*`nosuchpkg`*} $m] [string match {*your Tcl distribution*} $m]
+} -result {1 1}
+
+test deps-message-is-ascii {deps.tcl is sourced ABOVE the D54 encoding guard, so its literals are
+		decoded with the SYSTEM encoding — a non-ASCII character here reaches the user mojibake
+		on Windows, in the one message they have to be able to read} -body {
+	set f [open $::deps_tcl rb] ; set bytes [read $f] ; close $f
+	regexp {[^\x00-\x7f]} $bytes
+} -result 0
+
+test deps-require-exits-with-a-sentence {a missing package: exit 1, the message on stderr,
+		and NO Tcl stack trace} -setup {
+	set script [file join [temporaryDirectory] rio-deps-child-[pid].tcl]
+	set f [open $script w]
+	puts $f [list source $::deps_tcl]
+	puts $f {rio::deps::require nosuchpackage-xyzzy}
+	puts $f {puts "REACHED"}
+	close $f
+} -body {
+	set rc [catch {exec [info nameofexecutable] $script 2>@1} out]
+	list $rc \
+		[string match {*`nosuchpackage-xyzzy`*} $out] \
+		[string match {*INSTALL.md section 1*} $out] \
+		[string match {*while executing*} $out] \
+		[string match {*REACHED*} $out]
+} -cleanup { file delete $script } -result {1 1 1 0 0}
+
+test deps-require-loads-what-is-there {a package that IS installed loads and execution continues} -setup {
+	set script [file join [temporaryDirectory] rio-deps-child2-[pid].tcl]
+	set f [open $script w]
+	puts $f [list source $::deps_tcl]
+	puts $f {rio::deps::require json}
+	puts $f {puts "REACHED [package present json]"}
+	close $f
+} -body {
+	set rc [catch {exec [info nameofexecutable] $script 2>@1} out]
+	list $rc [string match {REACHED *} $out]
+} -cleanup { file delete $script } -result {0 1}
+
+cleanupTests
