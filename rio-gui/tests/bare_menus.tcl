@@ -165,12 +165,14 @@ ok "click: a selection survives a right-click inside it" [.fxview tag ranges sel
 
 .fxview tag remove sel 1.0 end
 .fxview tag add sel 1.6 1.9
-.fxview mark set insert 1.0
+# The caret starts AWAY from where the click lands (@0,0 is 1.0), or a caret that moved
+# and one that did not would read the same.
+.fxview mark set insert 1.5
 ctx_click .fxview 0 0 0   ;# @0,0 is outside the selection
 ok "click: a selection is cleared by a right-click outside it" [.fxview tag ranges sel] {}
 ok "click: the caret does NOT move in a read-only view — a disabled text draws no\
 	insertion cursor, so moving it would promise something nothing shows" \
-	[.fxview index insert] 1.0
+	[.fxview index insert] 1.5
 
 .fxtext delete 1.0 end ; .fxtext insert 1.0 "0123456789"
 .fxtext mark set insert 1.8
