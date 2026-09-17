@@ -8,7 +8,7 @@ Windows. The heavier features (git, the agent, a remote core) work here too; see
 
 > **Status:** verified. rio has been run natively on Windows 11 — it launches, spawns
 > its own core, edits and saves, and every test suite passed at the last run there
-> (2026-09-09; see [RELEASING.md](RELEASING.md) Gate 0 for what that took and the few
+> (2026-09-17; see [RELEASING.md](RELEASING.md) Gate 0 for what that took and the few
 > things still open). Development happens on Linux, so a Windows run always trails the
 > tree by some way — §8 is how to do one. If something does break, §6 says where to
 > look first.
@@ -252,6 +252,21 @@ wish  rio-gui\tests\pipe.tcl              # the spawned-core pipe transport
 The `rio-gui\tests\*.tcl` suites are each run the same way; `sandbox.tcl` is a helper
 the others source, not a suite.
 
+**Put `openssl` on the PATH before you trust a core run.** `rio-core\tests\tls.test`
+mints its own certificates with the `openssl` CLI and serves them over loopback — that
+is how D109–D111 (https repositories, refusing what doesn't verify, accepting one
+anyway) are actually tested. Without the CLI the whole loopback half **skips**, and
+tcltest reports that only as a count at the very end, so a run missing 19 tests still
+prints `0 failed`. Git for Windows already ships OpenSSL 3.5.7; it just isn't on the
+PATH, because only `Git\cmd` is:
+
+```
+$env:Path += ';C:\Program Files\Git\usr\bin'
+```
+
+With it, `rio-core` skips just the three `unix`-constrained permission tests. Check the
+skip count, not only the failure count.
+
 Note the GUI form: CONTRIBUTING shows `RIO_GUI_HEADLESS=1 wish …`, which is POSIX
 shell syntax that PowerShell cannot parse. **No prefix is needed** — the GUI test
 scripts set `RIO_GUI_HEADLESS` themselves. To set it anyway, PowerShell wants
@@ -299,24 +314,23 @@ if {[catch {uplevel #0 [list source $t]} err]} {
 wish runtest.tcl rio-gui\tests\highlight.tcl
 ```
 
-**Where Windows stands.** At the last full Windows run — **2026-09-09, commit
-`697acd2`** — everything was green, with nothing hanging and nothing skipped beyond the
-three `unix`-constrained permission tests:
+**Where Windows stands.** At the last full Windows run — **2026-09-17, commit
+`74f0517`** (D88–D113) — everything was green, with nothing hanging and nothing skipped
+beyond the three `unix`-constrained permission tests:
 
 | Suite | Result |
 |---|---|
-| `rio-core` | 475 passed / 0 failed (3 skipped: `unix` constraint) |
-| `syntax` | 532 / 532 |
-| `plugins/lib` | 9 / 9 |
-| `extensions/claude` | 30 / 30 |
-| `extensions/openai` | 29 / 29 |
-| `rio-gui` | 1218 checks / 0 failed, across 21 suites |
+| `rio-core` | 718 passed / 0 failed (3 skipped: `unix` constraint) |
+| `syntax` | 536 / 536 |
+| `plugins/lib` | 20 / 20 |
+| `extensions/claude` | 55 / 55 |
+| `extensions/openai` | 58 / 58 |
+| `rio-gui` | 1780 checks / 0 failed, across 26 suites |
 
-The suites have grown since — they are larger on every row, and there are more of them —
-so these are a **dated record, not today's count**: the numbers you get from a fresh
-Windows run will be bigger, and the thing to check is that the failure column is still
-zero. The findings behind the run — and the handful of things still open — are in
-[RELEASING.md](RELEASING.md) Gate 0.
+The suites grow with the tree, so treat this as a **dated record, not today's count**:
+a fresh run should give bigger numbers, and what matters is that the failure column is
+still zero and the skip column still reads three. The findings behind the run — and the
+handful of things still open — are in [RELEASING.md](RELEASING.md) Gate 0.
 
 **Writing a GUI test that measures widget geometry.** A headless run withdraws the
 window — but X11 assigns a toplevel real geometry whether or not it is ever mapped,
@@ -335,4 +349,11 @@ decodes a script with the *system* encoding, which is cp1252 on Windows, so any 
 run directly — `rio-gui.tcl`, `rio-core/server.tcl`, each `rio-gui/tests/*.tcl` — opens
 with the four-line UTF-8 guard those files carry. A new test file without it will
 compare rio's correct output against its own mojibake expectations and fail confusingly.
-Non-ASCII **expected values** in a `.test` are safer written as `\u` escapes regardless.
+
+**A `.test` is the exception, and there the `\u` escapes are mandatory.** That guard
+works by re-sourcing `[info script]`, which a `.test` cannot do: tcltest runs it in a
+child `tclsh` that has already decoded the file, and nothing the parent configures —
+`-load` included — happens early enough to change that. So any non-ASCII **value** a
+`.test` compares against, or feeds in as data, is written `\u00E9`, never `é`.
+`rio-core/tests/http.test` is the file where this bites, and it says so at the top.
+Non-ASCII in *comments* and test descriptions is fine; nothing compares those.

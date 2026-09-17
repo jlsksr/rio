@@ -398,14 +398,21 @@ test tls-loop-plain-http {plain http on the same machine, alongside, untouched} 
 	list [dict get $r status] [dict get $r text]
 } -result {200 {hello over http}}
 
-test tls-loop-opts-fail-closed {with no CA source at all, verification is still required} -constraints {tls18} -body {
+test tls-loop-opts-fail-closed {with no bundle and no SSL_CERT_*, verification is still
+		required} -constraints {tls18} -body {
 	set ::rio::tls::bundles {}
 	set saved [array get ::env SSL_CERT_*]
 	foreach {k v} $saved { unset ::env($k) }
 	set o [rio::tls::socket_opts]
 	foreach {k v} $saved { set ::env($k) $v }
-	list [dict get $o -require] [dict exists $o -cafile] [dict exists $o -castore]
-} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {1 0 0}
+	# -castore is deliberately not asserted here. This goes through socket_opts, which
+	# reads the REAL $tcl_platform(platform), and on Windows ca_opts then falls back to
+	# the OS certificate store — so "no CA source at all" is not a reachable state on
+	# every host. Which source each platform ends up with is settled above, purely, by
+	# ca_opts itself. What is left for this test is the part that must hold everywhere:
+	# socket_opts still demands verification when the fallbacks find nothing.
+	list [dict get $o -require] [dict exists $o -cafile]
+} -cleanup { set ::rio::tls::bundles $::real_bundles } -result {1 0}
 
 # --- inspecting a certificate (D111) — the review a user sees before accepting ---------
 test tls-inspect-self-signed {a self-signed certificate: its details, "untrusted", openssl's

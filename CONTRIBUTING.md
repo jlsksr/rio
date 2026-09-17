@@ -432,6 +432,19 @@ Tests live in `rio-core/tests/`, one `.test` file per area. If you add behaviour
 to the core, add a case alongside it; a change to how editing works should show
 up as a test that would have failed before.
 
+**Read the skip count, not just the failures.** `tls.test` mints certificates with the
+`openssl` CLI and serves them over loopback; without that binary on the `PATH` its whole
+half — 19 tests, the D109–D111 https work — skips, and tcltest says so only as a tally
+at the very end. A run that prints `0 failed` can still have tested none of it. A normal
+developer box has `openssl`; a minimal container often doesn't, and neither does Windows
+by default (WINDOWS.md §8). Apart from those, only three tests should skip, under the
+`unix` constraint.
+
+Non-ASCII **values** in a `.test` — data or expected results — are written as `\u`
+escapes, never as literals. tcltest runs each file in a child `tclsh` that decodes it
+with the system encoding, so a literal is mojibake anywhere that isn't UTF-8 and no
+setting in the runner can prevent it. Comments and test descriptions are unaffected.
+
 The syntax highlighters are pure Tcl too, so they have their own headless suite —
 no display needed:
 
