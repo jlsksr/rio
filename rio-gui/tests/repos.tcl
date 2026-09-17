@@ -710,9 +710,33 @@ proc select_row {i} {
 }
 # Open the review from the selected row, run `script` inside the dialog, and let the
 # script close it (a button's invoke).
+# Run `script` against the certificate dialog while it is up. The dialog blocks in
+# `tkwait window`, so the script has to arrive from the event loop.
+#
+# It waits for the dialog's FOCUS TO LAND, not for a fixed delay. Measured here, the
+# dialog becomes viewable at ~50ms and the focus reaches `.btns.back` between 50 and
+# 100ms — so the `after 100` this replaces sat right on the boundary and lost the race
+# whenever the machine was busy: about 1 run in 6 under a full-suite run, always on the
+# focus check, always reporting `.extcert` instead of `.extcert.btns.back`.
+#
+# Waiting on `winfo viewable` instead is WORSE, and the reason is worth keeping: the
+# window is viewable ~50ms BEFORE the focus transfer, so that condition fires the script
+# even earlier and the check then failed every time.
+#
+# `lastfor == the toplevel` means "not focused yet" *or* "focused nothing", which is the
+# ambiguity being waited out. A dialog that genuinely focuses nothing still fails the
+# check — it just takes the 3s ceiling to say so.
 proc review {script} {
-	after 100 $script
+	after 1 [list review_ready $script 0]
 	.extw.det.review invoke
+}
+proc review_ready {script tries} {
+	set pending [expr {![winfo exists .extcert] || [focus -lastfor .extcert] eq ".extcert"}]
+	if {$pending && $tries < 300} {
+		after 10 [list review_ready $script [incr tries]]
+		return
+	}
+	uplevel #0 $script
 }
 
 extensions_window
