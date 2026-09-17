@@ -6641,6 +6641,56 @@ Verified end to end by running both entry points with an emptied `auto_path`. Th
 injections: a wrong OS package, a non-ASCII literal, a `require` that throws instead of
 reporting. **Closes RELEASING.md Gate 3's graceful-failure box.**
 
+### D117 — rio has a window and taskbar icon
+
+rio set no `_NET_WM_ICON`, so the xfwm4 title bar and the xfce4-panel taskbar each fell
+back to their **own** default — which is why the two showed *different* generic icons.
+The artwork is **Christ the Redeemer** (jka, 2026-09-18), a pun on the name.
+
+**A raster asset, deliberately outside D27.** The monochrome-Unicode rule governs glyphs
+drawn *inside* rio's UI, where a font is the right tool and scales for free.
+`_NET_WM_ICON` takes pixels; a glyph would have to be rendered to a pixmap to get here
+at all. ROADMAP already drew this distinction and this confirms it.
+
+**Soft, like tkdnd (D86).** With `icons/` missing or unreadable rio starts exactly as
+before, on the window manager's default — the files are only ever read, never required.
+**Tk 8.6 reads PNG natively** (verified on this host, not assumed), so the
+Tk + tcllib + tcltls bar is untouched; tkimg would have broken it. Seven sizes are handed
+over at once and the WM picks; **`-default` covers every toplevel made later**, so the
+dialogs and the help window inherit it without repeating the call.
+
+**`icons/make-icons.sh` re-cuts the set from `source.png`.** Explicitly *not* a build
+step — the PNGs are committed and rio never runs it at start-up or install — it exists so
+swapping the artwork is one command. Needs ImageMagick, a *developer* tool only. What it
+encodes, learned by cutting this artwork and looking at the result magnified:
+
+- **Trim the source's transparent margin before scaling.** This one had 390×466 of
+  content inside 512×512; at 16×16 that slack is whole pixels of the subject.
+- **Lanczos, and no sharpening.** Unsharp is standard practice for icon downscaling and
+  it looked right at 48px — at 16px it rings, a dark halo along the pedestal.
+- A Windows `.ico` (16/32/48/256) alongside: `wm iconphoto` works there, but the taskbar
+  and alt-tab render a real `.ico` better.
+
+**Known limit, recorded rather than fixed:** at **16px** — the title-bar and taskbar size,
+the one this decision exists for — the icon is legible on a *dark* title bar and washy on
+a *light* one, because the pale-yellow disc has little contrast against light chrome. The
+fix is a more saturated disc **in the source artwork**; it cannot be done downstream,
+because the disc's pale yellow and the statue's highlights are too close for a colour key
+to separate (tried: it bled into the statue). Swapping in a revised `source.png` and
+re-running the script is the whole remedy.
+
+**Guards** (6 checks in `smoke.tcl`): the sizes the loader asks for and the files on disk,
+held **both directions** — a size added to one and not the other otherwise falls back to
+the WM default *silently*, which looks like nothing being wrong; every image square; the
+16px one really 16px; and rio starting with the directory absent. The size list is a
+**variable** (`::icon_sizes`) rather than a literal in the loop, so the guard asks what
+was asked for instead of reading the proc's source text (§7's "assert against behaviour"
+rule — the first draft violated it and parsed `info body`).
+
+**Verified against a live window**, not only headless: `xprop` reads `_NET_WM_ICON` off
+the running GUI and renders the 16×16 back as ASCII art. Three injections, each failing
+by name: a size asked for but never cut, a file nobody asks for, a non-square image.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

@@ -59,11 +59,15 @@ Each entry notes its state:
   foreground/background pair, but cannot vary colour *within* a row — which would put a second
   dialog idiom in the tree. Any of this would want a way to fetch several themes in one call
   before it's worth doing.
-- **Window / taskbar icon** — *deferred.* rio sets no `_NET_WM_ICON`, so the xfwm4 title
-  bar and the xfce4-panel taskbar each fall back to their own default (hence the mismatch).
-  jka has a custom pixmap icon in mind; the fix is `wm iconphoto . -default` with the image
-  at a few sizes (16/32/48). Note this is a *raster* asset, distinct from the mono-Unicode
-  in-UI iconography rule — a glyph would have to be rendered to a pixmap first.
+- **Window / taskbar icon** — *landed* (AGENTS.md **D117**). `wm iconphoto . -default` with
+  seven sizes (16–256) cut from `rio-gui/icons/source.png`, plus a Windows `.ico`; soft, so
+  a checkout without `icons/` still starts. The artwork is Christ the Redeemer, a pun on
+  the name. Confirmed as a *raster* asset distinct from the mono-Unicode in-UI rule (D27).
+  Remaining refinement: at **16px** it reads well on a dark title bar and washes out on a
+  light one — the pale-yellow disc has little contrast against light chrome. The fix is a
+  more saturated disc **in the source artwork** (it cannot be done by post-processing: the
+  disc and the statue's highlights are too close for a colour key), then re-running
+  `icons/make-icons.sh`.
 - **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). The

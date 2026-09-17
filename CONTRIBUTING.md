@@ -46,6 +46,26 @@ your code belongs:
 **Rule of thumb:** if you're writing actual logic, it almost certainly belongs in
 the core. Keep the frontends dumb.
 
+### The application icon
+
+`rio-gui/icons/` holds the window and taskbar icon: `source.png` (the artwork) and
+the sizes cut from it, all committed. To change it, drop in a new square PNG —
+512×512 or larger, with a transparent background — and run:
+
+```sh
+./rio-gui/icons/make-icons.sh path/to/new-icon.png
+```
+
+That re-cuts every size and the Windows `.ico`, and copies your file over
+`source.png`. It needs ImageMagick, which **only contributors doing this** need —
+rio itself never runs the script, and reads the finished PNGs with Tk's own PNG
+support.
+
+Look at the **16×16** before you commit: it is what the title bar and the taskbar
+actually show, and fine detail that looks good at 256 turns to mush there. Bold
+shapes and strong contrast against *both* light and dark window chrome are what
+survive.
+
 ## A few house rules
 
 - **Logic in the core, not the UI.** If you're tempted to put behaviour in the
