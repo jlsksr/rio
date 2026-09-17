@@ -11603,6 +11603,46 @@ menu .m.help -tearoff 0
 # needs binding here.
 wm protocol . WM_DELETE_WINDOW do_quit
 
+# The window / taskbar icon (AGENTS.md D117). Without one the window manager and the
+# taskbar each fall back to their OWN default, so rio showed two different generic
+# icons in the two places.
+#
+# A RASTER asset, deliberately outside D27's monochrome-Unicode rule: that rule governs
+# glyphs drawn INSIDE rio's own UI, where a font is the right tool. `_NET_WM_ICON` takes
+# pixels, and a glyph would have to be rendered to a pixmap to get here anyway.
+#
+# SOFT, like tkdnd (D86): missing or unreadable files leave rio running exactly as
+# before, with the window manager's default. The icons are only ever read, never
+# required — so a checkout with the directory removed still starts.
+#
+# Tk 8.6 reads PNG natively, so this costs no dependency. Several sizes are handed over
+# at once and the WM picks the one it wants (16 for the title bar, 32/48 for alt-tab,
+# larger for the window list). `-default` also covers every toplevel made LATER, so the
+# dialogs and the help window inherit it without each repeating this.
+#
+# The sizes are a VARIABLE, not a literal in the loop, so the guard in smoke.tcl can ask
+# what was asked for rather than reading this proc's source text (AGENTS §7: assert
+# against behaviour). `icons/make-icons.sh` cuts exactly this set.
+set ::icon_sizes {16 24 32 48 64 128 256}
+proc apply_window_icon {} {
+	set dir [file join $::rio_dir icons]
+	set imgs {}
+	foreach n $::icon_sizes {
+		set f [file join $dir rio-$n.png]
+		if {![file exists $f]} continue
+		if {[catch {image create photo ::rio_icon_$n -file $f}]} continue
+		lappend imgs ::rio_icon_$n
+	}
+	if {[llength $imgs]} { catch {wm iconphoto . -default {*}$imgs} }
+	# Windows only: `wm iconphoto` works there, but a real .ico is what the taskbar and
+	# alt-tab render best. Harmless to attempt and caught if the file isn't there.
+	if {[tk windowingsystem] eq "win32"} {
+		set ico [file join $dir rio.ico]
+		if {[file exists $ico]} { catch {wm iconbitmap . -default $ico} }
+	}
+}
+apply_window_icon
+
 # Re-sync the dock whenever rio regains OS focus, to pick up changes made outside rio
 # (see app_focus_event). The binding lives on the toplevel bindtag, so a focus event on
 # any descendant reaches it; app_focus_settle debounces the flurry into one check.

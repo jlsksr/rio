@@ -2171,5 +2171,32 @@ ok "size: bottom height stable on switch" [list $hg $hs] {200 200}
 ok "size: bsash clamps and drives height" [expr {[.sitebottom cget -height] >= 60}] 1
 set ::layout $_layout_sz ; apply_layout
 
+# --- D117: the window / taskbar icon -------------------------------------------
+# A soft asset, like tkdnd (D86): rio must start with the icons absent. The sizes the
+# loader asks for and the files on disk are held against each other BOTH ways, so a
+# size added to one and not the other fails here rather than silently falling back to
+# the window manager's default — which looks like nothing being wrong.
+set _icodir [file join $::rio_dir icons]
+set _asked $::icon_sizes
+ok "icon: the loader asks for a set of sizes" [expr {[llength $_asked] > 0}] 1
+set _ondisk {}
+foreach _f [lsort [glob -nocomplain -directory $_icodir rio-*.png]] {
+	if {[regexp {rio-([0-9]+)\.png$} $_f -> _n]} { lappend _ondisk $_n }
+}
+ok "icon: every size asked for is on disk, and every file is asked for" \
+	[lsort -integer $_ondisk] [lsort -integer $_asked]
+set _loaded [lsort [info commands ::rio_icon_*]]
+ok "icon: one photo image per size was created" [llength $_loaded] [llength $_asked]
+set _sq 1
+foreach _i $_loaded { if {[image width $_i] != [image height $_i]} { set _sq 0 } }
+ok "icon: every image is square (a window manager scales, it does not letterbox)" $_sq 1
+ok "icon: the 16px one is really 16px — the title-bar size, cut not scaled" \
+	[list [image width ::rio_icon_16] [image height ::rio_icon_16]] {16 16}
+# Absent-safe: point the loader at a directory with no icons and rio carries on.
+set _realdir $::rio_dir
+set ::rio_dir [file join / nonexistent-rio-icon-check-[pid]]
+ok "icon: a checkout with no icons/ still starts (soft, like tkdnd)" [catch {apply_window_icon}] 0
+set ::rio_dir $_realdir
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
