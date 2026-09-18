@@ -6659,6 +6659,14 @@ Tk + tcllib + tcltls bar is untouched; tkimg would have broken it. Seven sizes a
 over at once and the WM picks; **`-default` covers every toplevel made later**, so the
 dialogs and the help window inherit it without repeating the call.
 
+**The About box wears it too** (*Help ▸ About rio*), left of the name — the shape both
+Win2000 and VSCode give an About box, and the one thing it conventionally leads with. It
+**reuses an image already loaded** for `wm iconphoto` rather than reading the file again,
+so it cannot drift from the icon actually in force; the guard asserts that by identity
+against the loaded images, not by opening a file. One layout, not two: the icon owns
+column 0 and the text column 1 *always*, so in the soft case the label is simply never
+created, column 0 takes no width, and the box keeps its old single-column look.
+
 **`icons/make-icons.sh` re-cuts the set.** Explicitly *not* a build step — the PNGs are
 committed and rio never runs it at start-up or install — it exists so trying an icon, or
 going back to one, is a single command. Needs ImageMagick, a *developer* tool only.
