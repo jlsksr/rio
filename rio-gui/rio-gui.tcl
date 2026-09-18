@@ -3755,11 +3755,29 @@ proc about_dialog {} {
 	}
 	button $w.ok -text "Close" -font RioUIFont -command {destroy .about}
 
-	grid $w.name  -row 0 -column 0 -sticky w  -padx 16 -pady {14 0}
-	grid $w.tag   -row 1 -column 0 -sticky w  -padx 16 -pady {4 8}
-	grid $w.facts -row 2 -column 0 -sticky w  -padx 16
-	grid $w.ok    -row 3 -column 0 -sticky e  -padx 16 -pady {10 12}
-	grid columnconfigure $w 0 -weight 1
+	# rio's own icon, to the left of the name — the Win2000/VSCode About-box shape. It
+	# reuses an image apply_window_icon (D117) already loaded for `wm iconphoto`, so
+	# nothing is read from disk here and the box always shows the icon rio is actually
+	# wearing. The PNG's transparency composites over the label's themed background.
+	#
+	# Column 0 is the icon's, column 1 the text's, ALWAYS — so when there is no icon to
+	# show (the D117 soft case: a checkout with icons/ removed) column 0 simply has no
+	# width and the box keeps its old single-column look, with no second layout to hold
+	# in step.
+	set icon ""
+	foreach n {64 48 32} {
+		if {[llength [info commands ::rio_icon_$n]]} { set icon ::rio_icon_$n ; break }
+	}
+	if {$icon ne ""} {
+		label $w.icon -image $icon -background [dict get $c ui.bg] -borderwidth 0
+		grid $w.icon -row 0 -column 0 -rowspan 3 -sticky n -padx {16 0} -pady {16 0}
+	}
+
+	grid $w.name  -row 0 -column 1 -sticky w  -padx 16 -pady {14 0}
+	grid $w.tag   -row 1 -column 1 -sticky w  -padx 16 -pady {4 8}
+	grid $w.facts -row 2 -column 1 -sticky w  -padx 16
+	grid $w.ok    -row 3 -column 1 -sticky e  -padx 16 -pady {10 12}
+	grid columnconfigure $w 1 -weight 1
 
 	bind $w <Escape> {destroy .about}
 	bind $w <Return> {destroy .about}

@@ -1798,7 +1798,31 @@ about_dialog
 ok "help: About modal built"        [winfo exists .about] 1
 ok "help: About shows the build id" [expr {[string first [rio_build_id] [.about.facts.v0 cget -text]] >= 0}] 1
 ok "help: About shows the date"     [expr {[string first [rio_build_date] [.about.facts.v1 cget -text]] >= 0}] 1
+# The About box wears rio's own icon (D117), left of the name. It REUSES an image
+# apply_window_icon already loaded for `wm iconphoto` rather than reading the file again,
+# so the box cannot drift from the icon rio is actually wearing — asserted by identity,
+# not by looking at a file.
+ok "help: About shows rio's icon"   [winfo exists .about.icon] 1
+ok "help: …the very image the window manager was given, not a second read" \
+	[expr {[.about.icon cget -image] in [info commands ::rio_icon_*]}] 1
+ok "help: …and the text sits beside it, in column 1" \
+	[list [dict get [grid info .about.icon] -column] [dict get [grid info .about.name] -column]] {0 1}
 destroy .about
+# Absent-safe, the D117 soft case: with no icon images the box drops the icon and keeps its
+# old single-column look. The text stays in column 1, whose column 0 is then simply empty —
+# one layout, not two to hold in step.
+set _icon_cmds [info commands ::rio_icon_*]
+rename ::rio_icon_64 ::_saved_icon_64
+foreach _i {32 48} { catch {rename ::rio_icon_$_i ::_saved_icon_$_i} }
+about_dialog
+ok "help: About builds with no icon at all"   [winfo exists .about] 1
+ok "help: …and shows no icon label"           [winfo exists .about.icon] 0
+ok "help: …with the text where it always was" [dict get [grid info .about.name] -column] 1
+destroy .about
+rename ::_saved_icon_64 ::rio_icon_64
+foreach _i {32 48} { catch {rename ::_saved_icon_$_i ::rio_icon_$_i} }
+ok "help: the icon images are back for later checks" \
+	[expr {[llength [info commands ::rio_icon_*]] == [llength $_icon_cmds]}] 1
 # Compare With Another Tab… diffs the active buffer against another open buffer, both sides
 # live buffer text (D74). Drive compare_with_tab directly (the modal picker's row-building is
 # covered by buffer_pick_rows in tabs.tcl); open two buffers so there's another tab to pick.
