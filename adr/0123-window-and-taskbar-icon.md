@@ -53,6 +53,15 @@ adopts a new file by path. Going back to an earlier icon is therefore the same c
 with a different name, and the diff of that one line states which icon a commit changed
 rio to — something a set of re-cut binary PNGs cannot say.
 
+**An artwork is chosen at 16 pixels, against chrome of both colours.** A candidate is cut
+and judged at the sizes a title bar and a taskbar actually use — 16, 24 and 32 — over a
+dark and a light background, because none of what decides the question is visible in the
+512-pixel source. This record states that test and does not name the artwork that passed
+it: `active` is the one line that answers which artwork is in force, and anyone asking can
+read it. Naming the winner here as well would mean editing a record every time the
+one-command switch is used — the churn the switching mechanism exists to avoid — and the
+record would be wrong the first time someone did not.
+
 **The size list the loader asks for is a variable, not a literal inside the loop**, so
 the guard that holds it against the files on disk can ask what was requested instead of
 reading the loader's source text (ADR-0116).
@@ -64,10 +73,11 @@ and the result looked right at 48 pixels. Magnified at 16 it rings: a dark halo 
 edge of the pedestal. Rejected on the size that matters most.
 
 **Deriving a high-contrast variant for the smallest sizes by post-processing** — a dark
-silhouette where the artwork is weakest. It cannot be done: the disc's pale yellow and
-the statue's beige highlights are too close for a colour key to separate them. Two
-attempts bled, one reducing the whole icon to a dark blob. The fix belongs in the source
-artwork, not downstream of it.
+silhouette where the artwork is weakest. It could not be done for the artwork that needed
+it: the pale disc and the statue's highlights were too close in tone for a colour key to
+separate them. Two attempts bled, one reducing the whole icon to a dark blob. Contrast at
+16 pixels is a property of the source artwork, and nothing downstream of it can supply
+what the source lacks.
 
 **Keeping one source image and overwriting it.** That is how the set was first cut. It
 makes every change of artwork a destructive edit of a binary file, leaves the commit
@@ -89,17 +99,18 @@ does.
   set and committing the result; nothing downstream of the committed PNGs can be tuned
   per size. Because the candidates are kept, reverting that change costs exactly what
   making it cost.
-- The first artwork was accepted with a limit at 16 pixels — the title-bar and taskbar
-  size, which is the size this decision exists for: its pale-yellow disc read well on dark
-  window chrome and washed out on light, and nothing downstream of the source could mend
-  it. That limit is closed where it had to be. A second artwork, a mid-blue disc inside a
-  dark outline, was cut alongside the first and compared at 16, 24 and 32 pixels over both
-  dark and light backgrounds; it is better at every size and is now the active one. The
-  first is kept.
-- What that comparison settled outlives this icon. At 16 pixels an icon is carried by the
-  contrast at the edge of its largest shape, not by anything inside it, and the case it
-  fails is the window chrome it was not designed against. An artwork intended for a window
-  icon needs a hard outline and needs to hold against both a light and a dark title bar.
+- Three artworks have been through the comparison, which separated them decisively even
+  though at 512 pixels all three were good. A pale disc with no outline read on dark chrome and
+  washed out on light. A disc inside a dark outline mended the light case, but its
+  interior detail — clouds — broke into speckle, and its subject stood too close in tone
+  to the disc behind it. What won was the plainest of the three: a near-white subject on a
+  flat disc, no interior detail at all, the subject filling all but a hair of the canvas.
+  The others are kept and are one command away.
+- What the comparison settled outlives any of the three. At 16 pixels three things decide
+  an icon, in that order: the contrast at the edge of its largest shape, how much of the
+  canvas the subject fills, and the *absence* of interior detail, which is noise at that
+  size however good it looks at 256. The case an icon fails is the window chrome it was
+  not drawn against, so a candidate that has only been looked at on one is untested.
 - A size that the loader asks for but nobody cut, or a file nobody asks for, would
   otherwise fail silently — the desktop simply falls back, which looks like nothing being
   wrong. The set on disk and the set requested are therefore held against each other in
