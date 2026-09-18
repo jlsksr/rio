@@ -63,8 +63,9 @@ Each entry notes its state:
   seven sizes (16–256) plus a Windows `.ico`; soft, so a checkout without `icons/` still
   starts. The artwork is Christ the Redeemer, a pun on the name. Confirmed as a *raster*
   asset distinct from the mono-Unicode in-UI rule (D27). The first version's 16px
-  light-chrome washout is **fixed**: `redeemer-blue`, whose dark-outlined blue disc holds
-  on light and dark chrome alike, is active; candidates live in `icons/sources/` with
+  light-chrome washout is **fixed**: three Redeemer variants were cut and compared at
+  16/24/32 over dark and light chrome, and `redeemer-teal` — a near-white statue on a
+  plain teal disc, no interior detail — won. Candidates live in `icons/sources/` with
   `icons/active` naming the current one, so switching is `make-icons.sh <name>`.
 - **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`

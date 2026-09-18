@@ -6675,21 +6675,29 @@ this artwork and looking at the result magnified:
 - A Windows `.ico` (16/32/48/256) alongside: `wm iconphoto` works there, but the taskbar
   and alt-tab render a real `.ico` better.
 
-**The artwork, and why the second one replaced the first.** The original
-(`redeemer-yellow`) had a known limit, recorded at the time: at **16px** — the title-bar
-and taskbar size, the one this decision exists for — it was legible on *dark* chrome and
-washy on *light*, because a pale-yellow disc has little contrast against a light title
-bar. It could not be fixed downstream: the disc's yellow and the statue's highlights are
-too close for a colour key to separate, and two attempts bled into the statue. jka
-supplied a second artwork the same day and **`redeemer-blue` is now active** — a
-mid-blue disc inside a dark outline, which holds on *both* light and dark chrome and
-gives the 16px cut a hard edge to survive on. Compared side by side at 16/24/32 over dark
-and light backgrounds before switching. The yellow one is kept under `icons/sources/`,
-one command away.
+**How the artwork is chosen.** jka supplied three Redeemer variants; each was cut and
+compared **at 16/24/32 over both dark and light chrome** before deciding, because that is
+the comparison the decision turns on and none of it is visible at 512px. `icons/active`
+names the winner and `icons/sources/` keeps the rest, so this section states the *test*,
+not a running log — the whole point of the switching mechanism is that the answer can
+change cheaply.
 
-**The general lesson, worth more than the icon:** an app icon's weakest point is 16px
-against the chrome you did *not* design for. Contrast at the **disc's edge** is what
-carries it; interior detail is noise at that size either way.
+What the three showed, which is the reusable part:
+
+- `redeemer-yellow` — a pale disc with no outline. Legible on dark chrome, **washy on
+  light**: recorded as a known limit when it shipped. It could not be fixed downstream —
+  the disc's yellow and the statue's highlights are too close for a colour key to
+  separate, and two attempts bled into the statue.
+- `redeemer-blue` — a mid-blue disc **inside a dark outline**, which fixed the light-chrome
+  case. But its clouds became speckle at 16px and its sage statue had little contrast
+  against the blue.
+- `redeemer-teal` (**active**) — a near-white statue on a plain teal disc, no interior
+  detail, the subject filling 93% of the canvas. Best 16px of the three by a clear margin.
+
+**The general lesson, worth more than the icon.** An app icon's weakest point is 16px
+against the chrome you did *not* design for. Three things decide it, in order: **contrast
+at the disc's edge**, **how much of the canvas the subject occupies**, and **the absence
+of interior detail** — which is noise at that size no matter how good it looks at 256.
 
 **Guards** (6 checks in `smoke.tcl`): the sizes the loader asks for and the files on disk,
 held **both directions** — a size added to one and not the other otherwise falls back to
