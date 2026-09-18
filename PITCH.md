@@ -187,6 +187,22 @@ piece.
 See [README.md](README.md) for the feature list, [docs/](docs/index.md) for the user
 manual, [INSTALL.md](INSTALL.md) to deploy, [AGENTS.md](AGENTS.md) for the design log.
 
+## Credits
+
+rio's window and taskbar icon — Christ the Redeemer, for the name — comes from
+[Flaticon](https://www.flaticon.com/), whose free licence asks that the author be
+credited. Three variants live in `rio-gui/icons/sources/`; the one rio wears is named
+in `rio-gui/icons/active`.
+
+<a href="https://www.flaticon.com/free-icons/rio-de-janeiro" title="rio de janeiro icons">Rio de janeiro icons created by Valter Bispo - Flaticon</a>
+
+<a href="https://www.flaticon.com/free-icons/rio-de-janeiro-brazil" title="rio de janeiro brazil icons">Rio de janeiro brazil icons created by graphicmall - Flaticon</a>
+
+<a href="https://www.flaticon.com/free-icons/rio-de-janeiro" title="rio de janeiro icons">Rio de janeiro icons created by Roundicons Premium - Flaticon</a>
+
+Everything else in rio — editor, core, protocol, agent loop, highlighters, themes — is
+the project's own code.
+
 ## Changelog
 
 A curated history of the noticeable changes — features, improvements, and fixes —
