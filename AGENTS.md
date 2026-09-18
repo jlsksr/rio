@@ -6691,8 +6691,13 @@ What the three showed, which is the reusable part:
 - `redeemer-blue` — a mid-blue disc **inside a dark outline**, which fixed the light-chrome
   case. But its clouds became speckle at 16px and its sage statue had little contrast
   against the blue.
-- `redeemer-teal` (**active**) — a near-white statue on a plain teal disc, no interior
-  detail, the subject filling 93% of the canvas. Best 16px of the three by a clear margin.
+- `redeemer-teal` — a near-white statue on a plain teal disc, no interior detail, the
+  subject filling 93% of the canvas. Best 16px of the three by a clear margin, and the
+  one that won.
+
+`icons/active` is the single place that says which is in force. This section deliberately
+does **not** repeat it: that would be a two-place fact needing an edit every time the
+one-command switch runs, which is the churn the mechanism exists to avoid.
 
 **The general lesson, worth more than the icon.** An app icon's weakest point is 16px
 against the chrome you did *not* design for. Three things decide it, in order: **contrast
