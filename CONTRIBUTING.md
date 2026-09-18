@@ -64,6 +64,12 @@ stays in `sources/`, so going back is the same command with the other name. It
 needs ImageMagick, which **only contributors doing this** need: rio never runs the
 script, and reads the finished PNGs with Tk's own PNG support.
 
+**If the artwork isn't yours, record its credit** in
+`rio-gui/icons/sources/ATTRIBUTION.md`, in the same commit that adds the file.
+rio's current icons are Flaticon's, whose free licence requires attribution — so
+this is a condition of use, not a courtesy, and it applies to every artwork in
+`sources/` whether or not it is the one currently worn.
+
 Look at the **16×16** before you commit — it is what the title bar and the taskbar
 actually show, and detail that looks good at 256 turns to mush there. The thing
 that decides whether an icon works at that size is **contrast at its outer edge**,
