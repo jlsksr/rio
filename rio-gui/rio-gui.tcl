@@ -8147,7 +8147,7 @@ proc repo_sums_parse {text} {
 proc sig_mark {state} {
 	switch -- $state {
 		signed     { return "signed" }
-		unverified { return "unchecked" }
+		unverified { return "unverified" }
 	}
 	return "unsigned"
 }
@@ -9193,8 +9193,7 @@ proc dead_phrase {code} {
 		untrusted_cert { return "certificate not trusted" }
 		key_changed    { return "signing key changed" }
 		sig_bad        { return "signature doesn't verify" }
-		sig_missing    { return "no signature found" }
-		sig_stale      { return "the signature is out of date" }
+		sig_missing    { return "signature missing" }
 		sig_dropped    { return "no longer signed" }
 		sig_no_tool    { return "can't check the signature" }
 		hash_mismatch  { return "files don't match the signature" }
