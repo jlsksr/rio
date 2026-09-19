@@ -148,8 +148,29 @@ signature that doesn't verify, a key that changed and a file whose hash doesn't
 match are refused with it on. The switch lives with the GUI, in `prefs.json`,
 because it governs nothing but the Extensions window.
 
-The keys rio trusts are its own list, in `repository-keys.conf` beside your
-`sources.list`; deleting a section there forgets a key.
+## The signing keys rio trusts
+
+*Preferences ▸ Extensions ▸ Repository signing keys…* lists every signing key rio
+recorded — one row per repository, with the key's fingerprint and the date it was
+trusted, and the URL without its scheme, since `http://` and `https://` are the same
+publisher. Where the core's host has no `ssh-keygen` there is no fingerprint to show,
+so the row names the key itself instead.
+
+**Forget selected** drops one. It is not a refusal: the next scan trusts whatever
+that repository publishes then, the way the first scan did — so it undoes a decision
+rather than making a new one. To stop using a repository, remove it in
+*Repositories…*.
+
+rio's own repository is listed `(built in)` as long as it is still in your sources.
+Its key is the one rio ships with, nothing is stored for it, and **Forget selected**
+on that row does nothing and says why. A window with no rows at all means no
+repository of yours has published a key rio verified — an unsigned repository has
+none to list.
+
+The list is the file `repository-keys.conf`, beside your `sources.list`; deleting a
+section there is the same thing as forgetting a key here. See
+[extensions](extensions.md#trust-on-the-first-scan) for what first use protects and
+what it cannot.
 
 ## Network: how the core checks https
 
@@ -190,7 +211,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `prefs.json` | GUI preferences — every key is listed [above](#setting-a-default-is-just-setting-the-value) | yes — plain JSON (above); `layout` best left to the View menu |
 | `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes — see [keyboard shortcuts](keyboard.md) |
 | `sources.list` | extension-repository URLs, one `http://` or `https://` base per line | yes (above) |
-| `repository-keys.conf` | the signing key rio trusts for each repository, one section per repository, recorded the first time a signature from it verified | yes — delete a section to forget that key; see [extensions](extensions.md#trust-on-the-first-scan) |
+| `repository-keys.conf` | the signing key rio trusts for each repository, one section per repository, recorded the first time a signature from it verified | yes — delete a section to forget that key, the same as *Forget selected* in [the keys window](#the-signing-keys-rio-trusts) |
 | `certificates.conf` | certificates you accepted although they did not verify, one section per `host:port` — on the **core's** host | yes — delete a section to take one back; see [extensions](extensions.md#a-certificate-that-isnt-trusted) |
 | `themes/` | user theme files, read by the **core** | drop-in / installed |
 | `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
