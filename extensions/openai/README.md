@@ -18,3 +18,12 @@ llama-server, …) by its base URL — no key needed for a local server.
    URL of your local server.
 
 `echo` (the built-in stub provider) stays available whether or not this is installed.
+
+## License
+
+MIT, like rio itself — see the `LICENSE` in the rio source tree or in the repository this
+came from. Each of the three payload files repeats the notice in its own header, because
+an installed extension lands in the provider store on its own, with no LICENSE beside it.
+
+Whatever service you point it at — OpenAI's, or a local server — is governed by that
+service's own terms; this extension is only the client.

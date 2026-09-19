@@ -15,3 +15,12 @@ the hosted Anthropic API; you supply your own API key.
 4. Choose **Claude** as the agent provider and enter your API key when prompted.
 
 `echo` (the built-in stub provider) stays available whether or not this is installed.
+
+## License
+
+MIT, like rio itself — see the `LICENSE` in the rio source tree or in the repository this
+came from. Each of the three payload files repeats the notice in its own header, because
+an installed extension lands in the provider store on its own, with no LICENSE beside it.
+
+The Anthropic API this talks to is Anthropic's, and your use of it is between you and
+them; this extension is only the client.

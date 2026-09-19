@@ -265,6 +265,14 @@ Rules of the tree:
   http → https is followed. The trust section below is honest about what https
   does and doesn't buy.
 - Payloads are **text** (Tcl source, theme files); fetches are capped at 2 MB.
+- **Put your licence in the payload itself.** rio has no `license` manifest key, and
+  a repository's `LICENSE` file is not fetched — look at what installing does below
+  and you can see why it would not help: your `.tcl` lands in a directory shared with
+  every other extension of its kind, and a theme goes into the core's theme store.
+  Nothing you ship beside a payload arrives with it. So an extension that wants to be
+  redistributable has to say so **inside each file it ships**. rio's own extensions
+  carry the full MIT notice in their header comment for exactly this reason (D122);
+  yours are yours to license, and rio neither asks nor checks.
 
 What each kind installs as:
 

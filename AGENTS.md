@@ -7058,7 +7058,61 @@ forward-compatible by construction (unknown keys are ignored, D107), but it chan
 manifest contract and belongs to its own decision, not to this one. **`CODE_OF_CONDUCT.md`**
 — Gate 1's other half, still open, and due before rio takes outside contributions.
 
----
+*(D122 amends the first of those three for one class of file: an extension payload does
+not travel with the tree, so it carries its notice itself.)*
+
+### D122 — an extension payload carries its licence inside it
+
+**The gap D121 left.** rio's own extensions — `claude`, `openai`, `emacs`, `vi`, and the
+`night` theme in the publishing repository — sit in the tree and were therefore MIT the
+moment D121 landed. But an extension is the one thing in rio that **does not travel with
+the tree**. Look at what installing actually does and the problem is plain: a mode's
+payload is written into `~/.config/rio/modes/`, a **directory shared with every other
+mode**; a theme is handed to the core and stored in its theme store; only a provider gets
+a directory of its own. So a file installed from a repository arrives with no `LICENSE`
+anywhere near it, and one that cannot say what it is is unanswerable at exactly the
+moment the question gets asked — the second copy.
+
+**This is D120's test, applied to code.** The question an artwork's licence must answer is
+not *may we use this* but *may everyone who receives it pass it on*. A payload is in the
+same position as the icon was, and more so: it is fetched over plain http by strangers,
+by construction, as the normal way to get it.
+
+**The decision (jka, 2026-09-20).** Every payload rio's own extensions ship carries the
+**full MIT notice** — copyright line, permission paragraph, warranty disclaimer — in the
+comment block it already opens with. Not a pointer, not an SPDX tag alone: MIT asks for
+the notice to be *included in all copies*, and a file that travels alone is the case that
+requirement is written for. A one-line "MIT, see LICENSE" would send a reader to a file
+that is not there.
+
+**Why this does not reopen D121's refusal of file headers.** D121 declined SPDX headers
+for the tree because rio is **copied wholesale** — clone, tarball, mirror — so the root
+`LICENSE` arrives with every source file and a header would restate what is already
+present ~100 times. The reasoning inverts precisely when the wholesale copy stops being
+the unit of distribution. The rule is therefore not "headers are bad" or "headers are
+good" but: **the licence lives with whatever unit actually travels.** For rio that is the
+repository; for an extension it is the file. Tests are not stamped — they stay behind.
+
+- The stamped payloads: `extensions/{claude,openai}/*.tcl` (three each), `extensions/
+  emacs/emacs.tcl`, `extensions/vi/vi.tcl`, and `night-theme/night.theme` in the
+  publishing repository. `plugins/lib/` is **not** an extension — the core guarantees
+  `rio::llm::*` to every provider, so it ships with rio and D121 covers it.
+- `.theme` files take `#` comments like any conf file (D21), so a theme carries the same
+  block; `theme.put` validates by parsing and stores the text **verbatim**, so the notice
+  reaches the user's theme store intact.
+- The publishing repository (`rio-extensions`, served at `rio.skylm.org/extensions`) is a
+  separate git repository and had no licence of its own. It gets the same `LICENSE`, and
+  its README says the terms and says plainly that **another publisher's extensions are
+  theirs to license** — a rio repository makes no claim about what it serves.
+- CONTRIBUTING tells extension authors the same thing as a *format* fact rather than a
+  house rule: nothing shipped beside a payload arrives with it, so a licence has to be in
+  the file. rio neither asks for one nor checks.
+
+**Still no `license` manifest key.** The case for one is better than it was — the manifest
+*is* installed for a provider, and the install prompt could show the licence at the moment
+consent is given. But it is a manifest-contract change, it would be advisory (nothing can
+verify a claim in a `.conf`), and the notice in the payload is the part that has legal
+work to do. It stays deferred, now with a reason rather than by omission.
 
 ## 4. "Simple debug/terminal" — scope decision
 

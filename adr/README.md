@@ -189,4 +189,5 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0125](0125-repository-signing-keys-list.md) | Every repository signing key rio trusts is listed, and can be forgotten | Accepted; amended by 0126 | 2026-09-19 |
 | [0126](0126-signing-key-confirmed-by-the-user.md) | A signing key is trusted when the user confirms it, never because it arrived first | Accepted | 2026-09-19 |
 | [0127](0127-artwork-rio-can-pass-on.md) | rio ships only artwork it can pass on | Accepted | 2026-09-20 |
-| [0128](0128-mit-license.md) | rio is MIT-licensed | Accepted | 2026-09-20 |
+| [0128](0128-mit-license.md) | rio is MIT-licensed | Accepted; amended by 0129 | 2026-09-20 |
+| [0129](0129-extension-payload-carries-its-licence.md) | An extension payload carries its licence inside it | Accepted | 2026-09-20 |
