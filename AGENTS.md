@@ -6713,11 +6713,12 @@ this artwork and looking at the result magnified:
 **How the artwork is chosen.** jka supplied three Redeemer variants; each was cut and
 compared **at 16/24/32 over both dark and light chrome** before deciding, because that is
 the comparison the decision turns on and none of it is visible at 512px. `icons/active`
-names the winner and `icons/sources/` keeps the rest, so this section states the *test*,
-not a running log — the whole point of the switching mechanism is that the answer can
-change cheaply.
+names the artwork in force and `icons/sources/` holds what the project may ship, so this
+section states the *test*, not a running log — the whole point of the switching mechanism
+is that the answer can change cheaply.
 
-What the three showed, which is the reusable part:
+What the three showed at the time, which is the reusable part (none of the three is in
+the tree now — D120):
 
 - `redeemer-yellow` — a pale disc with no outline. Legible on dark chrome, **washy on
   light**: recorded as a known limit when it shipped. It could not be fixed downstream —
