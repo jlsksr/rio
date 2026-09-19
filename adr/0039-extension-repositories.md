@@ -54,7 +54,7 @@ in the detail section, and one row per unreachable source.
 
 Initially `version` was an opaque string, rio used plain HTTP only, and an
 `https://` source was refused with advice to use a TLS proxy. rio ships with one
-default source, `http://rio.skylm.org/rio`, written only on the first run.
+default source, `http://rio.skylm.org/extensions`, written only on the first run.
 
 ## Alternatives considered
 
@@ -75,3 +75,26 @@ be served by any web server and published with three text files.
 - Network behaviour could not be tested live at first. A charset defect in fetched
   payloads went unnoticed until ADR-0106 found it, which is why network code is now
   also tested over loopback (ADR-0116).
+
+## Amendment, 2026-09-19: the default source's URL
+
+The default source was `http://rio.skylm.org/rio` until 2026-09-19 and is now
+`http://rio.skylm.org/extensions`. The host already says "rio", so the `/rio` segment
+stuttered and carried no information, while the new path says what is served there. The
+content behind it also stopped being a demonstration: it is now a git repository with a
+remote, maintained like the rest of the project.
+
+The reason to move it at this point rather than later is the planned signing work. Under
+that design the source URL is the principal a publisher's key is trusted against, and the
+default source is the one seed that ships with a key already trusted. Changing the URL
+after users have trusted a key at the old one would oblige every one of them to add a new
+source and trust the key again. Changing it before anyone has costs one constant in the
+GUI and a line of documentation in two places.
+
+`/rxs`, for "Rio Extension Store", was weighed and rejected on two grounds. An acronym
+nobody can expand would appear verbatim in every user's sources list and in the
+Repositories… dialog they type it into. And "Store" promises curation, approval and a
+central authority, which is precisely what the trust model above refuses: the sources list
+is the trust list, and there is no operator to appeal to. Once signing lands the word
+would mislead further, inviting users to read a key trusted on first use as an
+endorsement rather than as a record of who published.
