@@ -8147,7 +8147,7 @@ proc repo_sums_parse {text} {
 proc sig_mark {state} {
 	switch -- $state {
 		signed     { return "signed" }
-		unverified { return "unverified" }
+		unverified { return "unchecked" }
 	}
 	return "unsigned"
 }
@@ -8167,6 +8167,16 @@ proc ext_consent_sig_line {source} {
 	return "NOT SIGNED: nothing vouches for these files. Over plain http, anyone between you and the server could have changed them."
 }
 
+# The hash the core reported for a fetch, or "". A core older than D118 answers
+# repo.fetch without one however politely it is asked (D30 lets a GUI attach to any
+# core), and that is not a detail to discover through a Tcl error mid-scan: it means
+# this core cannot check a signature at all, which is the same situation as having no
+# ssh-keygen and is handled in the same place.
+proc fetch_hash {r} {
+	if {[dict exists $r sha256]} { return [dict get $r sha256] }
+	return ""
+}
+
 proc repo_sig_of {source} {
 	if {[dict exists $::repo_sig $source]} { return [dict get $::repo_sig $source] }
 	return [dict create state unsigned signer "" sums {}]
@@ -8180,6 +8190,7 @@ proc repo_sig_of {source} {
 proc repo_file_ok {source path hash} {
 	set sig [repo_sig_of $source]
 	if {[dict get $sig state] ne "signed"} { return 1 }
+	if {$hash eq ""} { return 0 }   ;# asked for, not answered: check nothing, trust nothing
 	set sums [dict get $sig sums]
 	if {![dict exists $sums $path]} { return 0 }
 	return [expr {[string tolower $hash] eq [dict get $sums $path]}]
@@ -8192,6 +8203,25 @@ proc repo_file_ok {source path hash} {
 # Returns {ok 1 state … signer … sums …} or {ok 0 code … error … ?key …?}. Every
 # refusal is the WHOLE source: a signed repository is signed as one thing, and
 # "most of it verified" is not a state a user can act on.
+# "This signature cannot be checked here" — no ssh-keygen, one too old, a core that
+# can't hash, or a core that doesn't know sig.verify at all. NOT the same as a
+# signature that failed, and never allowed to become it.
+#
+# A source nobody has trusted yet loses nothing by listing as unsigned: rio was not
+# going to check anything for it either way. One whose key IS trusted would lose the
+# whole point of having trusted it, so it is refused — unless the user turned the
+# switch on, and then it lists loudly as `unverified`.
+proc _sig_cant_check {trusted why} {
+	if {$trusted eq ""} {
+		return [dict create ok 1 state unsigned signer "" sums {}]
+	}
+	if {$::repo_allow_unverified} {
+		return [dict create ok 1 state unverified signer "" sums {}]
+	}
+	return [dict create ok 0 code sig_no_tool \
+		error "rio can't check this repository's signature: $why. Fix that on the core's host — openssh 8.0 or newer, and a rio core new enough to hash what it fetches — or, to use the repository unchecked, turn on Preferences ▸ Extensions ▸ \"Use repositories rio can't check\"."]
+}
+
 proc repo_sig_check {base pubkey markerhash} {
 	set trusted [repo_key_of $base]
 	if {$pubkey eq "" && $trusted eq ""} {
@@ -8220,21 +8250,17 @@ proc repo_sig_check {base pubkey markerhash} {
 		return [dict create ok 0 code sig_missing \
 			error "This repository is signed, but SHA256SUMS or SHA256SUMS.sig couldn't be fetched from it. A publish that uploaded the payloads and not the signature looks exactly like this."]
 	}
-	set v [sig_verify [dict get $sr text] [dict get $gr text] $pubkey $base \
-		[expr {[dict exists $sr sha256] ? [dict get $sr sha256] : ""}]]
+	# A core older than D118 hashes nothing, however it is asked: no hash, no way to
+	# check a single file even if the signature itself verified. Same situation as no
+	# ssh-keygen, so the same answer — and found HERE, rather than as a Tcl error at
+	# the first file compared.
+	if {$markerhash eq "" || [fetch_hash $sr] eq ""} {
+		return [_sig_cant_check $trusted \
+			"the core this GUI is attached to is older than rio's repository signing and can't hash what it fetches"]
+	}
+	set v [sig_verify [dict get $sr text] [dict get $gr text] $pubkey $base [fetch_hash $sr]]
 	if {![dict get $v available]} {
-		# The tool is missing, not the signature (D118). A source nobody has trusted
-		# yet loses nothing by listing as unsigned; one with a trusted key would lose
-		# the whole point of having trusted it, so it is refused — unless the user
-		# said otherwise, in which case it lists loudly as `unverified`.
-		if {$trusted eq ""} {
-			return [dict create ok 1 state unsigned signer "" sums {}]
-		}
-		if {$::repo_allow_unverified} {
-			return [dict create ok 1 state unverified signer "" sums {}]
-		}
-		return [dict create ok 0 code sig_no_tool \
-			error "[dict get $v reason]. Install openssh (OpenSSH 8.0 or newer) there, or, to use this repository without checking it, turn on Preferences ▸ Extensions ▸ \"Use repositories rio can't check\"."]
+		return [_sig_cant_check $trusted [dict get $v reason]]
 	}
 	if {![dict get $v verified]} {
 		return [dict create ok 0 code sig_bad \
@@ -8243,8 +8269,8 @@ proc repo_sig_check {base pubkey markerhash} {
 	set sums [repo_sums_parse [dict get $sr text]]
 	# The marker carried the key, so it must be covered by the sums it pointed at —
 	# checked AFTER verification, and before the key is trusted for the first time.
-	if {$markerhash ne "" && (![dict exists $sums rio-repository.conf]
-			|| [dict get $sums rio-repository.conf] ne [string tolower $markerhash])} {
+	if {![dict exists $sums rio-repository.conf]
+			|| [dict get $sums rio-repository.conf] ne [string tolower $markerhash]} {
 		return [dict create ok 0 code hash_mismatch \
 			error "The signature verifies, but rio-repository.conf isn't the file it vouches for. The repository's SHA256SUMS is out of date, or these files are not the ones that were signed."]
 	}
@@ -8402,7 +8428,7 @@ proc repo_source_scan {base} {
 	set dirs {}
 	set ir [repo_fetch $base/index $signed]
 	if {[dict get $ir ok] && [dict get $ir status] == 200} {
-		if {$signed && ![repo_file_ok $base index [dict get $ir sha256]]} {
+		if {$signed && ![repo_file_ok $base index [fetch_hash $ir]]} {
 			return [repo_hash_refusal $base index]
 		}
 		set dirs [repo_parse_index [dict get $ir text]]
@@ -8419,7 +8445,7 @@ proc repo_source_scan {base} {
 	foreach d $dirs {
 		set mr [repo_fetch $base/$d/rio-extension.conf $signed]
 		if {![dict get $mr ok] || [dict get $mr status] != 200} continue
-		if {$signed && ![repo_file_ok $base $d/rio-extension.conf [dict get $mr sha256]]} {
+		if {$signed && ![repo_file_ok $base $d/rio-extension.conf [fetch_hash $mr]]} {
 			return [repo_hash_refusal $base $d/rio-extension.conf]
 		}
 		if {[catch {rio::conf::parse [dict get $mr text]} mc]} continue
@@ -8708,7 +8734,7 @@ proc ext_install {variant {consented 0}} {
 			report_error "Install of '$name' aborted: $f could not be fetched ($why). Nothing was changed."
 			return 0
 		}
-		if {$signed && ![repo_file_ok $source $dir/$f [dict get $r sha256]]} {
+		if {$signed && ![repo_file_ok $source $dir/$f [fetch_hash $r]]} {
 			report_error "Install of '$name' aborted: $dir/$f is not the file this repository's\
 				signature vouches for. Refresh the list — if the publisher re-uploaded without\
 				re-signing, the list you are looking at is older than the files. Nothing was changed."
@@ -9167,7 +9193,8 @@ proc dead_phrase {code} {
 		untrusted_cert { return "certificate not trusted" }
 		key_changed    { return "signing key changed" }
 		sig_bad        { return "signature doesn't verify" }
-		sig_missing    { return "signature missing" }
+		sig_missing    { return "no signature found" }
+		sig_stale      { return "the signature is out of date" }
 		sig_dropped    { return "no longer signed" }
 		sig_no_tool    { return "can't check the signature" }
 		hash_mismatch  { return "files don't match the signature" }

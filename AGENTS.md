@@ -6783,16 +6783,26 @@ is defended is every scan and install after it, which is an extension's whole li
 
 **No downgrade, and no partial trust.** Once a key is trusted, a key that vanishes, a
 missing or bad signature, and a file whose hash doesn't match are all refusals of the
-**whole source** — "most of it verified" is not a state a user can act on. Every file rio
-fetches from a signed source must be *in* `SHA256SUMS` with that hash: a publisher's sums
-cover everything served, so an unlisted file is not an omission but a file from somewhere
-else. The server's autoindex is exempt (it is not a file of the repository), and every
-directory it names must still produce a manifest the sums vouch for.
+**whole source** — "most of it verified" is not a state a user can act on. The rule is
+about *losing* a signature: a marker that announces a key on a source nothing is trusted
+for yet, with no sums published to go with it, is simply **unsigned** — there is nothing
+to downgrade from. Every file rio fetches from a signed source must be *in* `SHA256SUMS`
+with that hash: a publisher's sums cover everything served, so an unlisted file is not an
+omission but a file from somewhere else. Three things are necessarily outside that rule —
+`SHA256SUMS` and its `.sig`, which are what the checking is *made of*, and the server's
+autoindex, which is not a file of the repository at all. The marker is inside it, checked
+by its own hash against the sums it pointed at; every directory an autoindex names must
+still produce a manifest the sums vouch for.
 
-**The one way out is for the missing tool, not the missing signature** (jka, 2026-09-19,
-pointing at D114 rather than accepting a flat refusal). Without `ssh-keygen` nothing can
-be checked: a source nobody has trusted yet simply lists as *unsigned*, but one whose key
-**is** trusted is refused — that is the fail-closed shape of https without tcltls.
+**The one way out is "can't check", never "checked and failed"** (jka, 2026-09-19,
+pointing at D114 rather than accepting a flat refusal). *Can't check* is one state with
+several causes, and the code says so in one place (`_sig_cant_check`): no `ssh-keygen`,
+one older than 8.0, a core that doesn't know `sig.verify`, or **a core older than D118,
+which hashes nothing it fetches** — a real case, since D30 lets this GUI attach to any
+core, and one that must be found as that rather than as a Tcl error at the first file
+compared. A source nobody has trusted yet then simply lists as *unsigned* — rio was not
+going to check anything for it either way — but one whose key **is** trusted is refused;
+that is the fail-closed shape of https without tcltls.
 *Preferences ▸ Extensions ▸ "Use repositories rio can't check"*, off by default, lets
 those through marked **unverified**, never *signed*. It touches nothing else: a bad
 signature, a changed key or a mismatched hash is refused with the switch on. Unlike
@@ -6828,12 +6838,14 @@ key's public half and signatures made once, because a signature generated at tes
 from the same data path would agree with a systematic marshalling bug and prove nothing;
 plus the no-tool, too-old and no-reason answers, which are stubbed because a host that
 has OpenSSH cannot produce them. `http.test` covers the byte contract, including that the
-hash of a body and the hash of its decoded text differ. `repos.tcl` (+56 checks) covers
+hash of a body and the hash of its decoded text differ. `repos.tcl` (+65 checks) covers
 the policy on a stubbed verify seam: first use, the seed, rotation refused then trusted,
 every downgrade, a tampered payload at install and a tampered manifest at scan, an
-unlisted file, and the switch — including that it does *not* excuse a bad signature.
-Seven injections, each failing by name; two **passed** and were acted on (the
-`namespaces=` option removed, the first-use ordering given the test it lacked).
+unlisted file, a core that can't hash, and the switch — including that it does *not*
+excuse a bad signature. Seven injections, each failing by name; two **passed** and were
+acted on (the `namespaces=` option removed, the first-use ordering given the test it
+lacked). A self-review after that found the one real defect of the change: the old-core
+path reached `dict get` on a hash that isn't there, which is a crash, not a refusal.
 **Verified live** against rio.skylm.org/extensions through rio's own scan: five
 extensions, all marked signed, `SHA256:ThigJDQbjz1G8yvZMJ7grlLlcOA6uS+ZDWvJdJPVfG0`.
 

@@ -1068,7 +1068,7 @@ set ::sig_available 0
 s_fixtures
 s_scan 1                                  ;# S's key is still trusted from above
 ok "no tool: a trusted source is refused" [s_code] sig_no_tool
-ok "no tool: the message names the fix"   [string match "*Install openssh*Preferences*" [lindex [s_dead] 1]] 1
+ok "no tool: the message names the fix"   [string match "*openssh 8.0 or newer*Preferences*" [lindex [s_dead] 1]] 1
 set ::repo_allow_unverified 1
 s_scan 1
 ok "no tool: the switch lets it through"  [s_code] {}
@@ -1087,6 +1087,31 @@ ok "no tool: an untrusted source just lists as unsigned" \
 	[list [s_code] [dict get [lindex $::repo_variants 0] sig]] {{} unsigned}
 ok "no tool: and trusts nothing"        [repo_key_of $S] ""
 set ::sig_available 1
+
+# --- a core too old to hash what it fetches ------------------------------------------------
+# D30 lets this GUI attach to any core, including one from before D118, which answers
+# repo.fetch without a hash however politely it is asked. Nothing can be checked then
+# either — and it must be found as that, not as a Tcl error at the first comparison.
+rename repo_fetch _hashless_real
+proc repo_fetch {url {hash 0}} {
+	set r [_hashless_real $url $hash]
+	if {[dict exists $r sha256]} { dict unset r sha256 }
+	return $r
+}
+s_fixtures
+s_scan                                    ;# untrusted: nothing was going to be checked
+ok "old core: an untrusted source still lists" \
+	[list [s_code] [dict get [lindex $::repo_variants 0] sig]] {{} unsigned}
+repo_key_trust $S $KEY1
+s_scan 1
+ok "old core: a trusted source is refused"  [s_code] sig_no_tool
+ok "old core: and says what is too old"     [string match "*older than rio's repository signing*" [lindex [s_dead] 1]] 1
+set ::repo_allow_unverified 1
+s_scan 1
+ok "old core: the switch lets it through as unverified" \
+	[list [s_code] [dict get [lindex $::repo_variants 0] sig]] {{} unverified}
+set ::repo_allow_unverified 0
+rename repo_fetch {} ; rename _hashless_real repo_fetch
 
 # --- an unsigned repository is unchanged -------------------------------------------------
 sources_save [list $A]
