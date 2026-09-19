@@ -721,5 +721,32 @@ ok "the section covers the masked field" [expr {$maskpar ne ""}] 1
 ok "the masked field's entries are the ones documented" [md_bold $maskpar] \
 	[lsort -unique $::masklabels]
 
+# --- 13. the pre-seeded repository URL the docs quote is the one rio seeds ----
+#
+# ::default_repo is written into a fresh sources.list on a true first run (D39), and it
+# is a user-visible string: the manual tells the reader which URL will be there and how
+# to remove it. It is also the kind of fact that drifts silently — the URL moved from
+# .../rio to .../extensions once already, and a reader who copies the stale one adds a
+# repository that 404s while every page still reads perfectly.
+#
+# Derived from ::default_repo, never spelled out here: the host comes out of the
+# constant, every inline-code URL on that host across the manual and the user-facing
+# root documents is collected, and the set must be exactly {the default}. Both
+# directions — an old path left behind is a second entry, and dropping the mention
+# altogether leaves an empty set.
+set ::rhost ""
+regexp {^https?://([^/]+)} $::default_repo -> ::rhost
+ok "the default repo has a host" [expr {$::rhost ne ""}] 1
+
+set quoted {}
+foreach p $::menu_docs {
+	foreach {_ u} [regexp -all -inline "`(https?://[string map {. \\.} $::rhost]\[^`\]*)`" \
+		[slurp $p]] {
+		lappend quoted $u
+	}
+}
+ok "the pre-seeded repository URL the docs quote" [lsort -unique $quoted] \
+	[list $::default_repo]
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

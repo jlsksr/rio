@@ -95,7 +95,7 @@ writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
 picked up the next time the Extensions window scans.
 
 On a **first run** rio pre-fills this file with the project's own repository
-(`http://rio.skylm.org/rio`) so the Extensions window isn't empty out of the box.
+(`http://rio.skylm.org/extensions`) so the Extensions window isn't empty out of the box.
 Remove it in *Repositories…* (or delete the line) and it stays gone — the pre-fill
 happens only when the file doesn't yet exist, never on top of your edits.
 Otherwise it's optional: no file means no repositories.
