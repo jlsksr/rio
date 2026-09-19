@@ -8083,7 +8083,7 @@ proc repo_keys_save {} {
 	catch {
 		file mkdir [file dirname $path]
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
-		puts $f "# Signing keys rio trusts for extension repositories (D118). One section"
+		puts $f "# Signing keys rio trusts for extension repositories (D118, D119). One section"
 		puts $f "# per repository, written when you confirmed that repository's key."
 		puts $f "#"
 		puts $f "# Delete a section to forget that key: rio then asks again the next time"
