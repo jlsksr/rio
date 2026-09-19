@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Thirteen groups of checks. Each exists because something drifted once.
+Fifteen groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -79,6 +79,21 @@ Thirteen groups of checks. Each exists because something drifted once.
     collected, and the set must be exactly the default. It exists because the URL moved
     from `/rio` to `/extensions` and a reader copying the stale one would add a
     repository that 404s while every page still read perfectly.
+14. **The words a repository's signature makes rio say.** D118 put three user-visible
+    vocabularies on screen — the one-word mark every version line ends in (`sig_mark`)
+    and the phrase a refused source carries on its row (`dead_phrase`) — and
+    `extensions.md` tabulates them. Behaviour, not source text: every phrase comes out
+    of calling the proc, and the refusal *names* are enumerated from the live proc body,
+    so a refusal added to rio with no row in the manual fails here rather than waiting
+    to be noticed.
+15. **Every door out of the Preferences window is named in the manual.** Check 11 in
+    reverse, and the direction that was missing: check 11 holds the paths the docs quote
+    against the real window, and nothing held the window against the docs — so a new
+    button could land with every check green while the manual went on describing the old
+    way of doing that job. That is exactly what D118's *Repository signing keys…* did.
+    Buttons only, because a checkbutton is a setting and check 4 already covers those;
+    the labels are read off the real widgets, and *where* the manual names one is the
+    writer's business, so it matches the label in the prose rather than a full path.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:
