@@ -225,7 +225,9 @@ All three files use rio's conf format (AGENTS.md D21): `key = value` lines,
 `[section]` headers, `#` comments, UTF-8 — **data, parsed and never executed**.
 
 `rio-repository.conf`: `name` is required (shown as the repository's name);
-`description` and `maintainer` are optional and shown alongside.
+`description` and `maintainer` are optional and shown alongside. `key` is optional
+and publishes the signing key rio checks your `SHA256SUMS` against — *Signing your
+repository*, below.
 
 `rio-extension.conf`, per extension directory:
 
@@ -322,6 +324,73 @@ understanding before you publish one:
   and makes network calls with it, the install dialog says so and names your source.
   Publish from a source people can trust with their model credentials.
 
+### Signing your repository (optional, and worth it)
+
+rio treats plain `http://` as first-class, which means anyone between your server
+and a user can rewrite a payload in flight. A signature is what makes that fail —
+without a certificate, a registry, or an account anywhere. It is two commands at
+publish time and needs no rio tooling.
+
+**Once**, make a key and publish its public half in `rio-repository.conf`:
+
+    ssh-keygen -t ed25519 -f ~/.ssh/my-rio-repo -C 'my rio repository'
+    cut -d' ' -f1,2 ~/.ssh/my-rio-repo.pub        # type and base64, no comment
+
+    key = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA…    ← into rio-repository.conf
+
+**Every publish**, from the repository root — note that adding the `key =` line
+changed a hashed file, so do it in that order:
+
+    find . -path ./.git -prune -o -type f \
+        ! -name 'SHA256SUMS' ! -name 'SHA256SUMS.sig' -print \
+        | sed 's|^\./||' | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
+    ssh-keygen -Y sign -f ~/.ssh/my-rio-repo -n rio-repository SHA256SUMS
+
+`SHA256SUMS` is `sha256sum`'s own format (OpenBSD's `sha256 -r` prints the same),
+covering **every file you serve**; `SHA256SUMS.sig` signs that one file, so it
+covers the repository transitively. There is no per-extension signature — you sign
+the repository, not `vi/`. `-n rio-repository` is the namespace, and it is what
+stops a signature you made for git being replayed as a repository signature. Keep
+the private key off the web server; a passphrase plus `ssh-add` keeps signing
+non-interactive.
+
+What rio does with it (AGENTS.md D118), so you can predict what your users see:
+
+- The **first** scan that verifies your signature records your key. From then on
+  only that key speaks for your repository, and rio checks every file it fetches
+  from you — marker, `index`, manifests, payloads — against `SHA256SUMS`, at scan
+  time and again before an install writes anything.
+- **A file that isn't in `SHA256SUMS` is refused**, as firmly as one whose hash
+  differs: your sums cover everything served, so an unlisted file did not come from
+  you. This is the failure mode to know about — **re-sign on every publish**, and
+  upload payloads first, `SHA256SUMS` and `SHA256SUMS.sig` last (or stage and swap).
+  A client scanning mid-upload otherwise sees old sums against new payloads and
+  refuses the whole repository until you finish.
+- **Rotating your key** is a deliberate act: every rio that trusted the old one
+  refuses the new one as *changed* until the user reviews the fingerprints and
+  accepts. There is no cross-signing and no revocation — expect to announce it.
+- **Dropping signing again** is refused the same way, so don't start if you can't
+  keep it up. An unsigned repository stays perfectly valid; it is simply marked
+  *unsigned* for the user, which is what it is.
+
+Your dry run is the same check a user's rio will do, and it is worth running before
+every upload:
+
+    sha256sum -c SHA256SUMS --quiet && echo 'payloads ok'
+    printf '%s %s\n' http://yourserver.example/rio \
+        "$(cut -d' ' -f1,2 ~/.ssh/my-rio-repo.pub)" > /tmp/allowed-signers
+    ssh-keygen -Y verify -f /tmp/allowed-signers -I http://yourserver.example/rio \
+        -n rio-repository -s SHA256SUMS.sig < SHA256SUMS
+
+The two catch different things, and you want both: a payload changed after hashing
+passes the signature check and fails `sha256sum -c`; an edited `SHA256SUMS`, the
+wrong key, or the wrong namespace does the opposite. (rio derives the identity from
+the source URL itself, so you never ship an allowed-signers file.)
+
+**Verifying needs OpenSSH 8.0+ on the user's core host** — everything current has
+it; Windows 10 1809's bundled 7.7 does not. A user without it is told what to
+install rather than served your repository unchecked.
+
 ### The forward-compatibility contract
 
 Two guarantees make a repository you publish today durable:
@@ -346,6 +415,11 @@ of it:
 
     curl http://yourserver.example/rio/rio-repository.conf   # does the marker parse?
     curl http://yourserver.example/rio/index                 # does it list your dirs?
+
+If you sign, check the **served** bytes rather than your working tree — a partial
+upload passes locally every time. Mirror the published tree into an empty directory
+(`wget -r`, or curl every path `SHA256SUMS` names) and run the two checks from
+*Signing your repository* there.
 
 ### Versions are semver
 
@@ -383,14 +457,20 @@ remembers what it installed, and from where.
 
 - Installing a **syntax highlighter or an editing mode is installing Tcl code
   that runs inside the user's editor**, with the user's permissions. rio says
-  exactly that at install time, next to your source URL. There is no sandbox
-  and no signing yet (roadmap): **your URL is your reputation**, and a user's
-  sources list is their trust list — exactly like apt's.
+  exactly that at install time, next to your source URL. There is no sandbox:
+  **your URL is your reputation**, and a user's sources list is their trust list —
+  exactly like apt's.
+- **What a signature adds, and what it doesn't.** It says these bytes came from
+  the holder of your key and were not altered in transit — over plain http, which
+  is the point. It says nothing about the code being good, reviewed or approved by
+  anyone. There is no store here and no authority; signing is integrity, not
+  endorsement.
 - **What https adds, and what it doesn't.** It proves the files came from the
   host in the URL and weren't altered on the way. It says nothing about who
   wrote them or whether the host itself is trustworthy — that is still your URL
   and your reputation. The same repository over http and over https is the
-  same repository to rio: a user who switches schemes keeps their updates.
+  same repository to rio: a user who switches schemes keeps their updates, and
+  their trust in your signing key.
 - A **theme is data** — parsed, validated, never executed — and the consent
   dialog says that too.
 - Every installed extension is **marked with its provenance** (source URL +
