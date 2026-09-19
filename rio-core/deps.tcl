@@ -32,6 +32,7 @@ namespace eval rio::deps {
 		json         "tcllib (apt/pkg_add: tcllib, Alpine: tcl-lib)"
 		json::write  "tcllib (apt/pkg_add: tcllib, Alpine: tcl-lib)"
 		md5          "tcllib (apt/pkg_add: tcllib, Alpine: tcl-lib)"
+		sha256       "tcllib (apt/pkg_add: tcllib, Alpine: tcl-lib)"
 		Tk           "Tk (apt: tk, OpenBSD: tk%8.6)"
 		tls          "tcltls (apt: tcl-tls, apk/pkg_add: tcltls)"
 	}
