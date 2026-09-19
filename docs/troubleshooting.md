@@ -36,14 +36,18 @@ Some messages already have their answer written down:
   complaint is right there, a missing dependency being the usual one.
 - **`certificate not trusted`** on a repository in the Extensions window — see
   [a certificate that isn't trusted](extensions.md#a-certificate-that-isnt-trusted).
+- **`signing key not confirmed`** on a repository row — nothing is wrong: it signs
+  with a key you have never confirmed, and rio lists and installs nothing from a
+  repository until you do. Select the row, press **Review signing key…**, and see
+  [confirming a repository's key](extensions.md#confirming-a-repositorys-key).
 - **`signing key changed`, `signature doesn't verify`, `signature missing`,
   `no longer signed`, `files don't match the signature`** on a repository row — its
   signature didn't check out, so nothing from it is offered. Select the row for the
   whole sentence, and see
   [when rio refuses a signed repository](extensions.md#when-rio-refuses-a-signed-repository);
   a changed key can be reviewed and accepted from that row.
-- **`can't check the signature`** — a repository whose key rio trusts, and no way to
-  check it: the core's host has no `ssh-keygen` from OpenSSH 8.0 or newer, or the
+- **`can't check the signature`** — a repository whose key you confirmed, and no way
+  to check it: the core's host has no `ssh-keygen` from OpenSSH 8.0 or newer, or the
   core itself predates repository signing. Fix that on the core's host, or see
   [repositories rio can't check](extensions.md#repositories-rio-cant-check).
 - **The agent refused https**, naming `tcltls` and host-name checks — see

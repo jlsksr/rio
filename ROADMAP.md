@@ -244,27 +244,30 @@ for later:
   file is specced (CONTRIBUTING) and costs publishers one line; consuming it —
   a "host-validated" badge in the Extensions window, and an official-approval
   marking on top — is not built.
-- **Signing** — *landed* (AGENTS.md D118; designed with jka 2026-09-16, built
+- **Signing** — *landed* (AGENTS.md D118 and D119; designed with jka 2026-09-16, built
   2026-09-19 once rio.skylm.org/extensions was publishing signatures). It extends
   D39's apt-style trust model (the sources list is the trust list) without a central
   authority, the way D109/D111 did for transport. A publisher signs one root
   `SHA256SUMS` with an ed25519 SSH key as git does; rio verifies it by running
   `ssh-keygen -Y verify` on the core's host and checks every file it fetches against
-  those hashes. Trust is on first use — the key a marker publishes, recorded in
-  `repository-keys.conf` — with rio's own repository pre-trusted and a rotation
-  refused until the user trusts the new key. Unsigned repositories stay allowed and
-  are marked; once a source is trusted there is no downgrade.
-  - **Known limits, unchanged:** first use cannot catch an attacker already on the
-    path the first time; no freshness check (a replayed older `SHA256SUMS` only
-    freezes updates, and D107 never downgrades); rotation is the "changed" step, with
-    no cross-signing; no revocation (D109 addendum).
+  those hashes. A key is trusted when the **user confirms it** (D119) — the source is
+  refused until then and the fingerprint is one click away, the way `ssh` asks — after
+  which it is recorded in `repository-keys.conf` and a rotation is refused until the
+  new key is confirmed too. rio's own repository is pre-trusted. Unsigned repositories
+  stay allowed and are marked; once a source is trusted there is no downgrade.
+  - **Known limits, unchanged:** confirming narrows the first-scan attack rather than
+    closing it — an attacker on the path the first time can still offer a key that
+    verifies, they just have to get a human to accept a fingerprint the publisher's own
+    page contradicts; no freshness check (a replayed older `SHA256SUMS` only freezes
+    updates, and D107 never downgrades); rotation is the "changed" step, with no
+    cross-signing; no revocation (D109 addendum).
   - **The keys list landed too** (2026-09-19, deferred at first and built once the
     mechanism had settled): *Preferences ▸ Extensions ▸ Repository signing keys…* —
-    every source, its fingerprint, when it was trusted, and **Forget selected**, with
+    every source, its fingerprint, when it was confirmed, and **Forget selected**, with
     rio's own pre-trusted key shown as a `(built in)` row so a fresh install doesn't
-    look like it trusts nothing. Forgetting is not distrust: the next scan trusts on
-    first use again, which is what deleting the section from `repository-keys.conf`
-    always did. Nothing open here now.
+    look like it trusts nothing. Forget means what it says: the repository is refused
+    again until a key is confirmed for it. Forgetting the built-in row withdraws even
+    that. Nothing open here now.
 - **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
   B", successor to D19). `provider` is a `kind` in the **same** repositories — one
   infrastructure, a publisher adds `kind = provider` (plus `provider-api` and

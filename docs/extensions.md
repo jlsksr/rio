@@ -64,66 +64,97 @@ list *Update All* shows before it starts marks every row the same way, since tha
 one confirmation stands in for all of them. The provenance ledger `extensions.json`
 records the fingerprint as `signed_by`.
 
-### Trust on the first scan
+### Confirming a repository's key
 
-There is no central index and no authority to ask, so rio works the way an SSH
-client does: **the first scan that verifies a repository records its key**, and
-from then on that key, and only that key, speaks for that repository. rio's own
-repository ships with its key already trusted, so a fresh install is never asked a
-question it has no way to answer.
+There is no central index and no authority to ask, so rio does what an `ssh` client
+does with a host it has never seen: it shows you the key and waits. **A scan never
+trusts a key by itself.** The first time rio meets a repository that publishes one,
+that repository is **refused** — it lists as `!! <url> — signing key not confirmed`,
+and nothing from it is listed or installed until you say the key is the publisher's.
 
-***Preferences ▸ Extensions ▸ Repository signing keys…*** lists what rio recorded:
-one row per repository, with the key's **fingerprint** and the date it was trusted.
-The scheme is left off the URL on purpose — moving a repository from `http://` to
-`https://` is a change of route, not of publisher, so its key still counts. rio's own
-repository is listed `(built in)` while it is still in your sources: its key is the
-one rio ships with, so nothing was ever stored for it.
+**To look:** select that row. Its detail pane offers a **Review signing key…**
+button, which opens a dialog headed **Confirm signing key**: the repository, the one
+fingerprint it **offered** — in a box you can select and copy, since comparing a
+fingerprint is the whole point — and two buttons, **Go Back**, the default, which
+changes nothing, and **Trust This Key**. One fingerprint, because there is nothing
+inside rio to compare it against; that comparison is yours to make.
 
-**Forget selected** takes a key back. That is **not** distrust — the next scan trusts
-whatever that repository publishes then, exactly as the first scan did. (On the
-`(built in)` row there is nothing stored to forget, so the button does nothing and
-says so; removing the repository in *Repositories…* is what stops rio using it.)
+**Confirm that fingerprint away from this connection** — the publisher's own page, a
+release note, a message from them. Anyone who can answer for the repository can offer
+a key whose signature verifies; only the publisher can tell you which key is theirs.
+rio then records exactly the key the dialog showed you, and from then on that key,
+and only that key, speaks for that repository: the next scan lists it as `signed`,
+and a change of key is [a question again](#the-publisher-changed-their-key).
+
+rio asks only where the answer is worth something. The refusal comes *after* the
+signature has verified and after `rio-repository.conf` has been checked against the
+hashes that signature covers, so the fingerprint you are shown always already governs
+files rio holds — rather than being a key that signs nothing here.
+
+rio's **own** repository ships with its key already trusted, so a fresh install is
+never asked a question it has no way to answer. It is the one key you were not asked
+about, and you can take it back.
+
+### The keys you have confirmed
+
+***Preferences ▸ Extensions ▸ Repository signing keys…*** lists them: one row per
+repository, with the key's **fingerprint** and the date you confirmed it. The scheme
+is left off the URL on purpose — moving a repository from `http://` to `https://` is
+a change of route, not of publisher, so its key still counts. rio's own repository is
+listed `(built in)` while it is still in your sources.
+
+**Forget selected** takes a key back, and it means what it says: that repository is
+refused again on the next scan, as `signing key not confirmed`, until you confirm a
+key for it. On the `(built in)` row it **withdraws** the key rio ships with — the row
+stays, marked `(built in, withdrawn)`, and rio then asks about its own repository
+like any other's. Selecting either form of that row explains it, in the line under
+the list, before you press anything. Confirming a key for that repository later
+replaces the withdrawal.
 
 The same list is the file `repository-keys.conf`, beside your `sources.list` (see
 [where everything lives](preferences.md#where-everything-lives)). It is commented and
-you may edit it: deleting a section is exactly what **Forget selected** does for you.
+you may edit it: deleting a section is exactly what **Forget selected** does for you,
+and a section with no `key` line at all is the written form of a withdrawal — it says
+rio trusts no key for that repository, and it outranks the key rio ships with.
 
-Worth knowing what first use cannot do: if someone is already between you and a
-repository the **very first** time rio looks at it, they can serve their own key,
-their own hashes and their own signature over them, and rio has nothing to compare
-that against. What it does protect is every scan and every install after that one
-— which is the whole life of an installed extension. Confirming a new repository's
-fingerprint against the publisher's own page is the way to close even that gap.
+Worth knowing what confirming can and cannot do. If someone is already between you
+and a repository the **very first** time rio looks at it, they can serve their own
+key, their own hashes and a signature over them, and the dialog will show you their
+fingerprint with nothing inside rio to contradict it — which is why the check against
+the publisher's own page is the part that matters, and rio cannot tell whether you
+made it. What it does guarantee is everything afterwards: every later scan and every
+install is checked against the key you confirmed, which is the whole life of an
+installed extension.
 
 ### The publisher changed their key
 
-A repository later signed by a **different** key is refused, and lists as
-`!! <url> — signing key changed`. That is what a publisher rotating their key looks
-like — and exactly what someone else answering for the repository looks like. rio
-cannot tell them apart, so it asks you.
+A repository later signed by a **different** key than the one you confirmed is
+refused, and lists as `!! <url> — signing key changed`. That is what a publisher
+rotating their key looks like — and exactly what someone else answering for the
+repository looks like. rio cannot tell them apart, so it asks you.
 
-**To look:** select that row. Its detail pane offers a **Review signing key…**
-button, which opens a dialog with the repository, the fingerprint rio **trusted**
-(and the date it did), and the one now **offered** — in a box you can select and
-copy, since comparing a fingerprint is the whole point. Two buttons: **Go Back**,
-the default, which changes nothing, and **Trust the New Key**.
+**To look:** select that row. Its detail pane offers the same **Review signing key…**
+button, and the dialog is the same one with a fingerprint more: headed **Signing key
+changed**, it gives the repository, the fingerprint rio **trusted** (and the date you
+confirmed it), and the one now **offered**. Two buttons: **Go Back**, the default,
+which changes nothing, and **Trust the New Key**.
 
 **Trust it only if you can confirm that fingerprint away from this connection** —
 the publisher's own page, a release note, a message from them. rio then trusts
 exactly the key the dialog showed you, for that repository, and asks again if it
 ever changes. If you later change your mind, forgetting that key in
-*Preferences ▸ Extensions ▸ Repository signing keys…* puts the repository back on
-its first scan ([above](#trust-on-the-first-scan)).
+*Preferences ▸ Extensions ▸ Repository signing keys…* puts the repository back to
+being asked about ([above](#the-keys-you-have-confirmed)).
 
 ### When rio refuses a signed repository
 
-Once a key is trusted for a repository, rio will not quietly stop checking it.
-Each of these refuses the whole repository and nothing from it is offered, with its
-own phrase on the row:
+rio refuses a repository **whole** — nothing from it is listed or installed — and
+never quietly stops checking one. Each of these puts its own phrase on the row:
 
 | In the list | What happened |
 | ----------- | ------------- |
-| `signing key changed` | signed by a different key than the one rio trusted — review it, above |
+| `signing key not confirmed` | it signs with a key you have never confirmed — confirm it, [above](#confirming-a-repositorys-key) |
+| `signing key changed` | signed by a different key than the one you confirmed — review it, above |
 | `signature doesn't verify` | the signature is not a valid signature over that list of hashes |
 | `signature missing` | `SHA256SUMS` or `SHA256SUMS.sig` couldn't be fetched |
 | `no longer signed` | it used to publish a key and no longer does |
@@ -145,19 +176,20 @@ new enough to know about repository signatures at all, which matters only if you
 attach a window to an [older remote core](remote.md). Where either is missing rio
 says `can't check the signature` rather than pretending it checked, and:
 
-- a repository **nobody has trusted a key for** simply lists as `unsigned`, exactly
+- a repository **you have confirmed no key for** simply lists as `unsigned`, exactly
   as it did before signing existed — rio was not going to check anything for it
-  either way;
-- one whose key rio **has** trusted is **refused**, as `can't check the signature`.
-  Using it unchecked is the one thing trusting the key was meant to prevent.
+  either way, so there is nothing to confirm and nothing to refuse;
+- one whose key you **have** confirmed is **refused**, as `can't check the signature`.
+  Using it unchecked is the one thing confirming the key was meant to prevent.
 
 *Can't check* never turns into *checked and failed*: whatever is missing, rio says
 which. The fix is to mend it on the core's host. Where that isn't possible,
 *Preferences ▸ Extensions ▸ "Use repositories rio can't check"* — off by default —
 lets such a repository through, marked `unverified` everywhere a checked one would
 say `signed`, and named as such in the install confirmation. It covers **only** the
-missing means to check: a signature that doesn't verify, a key that changed and a
-file that doesn't match its hash are refused with it on
+missing means to check: it confirms no key on your behalf, and a signature that
+doesn't verify, a key that changed and a file that doesn't match its hash are all
+refused with it on
 (see [preferences](preferences.md#using-a-repository-rio-cant-check)).
 
 Two more things worth knowing:

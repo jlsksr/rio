@@ -765,13 +765,18 @@ ok "the pre-seeded repository URL the docs quote" [lsort -unique $quoted] \
 # then put through dead_phrase to get the words. A comment cannot slip in — it would
 # have to be shaped like a switch arm and survive the call.
 
-proc md_col1 {text from to} {
+# The first column of the tables under a `### ` heading, as a set. The section ends at
+# the next `### `, so renaming a LATER heading can't silently widen or empty a table
+# this check reads — only the heading named here matters, and if that one is gone the
+# empty set fails the comparison rather than passing on the rest of the page.
+proc md_col1 {text from} {
 	set a [string first $from $text]
-	set b [string first $to $text]
-	if {$a < 0 || $b < $a} { return {} }
+	if {$a < 0} { return {} }
+	set body [string range $text [expr {$a + [string length $from]}] end]
+	set b [string first "\n### " $body]
+	if {$b >= 0} { set body [string range $body 0 $b] }
 	set out {}
-	foreach {_ cell} [regexp -all -inline -line {^\| `([^`]+)` \|} \
-		[string range $text $a [expr {$b - 1}]]] { lappend out $cell }
+	foreach {_ cell} [regexp -all -inline -line {^\| `([^`]+)` \|} $body] { lappend out $cell }
 	return [lsort -unique $out]
 }
 
@@ -783,7 +788,7 @@ set marks {}
 foreach state {signed unverified unsigned} { lappend marks [sig_mark $state] }
 ok "a repository is marked three ways" [llength [lsort -unique $marks]] 3
 ok "extensions.md's marks are the ones rio prints" \
-	[md_col1 $ext "### What you see" "### Trust on the first scan"] [lsort -unique $marks]
+	[md_col1 $ext "### What you see"] [lsort -unique $marks]
 
 # Why a source produced nothing, in the few words its row has. `dead_phrase` answers
 # for a code it doesn't know too, so that default is exercised alongside the arms.
@@ -802,8 +807,7 @@ ok "extensions.md names every refusal a source can get" $unsaid {}
 set phrases {}
 foreach code $codes { lappend phrases [dead_phrase $code] }
 set invented {}
-foreach cell [md_col1 $ext "### When rio refuses a signed repository" \
-		"### Repositories rio can't check"] {
+foreach cell [md_col1 $ext "### When rio refuses a signed repository"] {
 	if {[lsearch -exact $phrases $cell] < 0} { lappend invented $cell }
 }
 ok "the refusal table quotes no phrase rio never prints" $invented {}
@@ -856,6 +860,102 @@ foreach l [lsort -unique $doors] {
 }
 ok "every Preferences button is named in the docs" $unnamed {}
 destroy .prefs
+
+# --- 16. the words the two signing-key windows put on screen ------------------
+#
+# D119 made confirming a repository's key something the user does, and the manual now
+# walks a reader through two windows by name: the review dialog behind a refused row —
+# which has two forms, a first sight and a rotation, differing in title and in the
+# button that grants trust — and the `(built in)` row in the keys window, the one row
+# whose Forget does something a reader has to be told about before they press it.
+#
+# Check 15 cannot reach either: neither is the Preferences window, they are what its
+# button and a refused row open. So a renamed button or a reworded row annotation
+# would leave the manual sending a reader after a control that is not there, with
+# every other check green — the same failure check 15 was written for, one door along.
+#
+# Behaviour, not source text: both windows are really built and every string is read
+# off the live widget. Both block in tkwait, so each is driven from the event loop and
+# closed again, as rio-gui/tests/repos.tcl drives them. The poll waits for what the
+# check reads rather than for the toplevel, because filling either window asks the
+# core for a fingerprint and that pumps the event loop mid-build.
+proc dlg_drive {ready script} { after 1 [list dlg_poll $ready $script 0] }
+proc dlg_poll {ready script tries} {
+	if {![uplevel #0 [list expr $ready]] && $tries < 400} {
+		after 10 [list dlg_poll $ready $script [incr tries]]
+		return
+	}
+	uplevel #0 $script
+}
+
+set ::keysave $::repo_keys
+set ::k1 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIdocsonedocsonedocsonedocsonedocs"
+set ::k2 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIdocstwodocstwodocstwodocstwodocs"
+
+# The review dialog: its title, and both buttons. Go Back closes it, so nothing is
+# ever trusted here — the drive destroys the window without choosing.
+proc key_dialog_words {url key} {
+	set ::kwords {}
+	dlg_drive {[winfo exists .extkey.btns.trust]} {
+		set ::kwords [list [wm title .extkey] [.extkey.btns.trust cget -text] \
+			[.extkey.btns.back cget -text]]
+		destroy .extkey
+	}
+	extw_key_review $url $key
+	return $::kwords
+}
+set ::repo_keys {}
+set firstsight [key_dialog_words http://docs.example/repo $::k1]
+dict set ::repo_keys [source_key http://docs.example/repo] \
+	[dict create key $::k1 trusted 2026-01-01 forgotten ""]
+set rotation [key_dialog_words http://docs.example/repo $::k2]
+set ::repo_keys $::keysave
+ok "the signing-key dialog has two forms, and nothing was trusted to get them" \
+	[list [expr {[lindex $firstsight 0] ne [lindex $rotation 0]}] \
+		[expr {[lindex $firstsight 1] ne [lindex $rotation 1]}] \
+		[repo_key_of http://docs.example/repo]] {1 1 {}}
+
+# The keys window's annotation for rio's own row, in both of its states. Read out of
+# the row text, so it is the string a reader compares against what they see.
+proc keys_row_marks {} {
+	set ::krows {}
+	dlg_drive {[winfo exists .repokeys.body.list] && [.repokeys.body.list size] > 0} {
+		set ::krows [.repokeys.body.list get 0 end]
+		destroy .repokeys
+	}
+	repo_keys_dialog
+	set out {}
+	foreach line $::krows {
+		if {[regexp {\((built in[^)]*)\)} $line -> m]} { lappend out $m }
+	}
+	return $out
+}
+set ::srcsave [sources_load]
+sources_save [list $::default_repo]
+set ::repo_keys {}
+set builtin [keys_row_marks]
+dict set ::repo_keys [source_key $::default_repo] \
+	[dict create key "" trusted "" forgotten 2026-01-01]
+set withdrawn [keys_row_marks]
+sources_save $::srcsave
+set ::repo_keys $::keysave
+ok "the keys window marks rio's own row, and its withdrawal" \
+	[concat $builtin $withdrawn] {{built in} {built in, withdrawn}}
+
+# Emphasis and inline code dropped, whitespace collapsed: a label wrapped across two
+# source lines is still the label, as in check 15.
+set docflat {}
+foreach p $pages {
+	lappend docflat [regsub -all {\s+} \
+		[string map [list * "" ` ""] [slurp [file join $::docs $p]]] " "]
+}
+set unsaid {}
+foreach s [concat $firstsight $rotation $builtin $withdrawn] {
+	set found 0
+	foreach t $docflat { if {[string first $s $t] >= 0} { set found 1 ; break } }
+	if {!$found} { lappend unsaid $s }
+}
+ok "every word those two windows say is in the manual" $unsaid {}
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

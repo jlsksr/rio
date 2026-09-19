@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Fifteen groups of checks. Each exists because something drifted once.
+Sixteen groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -94,6 +94,15 @@ Fifteen groups of checks. Each exists because something drifted once.
     Buttons only, because a checkbutton is a setting and check 4 already covers those;
     the labels are read off the real widgets, and *where* the manual names one is the
     writer's business, so it matches the label in the prose rather than a full path.
+16. **The words the two signing-key windows put on screen.** Check 15's blind spot:
+    neither the confirm/rotation dialog nor the keys window is reachable from the
+    Preferences window, so a renamed button in either could land with everything green.
+    Both are really built — they block in `tkwait`, so each is driven from the event
+    loop and closed — and the strings come off the live widgets: the dialog's two
+    titles, its two trust buttons, and the `(built in)` / `(built in, withdrawn)` row
+    annotations. It also asserts the dialog really has two forms and that opening it
+    trusted nothing. From D119, where the dialog grew a second form and the keys window
+    grew a second annotation, both of them words a user has to be able to look up.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:
@@ -165,7 +174,8 @@ it is one, says what it will cover, and points at the document that has the fact
 today — it never leaves the reader with nothing. Currently stubs:
 `files-and-projects.md`, `find-and-replace.md`, `panels-and-layout.md`,
 `editing-modes.md`, `remote.md`, `troubleshooting.md`, and `extensions.md` apart from its
-section on certificates that aren't trusted.
+sections on signatures and on certificates that aren't trusted — both of which are
+complete, and the page says so itself.
 
 **Keep the Markdown restrained.** Headings, paragraphs, lists, links, bold, italic,
 inline code, fenced code, simple tables, blockquotes. No HTML, no images, no footnotes,
