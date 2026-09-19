@@ -138,39 +138,44 @@ fetches from it against that repository's signature — see
 [extensions](extensions.md#a-repository-that-is-signed). The checking is done by
 running `ssh-keygen` on the core's host, and it needs OpenSSH 8.0 or newer there —
 and a core that knows about signatures at all. Where either is missing, a repository
-whose key rio has trusted is **refused** rather than used unchecked.
+whose key you have confirmed is **refused** rather than used unchecked.
 
 *Preferences ▸ Extensions ▸ "Use repositories rio can't check"* (the
 `allow_unverified_repos` key) lets those through anyway. It is **off** by default,
 and when you turn it on such a repository lists and installs marked `unverified` —
-never `signed` — and the install confirmation says so. It excuses nothing else: a
-signature that doesn't verify, a key that changed and a file whose hash doesn't
-match are refused with it on. The switch lives with the GUI, in `prefs.json`,
-because it governs nothing but the Extensions window.
+never `signed` — and the install confirmation says so. It excuses nothing else, and
+it confirms no key for you: a signature that doesn't verify, a key that changed and a
+file whose hash doesn't match are refused with it on. The switch lives with the GUI,
+in `prefs.json`, because it governs nothing but the Extensions window.
 
 ## The signing keys rio trusts
 
-*Preferences ▸ Extensions ▸ Repository signing keys…* lists every signing key rio
-recorded — one row per repository, with the key's fingerprint and the date it was
-trusted, and the URL without its scheme, since `http://` and `https://` are the same
-publisher. Where the core's host has no `ssh-keygen` there is no fingerprint to show,
-so the row names the key itself instead.
+*Preferences ▸ Extensions ▸ Repository signing keys…* lists every signing key you
+have confirmed — one row per repository, with the key's fingerprint and the date you
+confirmed it, and the URL without its scheme, since `http://` and `https://` are the
+same publisher. Where the core's host has no `ssh-keygen` there is no fingerprint to
+show, so the row names the key itself instead. rio never adds a row on its own: a
+repository that signs with a key you have not confirmed is refused until you do, from
+its row in the Extensions window
+([extensions](extensions.md#confirming-a-repositorys-key)).
 
-**Forget selected** drops one. It is not a refusal: the next scan trusts whatever
-that repository publishes then, the way the first scan did — so it undoes a decision
-rather than making a new one. To stop using a repository, remove it in
-*Repositories…*.
+**Forget selected** drops one, and that is a refusal rather than a tidy-up: the next
+scan of that repository asks you to confirm whatever key it publishes then, and
+nothing from it is listed or installed until you answer. To stop using a repository
+altogether, remove it in *Repositories…*.
 
-rio's own repository is listed `(built in)` as long as it is still in your sources.
-Its key is the one rio ships with, nothing is stored for it, and **Forget selected**
-on that row does nothing and says why. A window with no rows at all means no
-repository of yours has published a key rio verified — an unsigned repository has
-none to list.
+rio's own repository is listed `(built in)` as long as it is still in your sources —
+the one key rio ships with, and the one you were never asked about. **Forget
+selected** there **withdraws** it: the row stays, marked `(built in, withdrawn)`, and
+rio asks about its own repository like any other's until you confirm a key for it.
+Selecting either form of that row explains it in the line under the list. A window
+with no rows at all means you have confirmed no keys yet, which is what it says.
 
 The list is the file `repository-keys.conf`, beside your `sources.list`; deleting a
-section there is the same thing as forgetting a key here. See
-[extensions](extensions.md#trust-on-the-first-scan) for what first use protects and
-what it cannot.
+section there is the same thing as forgetting a key here, and a section with no `key`
+line is a withdrawal — it trusts no key for that repository, not even one rio ships
+with. See [extensions](extensions.md#confirming-a-repositorys-key) for what
+confirming a key protects and what it cannot.
 
 ## Network: how the core checks https
 
@@ -211,7 +216,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `prefs.json` | GUI preferences — every key is listed [above](#setting-a-default-is-just-setting-the-value) | yes — plain JSON (above); `layout` best left to the View menu |
 | `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes — see [keyboard shortcuts](keyboard.md) |
 | `sources.list` | extension-repository URLs, one `http://` or `https://` base per line | yes (above) |
-| `repository-keys.conf` | the signing key rio trusts for each repository, one section per repository, recorded the first time a signature from it verified | yes — delete a section to forget that key, the same as *Forget selected* in [the keys window](#the-signing-keys-rio-trusts) |
+| `repository-keys.conf` | the signing key you confirmed for each repository, one section per repository, written when you confirmed it | yes — delete a section to forget that key, the same as *Forget selected* in [the keys window](#the-signing-keys-rio-trusts) |
 | `certificates.conf` | certificates you accepted although they did not verify, one section per `host:port` — on the **core's** host | yes — delete a section to take one back; see [extensions](extensions.md#a-certificate-that-isnt-trusted) |
 | `themes/` | user theme files, read by the **core** | drop-in / installed |
 | `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
