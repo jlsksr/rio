@@ -1,6 +1,6 @@
 # ADR-0039: Extension repositories over plain HTTP, apt-sources style
 
-- **Status:** Accepted; amended by [ADR-0066](0066-installable-providers.md), [ADR-0107](0107-semver-extension-updates.md), [ADR-0109](0109-https-repositories.md)
+- **Status:** Accepted; amended by [ADR-0066](0066-installable-providers.md), [ADR-0107](0107-semver-extension-updates.md), [ADR-0109](0109-https-repositories.md), [ADR-0124](0124-signed-repositories.md)
 - **Date:** 2026-07-17
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D39
