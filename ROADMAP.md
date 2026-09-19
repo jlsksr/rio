@@ -62,11 +62,13 @@ Each entry notes its state:
 - **Window / taskbar icon** — *landed* (AGENTS.md **D117**). `wm iconphoto . -default` with
   seven sizes (16–256) plus a Windows `.ico`; soft, so a checkout without `icons/` still
   starts. The artwork is Christ the Redeemer, a pun on the name. Confirmed as a *raster*
-  asset distinct from the mono-Unicode in-UI rule (D27). The first version's 16px
-  light-chrome washout is **fixed**: three Redeemer variants were cut and compared at
-  16/24/32 over dark and light chrome, and `redeemer-teal` — a near-white statue on a
-  plain teal disc, no interior detail — won. Candidates live in `icons/sources/` with
-  `icons/active` naming the current one, so switching is `make-icons.sh <name>`.
+  asset distinct from the mono-Unicode in-UI rule (D27). The early 16px light-chrome
+  washout is **fixed** — an artwork is cut and judged at 16/24/32 over dark *and* light
+  chrome before it ships. The three Flaticon variants that first passed that test were
+  **removed** and replaced by the project's own artwork (**D120**): a licence that
+  requires attribution says too little about redistributing the file itself, and the icon
+  travels with every copy of rio. Artwork lives in `icons/sources/` with `icons/active`
+  naming the current one, so switching is `make-icons.sh <name>`.
 - **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). The

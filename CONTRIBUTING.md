@@ -54,21 +54,23 @@ All committed.
 
 ```sh
 ./rio-gui/icons/make-icons.sh --list            # what's available, and which is on
-./rio-gui/icons/make-icons.sh redeemer-yellow   # switch to another candidate
+./rio-gui/icons/make-icons.sh redeemer-1        # switch to another candidate
 ./rio-gui/icons/make-icons.sh ~/my-icon.png     # adopt a new one (kept in sources/)
 ```
 
-Any square PNG, 512×512 or larger, with a transparent background. The script
-re-cuts every size and the Windows `.ico`. Nothing is overwritten — old artwork
-stays in `sources/`, so going back is the same command with the other name. It
-needs ImageMagick, which **only contributors doing this** need: rio never runs the
+Any square PNG, 512×512 or larger. A transparent margin is trimmed before scaling;
+an opaque tile is cut exactly as drawn, margin and all. The script re-cuts every
+size and the Windows `.ico`. Nothing is overwritten — old artwork stays in
+`sources/`, so going back is the same command with the other name. It needs
+ImageMagick, which **only contributors doing this** need: rio never runs the
 script, and reads the finished PNGs with Tk's own PNG support.
 
-**If the artwork isn't yours, record its credit** in
-`rio-gui/icons/sources/ATTRIBUTION.md`, in the same commit that adds the file.
-rio's current icons are Flaticon's, whose free licence requires attribution — so
-this is a condition of use, not a courtesy, and it applies to every artwork in
-`sources/` whether or not it is the one currently worn.
+**Only artwork rio may pass on.** The icon travels with every copy of rio anyone
+clones, packages or mirrors, so the question is not whether *we* may use it but
+whether everyone who receives rio may redistribute it. Record where a new artwork
+came from, and on what terms, in `rio-gui/icons/sources/README.md`, in the same
+commit that adds the file — for every artwork in `sources/`, not only the one
+currently worn. rio's earlier Flaticon icons were removed over exactly this.
 
 Look at the **16×16** before you commit — it is what the title bar and the taskbar
 actually show, and detail that looks good at 256 turns to mush there. The thing

@@ -6664,6 +6664,12 @@ reporting. **Closes RELEASING.md Gate 3's graceful-failure box.**
 
 ### D117 — rio has a window and taskbar icon
 
+> **Amended by D120 (the mechanism stands, the artwork changed).** The three Flaticon
+> variants compared below are **gone from the tree** — removed over what their licence
+> says about redistributing the files themselves, not replaced on their merits. What that
+> comparison taught about 16px is the part worth keeping and is why it stays here; read
+> the three names as history rather than as candidates one command away.
+
 rio set no `_NET_WM_ICON`, so the xfwm4 title bar and the xfce4-panel taskbar each fell
 back to their **own** default — which is why the two showed *different* generic icons.
 The artwork is **Christ the Redeemer** (jka, 2026-09-18), a pun on the name.
@@ -6940,6 +6946,53 @@ row and status line green, because the dialog block never reloaded from disk —
 would have looked right while the seed came back on the next start. `docs.tcl` check 14
 enumerates `dead_phrase`'s arms from the live proc, so it failed until the new phrase was
 in the manual; that is the guard doing its job and is why it exists.
+
+### D120 — rio ships only artwork it can pass on
+
+The icon is not decoration sitting in a repository: it travels with **every copy of rio
+anyone makes** — clone, package, mirror, a tarball on a mailing list. So the question a
+licence has to answer is not *may we use this* but *may everyone who receives rio pass it
+on*, and the answer has to be clear enough to put a release behind (RELEASING Gate 1).
+
+**The three Flaticon Redeemer variants of D117 are removed, not re-credited.** Their free
+licence requires attribution, which is cheap and which rio did carry. What it permits
+downstream of a `git clone` is what jka judged too uncertain — and an uncertainty in a
+file that is copied everywhere is the wrong kind to carry into a first release. Deleting
+them is the only move that ends the question; keeping them "for now" would leave it open
+in every checkout already made.
+
+**The replacement is the project's own**: `redeemer-1`, made by jka on 2026-09-20 from a
+prompt of jka's, with ChatGPT. Same subject, so the pun survives. rio may ship it and
+anyone may redistribute it, which is the whole requirement.
+
+**What it is, and how it was judged.** A flat near-white statue on a teal disc on a *dark
+teal square tile* — and, unlike the three before it, **opaque**: there is no transparent
+margin, so `make-icons.sh`'s trim is a no-op and the tile is cut exactly as drawn, its
+margin included, because there the margin is part of the design. Put through D117's test
+— cut at 16/24/32 and looked at magnified over dark *and* light chrome — it holds on
+both: the white subject carries the shape and the tile has an edge against either. It
+fills *less* of the canvas at 16px than `redeemer-teal` did, the price of that margin;
+that is the second of D117's three factors, traded knowingly for the first, which is the
+one that decides.
+
+**The mechanism is untouched, and that is the point.** `sources/` + `active` +
+`make-icons.sh` stay exactly as D117 designed them: the artwork is expected to keep
+evolving, and switching or going back must stay one command. The folder simply holds only
+artwork the project owns now. `sources/README.md` replaces `ATTRIBUTION.md` — same idea,
+the origin kept beside the file so the two cannot be separated, but a different question:
+no longer *who do we credit* but *on what terms may rio pass this on*. That is now the
+condition of putting a file in the folder, for every artwork in it and not only the one
+being worn.
+
+**Cost, accepted.** The new source is ~1 MB where each old one was ~30 KB — flat art, but
+generated, so it carries grain a drawing would not. Every future revision adds another to
+history. Kept as supplied: a lossless recompress saved 10% and would have made the
+committed file no longer the bytes jka handed over.
+
+**Guards: nothing to change, which was worth confirming.** `smoke.tcl`'s six icon checks
+hold `::icon_sizes` against the files on disk and never name an artwork; neither does the
+loader, `docs/`, nor the manual. So the swap is covered by re-running them — a set
+re-cut from a different source either satisfies the same two-way check or it does not.
 
 ---
 
