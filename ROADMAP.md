@@ -424,5 +424,6 @@ for later:
   contribution surface. (Syntax highlighters, by contrast, are stable today.)
 - **Install / packaging path** — *planned.* A polished install and packaging story
   beyond the dev/server deploy scripts (see [INSTALL.md](INSTALL.md)).
-- **License & code of conduct** — *planned.* To be added before rio opens up to
-  outside contributions.
+- **Code of conduct** — *planned.* To be added before rio opens up to outside
+  contributions. (The licence half of this is **done**: rio is MIT-licensed,
+  D121 — see [LICENSE](LICENSE).)

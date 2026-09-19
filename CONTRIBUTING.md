@@ -633,7 +633,19 @@ involved.
 
 ## License & code of conduct
 
-*To be added before rio opens up to outside contributions.*
+rio is under the **MIT License** ([LICENSE](LICENSE)) — permissive, short, and
+familiar. A change you send is offered under that same licence: there is no
+contributor agreement to sign, and no separate copyright assignment. That is the
+whole of it, and it is worth knowing before you spend an evening on a patch.
+
+The same question applies to anything a change *brings with it*. Code copied from
+elsewhere, and artwork especially, has to be something rio may pass on to everyone
+who receives a copy — not merely something rio may use. The rule under
+[The application icon](#the-application-icon) is that question in its sharpest
+form, and it is why rio's earlier stock icons were removed rather than credited.
+
+A **code of conduct** is still to be added, before rio opens up to outside
+contributions.
 
 ---
 

@@ -307,3 +307,16 @@ as untested rather than claimed.
 - **[WINDOWS.md](WINDOWS.md)** — running rio on Windows 11: one deploy script that
   installs the toolchain for you, launch, the daily notes/scratch/logfile workflow in
   keys, and a section for hacking on rio from Windows.
+- **[LICENSE](LICENSE)** — the MIT licence, in full.
+
+## License
+
+rio is released under the **MIT License** — see [LICENSE](LICENSE) for the full
+text. Use it, change it, build on it, ship it in something you sell: all of that
+is fine, and the only condition is that the copyright notice and the licence text
+travel with the copies you pass on. It comes with no warranty.
+
+Copyright © 2026 Julius Kaiser. Every part of rio — the editor, the core, the
+protocol, the agent loop, the highlighters, the themes, the icon — is the
+project's own work, so that one licence covers the whole tree with nothing carved
+out of it.

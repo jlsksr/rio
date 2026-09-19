@@ -3718,8 +3718,11 @@ proc rio_build_date {} {
 }
 
 # Help ▸ About rio (D76): a small themed modal with rio's name, one-line description, and the
-# build id, its commit date, and the wire-protocol version (all handy in a bug report — see
-# ::rio_protocol). Info is
+# build id, its commit date, the wire-protocol version (all handy in a bug report — see
+# ::rio_protocol) and the licence (D121) — the one fact here that is about the copy in front of
+# you rather than this build, and the reason it is legible without going back to the repository.
+# The licence name is written here rather than read from LICENSE: the file need not sit beside a
+# deployed GUI, and smoke.tcl holds this string to it. Info is
 # static labels (muted), the lone control is Close; Esc/Return dismiss. Non-blocking (grab but
 # no tkwait) — it just informs, it returns nothing.
 proc about_dialog {} {
@@ -3744,7 +3747,8 @@ proc about_dialog {} {
 	# The static facts, as a dim two-column block so they read as info, not controls.
 	frame $w.facts -background [dict get $c ui.bg]
 	set r 0
-	foreach {k v} [list Build [rio_build_id] Date [rio_build_date] Protocol $::rio_protocol] {
+	foreach {k v} [list Build [rio_build_id] Date [rio_build_date] Protocol $::rio_protocol \
+		License "MIT"] {
 		label $w.facts.k$r -text $k -font RioUIFont -anchor e \
 			-background [dict get $c ui.bg] -foreground $mute
 		label $w.facts.v$r -text $v -font RioUIFont -anchor w \

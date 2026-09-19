@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Sixteen groups of checks. Each exists because something drifted once.
+Seventeen groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -103,6 +103,14 @@ Sixteen groups of checks. Each exists because something drifted once.
     annotations. It also asserts the dialog really has two forms and that opening it
     trusted nothing. From D119, where the dialog grew a second form and the keys window
     grew a second annotation, both of them words a user has to be able to look up.
+17. **The facts *Help ▸ About rio* puts on screen.** `getting-started.md` tabulates the
+    box's rows, so that table is a second home for a fact that lives in the dialog. The
+    box is really built — it does not block, so unlike check 16 it needs no driving —
+    the labels are read off the live widgets, and the table has to match them *in order*
+    (D121 appended `License` last on purpose). The licence the page quotes must be the
+    one the box shows. `smoke.tcl` holds the dialog against the `LICENSE` file; this
+    holds the manual against the dialog, so a relicensing that forgets one of the three
+    fails in code or in prose.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:

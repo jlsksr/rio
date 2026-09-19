@@ -6995,6 +6995,69 @@ hold `::icon_sizes` against the files on disk and never name an artwork; neither
 loader, `docs/`, nor the manual. So the swap is covered by re-running them — a set
 re-cut from a different source either satisfies the same two-way check or it does not.
 
+### D121 — rio is MIT-licensed
+
+**The gap.** rio had no `LICENSE` file, no headers, no SPDX identifier — and the default
+for a work with no licence is **all rights reserved**. Published like that, rio would be
+readable and nothing else: nobody may legally run it, fork it, or pass it on, and the
+generosity everything else about the project assumes would have no legal basis at all.
+This is RELEASING's Gate 1, the one gate named a *hard blocker*, and it was the last
+question a release could not answer.
+
+**What made it a one-line decision rather than an audit.** D120 had already removed the
+only third-party asset in the tree. Every part of rio — editor, core, protocol, agent
+loop, highlighters, themes, and now the icon — is the project's own work, so there is
+nothing to carve out and **one licence covers the whole tree**. The hard half of
+licensing a codebase is knowing what is in it; that half was done, and for its own
+reasons, before this decision was taken.
+
+**The decision (jka, 2026-09-20).** The **MIT License**, verbatim, at `LICENSE`, held by
+Julius Kaiser. ISC and BSD-2-Clause were the other candidates and RELEASING had named
+them first — they fit rio's POSIX/BSD temperament, and ISC says the same thing in half
+the words. MIT wins on **recognition**: it grants the same permissions, and a reader can
+tell what it permits *without reading it*, which for a first release is worth more than
+concision. The text is not edited, not even to tidy it — a licence that has been touched
+is no longer the licence people recognise on sight, and recognition was the whole reason
+for choosing this one.
+
+**Where it is said.** `LICENSE` is the grant; the documents around it say what it means
+in their own register. README gets a short **License** section (use it, change it, sell
+it, keep the notice with the copies you pass on). CONTRIBUTING answers the question a
+contributor actually has — **a change you send is offered under the same licence**, no
+agreement to sign, no copyright assignment — and points at the icon rule as the same
+question in its sharpest form for anything a change *brings with it*. ROADMAP's
+"License & code of conduct" bullet loses its first half; RELEASING's Gate 1 keeps only
+the code of conduct open.
+
+**And in the running program.** *Help ▸ About rio* gains a fourth facts row, `License:
+MIT`, after Build, Date and Protocol. The other three identify this *build*; the licence
+identifies **this copy** — the thing whoever received it needs to know, and the one fact
+here they should not have to go back to a repository to find. The name is written in the
+dialog rather than read from `LICENSE` at runtime: the file need not sit beside a
+deployed GUI, and a fact with two homes wants a **guard**, not a lookup (§7). The guard
+is in `smoke.tcl`, and it holds the dialog against the *file* rather than against a
+second copy of the string — relicense the project and forget the box, and it fails by
+name. The row is appended last so the existing positional assertions keep their meaning.
+
+**The manual documents the box, which is how it documents the licence.** `docs/` mentioned
+neither *About rio* nor licensing — a gap that predates this decision and that the licence
+made worth closing, since the licence now lives *in* that dialog. `getting-started.md`
+gains a short section on Help: *Contents…*, then *About rio* with its four rows tabulated
+and a line each, and the licence in one sentence (use it, change it, pass it on, keep the
+notice) pointing at `LICENSE` and at CONTRIBUTING for a change sent back. That table is a
+third home for the same fact, so it has a guard too: `docs.tcl` check 17 builds the real
+box, reads the labels off it and holds the table to them **in order**, and holds the
+licence the page quotes to the one the box shows. The three are now chained — file, dialog,
+manual — and a relicensing that updates only some of them fails by name.
+
+**Left out, deliberately.** **Per-file SPDX headers** — rio has never carried file
+headers, and stamping ~100 files buys machine-readability nobody has asked for at the
+price of touching every source in the tree; the repository-level `LICENSE` is what
+tooling reads first anyway. **A `license` key in extension manifests** — plausible, and
+forward-compatible by construction (unknown keys are ignored, D107), but it changes the
+manifest contract and belongs to its own decision, not to this one. **`CODE_OF_CONDUCT.md`**
+— Gate 1's other half, still open, and due before rio takes outside contributions.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -7534,6 +7597,8 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
 | `rio::tls::bundles` (D109) | the system CA locations INSTALL.md §1 lists | `tls.test` — both directions |
 | INSTALL.md §1's OS package names | `rio::deps::provides` (D116), which rio prints when one is missing | `deps.test` — both directions, as sets |
+| the `LICENSE` file | the About box's **License** row (D121) | `smoke.tcl` — reads the file, holds the row to it |
+| the About box's facts rows | `docs/getting-started.md`'s table of them | `docs.tcl` — builds the box, reads the labels, order included |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 

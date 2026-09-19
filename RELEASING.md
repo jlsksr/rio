@@ -343,11 +343,16 @@ though the interactive behaviour is right.
 
 ## Gate 1 — Legal (hard blocker)
 
-- [ ] Add a `LICENSE` file. With no license, nobody may legally use, fork, or
-      redistribute rio. (ISC or BSD-2 fit the project's POSIX/BSD spirit; MIT for
-      maximum familiarity.) *Nothing in the tree needs carving out: the window icon
+- [x] Add a `LICENSE` file. With no license, nobody may legally use, fork, or
+      redistribute rio. *Nothing in the tree needs carving out: the window icon
       was the only third-party asset, and since AGENTS.md **D120** the artwork is
-      the project's own — one licence covers the whole tree.*
+      the project's own — one licence covers the whole tree.* **Done (D121).**
+      **MIT**, chosen over the ISC and BSD-2 candidates for recognition: a reader
+      should be able to tell what it permits without reading it. `LICENSE` holds
+      the standard text verbatim, README and CONTRIBUTING say what it means (a
+      contribution comes under the same licence), and **Help ▸ About rio** shows
+      it, so the licence is legible from inside a running rio and not only from
+      the repository root.
 - [ ] Add `CODE_OF_CONDUCT.md` (already a ROADMAP "planned" item, due before rio
       opens to outside contributions).
 

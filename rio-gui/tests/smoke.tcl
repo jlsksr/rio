@@ -1798,6 +1798,18 @@ about_dialog
 ok "help: About modal built"        [winfo exists .about] 1
 ok "help: About shows the build id" [expr {[string first [rio_build_id] [.about.facts.v0 cget -text]] >= 0}] 1
 ok "help: About shows the date"     [expr {[string first [rio_build_date] [.about.facts.v1 cget -text]] >= 0}] 1
+# …and the licence (D121), last of the facts rows. The name is written in the dialog, so the
+# guard is against the LICENSE file itself rather than against a second copy of the string:
+# relicense the project and forget the About box, and this fails by name. Both halves are
+# checked — the row is labelled License, and what it names is the licence the file grants.
+set _lic_first ""
+set _lic_fh [open [file join [file dirname [info script]] .. .. LICENSE] r]
+gets $_lic_fh _lic_first
+close $_lic_fh
+ok "help: About has a License row"  [.about.facts.k3 cget -text] "License"
+ok "help: …naming a licence"        [expr {[string length [.about.facts.v3 cget -text]] > 0}] 1
+ok "help: …the one LICENSE grants"  [expr {[string first [.about.facts.v3 cget -text] $_lic_first] >= 0}] 1
+unset _lic_first _lic_fh
 # The About box wears rio's own icon (D117), left of the name. It REUSES an image
 # apply_window_icon already loaded for `wm iconphoto` rather than reading the file again,
 # so the box cannot drift from the icon rio is actually wearing — asserted by identity,
