@@ -1202,14 +1202,19 @@ keys_drive {
 	set ::keys_note [.repokeys.status cget -text]
 	repo_keys_forget
 	set ::keys_after [list [.repokeys.body.list size] \
-		[dict exists $::repo_keys [source_key $::default_repo]]]
+		[dict exists $::repo_keys [source_key $::default_repo]] \
+		[.repokeys.status cget -text]]
 }
 ok "keys: rio's own repository is listed as built in" \
 	[lindex $::keys_seen 1] "rio.skylm.org/extensions  —  [sig_fingerprint $::default_repo_key]  (built in)"
 ok "keys: selecting it says why there is nothing to forget" \
 	[string match "rio ships with this key*Repositories…*" $::keys_note] 1
 ok "keys: and the selection really runs that" [lindex $::keys_bind 0] repo_keys_sel
-ok "keys: and Forget leaves it alone"   $::keys_after {2 0}
+ok "keys: and Forget leaves it alone"   [lrange $::keys_after 0 1] {2 0}
+# …and does not claim to have forgotten anything. A status line that says a key was
+# forgotten while the row is still there is the one thing this window must not do.
+ok "keys: Forget on it says why, not that it worked" \
+	[string match "rio ships with this key*" [lindex $::keys_after 2]] 1
 
 keys_drive {
 	.repokeys.body.list selection set 0
