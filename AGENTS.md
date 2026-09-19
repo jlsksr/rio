@@ -6833,10 +6833,14 @@ verify*, *can't check the signature*, …), and the ledger records `signed_by`.
 (jka). Rotation has its own step, and forgetting a key is a section deleted from a
 commented, hand-editable file the dialog names. ROADMAP carries it.
 
-*(Amendment, 2026-09-19 — that list is built: **Preferences ▸ Extensions ▸ Repository
-signing keys…** (`repo_keys_dialog`), `certs_dialog`'s counterpart, a row per trust
-decision and **Forget selected**. Extensions and not Network, because unlike a
-certificate exception nothing but the Extensions window consults these keys. Two things
+*(Amendment, 2026-09-19 — **read D119 first: the two conclusions this paragraph reaches
+about the seed row and about what *Forget* means were overturned later the same day, by
+jka reading this very paragraph.** What follows is the working log of how it got there,
+which is why the reversal is worth having. — that list is built: **Preferences ▸
+Extensions ▸ Repository signing keys…** (`repo_keys_dialog`), `certs_dialog`'s
+counterpart, a row per trust decision and **Forget selected**. Extensions and not
+Network, because unlike a certificate exception nothing but the Extensions window
+consults these keys. Two things
 it has to **say** rather than assume, and both were the design work: the **seed is
 trusted without ever being written down** — `repo_key_of` falls back to it, so a first
 scan of rio's own repository stores nothing, and a window listing only the file would be
@@ -6849,9 +6853,7 @@ checks in `repos.tcl` driving the real dialog, plus the button's place in
 something: removing the built-in guard from `repo_keys_forget` changed no row and no
 count, so the **first version of the test passed a status line claiming a key had been
 forgotten when none had**. The check, not the code, was wrong; it now asserts what the
-window says, and the injection fails. **That last sentence is what D119 overturned, the
-same day** — jka read it here and objected to it, so the seed row and the meaning of
-*Forget* below are both superseded.)*
+window says, and the injection fails. **That last sentence is the one D119 overturned.**)*
 
 **Guards**: `sig.test` (30) runs the real tool against **committed fixtures** — a test
 key's public half and signatures made once, because a signature generated at test time
