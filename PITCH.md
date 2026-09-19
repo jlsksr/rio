@@ -189,16 +189,11 @@ manual, [INSTALL.md](INSTALL.md) to deploy, [AGENTS.md](AGENTS.md) for the desig
 
 ## Credits
 
-rio's window and taskbar icon — Christ the Redeemer, for the name — comes from
-[Flaticon](https://www.flaticon.com/), whose free licence asks that the author be
-credited. Three variants live in `rio-gui/icons/sources/`; the one rio wears is named
-in `rio-gui/icons/active`.
-
-<a href="https://www.flaticon.com/free-icons/rio-de-janeiro" title="rio de janeiro icons">Rio de janeiro icons created by Valter Bispo - Flaticon</a>
-
-<a href="https://www.flaticon.com/free-icons/rio-de-janeiro-brazil" title="rio de janeiro brazil icons">Rio de janeiro brazil icons created by graphicmall - Flaticon</a>
-
-<a href="https://www.flaticon.com/free-icons/rio-de-janeiro" title="rio de janeiro icons">Rio de janeiro icons created by Roundicons Premium - Flaticon</a>
+rio's window and taskbar icon — Christ the Redeemer, for the name — is the project's
+own artwork (jka, made with ChatGPT). It lives in `rio-gui/icons/sources/`, and
+`rio-gui/icons/active` names the one rio wears. The stock icons rio used before it were
+dropped rather than credited: an icon travels with every copy of rio anyone makes, and
+what their licence allowed that far downstream was not clear enough to ship on.
 
 Everything else in rio — editor, core, protocol, agent loop, highlighters, themes — is
 the project's own code.
