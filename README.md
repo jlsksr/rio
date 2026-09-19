@@ -164,7 +164,8 @@ in [docs/](docs/index.md).
   to browse on first run — remove it in *Repositories…* if you'd rather not. Browse,
   install, and remove in *Settings ▸ Extensions…*; every installed extension shows
   which repository it came from, same-name extensions from different authors
-  coexist and you pick, and it all works over a remote core too.
+  coexist and you pick, and it all works over a remote core too. A repository can
+  be **signed**, and rio checks the signature and every file against it.
 - **Custom keybindings** — every shortcut is one data table. Remap them in
   *Settings ▸ Keyboard Shortcuts…* (press-to-capture, applied live, no restart) or by
   hand in `~/.config/rio/keys.json`; the menus relabel themselves to match.
@@ -227,6 +228,16 @@ repository, which version); when two repositories offer an extension of the
 same name, both are listed with author and source and **you choose**; and
 installing code (a highlighter, a mode) says plainly that it is code, next to
 the URL you're trusting. Themes are data, parsed and never executed.
+
+A repository can also be **signed**, and rio checks it. The publisher signs one
+file listing the hash of everything they serve — two commands with stock
+OpenSSH, no rio tooling — and rio verifies that signature and then every file it
+fetches against it, refusing the lot if anything doesn't match. That is what
+gives a plain `http://` repository integrity without a certificate: rio trusts
+the key on first sight, tells you if it ever changes, and marks every extension
+*signed*, *unsigned* or *unverified* so you can see which you're installing. It
+says these bytes are the publisher's, not that the code is any good — there is
+still no authority here, and that is the point.
 
 Versions are [semver](https://semver.org/), so rio can tell you when a
 repository offers something newer — `[1.1.0 → 1.2.0]` on the row, one button to
