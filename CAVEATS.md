@@ -143,6 +143,11 @@ design limit that surprises, append it to the matching section.
   *unsigned*, exactly as it did before signing existed — the tool is only needed to check
   a signature rio is expecting.
 
+  Fingerprints are a separate question: `ssh-keygen -lf` long predates 8.0, so a 7.7 host
+  still shows one for every key in *Preferences ▸ Extensions ▸ Repository signing keys…*
+  and only the verifying fails. Where there is **no** `ssh-keygen` at all, that window has
+  no fingerprint to compute and names each key by its type and the start of its base64.
+
   **Only the core's host counts** (D30), as with `tcltls`.
 - **Mitigation in rio.** Refuse by default, and say which package to install. If that is
   not possible, *Preferences ▸ Extensions ▸ "Use repositories rio can't check"* lets the
