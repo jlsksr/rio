@@ -55,6 +55,7 @@ rather than repeating them:
 | [WINDOWS.md](../WINDOWS.md) | Running rio on Windows 11 |
 | [AGENTS.md](../AGENTS.md) | The design log — *why* rio works the way it does |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Hacking on rio itself |
+| [LICENSE](../LICENSE) | May I use, change and pass rio on? |
 
 ## About these pages
 

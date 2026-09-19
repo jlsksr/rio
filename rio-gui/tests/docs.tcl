@@ -957,5 +957,64 @@ foreach s [concat $firstsight $rotation $builtin $withdrawn] {
 }
 ok "every word those two windows say is in the manual" $unsaid {}
 
+# --- 17. the facts Help ▸ About rio puts on screen ----------------------------
+#
+# About is the one window that describes the copy in front of the reader rather than
+# the project, and since D121 it is where the licence is legible without going back to
+# a repository. getting-started.md tabulates its rows, so the table is a second home
+# for a fact that lives in the dialog — the register's rule, and the reason for this
+# check: a row added, renamed or reordered in rio leaves the manual describing a box
+# nobody will see, and it reads perfectly while doing it.
+#
+# smoke.tcl holds the dialog's licence against the LICENSE file; this holds the manual
+# against the dialog, so relicensing rio fails in code (smoke) and in prose (here).
+#
+# Behaviour, not source text: the box is really built and every string is read off the
+# live label. It only informs — grab, but no tkwait — so it needs no driving, unlike
+# check 16's two windows. Order matters and is compared: D121 appended License last so
+# the positional assertions elsewhere kept their meaning, and the table reads top to
+# bottom like the block does.
+
+# The rows of the first table under a `## ` heading, in page order, as
+# {first-column-code rest-of-row}. Like md_col1, the section ends at the next heading
+# of its own level, so renaming a LATER one cannot widen this; renaming THIS one
+# empties it and fails the comparison rather than passing on the rest of the page.
+proc md_table_rows {text from} {
+	set a [string first $from $text]
+	if {$a < 0} { return {} }
+	set body [string range $text [expr {$a + [string length $from]}] end]
+	set b [string first "\n## " $body]
+	if {$b >= 0} { set body [string range $body 0 $b] }
+	set out {}
+	foreach {_ cell rest} [regexp -all -inline -line {^\| `([^`]+)` \| (.*) \|$} $body] {
+		lappend out [list $cell $rest]
+	}
+	return $out
+}
+
+about_dialog
+update idletasks
+set factk {} ; set factv {}
+for {set r 0} {[winfo exists .about.facts.k$r]} {incr r} {
+	lappend factk [.about.facts.k$r cget -text]
+	lappend factv [.about.facts.v$r cget -text]
+}
+destroy .about
+ok "the About box has a facts block" [expr {[llength $factk] > 3}] 1
+
+set aboutrows [md_table_rows $gs "## Help, and which rio you are running"]
+ok "getting-started.md lists the About box's rows, in order" \
+	[lmap row $aboutrows {lindex $row 0}] $factk
+
+# The one fact in that block whose value is rio's own vocabulary rather than this
+# build's or this machine's: the licence name has to be the word the box shows, quoted
+# as code so a reader matches it against the screen.
+set lic [lindex $factv [lsearch -exact $factk License]]
+ok "the About box names a licence" [expr {$lic ne ""}] 1
+set licrow [lindex [lindex $aboutrows [lsearch -index 0 -exact $aboutrows License]] 1]
+ok "the manual quotes the licence the About box shows" \
+	[expr {[lsearch -exact [lmap {_ c} [regexp -all -inline {`([^`]+)`} $licrow] {set c}] \
+		$lic] >= 0}] 1
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

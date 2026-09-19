@@ -118,6 +118,28 @@ A few things worth knowing early:
   default from then on — there is no separate "save settings" step. See
   [preferences](preferences.md).
 
+## Help, and which rio you are running
+
+***Help ▸ Contents…*** — or `F1` — opens this manual inside rio, formatted, from
+disk, with no network.
+
+***Help ▸ About rio*** opens a small box with rio's name, one line about what it
+is, and a few facts about the copy in front of you:
+
+| Row | What it tells you |
+| --- | ----------------- |
+| `Build` | which build of the window this is, taken from the source it was started from — `unknown` for a copy with no git history beside it |
+| `Date` | when that build was made |
+| `Protocol` | the version of the protocol this window speaks to its core |
+| `License` | the licence rio is under — `MIT` |
+
+The first three describe the build, and are the ones worth quoting in a bug
+report. The last is about your copy: rio is under the MIT License, so you may use
+it, change it, build on it and pass it on, as long as the copyright notice and the
+licence text travel with the copies you hand out. The full text is in
+[LICENSE](../LICENSE); if you are sending a change back rather than taking one
+away, [CONTRIBUTING.md](../CONTRIBUTING.md) covers what the licence means for that.
+
 ## Where to go next
 
 - [The editor](editor.md) — the text area in depth.
