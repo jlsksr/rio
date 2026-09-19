@@ -808,5 +808,54 @@ foreach cell [md_col1 $ext "### When rio refuses a signed repository" \
 }
 ok "the refusal table quotes no phrase rio never prints" $invented {}
 
+# --- 15. every door out of the Preferences window is named in the manual ------
+#
+# Check 11 in reverse, and the direction that was missing. Check 11 holds the paths the
+# docs quote against the real window; nothing held the window against the docs, so a new
+# button could land with every check green while the manual went on describing the old
+# way of doing that job. That is what D118's *Repository signing keys…* did: two topics
+# kept saying the only way to take a key back was to edit a file by hand.
+#
+# Buttons only. A checkbutton is a setting, and check 4 already holds prefs.json's keys
+# against the page; a button opens a whole window, which is a feature the manual has to
+# name. WHERE it names it is the writer's business — a Preferences path, or the menu
+# that opens the same window — so this matches the label in the prose, not a path.
+#
+# Behaviour, not source text: the labels come off the real widgets. Two are skipped
+# because they are data rather than rio's vocabulary — the theme button carries the
+# current theme's name through -textvariable, and a provider's `<name>` API Key… button
+# exists only once that provider is installed.
+preferences_window
+update idletasks
+proc pref_doors {w} {
+	set out {}
+	foreach c [winfo children $w] {
+		if {[winfo class $c] eq "Button" && [$c cget -textvariable] eq ""} {
+			set l [$c cget -text]
+			if {$l ne "" && ![string match *<* $l]} { lappend out $l }
+		}
+		lappend out {*}[pref_doors $c]
+	}
+	return $out
+}
+set doors {}
+foreach cat $::prefcats { lappend doors {*}[pref_doors .prefs.body.[string tolower $cat]] }
+ok "the Preferences window has doors to other windows" [expr {[llength $doors] > 5}] 1
+
+# Emphasis and inline code dropped, every run of whitespace one space: a label wrapped
+# across two source lines is still the label.
+set flat {}
+foreach p $::menu_docs {
+	lappend flat [regsub -all {\s+} [string map [list * "" ` ""] [slurp $p]] " "]
+}
+set unnamed {}
+foreach l [lsort -unique $doors] {
+	set found 0
+	foreach t $flat { if {[string first $l $t] >= 0} { set found 1 ; break } }
+	if {!$found} { lappend unnamed $l }
+}
+ok "every Preferences button is named in the docs" $unnamed {}
+destroy .prefs
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -234,7 +234,8 @@ file listing the hash of everything they serve — two commands with stock
 OpenSSH, no rio tooling — and rio verifies that signature and then every file it
 fetches against it, refusing the lot if anything doesn't match. That is what
 gives a plain `http://` repository integrity without a certificate: rio trusts
-the key on first sight, tells you if it ever changes, and marks every extension
+the key on first sight, tells you if it ever changes, lists every key it has
+trusted so you can take one back, and marks every extension
 *signed*, *unsigned* or *unverified* so you can see which you're installing. It
 says these bytes are the publisher's, not that the code is any good — there is
 still no authority here, and that is the point.

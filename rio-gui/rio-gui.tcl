@@ -8053,7 +8053,7 @@ proc repo_keys_path {} {
 
 # `[<scheme-less source>]` sections carrying `key` and `trusted` — rio's own conf
 # format (D21), hand-editable on purpose: deleting a section is how a user takes a
-# trust decision back until the Extensions window grows a list of its own (ROADMAP).
+# trust decision back, and is exactly what repo_keys_forget does for them.
 proc repo_keys_load {} {
 	set ::repo_keys {}
 	set path [repo_keys_path]
@@ -8077,7 +8077,8 @@ proc repo_keys_save {} {
 		puts $f "# per repository, written the first time a signature from it verified."
 		puts $f "#"
 		puts $f "# Delete a section to forget that key: the next scan then trusts whatever"
-		puts $f "# the repository publishes, as it did the first time."
+		puts $f "# the repository publishes, as it did the first time. The same thing is one"
+		puts $f "# click in Preferences > Extensions > Repository signing keys..."
 		dict for {src e} $::repo_keys {
 			puts $f ""
 			puts $f "\[$src\]"
@@ -9820,7 +9821,7 @@ proc extw_key_review {url newkey} {
 	$w.det configure -state disabled
 	pack $w.det -fill x -padx 8 -pady {6 4}
 	label $w.hint -anchor w -justify left -wraplength $wrap -font RioUIFont \
-		-text "Trust the new key only if you can confirm it away from this connection — the publisher's own page, a release note, a message from them. rio then trusts exactly this key for this repository, and asks again if it ever changes. The keys it trusts are in repository-keys.conf beside your sources list; deleting a section there forgets that key." \
+		-text "Trust the new key only if you can confirm it away from this connection — the publisher's own page, a release note, a message from them. rio then trusts exactly this key for this repository, and asks again if it ever changes. Every key it trusts is listed under Preferences ▸ Extensions ▸ Repository signing keys…, where forgetting one puts that repository back on its first scan." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	pack $w.hint -fill x -padx 8 -pady {2 6}
 	frame $w.btns -background [dict get $c ui.bg]
@@ -9919,6 +9920,137 @@ proc certs_remove {} {
 		return
 	}
 	certs_fill
+}
+
+# Preferences ▸ Extensions ▸ Repository signing keys…: every key rio recorded on a
+# first scan, and a way to take one back (D118; deferred with jka when D118 landed,
+# built once the mechanism had settled). certs_dialog's counterpart for repositories,
+# and deliberately the same window: a list, one line per trust decision, Forget.
+#
+# Two things differ from the certificates, and both are said in the window rather
+# than assumed. The keys are the GUI's own — repository-keys.conf beside sources.list,
+# because the sources list IS the trust list (D39) and a key is a property of an entry
+# in it, not of a host the core dialled. And forgetting one does NOT distrust the
+# repository: the next scan trusts on first use again, exactly as the first one did.
+# That is the whole of what the hand edit the conf file invites already did; this only
+# saves finding the file.
+proc repo_keys_dialog {} {
+	set w .repokeys
+	destroy $w
+	toplevel $w
+	wm title $w "Repository signing keys"
+	wm transient $w [expr {[winfo exists .prefs] ? ".prefs" : "."}]
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.hint -anchor w -justify left -wraplength 520 -font RioUIFont \
+		-text "The signing key rio trusts for each extension repository, recorded the first time a signature from it verified. A repository that later signs with a different key is refused until you review it. The scheme is left off on purpose — moving a repository from http:// to https:// is a change of route, not of publisher. They are kept in repository-keys.conf beside your sources list." \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.repokeys.body.list yview}
+	listbox $w.body.list -height 6 -width 72 -activestyle none -exportselection 0 \
+		-borderwidth 1 -relief solid -highlightthickness 0 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg] \
+		-yscrollcommand {autoscroll .repokeys.body.sb .repokeys.body.list}
+	pack $w.body.list -side left -fill both -expand 1
+	bind $w.body.list <<ListboxSelect>> repo_keys_sel
+	# Muted, not the error colour: what lands here explains a row or reports what
+	# Forget just did — the row vanishing is otherwise the only feedback there is.
+	label $w.status -anchor w -justify left -wraplength 520 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.rm    -text "Forget selected" -font RioUIFont -command repo_keys_forget
+	button $w.btns.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right
+	pack $w.btns.rm    -side left
+	grid $w.hint   -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
+	grid $w.body   -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.status -row 2 -column 0 -sticky we   -padx 8 -pady {4 0}
+	grid $w.btns   -row 3 -column 0 -sticky we   -padx 8 -pady {4 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	repo_keys_fill
+	bind $w <Escape> [list destroy $w]
+	catch {grab $w}
+	focus $w.body.list
+	tkwait window $w
+}
+
+set ::repo_keys_rows {}   ;# the keys behind .repokeys.body.list, in its order
+
+proc repo_keys_fill {} {
+	if {![winfo exists .repokeys]} return
+	.repokeys.body.list delete 0 end
+	set ::repo_keys_rows {}
+	set rows {}
+	dict for {src e} $::repo_keys {
+		lappend rows [dict create src $src key [dict get $e key] \
+			when [dict get $e trusted] builtin 0]
+	}
+	# rio's own key is trusted without ever being written down — it is the seed
+	# repo_key_of falls back to, so a first scan of that repository finds a key already
+	# trusted and stores nothing. Left out, this window would be empty on a fresh
+	# install while rio does trust a key, which is the one thing it exists to show.
+	# Only while that repository is still in the sources list, though: a key for a
+	# source the user removed speaks for nothing.
+	set seed [source_key $::default_repo]
+	if {![dict exists $::repo_keys $seed]} {
+		foreach u [sources_load] {
+			if {![source_same $u $::default_repo]} continue
+			lappend rows [dict create src $seed key $::default_repo_key \
+				when "" builtin 1]
+			break
+		}
+	}
+	foreach row $rows {
+		# The fingerprint is the core's to compute, and the call pumps the event
+		# loop — the window may be gone by the time it answers.
+		set fp [sig_fingerprint [dict get $row key]]
+		if {![winfo exists .repokeys]} return
+		if {$fp eq ""} {
+			# No ssh-keygen on the core's host, so no fingerprint to show. The key
+			# itself still identifies the row; truncated, because its whole point
+			# here is to be compared, and 68 base64 characters are not.
+			set k [dict get $row key]
+			set fp "[lindex $k 0] [string range [lindex $k 1] 0 15]…"
+		}
+		set line "[dict get $row src]  —  $fp"
+		if {[dict get $row builtin]} {
+			append line "  (built in)"
+		} elseif {[dict get $row when] ne ""} {
+			append line "  (trusted [dict get $row when])"
+		}
+		lappend ::repo_keys_rows $row
+		.repokeys.body.list insert end $line
+	}
+	if {$::repo_keys_rows eq ""} {
+		.repokeys.status configure -text "No repository has published a signing key that rio verified yet. An unsigned repository has no key to list."
+	}
+}
+
+# Why a selected row offers nothing to forget. Said on selection rather than only
+# when the button is pressed: a control that does nothing is worse than one that
+# says why beforehand.
+proc repo_keys_sel {} {
+	if {![winfo exists .repokeys]} return
+	set sel [.repokeys.body.list curselection]
+	set t ""
+	if {$sel ne "" && [dict get [lindex $::repo_keys_rows $sel] builtin]} {
+		set t "rio ships with this key for its own repository, so there is nothing stored to forget. Removing the repository in Repositories… is what stops rio using it."
+	}
+	.repokeys.status configure -text $t
+}
+
+proc repo_keys_forget {} {
+	set sel [.repokeys.body.list curselection]
+	if {$sel eq ""} return
+	set row [lindex $::repo_keys_rows $sel]
+	if {[dict get $row builtin]} { repo_keys_sel ; return }
+	dict unset ::repo_keys [dict get $row src]
+	repo_keys_save
+	repo_keys_fill
+	if {![winfo exists .repokeys]} return
+	.repokeys.status configure -text "rio has forgotten the key for [dict get $row src]. That is not a refusal: the next scan records whatever that repository publishes then, the way the first scan did."
 }
 
 # ---------------------------------------------------------------------------
@@ -11263,6 +11395,8 @@ proc prefs_fill_extensions {f} {
 	grid [prefs_button $f.ext "Extensions…" extensions_window] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
+		-row [incr r] -column 0 -sticky w -pady {2 2}
+	grid [prefs_button $f.keys "Repository signing keys…" repo_keys_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 

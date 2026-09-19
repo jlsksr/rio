@@ -8,7 +8,8 @@ apart.
 
 ## Changing them
 
-- **In the editor** — ***Settings ▸ Keyboard Shortcuts…*** lists every command.
+- **In the editor** — ***Settings ▸ Keyboard Shortcuts…*** lists every command (the
+  same recorder opens from *Preferences ▸ Keyboard ▸ Edit Keyboard Shortcuts…*).
   Click a shortcut and press the keys you want (press-to-capture, like a modern
   IDE); *Clear* unbinds one, *Default* restores a single command's original chord,
   and *Reset all to defaults* starts over. **Save** applies immediately — no

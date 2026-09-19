@@ -72,12 +72,21 @@ from then on that key, and only that key, speaks for that repository. rio's own
 repository ships with its key already trusted, so a fresh install is never asked a
 question it has no way to answer.
 
-The keys are kept in `repository-keys.conf`, beside your `sources.list` (see
-[where everything lives](preferences.md#where-everything-lives)). It is commented
-and you may edit it: **deleting a section forgets that key**, and the next scan
-then trusts whatever the repository publishes, as it did the first time. Moving a
-repository from `http://` to `https://` is a change of route, not of publisher, so
-its key still counts.
+***Preferences ▸ Extensions ▸ Repository signing keys…*** lists what rio recorded:
+one row per repository, with the key's **fingerprint** and the date it was trusted.
+The scheme is left off the URL on purpose — moving a repository from `http://` to
+`https://` is a change of route, not of publisher, so its key still counts. rio's own
+repository is listed `(built in)` while it is still in your sources: its key is the
+one rio ships with, so nothing was ever stored for it.
+
+**Forget selected** takes a key back. That is **not** distrust — the next scan trusts
+whatever that repository publishes then, exactly as the first scan did. (On the
+`(built in)` row there is nothing stored to forget, so the button does nothing and
+says so; removing the repository in *Repositories…* is what stops rio using it.)
+
+The same list is the file `repository-keys.conf`, beside your `sources.list` (see
+[where everything lives](preferences.md#where-everything-lives)). It is commented and
+you may edit it: deleting a section is exactly what **Forget selected** does for you.
 
 Worth knowing what first use cannot do: if someone is already between you and a
 repository the **very first** time rio looks at it, they can serve their own key,
@@ -102,7 +111,9 @@ the default, which changes nothing, and **Trust the New Key**.
 **Trust it only if you can confirm that fingerprint away from this connection** —
 the publisher's own page, a release note, a message from them. rio then trusts
 exactly the key the dialog showed you, for that repository, and asks again if it
-ever changes.
+ever changes. If you later change your mind, forgetting that key in
+*Preferences ▸ Extensions ▸ Repository signing keys…* puts the repository back on
+its first scan ([above](#trust-on-the-first-scan)).
 
 ### When rio refuses a signed repository
 
@@ -153,8 +164,10 @@ Two more things worth knowing:
 
 - **The checking happens on the core's host**, because that is what fetches the
   repositories — so it is that machine's `ssh-keygen` that matters. The keys you
-  trust, though, are the GUI's, in your own `repository-keys.conf`: the sources list
-  is your trust list, and a key belongs to an entry in it.
+  trust, though, are the GUI's: the list under
+  *Preferences ▸ Extensions ▸ Repository signing keys…*, kept in your own
+  `repository-keys.conf`. The sources list is your trust list, and a key belongs to
+  an entry in it.
 - **Signing and certificates are separate checks.** A signed `https://` repository
   whose certificate isn't trusted is still refused for its certificate, and a
   certificate you accepted does not vouch for a single file.

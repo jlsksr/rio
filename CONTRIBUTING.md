@@ -368,7 +368,9 @@ What rio does with it (AGENTS.md D118), so you can predict what your users see:
   refuses the whole repository until you finish.
 - **Rotating your key** is a deliberate act: every rio that trusted the old one
   refuses the new one as *changed* until the user reviews the fingerprints and
-  accepts. There is no cross-signing and no revocation — expect to announce it.
+  accepts — or forgets the old key under *Preferences ▸ Extensions ▸ Repository
+  signing keys…*, which puts your repository back on its first scan. There is no
+  cross-signing and no revocation — expect to announce it.
 - **Dropping signing again** is refused the same way, so don't start if you can't
   keep it up. An unsigned repository stays perfectly valid; it is simply marked
   *unsigned* for the user, which is what it is.
