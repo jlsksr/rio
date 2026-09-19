@@ -258,11 +258,13 @@ for later:
     path the first time; no freshness check (a replayed older `SHA256SUMS` only
     freezes updates, and D107 never downgrades); rotation is the "changed" step, with
     no cross-signing; no revocation (D109 addendum).
-  - **Still open:** a *Repository signing keys…* list, mirroring D111's *Accepted
-    certificates…* — every source, its fingerprint, when it was trusted, and Forget.
-    Today a rotation has its own dialog and forgetting a key is a section deleted from
-    `repository-keys.conf`, which is commented and hand-editable; the dialog names it.
-    Deferred with jka rather than grown onto an already large change.
+  - **The keys list landed too** (2026-09-19, deferred at first and built once the
+    mechanism had settled): *Preferences ▸ Extensions ▸ Repository signing keys…* —
+    every source, its fingerprint, when it was trusted, and **Forget selected**, with
+    rio's own pre-trusted key shown as a `(built in)` row so a fresh install doesn't
+    look like it trusts nothing. Forgetting is not distrust: the next scan trusts on
+    first use again, which is what deleting the section from `repository-keys.conf`
+    always did. Nothing open here now.
 - **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
   B", successor to D19). `provider` is a `kind` in the **same** repositories — one
   infrastructure, a publisher adds `kind = provider` (plus `provider-api` and
