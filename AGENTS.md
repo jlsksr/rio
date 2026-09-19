@@ -2593,7 +2593,7 @@ editor). Live-network behaviour is verified against a real webdir at release
 fixture tables instead).
 
 **Addendum (2026-09-09) — ship with the project repo pre-filled.** rio now seeds
-`sources.list` with **one default repository, `http://rio.skylm.org/rio`** (the project's own
+`sources.list` with **one default repository, `http://rio.skylm.org/extensions`** (the project's own
 extension repo), so a fresh install has something to browse in the Extensions window out of
 the box instead of an empty list. The seed (`sources_seed_default`, run once at boot after
 `ledger_load`) is a **true-first-run-only** act — it writes the file *only when it does not
@@ -2603,7 +2603,28 @@ hand-edited list. Stored **without a trailing slash** (`repo_source_scan` append
 `/rio-repository.conf`). It's just a normal source once seeded — no special status, no
 pinning, plain HTTP like any other (still no rio-side TLS, D39). The URL is a single constant
 (`::default_repo`); `repos.tcl` covers the seed, its idempotence, and the no-re-seed contract.
-The repo is currently a test/POC endpoint that may become the production home.
+
+**Addendum (2026-09-19, jka: "the rio.skylm.org/rio url bugs me a bit") — the default
+source is `/extensions`, and it is a real repository now.** Two changes to the same fact.
+
+The path moved from `/rio` to `/extensions`. The host is already named `rio.skylm.org`, so
+the old segment stuttered and carried no information. The alternative weighed was `/rxs`, for
+*Rio Extension Store*, and it was **rejected on two grounds**: an acronym nobody can expand
+is not a good string to put in front of users, who type this URL into *Repositories…* by hand
+and read it back in their sources list; and **"Store" promises the one thing D39 refuses** —
+curation, approval, a central index. There is no store, and once signing lands (ROADMAP) a
+"Store" URL would actively invite users to read a first-use-trusted key as an endorsement.
+
+The timing is the part worth recording. Under the planned signing design the **source URL
+becomes the trust principal** — the identity a publisher key is trusted against, and the seed
+that ships pre-trusted. Moving it afterwards would make every user add a new source and trust
+the key again; moving it now costs one constant. A URL is cheap to change exactly until it
+anchors trust, and then it never is again.
+
+The repo also stopped being a test/POC endpoint: it is a git repository with a remote,
+published from a working tree rather than copied into place, and it carries its own
+`SIGNING.md` for the publish procedure. It is a separate repository from the in-tree
+[extensions/](extensions/) sample (D41's built-in modes), which is unaffected.
 
 ### D40 — Column / block editing: a vertical multi-line cursor, GUI-only
 
@@ -6056,7 +6077,7 @@ providers' and plugins/lib suites unchanged (14/14 with `transport.tcl` now sour
 **Open, for jka:** (1) the agent on tcltls 1.7 still accepts a trusted certificate for
 the wrong host — refuse like repositories do, or leave it *[decided: D110]*; (2) the
 Windows store path is from tcltls's documentation and has not run on Windows; (3) the
-pre-configured `http://rio.skylm.org/rio` stays http — switching it is a one-line change
+pre-configured `http://rio.skylm.org/extensions` stays http — switching it is a one-line change
 once that host serves https, and `source_same` means nobody's installs notice.
 
 **Addendum (2026-09-16, jka: "should we support a CRL? don't bloat it up").**

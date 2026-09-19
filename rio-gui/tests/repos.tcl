@@ -168,6 +168,13 @@ ok "autoindex: openbsd httpd" [repo_parse_autoindex {<!DOCTYPE html>
 # Booting with no sources.list pre-fills rio's own repository, so a fresh install has
 # something to browse. It is a true-first-run only act: idempotent while the file exists,
 # and it never comes back once the user has emptied the list.
+#
+# The constant itself has a contract worth holding, since it is edited by hand and a
+# bad value is silent: repo_source_scan appends "/rio-repository.conf" to it, so a
+# trailing slash would ask every fresh install for ".../extensions//rio-repository.conf".
+ok "seed: the default names a scheme"   [regexp {^https?://} $::default_repo] 1
+ok "seed: and carries no trailing slash" [string match */ $::default_repo] 0
+
 ok "seed: first run pre-fills rio's repo" [sources_load] [list $::default_repo]
 sources_seed_default
 ok "seed: idempotent while file exists"   [sources_load] [list $::default_repo]

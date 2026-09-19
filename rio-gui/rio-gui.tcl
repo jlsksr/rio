@@ -7990,7 +7990,7 @@ proc sources_save {urls} {
 # sources.list ONLY on a true first run — when the file does not yet exist — so a user who
 # removes it in Repositories… (which leaves a header-only file behind) is never re-seeded.
 # No trailing slash: repo_source_scan appends "/rio-repository.conf" to the base.
-set ::default_repo "http://rio.skylm.org/rio"
+set ::default_repo "http://rio.skylm.org/extensions"
 proc sources_seed_default {} {
 	set path [sources_path]
 	if {$path eq "" || [file exists $path]} return
