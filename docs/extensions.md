@@ -176,9 +176,12 @@ new enough to know about repository signatures at all, which matters only if you
 attach a window to an [older remote core](remote.md). Where either is missing rio
 says `can't check the signature` rather than pretending it checked, and:
 
-- a repository **you have confirmed no key for** simply lists as `unsigned`, exactly
-  as it did before signing existed — rio was not going to check anything for it
-  either way, so there is nothing to confirm and nothing to refuse;
+- a repository **you have confirmed no key for** simply lists as `unsigned`, and
+  installs like any unsigned repository. **The confirmation question is never raised
+  here**, whatever the repository publishes: rio would be putting a fingerprint in
+  front of you that it could not check a single signature against. So on such a core
+  a signed repository you have not confirmed is used exactly as an unsigned one is —
+  nothing vouches for the files, and the install confirmation says so;
 - one whose key you **have** confirmed is **refused**, as `can't check the signature`.
   Using it unchecked is the one thing confirming the key was meant to prevent.
 
