@@ -66,12 +66,14 @@ test http-scheme {the scheme, case-folded; "" for anything else} -body {
 } -result {http https {} {}}
 
 # --- body decoding (pure: the seam is the decoder, not the socket) ------------
-# A repository is a plain webdir, which declares no charset — so ::http::data
-# hands back a body decoded as iso8859-1, one latin-1 character per UTF-8 byte.
-# Left alone, the GUI writes that back out as UTF-8 and the installed extension
-# is corrupted on disk (found live against rio.skylm.org, 2026-09-12).
+# Since D118 the fetch is -binary, so _decode's input is always BYTES — one
+# character per byte — and every decision about what they mean is made here. A
+# repository is a plain webdir, which declares no charset, and the RFC default for
+# that is latin-1: left alone, the GUI writes those characters back out as UTF-8
+# and the installed extension is corrupted on disk (found live against
+# rio.skylm.org, 2026-09-12).
 
-# The three latin-1 characters an em-dash's UTF-8 bytes become when read that way.
+# The three bytes of an em-dash, as a byte string.
 #
 # Every non-ASCII value below is a \u escape, not a literal, and must stay that way:
 # tcltest runs each .test in a CHILD tclsh, which decodes the file with the SYSTEM
@@ -85,13 +87,32 @@ test http-decode-undeclared-charset-is-utf8 {no charset means UTF-8, not latin-1
 	rio::http::_decode $::mangled "text/plain"
 } -result "a\u2014b"
 
-test http-decode-declared-charset-is-left-alone {http already decoded it; twice would mangle} -body {
-	# The bytes are the same; the difference is that the server said what they are.
+test http-decode-declared-latin1 {a server that says latin-1 is believed} -body {
+	# The same bytes; the difference is that the server said what they are.
 	rio::http::_decode $::mangled "text/plain; charset=iso-8859-1"
 } -result "a\u00E2\u0080\u0094b"
 
-test http-decode-declared-utf8-is-left-alone {a declared utf-8 body is already decoded} -body {
-	rio::http::_decode "a\u2014b" "text/plain; charset=utf-8"
+test http-decode-declared-utf8 {and a server that says utf-8 is believed too} -body {
+	rio::http::_decode $::mangled "text/plain; charset=utf-8"
+} -result "a\u2014b"
+
+test http-decode-charset-quoted-and-cased {charset="UTF-8"; \u2026, as servers write it} -body {
+	list [rio::http::_decode $::mangled {text/plain; charset="UTF-8"}] \
+		[rio::http::_decode $::mangled {text/html;charset=utf-8}]
+} -result [list "a\u2014b" "a\u2014b"]
+
+test http-encoding-for {the IANA name a server sends -> the name Tcl knows} -body {
+	set out {}
+	foreach cs {utf-8 UTF-8 iso-8859-1 iso8859-1 windows-1252 cp1252 us-ascii
+			utf8 klingon-9 {}} {
+		lappend out [rio::http::_encoding_for $cs]
+	}
+	set out
+} -result {utf-8 utf-8 iso8859-1 iso8859-1 cp1252 cp1252 ascii utf-8 {} {}}
+
+test http-decode-unknown-charset-falls-back {a charset this Tcl has no encoding for
+		is no reason to mangle anything \u2014 the UTF-8 guess still runs} -body {
+	rio::http::_decode $::mangled "text/plain; charset=klingon-9"
 } -result "a\u2014b"
 
 test http-decode-ascii-unchanged {the overwhelmingly common case costs nothing} -body {
@@ -100,7 +121,7 @@ test http-decode-ascii-unchanged {the overwhelmingly common case costs nothing} 
 
 test http-decode-invalid-utf8-kept-as-is {bytes that are NOT utf-8 are not replaced by U+FFFD} -body {
 	# A lone 0xE9 (latin-1 "é") is not a valid UTF-8 sequence: decoding it as UTF-8
-	# would destroy it, so the body http gave us stands.
+	# would destroy it, so the bytes stand as they are.
 	rio::http::_decode "caf\u00E9" "text/plain"
 } -result "caf\u00E9"
 
@@ -109,6 +130,26 @@ test http-decode-multibyte-round-trip {a whole manifest line survives intact} -b
 	set wire [encoding convertfrom iso8859-1 [encoding convertto utf-8 $src]]
 	rio::http::_decode $wire "text/plain"
 } -result "description = OpenAI-compatible agent provider \u2014 hosted ChatGPT"
+
+test http-decode-keeps-crlf {line endings are NOT translated (D118): a signature
+		covers bytes, and a repository published from Windows must stay verifiable} -body {
+	list [rio::http::_decode "a\r\nb\r\n" "text/plain"] \
+		[rio::http::_decode "a\r\nb\r\n" "text/plain; charset=utf-8"]
+} -result [list "a\r\nb\r\n" "a\r\nb\r\n"]
+
+# --- the hash of what arrived (AGENTS.md D118) --------------------------------
+test http-sha256-of-bytes {the hash is over BYTES, and is the one sha256sum prints
+		for the same input — checked against `printf abc | sha256sum`} -body {
+	list [rio::http::_sha256 "abc"] \
+		[rio::http::_sha256 [encoding convertto utf-8 "café"]]
+} -result {ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad 850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e}
+
+test http-sha256-is-not-the-hash-of-the-decoded-text {the distinction the whole
+		design rests on: one body, two strings, two different hashes — which is why
+		the core hashes and the GUI never re-derives} -body {
+	expr {[rio::http::_sha256 $::mangled]
+		ne [rio::http::_sha256 [rio::http::_decode $::mangled "text/plain"]]}
+} -result 1
 
 # --- repo.fetch parameter validation (no fetch is ever attempted) -------------
 test repo-fetch-requires-url {a missing url is bad_request} -body {
@@ -134,6 +175,11 @@ test repo-fetch-scheme-refused {a non-http scheme is bad_request} -body {
 
 test repo-fetch-bad-timeout {a garbage timeout is bad_request, not internal} -body {
 	catch {rio::ops::repo_fetch {url http://example.org/repo timeout soon}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test repo-fetch-bad-sha256-flag {and so is a garbage sha256 flag (D118)} -body {
+	catch {rio::ops::repo_fetch {url http://example.org/repo sha256 maybe}} e opts
 	rio::error::code_of $opts
 } -result bad_request
 
