@@ -30,6 +30,10 @@
 # (`-n git`) or for ssh authentication fails here, and a signature by any other key
 # fails here.
 #
+# A KEY IS REFUSED BEFORE IT REACHES A FILE unless it is a type and base64 on one
+# line (key_ok). The allowed-signers file rio writes is the whole trust decision, and
+# a newline inside a published key would add principals to it.
+#
 # EXACT BYTES, EVERYWHERE. A signature covers bytes, so nothing in this file may
 # re-encode anything by accident: the data and the signature are written to temp
 # files as raw UTF-8 and handed to the child as file redirections. `exec << $string`
@@ -160,9 +164,12 @@ proc rio::sig::verify {data sig key principal {ns ""}} {
 	set sf   [file tempfile spath] ; close $sf
 	set df   [file tempfile dpath] ; close $df
 	set rc [catch {
-		# One principal, one key, and the namespace bound to it: the file IS the
-		# trust decision, so it says exactly what rio decided and nothing more.
-		_spit $apath "$principal namespaces=\"$ns\" $key\n"
+		# One principal, one key: the file IS the trust decision, so it says exactly
+		# what rio decided and nothing more. The namespace is NOT repeated here as a
+		# `namespaces="…"` option — `-n` below is what enforces it (measured: with the
+		# option removed, a `-n git` signature still fails as "namespace does not
+		# match"), and an option no test can make fail is decoration, not defence.
+		_spit $apath "$principal $key\n"
 		_spit $spath $sig
 		_spit $dpath $data
 		_run [list $tool -Y verify -f $apath -I $principal -n $ns -s $spath] $dpath
@@ -180,6 +187,9 @@ proc rio::sig::verify {data sig key principal {ns ""}} {
 		return [dict merge $out [dict create available 0 \
 			reason "the ssh-keygen on the core's host is older than OpenSSH 8.0 and can't verify signatures"]]
 	}
+	# BOTH, never either: a zero exit is not a verdict on its own (a tool invoked in a
+	# way it did not understand can succeed at doing nothing), and neither is a line of
+	# output. ssh-keygen says Good for the namespace it was asked about, or this is a no.
 	if {[dict get $r exitcode] == 0 && [regexp "^Good \"$ns\" signature" $sout]} {
 		set fp ""
 		regexp {(SHA256:[A-Za-z0-9+/=]+)} $sout -> fp

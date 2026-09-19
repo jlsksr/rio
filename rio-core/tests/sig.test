@@ -120,6 +120,52 @@ test sig-verify-refusal-always-has-a-reason {a wrong key exits non-zero with NOT
 	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
 } -result {0 1}
 
+test sig-verify-needs-both-exit-and-verdict {a zero exit alone is not a verdict —
+		a tool that succeeded at doing nothing has verified nothing} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 0 stdout "" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
+test sig-verify-good-line-alone-is-not-enough {nor is the word Good on a failed run} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 255 \
+			stdout "Good \"rio-repository\" signature for x with ED25519 key SHA256:zz" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
+test sig-verify-good-for-another-namespace-is-not-good {the verdict line names the
+		namespace it is about, and it must be the one we asked for} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 0 \
+			stdout "Good \"git\" signature for x with ED25519 key SHA256:zz" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
 # --- the real tool against the fixtures ---------------------------------------
 test sig-verify-good {the signature the fixture key made over these bytes} -constraints sshkeygen -body {
 	set r [rio::sig::verify $::sums $::good $::signer $::principal rio-repository]
