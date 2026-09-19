@@ -8921,9 +8921,10 @@ proc ext_update_all {} {
 		set u [dict get $pending $key]
 		lassign [split $key /] kind name
 		set v [dict get $u variant]
-		set line [format "  %-16s %s → %s   %s" \
+		set line [format "  %-16s %s → %s   %s (%s)" \
 			"$name ($kind)" [dict get $u from] [dict get $u to] \
-			[host_of [dict get $v source]]]
+			[host_of [dict get $v source]] \
+			[sig_mark [expr {[dict exists $v sig] ? [dict get $v sig] : "unsigned"}]]]
 		if {[dict exists $::ext_installed $key]
 				&& [source_same [dict get $v source] [dict get [dict get $::ext_installed $key] source]]} {
 			lappend same $line

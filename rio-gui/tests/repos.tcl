@@ -609,6 +609,10 @@ ok "update all: consent lists both" \
 	[list [string match "*up *1.0.0 → 1.2.0*" [mb_last]] [string match "*up2*1.0.0 → 1.3.0*" [mb_last]]] {1 1}
 ok "update all: consent says which repository" \
 	[string match "*repository each was installed from*" [mb_last]] 1
+# The batch consent suppresses the per-install dialog, so the one thing that dialog
+# would have said about each source has to be on these lines instead (D118).
+ok "update all: consent marks each source" \
+	[string match "*(unsigned)*" [mb_last]] 1
 ok "update all: ledger carries the new versions" \
 	[list [dict get $::ext_ledger syntax/up version] [dict get $::ext_ledger syntax/up2 version]] \
 	{1.2.0 1.3.0}
