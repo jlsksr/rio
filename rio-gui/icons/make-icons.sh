@@ -6,7 +6,7 @@
 # one -- is a single command.
 #
 #   ./rio-gui/icons/make-icons.sh                  re-cut the ACTIVE artwork
-#   ./rio-gui/icons/make-icons.sh redeemer-blue    switch to sources/redeemer-blue.png
+#   ./rio-gui/icons/make-icons.sh redeemer-1       switch to sources/redeemer-1.png
 #   ./rio-gui/icons/make-icons.sh ~/new-icon.png   adopt a new file (kept in sources/)
 #   ./rio-gui/icons/make-icons.sh --list           show what is available, and which is on
 #
@@ -21,6 +21,8 @@
 # What it does, and why:
 #   * TRIMS the source's transparent margin and re-pads it square. Artwork usually
 #     ships with slack around it; at 16x16 that slack is whole pixels of the subject.
+#     A no-op on artwork that has none -- an opaque tile is left exactly as drawn,
+#     margin included, because there its margin is part of the design.
 #   * Lanczos, and NO sharpening. Unsharp looks right at 48px and rings at 16 --
 #     a dark halo along the strongest edge.
 #   * Writes a Windows .ico too (16/32/48/256 in one file). `wm iconphoto` works on
