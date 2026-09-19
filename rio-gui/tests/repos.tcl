@@ -1009,6 +1009,23 @@ fix_sign $S $KEY1 {rio-repository.conf index sig-mode/rio-extension.conf sig-mod
 s_scan
 ok "unlisted: an unsigned extra file kills the source" [s_code] hash_mismatch
 
+# --- the marker is covered by the sums it pointed at --------------------------------
+# The marker carried the key, so it has to be one of the files the signature vouches
+# for. And the key is trusted only after a scan rio fully accepted: a first use that
+# ends in a refusal must leave nothing behind, or the user is pinned to a key from a
+# repository rio would not touch.
+s_fixtures
+fix_sign $S $KEY1 {index sig-mode/rio-extension.conf sig-mode/sigmode.tcl}
+s_scan
+ok "marker: a marker the sums don't cover is refused" [s_code] hash_mismatch
+ok "marker: and no key was trusted on the way out"    [repo_key_of $S] ""
+s_fixtures
+set ::fix($S/rio-repository.conf) [list 200 \
+	"name = S repository\ndescription = edited after signing\nkey = $KEY1"]
+s_scan
+ok "marker: a marker edited after signing is refused" [s_code] hash_mismatch
+ok "marker: still nothing trusted"                    [repo_key_of $S] ""
+
 # --- a changed key --------------------------------------------------------------------
 s_fixtures
 s_scan
