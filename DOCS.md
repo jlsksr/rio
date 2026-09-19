@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Eleven groups of checks. Each exists because something drifted once.
+Thirteen groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -67,6 +67,18 @@ Eleven groups of checks. Each exists because something drifted once.
     and its controls' labels. It is check 6 for the window, and it came from D114: the old
     Extensions path for Accepted certificates… stayed in two topics after the button moved
     to Network. Like check 6, it relies on the path being in emphasis.
+12. **`getting-started.md` lists exactly the menus outside the editor.** Check 10's
+    twin for D115: the read-only views' menu and the one every entry and text outside
+    the editor carries. The suite runs both builders against fixtures of its own — a
+    disabled text, a bare entry — so the check never depends on what a pane happens to
+    hold, and reads the labels off the real menu widget. Both directions, on check 10's
+    convention: in *Right-click menus*, bold marks an entry and nothing else.
+13. **The pre-seeded repository URL the docs quote is the one rio seeds.** Derived from
+    `::default_repo`, never spelled out: the host comes out of the constant, every
+    inline-code URL on that host across the manual and the user-facing root documents is
+    collected, and the set must be exactly the default. It exists because the URL moved
+    from `/rio` to `/extensions` and a reader copying the stale one would add a
+    repository that 404s while every page still read perfectly.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:
