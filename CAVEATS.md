@@ -118,11 +118,38 @@ design limit that surprises, append it to the matching section.
      - That is no worse than a plain **http** repository, which never had a certificate
        to check.
      - Use it only on a network you trust.
-  4. **Stay on http:** a local model and http repositories. http repositories have **no
-     transport integrity** until repository signing is built.
+  4. **Stay on http:** a local model and http repositories. A **signed** http repository
+     (D118) has integrity without a certificate — the publisher's key vouches for the
+     files whatever the transport did to them. An unsigned one has none.
 - **Planned.** Nothing in rio: the gap closes as hosts ship `tcltls` 1.8+. Repository
-  signing ([ROADMAP.md](ROADMAP.md)) would give http repositories integrity independent of
-  TLS.
+  signing (D118) closed the http-repository half of it.
+
+---
+
+### An OpenSSH older than 8.0 can't check a repository signature
+
+- **Symptom.** On a core whose host has `ssh-keygen` from OpenSSH **older than 8.0** — or
+  none at all — a signed extension repository whose key rio already trusts lists as
+  *can't check the signature* and installs nothing. The same rio works against the same
+  repository from a core on a newer host.
+
+  The most likely host is **Windows 10 1809**, the first to ship OpenSSH: that build is
+  7.7. Windows 10 1903+ and Windows 11 ship 8.1 or newer; every current Linux and BSD is
+  well past 8.0.
+- **Cause.** `ssh-keygen -Y sign` / `-Y verify` arrived in OpenSSH 8.0. Before it there is
+  no way to verify a detached signature with `ssh-keygen` at all. rio reports that as the
+  version problem it is, never as a bad signature (D118).
+- **Where it's fine.** A repository nobody has trusted a key for simply lists as
+  *unsigned*, exactly as it did before signing existed — the tool is only needed to check
+  a signature rio is expecting.
+
+  **Only the core's host counts** (D30), as with `tcltls`.
+- **Mitigation in rio.** Refuse by default, and say which package to install. If that is
+  not possible, *Preferences ▸ Extensions ▸ "Use repositories rio can't check"* lets the
+  repository through marked **unverified** — never *signed* — and named as such in the
+  install consent. It does not excuse a signature that fails, a key that changed, or a
+  file that doesn't match: those are refused either way.
+- **Planned.** Nothing: the gap closes with the host's OpenSSH.
 
 ---
 
