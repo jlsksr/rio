@@ -1272,7 +1272,12 @@ ok "keys: the conf file says so, with no key" \
 	[list [expr {[string first "\[rio.skylm.org/extensions\]\nforgotten = $TODAY" [keys_file]] >= 0}] \
 		[string match "*rio.skylm.org*key = *" [keys_file]]] {1 0}
 # Selecting the withdrawn row explains the state it is in, and Forget on it is a
-# no-op — it must not claim to have withdrawn anything a second time.
+# no-op — it must not claim to have withdrawn anything a second time. Driven from a
+# reloaded store, because a withdrawal that only held in memory would put the seed
+# back on the next start and the user would never be told.
+set ::repo_keys {} ; repo_keys_load
+ok "keys: and the withdrawal is still in force after a restart" \
+	[repo_key_of $::default_repo] ""
 keys_drive {
 	.repokeys.body.list selection set 1
 	repo_keys_sel
