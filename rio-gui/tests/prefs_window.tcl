@@ -64,6 +64,11 @@ ok "update check is off"         $::ext_check_updates                  0
 ok "update check binds the flag" [.prefs.body.extensions.chk cget -variable] ::ext_check_updates
 # D111's certificates moved to Network with D114: they apply to every https connection.
 ok "extensions: no certificates button" [winfo exists .prefs.body.extensions.certs] 0
+# The signing keys are the repositories' own trust store (D118), so they sit here and
+# not in Network — nothing but the Extensions window consults them.
+ok "extensions: signing keys button"    [list [winfo exists .prefs.body.extensions.keys] \
+	[.prefs.body.extensions.keys cget -command]] {1 repo_keys_dialog}
+ok "network: no signing keys button"    [winfo exists .prefs.body.network.keys] 0
 
 # --- two-door sync: the window control binds the SAME global the menu entry does ---
 ok "wrap: same var as menu"      [.prefs.body.view.wrap cget -variable] \

@@ -1157,5 +1157,87 @@ ok "ledger: an unsigned install records no signer" \
 	[dict exists $::ext_ledger theme/night signed_by] 0
 ext_remove theme night
 
+# --- Preferences ▸ Extensions ▸ Repository signing keys… -------------------------------------
+# The list of what rio recorded, and Forget. The dialog blocks in tkwait, so the
+# script that drives it runs from the event loop, as the certificates dialog's does.
+proc keys_drive {script} {
+	after 50 [list keys_ready $script 0]
+	repo_keys_dialog
+}
+proc keys_ready {script tries} {
+	if {![winfo exists .repokeys.body.list] && $tries < 300} {
+		after 10 [list keys_ready $script [incr tries]]
+		return
+	}
+	uplevel #0 $script
+	if {[winfo exists .repokeys]} { destroy .repokeys }
+}
+proc keys_file {} {
+	if {![file exists [repo_keys_path]]} { return "" }
+	set f [open [repo_keys_path] r] ; set t [read $f] ; close $f
+	return $t
+}
+set TODAY [clock format [clock seconds] -format %Y-%m-%d]
+
+s_fixtures
+s_scan                                    ;# S trusted on first use; sources.list is S alone
+keys_drive { set ::keys_seen [list [.repokeys.body.list size] [.repokeys.body.list get 0]] }
+# One row, and only one: rio's own repository is not in this sources list, and a key
+# for a source the user removed speaks for nothing.
+ok "keys: the trusted key is listed, alone" [lindex $::keys_seen 0] 1
+ok "keys: scheme-less, with fingerprint and date" [lindex $::keys_seen 1] \
+	"s.example/signed  —  [sig_fingerprint $KEY1]  (trusted $TODAY)"
+
+# The seed is trusted without ever being written down, so it has to be listed from the
+# seed itself — otherwise a fresh install shows an empty window while rio does trust a key.
+sources_save [list $S $::default_repo]
+keys_drive {
+	set ::keys_seen [list [.repokeys.body.list get 0] [.repokeys.body.list get 1]]
+	set ::keys_bind [bind .repokeys.body.list <<ListboxSelect>>]
+	.repokeys.body.list selection set 1
+	# The selection carries the note. `event generate` can't deliver a virtual event
+	# to an unmapped window, so the binding is checked separately (below) and the
+	# handler called the way that binding would.
+	repo_keys_sel
+	set ::keys_note [.repokeys.status cget -text]
+	repo_keys_forget
+	set ::keys_after [list [.repokeys.body.list size] \
+		[dict exists $::repo_keys [source_key $::default_repo]]]
+}
+ok "keys: rio's own repository is listed as built in" \
+	[lindex $::keys_seen 1] "rio.skylm.org/extensions  —  [sig_fingerprint $::default_repo_key]  (built in)"
+ok "keys: selecting it says why there is nothing to forget" \
+	[string match "rio ships with this key*Repositories…*" $::keys_note] 1
+ok "keys: and the selection really runs that" [lindex $::keys_bind 0] repo_keys_sel
+ok "keys: and Forget leaves it alone"   $::keys_after {2 0}
+
+keys_drive {
+	.repokeys.body.list selection set 0
+	repo_keys_forget
+	set ::keys_gone [list [.repokeys.body.list size] [dict exists $::repo_keys [source_key $S]] \
+		[.repokeys.status cget -text]]
+}
+ok "keys: Forget drops the stored key"  [lrange $::keys_gone 0 1] {1 0}
+ok "keys: and says what that means"     [string match "*forgotten the key for s.example/signed*next scan*" [lindex $::keys_gone 2]] 1
+ok "keys: the conf file no longer holds it" [string match "*s.example/signed*" [keys_file]] 0
+# Forgetting is not distrust: the next scan trusts on first use, as the first one did.
+s_scan 1
+ok "keys: the next scan trusts it again" [repo_key_of $S] $KEY1
+ok "keys: as a first use, dated today"  [dict get $::repo_keys [source_key $S] trusted] $TODAY
+
+# A core with no ssh-keygen has no fingerprint to give, and a row still has to say
+# WHICH key it is — that is the only reason the row exists.
+set ::sig_available 0
+keys_drive { set ::keys_nofp [.repokeys.body.list get 0] }
+set ::sig_available 1
+ok "keys: no ssh-keygen, so the key itself names the row" \
+	[string match "s.example/signed  —  ssh-ed25519 AAAAsigningkeyON…*" $::keys_nofp] 1
+
+set ::repo_keys {} ; repo_keys_save
+sources_save [list $S]
+keys_drive { set ::keys_empty [list [.repokeys.body.list size] [.repokeys.status cget -text]] }
+ok "keys: nothing trusted, nothing listed" [lindex $::keys_empty 0] 0
+ok "keys: and the window says so"          [string match "No repository has published a signing key*" [lindex $::keys_empty 1]] 1
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
