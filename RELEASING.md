@@ -345,7 +345,9 @@ though the interactive behaviour is right.
 
 - [ ] Add a `LICENSE` file. With no license, nobody may legally use, fork, or
       redistribute rio. (ISC or BSD-2 fit the project's POSIX/BSD spirit; MIT for
-      maximum familiarity.)
+      maximum familiarity.) *Nothing in the tree needs carving out: the window icon
+      was the only third-party asset, and since AGENTS.md **D120** the artwork is
+      the project's own — one licence covers the whole tree.*
 - [ ] Add `CODE_OF_CONDUCT.md` (already a ROADMAP "planned" item, due before rio
       opens to outside contributions).
 
