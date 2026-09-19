@@ -354,12 +354,24 @@ stops a signature you made for git being replayed as a repository signature. Kee
 the private key off the web server; a passphrase plus `ssh-add` keeps signing
 non-interactive.
 
-What rio does with it (AGENTS.md D118), so you can predict what your users see:
+**Publish your fingerprint where a user can check it** — your project page, a
+release note, the mail you announce the repository in:
 
-- The **first** scan that verifies your signature records your key. From then on
-  only that key speaks for your repository, and rio checks every file it fetches
-  from you — marker, `index`, manifests, payloads — against `SHA256SUMS`, at scan
-  time and again before an install writes anything.
+    ssh-keygen -lf ~/.ssh/my-rio-repo.pub          # SHA256:…
+
+rio asks each of your users to confirm it once, and the only way they can answer is
+by comparing it against something of yours that is not the repository itself. Signing
+without publishing the fingerprint leaves them clicking yes on faith.
+
+What rio does with it (AGENTS.md D118, D119), so you can predict what your users see:
+
+- The **first** scan that verifies your signature does **not** record your key — it
+  refuses your repository and shows the user your fingerprint, the way `ssh` does on
+  a first connection. Once they confirm it, only that key speaks for your repository,
+  and rio checks every file it fetches from you — marker, `index`, manifests,
+  payloads — against `SHA256SUMS`, at scan time and again before an install writes
+  anything. So a new user's very first sight of your repository is a question about
+  you; make the fingerprint easy to find.
 - **A file that isn't in `SHA256SUMS` is refused**, as firmly as one whose hash
   differs: your sums cover everything served, so an unlisted file did not come from
   you. This is the failure mode to know about — **re-sign on every publish**, and
@@ -369,8 +381,8 @@ What rio does with it (AGENTS.md D118), so you can predict what your users see:
 - **Rotating your key** is a deliberate act: every rio that trusted the old one
   refuses the new one as *changed* until the user reviews the fingerprints and
   accepts — or forgets the old key under *Preferences ▸ Extensions ▸ Repository
-  signing keys…*, which puts your repository back on its first scan. There is no
-  cross-signing and no revocation — expect to announce it.
+  signing keys…*, which puts your repository back to being asked about. There is no
+  cross-signing and no revocation — expect to announce it, with the new fingerprint.
 - **Dropping signing again** is refused the same way, so don't start if you can't
   keep it up. An unsigned repository stays perfectly valid; it is simply marked
   *unsigned* for the user, which is what it is.

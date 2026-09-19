@@ -6849,7 +6849,9 @@ checks in `repos.tcl` driving the real dialog, plus the button's place in
 something: removing the built-in guard from `repo_keys_forget` changed no row and no
 count, so the **first version of the test passed a status line claiming a key had been
 forgotten when none had**. The check, not the code, was wrong; it now asserts what the
-window says, and the injection fails.)*
+window says, and the injection fails. **That last sentence is what D119 overturned, the
+same day** — jka read it here and objected to it, so the seed row and the meaning of
+*Forget* below are both superseded.)*
 
 **Guards**: `sig.test` (30) runs the real tool against **committed fixtures** — a test
 key's public half and signatures made once, because a signature generated at test time
@@ -6866,6 +6868,76 @@ lacked). A self-review after that found the one real defect of the change: the o
 path reached `dict get` on a hash that isn't there, which is a crash, not a refusal.
 **Verified live** against rio.skylm.org/extensions through rio's own scan: five
 extensions, all marked signed, `SHA256:ThigJDQbjz1G8yvZMJ7grlLlcOA6uS+ZDWvJdJPVfG0`.
+
+---
+
+### D119 — a signing key is trusted when the user says so, never because it arrived first
+
+**Amends D118's trust-on-first-use.** jka, reading the amendment above, stopped on the
+sentence *"forgetting is not distrust — the next scan trusts on first use again"*:
+**security stuff should work consciously for the user.** I offered a fix; the answer was
+better than the question — *"SSH asks on first use of a key, too. And SSH seems to be a
+good bar."*
+
+It is, and rio was not clearing it. `ssh` prints the fingerprint and waits for `yes`.
+Silent recording is `StrictHostKeyChecking=accept-new`, which exists precisely because it
+is **not** the default. D118 shipped `accept-new` and D118's own manual claimed rio
+"works the way an SSH client does" — the documentation described the stronger thing while
+the code did the weaker one, which is the worst version of this to leave standing.
+
+**What it buys, stated exactly.** Confirming does not close the first-scan hole: an
+attacker on the path still gets to serve a marker, sums and a signature made by their own
+key. What changes is that they can no longer win **silently and permanently**. They must
+now get a human to accept a fingerprint the publisher's own page contradicts — and the
+same fingerprint is what rio shows, so there is something to check. Under D118 the only
+observable was a row that said *signed*, which is exactly what a successful attack looked
+like. The cost is one click per repository added, which is a rare act; a per-install
+prompt would have been the wrong trade and was never on the table.
+
+**Where the refusal sits is the security property.** `repo_sig_check` returns
+`key_unconfirmed` in the exact position `repo_key_trust` used to be called: **after** the
+signature verified and **after** the marker-hash check. Raised earlier it would put a
+fingerprint in front of a user for a key that signs nothing in this repository — an
+invitation to confirm something meaningless, which trains people to click through. Its own
+injection: moving it three lines up fails `marker: not offered for confirmation` by name.
+
+**A refused row, not a modal** (jka's choice among three). D107 scans repositories at
+start-up; a modal would ambush someone who opened rio to edit a file. So it is D111's
+shape, which rio already had for an untrusted certificate and for a changed key: the
+source is refused, the row says *signing key not confirmed*, and the detail pane offers
+*Review signing key…*. `extw_key_review` gained a **first-sight branch** rather than a
+second window — one fingerprint instead of two, the title *Confirm signing key*, **Go
+Back** still the default button, and still trusting the key the dialog **showed**, never
+one refetched at the click.
+
+**It removes a state instead of adding one.** This is the part worth keeping. Under D118,
+*Forget* needed a "forgotten" marker or it was a lie — delete the section and the next
+scan silently put the key back. With no silent trust anywhere, deleting the section *is*
+the whole act: the question simply comes back. The objection dissolved a design instead of
+requiring one.
+
+**The seed is the one exception, and it is now withdrawable.** rio's own key is a fallback
+in `repo_key_of`, not a stored entry, so there is nothing to delete — which is why D118's
+dialog could only apologise for that row. *Forget* on it now **writes**: a **keyless
+section** (`forgotten = <date>`), and the rule is one sentence — *a section with no `key`
+means rio knows this source and trusts no key for it*. `repo_key_of` answers `""` from
+inside the loop and never reaches the seed; `repo_keys_load` stopped skipping sections
+without a `key`; the row stays, marked *(built in, withdrawn)*, because a decision rio
+made on the user's behalf should be visible and reversible rather than merely absent.
+**Keys already recorded under D118 stay trusted** — the change is forward-looking, and
+re-asking about keys a user has been using for a week would teach them to say yes.
+
+**Guards**: `repos.tcl` grew to 310 checks. The *trust on first use* block became *first
+sight* (refused, **nothing written**, no variants, the row carrying the offered key), an
+`s_scan_ok` helper confirms `KEY1` for the ~65 checks that are about a trusted repository
+rather than about trust itself, and the review dialog is now driven end-to-end — **which
+D118 never did**: Go Back leaving the source refused, and Trust recording the shown key
+while the fixture swaps its marker mid-click. Seven injections, each failing by name. One
+**passed six of seven** and was acted on: withdrawing the seed only in memory kept every
+row and status line green, because the dialog block never reloaded from disk — the window
+would have looked right while the seed came back on the next start. `docs.tcl` check 14
+enumerates `dead_phrase`'s arms from the live proc, so it failed until the new phrase was
+in the manual; that is the guard doing its job and is why it exists.
 
 ---
 
