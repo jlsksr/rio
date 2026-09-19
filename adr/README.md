@@ -184,7 +184,8 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0120](0120-core-wide-unchecked-https-switch.md) | One core-wide switch for https without host-name checks | Accepted | 2026-09-17 |
 | [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted | 2026-09-17 |
 | [0122](0122-missing-dependency-names-its-package.md) | A missing dependency names the package to install | Accepted | 2026-09-17 |
-| [0123](0123-window-and-taskbar-icon.md) | rio has a window and taskbar icon | Accepted | 2026-09-18 |
+| [0123](0123-window-and-taskbar-icon.md) | rio has a window and taskbar icon | Accepted; the artworks it compares were removed by 0127 | 2026-09-18 |
 | [0124](0124-signed-repositories.md) | A repository can be signed, and rio checks it | Accepted; amended by 0125; trust on first use superseded by 0126 | 2026-09-16 |
 | [0125](0125-repository-signing-keys-list.md) | Every repository signing key rio trusts is listed, and can be forgotten | Accepted; amended by 0126 | 2026-09-19 |
 | [0126](0126-signing-key-confirmed-by-the-user.md) | A signing key is trusted when the user confirms it, never because it arrived first | Accepted | 2026-09-19 |
+| [0127](0127-artwork-rio-can-pass-on.md) | rio ships only artwork it can pass on | Accepted | 2026-09-20 |

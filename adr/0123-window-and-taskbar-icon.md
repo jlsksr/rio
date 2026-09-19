@@ -1,6 +1,6 @@
 # ADR-0123: rio has a window and taskbar icon
 
-- **Status:** Accepted
+- **Status:** Accepted; the artworks it compares were removed by [ADR-0127](0127-artwork-rio-can-pass-on.md)
 - **Date:** 2026-09-18
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D117
