@@ -53,3 +53,19 @@ proc rio::ops::sig_verify {params} {
 	return [dict create result [rio::sig::verify $data $sig $key $principal $ns]]
 }
 rio::dispatch::register sig.verify rio::ops::sig_verify
+
+# sig.fingerprint {key} -> {fingerprint <SHA256:…>}
+#
+# What a user is shown when they are asked to trust a key — the same string
+# `ssh-keygen -lf` prints, so it can be compared with what a publisher quotes out of
+# band. "" when the key is junk or there is no ssh-keygen to ask; a client showing a
+# key it cannot fingerprint has to say so, which is why this is an empty answer
+# rather than an error.
+proc rio::ops::sig_fingerprint {params} {
+	if {![dict exists $params key]} {
+		rio::error::raise bad_request "sig.fingerprint requires key"
+	}
+	return [dict create result [dict create \
+		fingerprint [rio::sig::fingerprint [string trim [dict get $params key]]]]]
+}
+rio::dispatch::register sig.fingerprint rio::ops::sig_fingerprint

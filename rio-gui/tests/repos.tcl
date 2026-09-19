@@ -46,7 +46,12 @@ array set ::fix {}
 set ::fetches 0        ;# every fetch the GUI asks for — the start-up check must make NONE
                        ;# while its preference is off (D107)
 array set ::fixerr {}  ;# url -> {code message}: a fetch the core refused with that code
-proc repo_fetch {url} {
+# The hash is the CORE's answer about the bytes it received (D118), so the stub
+# computes a real one over the fixture's own bytes — a fixture whose text changes
+# then changes its hash, exactly as a repository would.
+package require sha256
+proc fix_hash {text} { return [::sha2::sha256 -hex [encoding convertto utf-8 $text]] }
+proc repo_fetch {url {hash 0}} {
 	incr ::fetches
 	if {[info exists ::fixerr($url)]} {
 		lassign $::fixerr($url) code msg
@@ -54,9 +59,54 @@ proc repo_fetch {url} {
 	}
 	if {[info exists ::fix($url)]} {
 		lassign $::fix($url) status text
-		return [dict create ok 1 status $status text $text]
+		set out [dict create ok 1 status $status text $text]
+		if {$hash} { dict set out sha256 [fix_hash $text] }
+		return $out
 	}
 	return [dict create ok 0 error "connection refused (stub)"]
+}
+
+# --- the signature seam (D118) -------------------------------------------------
+# sig_verify is what the GUI suite stubs: the crypto itself is the core's, tested
+# against real fixtures in rio-core/tests/sig.test. Here a "signature" is the string
+# "signed-by:<key>", so the stub can answer the way ssh-keygen would — good for the
+# key that made it, bad for any other — without an ssh-keygen anywhere near this file.
+set ::sig_available 1     ;# 0 = no ssh-keygen on the core's host
+set ::sig_calls {}        ;# every {data-first-line key principal} asked about
+proc sig_sign {key} { return "signed-by:$key" }
+proc sig_fingerprint {key} {
+	if {!$::sig_available} { return "" }
+	return "SHA256:fp-of-[string range [lindex $key 1] 0 7]"
+}
+proc sig_verify {data sig key principal {datahash ""}} {
+	lappend ::sig_calls [list [lindex [split $data "\n"] 0] $key $principal]
+	if {!$::sig_available} {
+		return [dict create available 0 verified 0 signer "" fingerprint "" \
+			reason "ssh-keygen isn't installed on the core's host, so rio can't check any signature"]
+	}
+	if {$datahash ne "" && $datahash ne [fix_hash $data]} {
+		return [dict create available 1 verified 0 signer "" fingerprint [sig_fingerprint $key] \
+			reason "the signed bytes couldn't be reconstructed here"]
+	}
+	if {$sig ne [sig_sign $key]} {
+		return [dict create available 1 verified 0 signer "" fingerprint [sig_fingerprint $key] \
+			reason "signature verification failed: incorrect signature"]
+	}
+	return [dict create available 1 verified 1 signer [sig_fingerprint $key] \
+		fingerprint [sig_fingerprint $key] reason ""]
+}
+
+# Give a fixture repository a SHA256SUMS over the files it serves, signed by `key`.
+# `paths` are repository-relative, as a publisher's sha256sum writes them.
+proc fix_sign {base key paths} {
+	set lines {}
+	foreach p $paths {
+		if {![info exists ::fix($base/$p)]} { error "fix_sign: no fixture for $base/$p" }
+		lappend lines "[fix_hash [lindex $::fix($base/$p) 1]]  $p"
+	}
+	set sums "[join $lines \n]\n"
+	set ::fix($base/SHA256SUMS) [list 200 $sums]
+	set ::fix($base/SHA256SUMS.sig) [list 200 [sig_sign $key]]
 }
 
 # tk_messageBox: consume queued answers (consent dialogs), default `ok`
@@ -840,6 +890,226 @@ certs_dialog
 ok "certs: the accepted one is listed" [lindex $::certs_seen 0] 1
 ok "certs: by host:port and subject"   [string match "t.example:443  —  CN=t.example  —  SHA-256 1A:1A:*" [lindex $::certs_seen 1]] 1
 ok "certs: Remove takes it back"       [list $::certs_after [accepted_now]] {0 {}}
+
+# --- signed repositories (AGENTS.md D118) --------------------------------------------
+#
+# Source S publishes a key and a signature over its files. Everything below runs on
+# the stubbed verify seam (above): what is under test here is rio's POLICY — which
+# key it trusts, what it refuses, what it installs, and what it says — not the
+# cryptography, which is the core's and is tested against real signatures made by
+# the real tool in rio-core/tests/sig.test.
+
+set S http://s.example/signed
+set KEY1 "ssh-ed25519 AAAAsigningkeyONE"
+set KEY2 "ssh-ed25519 AAAAsigningkeyTWO"
+
+proc s_fixtures {{key ""}} {
+	global S KEY1
+	if {$key eq ""} { set key $KEY1 }
+	set marker "name = S repository\ndescription = a signed one\nkey = $key"
+	set ::fix($S/rio-repository.conf) [list 200 $marker]
+	set ::fix($S/index) [list 200 "sig-mode\n"]
+	set ::fix($S/sig-mode/rio-extension.conf) [list 200 \
+		"name = sigmode\nkind = mode\nversion = 1.0\nauthor = sam\ndescription = a signed mode\nfiles = sigmode.tcl"]
+	set ::fix($S/sig-mode/sigmode.tcl) [list 200 \
+		{rio::modes::register sigmode {Sig Mode} {apply {tag {}}} {apply {tag {}}}}]
+	fix_sign $S $key {rio-repository.conf index sig-mode/rio-extension.conf sig-mode/sigmode.tcl}
+}
+# Scan S alone, from a clean trust store unless `keep` is given.
+proc s_scan {{keep 0}} {
+	global S
+	if {!$keep} { set ::repo_keys {} ; repo_keys_save }
+	sources_save [list $S]
+	repo_scan_all
+}
+proc s_dead {} {
+	global S
+	set d [lsearch -index 0 -inline $::repo_dead $S]
+	if {$d eq ""} { return "" }
+	return [list [lindex $d 2] [lindex $d 1]]
+}
+proc s_code {} { return [lindex [s_dead] 0] }
+
+# --- the sums file --------------------------------------------------------------
+ok "sums: the shape sha256sum prints" \
+	[repo_sums_parse "[string repeat a 64]  index\n[string repeat b 64]  vi/vi.tcl\n"] \
+	[list index [string repeat a 64] vi/vi.tcl [string repeat b 64]]
+ok "sums: binary-mode star and a leading ./ (BSD sha256 -r, a publisher's find)" \
+	[repo_sums_parse "[string repeat c 64] *./vi/vi.tcl\n"] \
+	[list vi/vi.tcl [string repeat c 64]]
+ok "sums: a line that names no file is skipped, not fatal" \
+	[dict size [repo_sums_parse "not a hash line\n\n[string repeat d 64]  index\n"]] 1
+ok "sums: hashes fold to lower case" \
+	[dict get [repo_sums_parse "[string repeat A 64]  index"] index] [string repeat a 64]
+
+# --- trust on first use -----------------------------------------------------------
+s_fixtures
+s_scan
+ok "signed: the source scanned"        [s_code] {}
+ok "signed: its extension is listed"   [llength $::repo_variants] 1
+ok "signed: marked signed"             [dict get [lindex $::repo_variants 0] sig] signed
+ok "signed: and says who signed it"    [dict get [lindex $::repo_variants 0] signer] [sig_fingerprint $KEY1]
+ok "first use: the key is now trusted" [repo_key_of $S] $KEY1
+ok "first use: and written down"       [dict get $::repo_keys [source_key $S] key] $KEY1
+ok "first use: with the date"          [dict get $::repo_keys [source_key $S] trusted] \
+	[clock format [clock seconds] -format %Y-%m-%d]
+ok "first use: the file is conf, sectioned by source" \
+	[string match "*\[s.example/signed\]*key = $KEY1*" [::read [set f [open [repo_keys_path] r]]]] 1
+close $f
+ok "signed: what was verified is the sums file, for this source" \
+	[lrange [lindex $::sig_calls end] 1 2] [list $KEY1 $S]
+
+# The trust store survives a restart, and is re-read per scan because it is meant to
+# be editable by hand.
+set ::repo_keys {}
+repo_keys_load
+ok "keys: reload from disk"            [repo_key_of $S] $KEY1
+
+# --- the seed ---------------------------------------------------------------------
+# rio's own repository is trusted out of the box, so a first scan of it is not a
+# question the user has no way to answer.
+ok "seed: the default repo's key is pre-trusted" \
+	[repo_key_of $::default_repo] $::default_repo_key
+ok "seed: and the https route to it is the same trust (D109)" \
+	[repo_key_of [string map {http:// https://} $::default_repo]] $::default_repo_key
+ok "seed: an unrelated source is not" [repo_key_of http://other.example/x] ""
+
+# --- a tampered payload -------------------------------------------------------------
+# The signature still verifies (SHA256SUMS is untouched); it is the FILE that changed.
+# Nothing may be written, and the message must name the file.
+s_fixtures
+s_scan
+set ::mb_log {}
+set v [variant sigmode $S]
+ok "tamper: the variant is installable" [expr {$v ne ""}] 1
+set ::fix($S/sig-mode/sigmode.tcl) [list 200 "# rewritten in flight\nrio::modes::register sigmode {Sig Mode} {apply {tag {}}} {apply {tag {}}}"]
+set ::mb_answers {yes}
+ok "tamper: install refused"            [ext_install $v] 0
+ok "tamper: and says which file"        [string match "*sig-mode/sigmode.tcl is not the file*" [mb_last]] 1
+ok "tamper: nothing was installed"      [dict exists $::ext_ledger mode/sigmode] 0
+ok "tamper: and nothing written to disk" [file exists [file join [modes_user_dir] sigmode.tcl]] 0
+
+# --- a tampered manifest, found at scan ---------------------------------------------
+s_fixtures
+set ::fix($S/sig-mode/rio-extension.conf) [list 200 \
+	"name = sigmode\nkind = mode\nversion = 9.9\nauthor = sam\nfiles = sigmode.tcl"]
+s_scan
+ok "tamper: a manifest that isn't the signed one kills the source" [s_code] hash_mismatch
+ok "tamper: no variants survive it"     [llength $::repo_variants] 0
+ok "tamper: the row names the file"     [string match "*sig-mode/rio-extension.conf is not the file*" [lindex [s_dead] 1]] 1
+
+# --- a file the sums don't mention ---------------------------------------------------
+# A publisher's SHA256SUMS covers everything served, so an unlisted file is not an
+# omission — it is a file that arrived from somewhere else.
+s_fixtures
+set ::fix($S/index) [list 200 "sig-mode\nextra-mode\n"]
+set ::fix($S/extra-mode/rio-extension.conf) [list 200 \
+	"name = extra\nkind = mode\nversion = 1.0\nauthor = nobody\nfiles = extra.tcl"]
+fix_sign $S $KEY1 {rio-repository.conf index sig-mode/rio-extension.conf sig-mode/sigmode.tcl}
+s_scan
+ok "unlisted: an unsigned extra file kills the source" [s_code] hash_mismatch
+
+# --- a changed key --------------------------------------------------------------------
+s_fixtures
+s_scan
+ok "rotation: trusted the first key"   [repo_key_of $S] $KEY1
+s_fixtures $KEY2
+s_scan 1
+ok "rotation: the new key is refused"  [s_code] key_changed
+ok "rotation: nothing from it is listed" [llength $::repo_variants] 0
+ok "rotation: the old key is still the trusted one" [repo_key_of $S] $KEY1
+ok "rotation: the row offers the new key to the dialog" \
+	[lindex [lsearch -index 0 -inline $::repo_dead $S] 3] $KEY2
+# The explicit step, as the dialog performs it.
+repo_key_trust $S $KEY2
+s_scan 1
+ok "rotation: after trusting it, the source is back" [s_code] {}
+ok "rotation: signed by the new key"   [dict get [lindex $::repo_variants 0] signer] [sig_fingerprint $KEY2]
+
+# --- the signature going away ----------------------------------------------------------
+s_fixtures
+s_scan
+set ::fix($S/rio-repository.conf) [list 200 "name = S repository\ndescription = a signed one"]
+s_scan 1
+ok "downgrade: dropping the key is refused" [s_code] sig_dropped
+s_fixtures
+unset ::fix($S/SHA256SUMS.sig)
+s_scan 1
+ok "downgrade: losing the signature file is refused" [s_code] sig_missing
+s_fixtures
+set ::fix($S/SHA256SUMS.sig) [list 200 [sig_sign $KEY2]]
+s_scan 1
+ok "downgrade: a signature by another key is refused" [s_code] sig_bad
+ok "downgrade: and says so in the row"  [string match "*doesn't verify*" [lindex [s_dead] 1]] 1
+
+# --- no ssh-keygen on the core's host ----------------------------------------------------
+set ::sig_available 0
+s_fixtures
+s_scan 1                                  ;# S's key is still trusted from above
+ok "no tool: a trusted source is refused" [s_code] sig_no_tool
+ok "no tool: the message names the fix"   [string match "*Install openssh*Preferences*" [lindex [s_dead] 1]] 1
+set ::repo_allow_unverified 1
+s_scan 1
+ok "no tool: the switch lets it through"  [s_code] {}
+ok "no tool: marked unverified, never signed" [dict get [lindex $::repo_variants 0] sig] unverified
+# The switch buys exactly one thing. A signature that FAILS is still a refusal.
+set ::sig_available 1
+set ::fix($S/SHA256SUMS.sig) [list 200 [sig_sign $KEY2]]
+s_scan 1
+ok "no tool: the switch does not excuse a bad signature" [s_code] sig_bad
+set ::repo_allow_unverified 0
+# A source nobody has trusted yet loses nothing by being unsigned, so it stays listed.
+s_fixtures
+set ::sig_available 0
+s_scan
+ok "no tool: an untrusted source just lists as unsigned" \
+	[list [s_code] [dict get [lindex $::repo_variants 0] sig]] {{} unsigned}
+ok "no tool: and trusts nothing"        [repo_key_of $S] ""
+set ::sig_available 1
+
+# --- an unsigned repository is unchanged -------------------------------------------------
+sources_save [list $A]
+set ::repo_keys {} ; repo_keys_save
+repo_scan_all
+ok "unsigned: still scans"              [llength $::repo_dead] 0
+ok "unsigned: marked unsigned"          [dict get [variant zz $A] sig] unsigned
+ok "unsigned: and nothing is trusted"   [repo_key_of $A] ""
+ok "unsigned: no signature was asked about" \
+	[expr {[lsearch -index 2 $::sig_calls $A] < 0}] 1
+
+# --- what the user is told ----------------------------------------------------------------
+ok "marks: the three words"             [list [sig_mark signed] [sig_mark unsigned] [sig_mark unverified]] \
+	{signed unsigned unverified}
+ok "consent: an unsigned source says nothing vouches for it" \
+	[string match "NOT SIGNED*" [ext_consent_sig_line $A]] 1
+s_fixtures
+s_scan
+ok "consent: a signed one names the key" \
+	[string match "Signed by [sig_fingerprint $KEY1],*" [ext_consent_sig_line $S]] 1
+ok "dead rows: a phrase per refusal" \
+	[list [dead_phrase key_changed] [dead_phrase sig_bad] [dead_phrase sig_no_tool] \
+		[dead_phrase untrusted_cert] [dead_phrase io_error]] \
+	[list "signing key changed" "signature doesn't verify" "can't check the signature" \
+		"certificate not trusted" "unreachable"]
+
+# --- the ledger records who vouched ---------------------------------------------------------
+s_fixtures
+s_scan
+set ::mb_answers {yes}
+ok "ledger: the signed install goes through" [ext_install [variant sigmode $S]] 1
+ok "ledger: signed_by is the signer"    [dict get $::ext_ledger mode/sigmode signed_by] [sig_fingerprint $KEY1]
+ledger_save ; ledger_load
+ok "ledger: it survives a save/load"    [dict get $::ext_ledger mode/sigmode signed_by] \
+	[sig_fingerprint $KEY1]
+ext_remove mode sigmode
+# …and an unsigned one still writes the pre-D118 shape, with no empty field in it.
+sources_save [list $A]
+repo_scan_all
+set ::mb_answers {yes}
+ext_install [variant night $A]
+ok "ledger: an unsigned install records no signer" \
+	[dict exists $::ext_ledger theme/night signed_by] 0
+ext_remove theme night
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

@@ -7693,6 +7693,7 @@ proc prefs_load {} {
 	if {[dict exists $d show_hidden]} { set ::show_hidden [expr {[dict get $d show_hidden] ? 1 : 0}] }
 	if {[dict exists $d column_edit]} { set ::col_on [expr {[dict get $d column_edit] ? 1 : 0}] }
 	if {[dict exists $d check_updates]} { set ::ext_check_updates [expr {[dict get $d check_updates] ? 1 : 0}] }
+	if {[dict exists $d allow_unverified_repos]} { set ::repo_allow_unverified [expr {[dict get $d allow_unverified_repos] ? 1 : 0}] }
 	if {[dict exists $d agent_selection_menu]} { set ::agent_selection_menu [expr {[dict get $d agent_selection_menu] ? 1 : 0}] }
 	if {[dict exists $d tab_layout]} {
 		set tl [dict get $d tab_layout]
@@ -7741,6 +7742,7 @@ proc prefs_save {} {
 			show_hidden $::show_hidden \
 			column_edit $::col_on \
 			check_updates $::ext_check_updates \
+			allow_unverified_repos $::repo_allow_unverified \
 			agent_selection_menu $::agent_selection_menu \
 			tab_layout  $::tab_layout \
 			font_family $::editor_font_family \
@@ -7997,6 +7999,259 @@ proc sources_seed_default {} {
 	sources_save [list $::default_repo]
 }
 
+# --- signing: which key speaks for a repository (AGENTS.md D118) ---------------
+#
+# D39 keeps plain http first-class, which means anyone on the path between a user
+# and a repository can rewrite a payload in flight. A signature over the repository
+# is what makes that fail without a registry or an account: the publisher signs one
+# root SHA256SUMS with an ssh key (their SIGNING.md), rio checks that signature and
+# then checks every file it fetches against those hashes.
+#
+# TRUST ON FIRST USE, with a seed. A repository publishes its public key in
+# rio-repository.conf. The first scan that verifies against it RECORDS it, and from
+# then on that key — and only that key — speaks for that source. A different key
+# later is refused as `key_changed` until the user trusts it by hand (D111's shape
+# for a changed certificate). The default source ships with the project's own key
+# already trusted, so a fresh rio is not asked a question it has no way to answer.
+#
+# WHAT FIRST USE CANNOT DO, said plainly: an attacker already on the path the very
+# first time sees a marker, a SHA256SUMS and a signature made by their own key, and
+# rio has nothing to compare it against. What it does defend is every scan and every
+# install after that one — which is the whole lifetime of an installed extension.
+#
+# The keys live GUI-SIDE, beside sources.list: the sources list is the trust list
+# (D39), and a key is a property of an entry in it. The verifying is the CORE's
+# (sig.verify), because ssh-keygen must be on the host that has the tool — the same
+# split as tcltls and https (D109).
+
+set ::repo_keys {}   ;# scheme-less source -> {key <type+base64> trusted <date>}
+set ::repo_sig  {}   ;# source -> {state signed|unsigned|unverified signer <fp> sums {path hash …}}
+
+# May a repository rio CANNOT check be used anyway? Off by default, and it buys
+# exactly one thing: a source whose key is trusted, on a host with no ssh-keygen to
+# check it with, lists and installs — marked `unverified` in every place a signed one
+# would say `signed`, and named as such in the install consent. It does NOT touch a
+# bad signature, a changed key or a mismatched hash: those are refusals whatever this
+# says. The same shape as D114's switch for an https that can't check host names —
+# fail closed, with one explicit way out that never hides which way was taken.
+# (Prefs, not the core's conf, because unlike D114 this governs nothing but the
+# Extensions window; the agent's transport is not involved.)
+set ::repo_allow_unverified 0   ;# the preference (prefs.json `allow_unverified_repos`)
+
+# The key rio trusts for its own repository out of the box. Published as the `key =`
+# line of http://rio.skylm.org/extensions/rio-repository.conf; fingerprint
+# SHA256:ThigJDQbjz1G8yvZMJ7grlLlcOA6uS+ZDWvJdJPVfG0, which is the one to confirm
+# out of band. A stored entry always wins over this, so trusting a rotation by hand
+# is never undone by the seed.
+set ::default_repo_key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzSB7e8mVA9R+JndUZAIliRW2sxKlUD5P4AMoZuIzLV"
+
+proc repo_keys_path {} {
+	set p [sources_path]
+	if {$p eq ""} { return "" }
+	return [file join [file dirname $p] repository-keys.conf]
+}
+
+# `[<scheme-less source>]` sections carrying `key` and `trusted` — rio's own conf
+# format (D21), hand-editable on purpose: deleting a section is how a user takes a
+# trust decision back until the Extensions window grows a list of its own (ROADMAP).
+proc repo_keys_load {} {
+	set ::repo_keys {}
+	set path [repo_keys_path]
+	if {$path eq "" || ![file exists $path]} return
+	if {[catch {rio::conf::parse [slurp_utf8 $path]} conf]} return
+	dict for {section kv} $conf {
+		if {$section eq "" || ![dict exists $kv key]} continue
+		dict set ::repo_keys $section [dict create \
+			key [string trim [dict get $kv key]] \
+			trusted [expr {[dict exists $kv trusted] ? [dict get $kv trusted] : ""}]]
+	}
+}
+
+proc repo_keys_save {} {
+	set path [repo_keys_path]
+	if {$path eq ""} return
+	catch {
+		file mkdir [file dirname $path]
+		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
+		puts $f "# Signing keys rio trusts for extension repositories (D118). One section"
+		puts $f "# per repository, written the first time a signature from it verified."
+		puts $f "#"
+		puts $f "# Delete a section to forget that key: the next scan then trusts whatever"
+		puts $f "# the repository publishes, as it did the first time."
+		dict for {src e} $::repo_keys {
+			puts $f ""
+			puts $f "\[$src\]"
+			puts $f "key = [dict get $e key]"
+			if {[dict get $e trusted] ne ""} { puts $f "trusted = [dict get $e trusted]" }
+		}
+		close $f
+	}
+}
+
+# The key trusted for a source, or "". Scheme-less, like source_same: moving a
+# repository from http:// to https:// (D109) is a change of route, not of publisher,
+# and must not read as a rotated key.
+proc repo_key_of {source} {
+	set key [source_key $source]
+	dict for {src e} $::repo_keys {
+		if {$src eq $key} { return [dict get $e key] }
+	}
+	if {[source_same $source $::default_repo]} { return $::default_repo_key }
+	return ""
+}
+
+proc source_key {source} {
+	regsub -nocase {^https?://} [string trimright $source /] {} s
+	return $s
+}
+
+proc repo_key_trust {source key} {
+	dict set ::repo_keys [source_key $source] [dict create \
+		key $key trusted [clock format [clock seconds] -format %Y-%m-%d]]
+	repo_keys_save
+}
+
+# The verify seam: sig.verify through the core, never throwing. `datahash` is the
+# hash the core itself reported for those bytes when it fetched them, which lets the
+# core tell a lost byte apart from a bad signature. Tests stub THIS proc.
+proc sig_verify {data sig key principal {datahash ""}} {
+	set params [dict create data $data sig $sig key $key principal $principal \
+		namespace rio-repository]
+	if {$datahash ne ""} { dict set params sha256 $datahash }
+	set resp [rio_call sig.verify $params]
+	if {![dict get $resp ok]} {
+		return [dict create available 0 verified 0 signer "" fingerprint "" \
+			reason [dict get $resp error message]]
+	}
+	return [dict get $resp result]
+}
+
+# SHA256SUMS -> {path hash …}. The format `sha256sum` and OpenBSD's `sha256 -r`
+# print: a hex digest, whitespace, then the path — with the optional `*` that marks
+# a binary-mode hash, and a leading `./` some publishers' `find` leaves behind. A
+# line that isn't that shape is skipped: it was signed along with everything else,
+# it simply names no file rio will ever fetch.
+proc repo_sums_parse {text} {
+	set out {}
+	foreach line [split $text "\n"] {
+		if {![regexp {^([0-9a-fA-F]{64})[ \t]+\*?(.+)$} [string trimright $line "\r"] -> h path]} continue
+		set path [string trimleft [string trim $path] "./"]
+		if {$path ne ""} { dict set out $path [string tolower $h] }
+	}
+	return $out
+}
+
+# The one-word mark a variant carries in the window: what rio knows about where
+# these bytes came from. Deliberately said in all three cases, including the boring
+# one — "signed" means nothing to a user who has never seen rio say "unsigned".
+proc sig_mark {state} {
+	switch -- $state {
+		signed     { return "signed" }
+		unverified { return "unverified" }
+	}
+	return "unsigned"
+}
+
+# The line above "From:" in the install consent — the same three cases, at the
+# length a decision deserves.
+proc ext_consent_sig_line {source} {
+	set sig [repo_sig_of $source]
+	switch -- [dict get $sig state] {
+		signed {
+			return "Signed by [dict get $sig signer], and every file was checked against that signature."
+		}
+		unverified {
+			return "SIGNED, BUT NOT CHECKED: this repository publishes a signature, and the core's host has no ssh-keygen to check it with. You turned that on in Preferences ▸ Extensions."
+		}
+	}
+	return "NOT SIGNED: nothing vouches for these files. Over plain http, anyone between you and the server could have changed them."
+}
+
+proc repo_sig_of {source} {
+	if {[dict exists $::repo_sig $source]} { return [dict get $::repo_sig $source] }
+	return [dict create state unsigned signer "" sums {}]
+}
+
+# Is `path` (relative to the repository root) allowed to be what we just fetched?
+# On an unsigned or unverifiable source there is nothing to check against and the
+# answer is yes — that is what those words mean. On a SIGNED one, a file rio fetches
+# must be in SHA256SUMS with that hash: a file the sums don't mention is as bad as
+# one whose hash differs, because a publisher's SHA256SUMS covers everything served.
+proc repo_file_ok {source path hash} {
+	set sig [repo_sig_of $source]
+	if {[dict get $sig state] ne "signed"} { return 1 }
+	set sums [dict get $sig sums]
+	if {![dict exists $sums $path]} { return 0 }
+	return [expr {[string tolower $hash] eq [dict get $sums $path]}]
+}
+
+# Decide what a source's signature says, BEFORE anything else is fetched from it.
+# `markerhash` is the hash of the rio-repository.conf we already have, checked here
+# against the sums it must itself be listed in.
+#
+# Returns {ok 1 state … signer … sums …} or {ok 0 code … error … ?key …?}. Every
+# refusal is the WHOLE source: a signed repository is signed as one thing, and
+# "most of it verified" is not a state a user can act on.
+proc repo_sig_check {base pubkey markerhash} {
+	set trusted [repo_key_of $base]
+	if {$pubkey eq "" && $trusted eq ""} {
+		return [dict create ok 1 state unsigned signer "" sums {}]
+	}
+	# No downgrade (D118): a repository that was signed and now isn't is refused,
+	# because that is exactly what removing a signature would look like.
+	if {$pubkey eq ""} {
+		return [dict create ok 0 code sig_dropped \
+			error "This repository used to be signed and no longer publishes a key. rio won't quietly stop checking: if the publisher really dropped signing, delete its section from repository-keys.conf."]
+	}
+	if {$trusted ne "" && $pubkey ne $trusted} {
+		return [dict create ok 0 code key_changed key $pubkey \
+			error "This repository is now signed by a DIFFERENT key than the one rio trusted. That is what a key rotation looks like — and also what someone impersonating the repository looks like. Review the new key before trusting it."]
+	}
+	set sr [repo_fetch $base/SHA256SUMS 1]
+	set gr [repo_fetch $base/SHA256SUMS.sig]
+	set have [expr {[dict get $sr ok] && [dict get $sr status] == 200
+		&& [dict get $gr ok] && [dict get $gr status] == 200}]
+	if {!$have} {
+		if {$trusted eq ""} {
+			# Nothing was trusted here yet and there is no signature to trust: the
+			# publisher announced a key and published nothing to check with it.
+			return [dict create ok 1 state unsigned signer "" sums {}]
+		}
+		return [dict create ok 0 code sig_missing \
+			error "This repository is signed, but SHA256SUMS or SHA256SUMS.sig couldn't be fetched from it. A publish that uploaded the payloads and not the signature looks exactly like this."]
+	}
+	set v [sig_verify [dict get $sr text] [dict get $gr text] $pubkey $base \
+		[expr {[dict exists $sr sha256] ? [dict get $sr sha256] : ""}]]
+	if {![dict get $v available]} {
+		# The tool is missing, not the signature (D118). A source nobody has trusted
+		# yet loses nothing by listing as unsigned; one with a trusted key would lose
+		# the whole point of having trusted it, so it is refused — unless the user
+		# said otherwise, in which case it lists loudly as `unverified`.
+		if {$trusted eq ""} {
+			return [dict create ok 1 state unsigned signer "" sums {}]
+		}
+		if {$::repo_allow_unverified} {
+			return [dict create ok 1 state unverified signer "" sums {}]
+		}
+		return [dict create ok 0 code sig_no_tool \
+			error "[dict get $v reason]. Install openssh (OpenSSH 8.0 or newer) there, or, to use this repository without checking it, turn on Preferences ▸ Extensions ▸ \"Use repositories rio can't check\"."]
+	}
+	if {![dict get $v verified]} {
+		return [dict create ok 0 code sig_bad \
+			error "The signature on this repository doesn't verify: [dict get $v reason]. Until it does, rio won't install anything from it — the files may have been altered after they were published."]
+	}
+	set sums [repo_sums_parse [dict get $sr text]]
+	# The marker carried the key, so it must be covered by the sums it pointed at —
+	# checked AFTER verification, and before the key is trusted for the first time.
+	if {$markerhash ne "" && (![dict exists $sums rio-repository.conf]
+			|| [dict get $sums rio-repository.conf] ne [string tolower $markerhash])} {
+		return [dict create ok 0 code hash_mismatch \
+			error "The signature verifies, but rio-repository.conf isn't the file it vouches for. The repository's SHA256SUMS is out of date, or these files are not the ones that were signed."]
+	}
+	if {$trusted eq ""} { repo_key_trust $base $pubkey }
+	return [dict create ok 1 state signed signer [dict get $v signer] sums $sums]
+}
+
 # --- the provenance ledger ----------------------------------------------------
 proc ledger_path {} {
 	if {[info exists ::env(XDG_DATA_HOME)] && $::env(XDG_DATA_HOME) ne ""} {
@@ -8037,6 +8292,10 @@ proc ledger_entry_json {e} {
 	if {[dict exists $e anysource] && [dict get $e anysource]} {
 		lappend parts "\"anysource\":\"1\""
 	}
+	# The key that vouched for these files, when there was one (D118) — same rule.
+	if {[dict exists $e signed_by] && [dict get $e signed_by] ne ""} {
+		lappend parts "\"signed_by\":[rio::wire::str [dict get $e signed_by]]"
+	}
 	return "{[join $parts ,]}"
 }
 
@@ -8054,14 +8313,23 @@ proc ledger_save {} {
 # --- fetching & scanning ------------------------------------------------------
 
 # The one fetch seam: repo.fetch through the core, never throwing — the return
-# is {ok 1 status <n> text <t>} or {ok 0 error <msg> code <code>}. `code` is the
-# taxonomy's (D11) — untrusted_cert is the one the window acts on (D111). Tests stub
-# THIS proc with a fixture table (no network in tests, D39).
-proc repo_fetch {url} {
-	set resp [rio_call repo.fetch [dict create url $url]]
+# is {ok 1 status <n> text <t> ?sha256 <hex>?} or {ok 0 error <msg> code <code>}.
+# `code` is the taxonomy's (D11) — untrusted_cert is the one the window acts on
+# (D111). `hash` asks the core for the hash of the bytes it received (D118), which
+# is the only place that hash can honestly be taken: the text here has been decoded
+# and re-encoded on its way through the wire. Tests stub THIS proc with a fixture
+# table (no network in tests, D39).
+proc repo_fetch {url {hash 0}} {
+	set params [dict create url $url]
+	if {$hash} { dict set params sha256 1 }
+	set resp [rio_call repo.fetch $params]
 	if {[dict get $resp ok]} {
-		return [dict create ok 1 status [dict get $resp result status] \
+		set out [dict create ok 1 status [dict get $resp result status] \
 			text [dict get $resp result text]]
+		if {[dict exists $resp result sha256]} {
+			dict set out sha256 [dict get $resp result sha256]
+		}
+		return $out
 	}
 	return [dict create ok 0 error [dict get $resp error message] \
 		code [dict get $resp error code]]
@@ -8095,14 +8363,17 @@ proc repo_parse_autoindex {html} {
 }
 
 # Scan ONE source: the marker manifest (required — anything without a parseable
-# rio-repository.conf carrying name= is "not a rio repository"), then the
-# extension list (index, else autoindex), then each extension's manifest.
-# Returns {ok 1 name <n> description <d> exts {<variant>…}} or {ok 0 error <e>};
-# a malformed extension manifest skips that extension, never the source.
-# A variant dict: {source dir name kind version author description files}.
+# rio-repository.conf carrying name= is "not a rio repository"), then its signature
+# if it has one (D118), then the extension list (index, else autoindex), then each
+# extension's manifest.
+# Returns {ok 1 name <n> description <d> sig <state> signer <fp> sums {…}
+# exts {<variant>…}} or {ok 0 error <e> ?code <c>?}; a malformed extension manifest
+# skips that extension, never the source — but a file that fails its signed hash
+# takes the whole source down, because a signed repository is signed as one thing.
+# A variant dict: {source dir name kind version author description files sig signer}.
 proc repo_source_scan {base} {
 	set base [string trimright $base /]
-	set r [repo_fetch $base/rio-repository.conf]
+	set r [repo_fetch $base/rio-repository.conf 1]
 	if {![dict get $r ok]} {
 		return [dict create ok 0 error [dict get $r error] \
 			code [expr {[dict exists $r code] ? [dict get $r code] : ""}]]
@@ -8114,11 +8385,31 @@ proc repo_source_scan {base} {
 	}
 	set srcname [dict get $conf "" name]
 	set srcdesc [expr {[dict exists $conf "" description] ? [dict get $conf "" description] : ""}]
+	# What this source's signature says, before a single payload is considered. The
+	# answer is recorded in ::repo_sig FIRST, because repo_file_ok reads it there for
+	# every file fetched below.
+	set sig [repo_sig_check $base \
+		[expr {[dict exists $conf "" key] ? [string trim [dict get $conf "" key]] : ""}] \
+		[expr {[dict exists $r sha256] ? [dict get $r sha256] : ""}]]
+	if {![dict get $sig ok]} {
+		dict unset ::repo_sig $base
+		return [dict create ok 0 error [dict get $sig error] code [dict get $sig code] \
+			newkey [expr {[dict exists $sig key] ? [dict get $sig key] : ""}]]
+	}
+	dict set ::repo_sig $base [dict create state [dict get $sig state] \
+		signer [dict get $sig signer] sums [dict get $sig sums]]
+	set signed [expr {[dict get $sig state] eq "signed"}]
 	set dirs {}
-	set ir [repo_fetch $base/index]
+	set ir [repo_fetch $base/index $signed]
 	if {[dict get $ir ok] && [dict get $ir status] == 200} {
+		if {$signed && ![repo_file_ok $base index [dict get $ir sha256]]} {
+			return [repo_hash_refusal $base index]
+		}
 		set dirs [repo_parse_index [dict get $ir text]]
 	} else {
+		# The autoindex is the SERVER's own listing, not a file of the repository, so
+		# there is nothing it could be checked against. It costs nothing: every
+		# directory it names still has to produce a manifest the sums vouch for.
 		set ar [repo_fetch $base/]
 		if {[dict get $ar ok] && [dict get $ar status] == 200} {
 			set dirs [repo_parse_autoindex [dict get $ar text]]
@@ -8126,8 +8417,11 @@ proc repo_source_scan {base} {
 	}
 	set exts {}
 	foreach d $dirs {
-		set mr [repo_fetch $base/$d/rio-extension.conf]
+		set mr [repo_fetch $base/$d/rio-extension.conf $signed]
 		if {![dict get $mr ok] || [dict get $mr status] != 200} continue
+		if {$signed && ![repo_file_ok $base $d/rio-extension.conf [dict get $mr sha256]]} {
+			return [repo_hash_refusal $base $d/rio-extension.conf]
+		}
 		if {[catch {rio::conf::parse [dict get $mr text]} mc]} continue
 		set top [expr {[dict exists $mc ""] ? [dict get $mc ""] : {}}]
 		set ok 1
@@ -8147,6 +8441,7 @@ proc repo_source_scan {base} {
 		if {!$ok || ![llength $files]} continue
 		set variant [dict create \
 			source $base dir $d name $name kind $kind \
+			sig [dict get $sig state] signer [dict get $sig signer] \
 			version [dict get $top version] \
 			author [expr {[dict exists $top author] ? [dict get $top author] : "unknown"}] \
 			description [expr {[dict exists $top description] ? [dict get $top description] : ""}] \
@@ -8163,7 +8458,17 @@ proc repo_source_scan {base} {
 		}
 		lappend exts $variant
 	}
-	return [dict create ok 1 name $srcname description $srcdesc exts $exts]
+	return [dict create ok 1 name $srcname description $srcdesc exts $exts \
+		sig [dict get $sig state] signer [dict get $sig signer]]
+}
+
+# One wording for "this file is not the file the signature vouches for", wherever it
+# is found. It names the file, because "the repository changed" is not actionable and
+# "vi/vi.tcl isn't what was signed" is.
+proc repo_hash_refusal {base path} {
+	dict unset ::repo_sig $base
+	return [dict create ok 0 code hash_mismatch \
+		error "$path is not the file this repository's signature vouches for. Either it was changed after SHA256SUMS was signed — an upload that didn't re-sign looks like this — or it was changed in transit."]
 }
 
 # Scan every configured source into ::repo_variants / ::repo_dead /
@@ -8174,6 +8479,8 @@ proc repo_scan_all {{progress ""}} {
 	set ::repo_variants {}
 	set ::repo_dead {}
 	set ::repo_srcinfo {}
+	set ::repo_sig {}
+	repo_keys_load   ;# the file is hand-editable (D118), so re-read it per scan
 	set srcs [sources_load]
 	set n 0
 	foreach src $srcs {
@@ -8182,7 +8489,8 @@ proc repo_scan_all {{progress ""}} {
 		set s [repo_source_scan $src]
 		if {![dict get $s ok]} {
 			lappend ::repo_dead [list $src [dict get $s error] \
-				[expr {[dict exists $s code] ? [dict get $s code] : ""}]]
+				[expr {[dict exists $s code] ? [dict get $s code] : ""}] \
+				[expr {[dict exists $s newkey] ? [dict get $s newkey] : ""}]]
 			continue
 		}
 		dict set ::repo_srcinfo $src [dict create \
@@ -8369,7 +8677,7 @@ proc ext_install {variant {consented 0}} {
 	} else {
 		set what "'$name' is Tcl CODE that will run inside your editor with your permissions."
 	}
-	set msg "Install $kind '$name' $version by $author?\n\n$what\n\nFrom: $source"
+	set msg "Install $kind '$name' $version by $author?\n\n$what\n\nFrom: $source\n[ext_consent_sig_line $source]"
 	if {[dict exists $::ext_installed $key]} {
 		set old [dict get $::ext_installed $key]
 		set msg "$msg\n\nReplaces the installed '$name' [dict get $old version] from [dict get $old source]."
@@ -8387,13 +8695,23 @@ proc ext_install {variant {consented 0}} {
 			return 0
 		}
 	}
-	# Fetch everything first; only then touch disk.
+	# Fetch everything first; only then touch disk. On a signed source every payload
+	# is checked against the signature's hashes HERE, inside that rule — so a file
+	# that isn't what was signed aborts with nothing written, and the repository
+	# having changed under a stale scan reads as what it is.
+	set signed [expr {[dict get [repo_sig_of $source] state] eq "signed"}]
 	set payload {}
 	foreach f $files {
-		set r [repo_fetch $source/$dir/$f]
+		set r [repo_fetch $source/$dir/$f $signed]
 		if {![dict get $r ok] || [dict get $r status] != 200} {
 			set why [expr {[dict get $r ok] ? "HTTP [dict get $r status]" : [dict get $r error]}]
 			report_error "Install of '$name' aborted: $f could not be fetched ($why). Nothing was changed."
+			return 0
+		}
+		if {$signed && ![repo_file_ok $source $dir/$f [dict get $r sha256]]} {
+			report_error "Install of '$name' aborted: $dir/$f is not the file this repository's\
+				signature vouches for. Refresh the list — if the publisher re-uploaded without\
+				re-signing, the list you are looking at is older than the files. Nothing was changed."
 			return 0
 		}
 		dict set payload $f [dict get $r text]
@@ -8417,6 +8735,12 @@ proc ext_install {variant {consented 0}} {
 	# The cross-source flag is the USER's setting for this extension, not a property
 	# of the payload — an update must not silently reset it (D107).
 	if {[ext_anysource $key]} { dict set entry anysource 1 }
+	# Provenance now includes WHO vouched for these bytes (D118). Written only when
+	# there was a signature, so a ledger that never met one keeps its old shape.
+	set sigstate [repo_sig_of $source]
+	if {[dict get $sigstate state] eq "signed" && [dict get $sigstate signer] ne ""} {
+		dict set entry signed_by [dict get $sigstate signer]
+	}
 	dict set ::ext_ledger $key $entry
 	ledger_save
 	ext_installed_compute
@@ -8828,9 +9152,26 @@ proc extw_rows_build {} {
 			variants $vars desc $desc]
 	}
 	foreach d $::repo_dead {
-		lappend rows [dict create dead 1 url [lindex $d 0] error [lindex $d 1] code [lindex $d 2]]
+		lappend rows [dict create dead 1 url [lindex $d 0] error [lindex $d 1] \
+			code [lindex $d 2] newkey [lindex $d 3]]
 	}
 	return $rows
+}
+
+# Why a source produced no extensions, in the few words a list row has. Everything
+# past `unreachable` is a signature refusal (D118) — the detail pane below carries
+# the sentence, and for a changed key the way to act on it.
+proc dead_phrase {code} {
+	switch -- $code {
+		untrusted_cert { return "certificate not trusted" }
+		key_changed    { return "signing key changed" }
+		sig_bad        { return "signature doesn't verify" }
+		sig_missing    { return "signature missing" }
+		sig_dropped    { return "no longer signed" }
+		sig_no_tool    { return "can't check the signature" }
+		hash_mismatch  { return "files don't match the signature" }
+	}
+	return "unreachable"
 }
 
 # Fill the listbox from the rows, applying the filter; keep the selection on
@@ -8850,8 +9191,7 @@ proc extw_fill {} {
 		if {[dict exists $row dead]} {
 			if {$filter ne "" && ![string match *$filter* [string tolower [dict get $row url]]]} continue
 			lappend ::extw_rows $row
-			.extw.body.list insert end "!! [dict get $row url] — [expr {
-				[dict get $row code] eq "untrusted_cert" ? "certificate not trusted" : "unreachable"}]"
+			.extw.body.list insert end "!! [dict get $row url] — [dead_phrase [dict get $row code]]"
 			.extw.body.list itemconfigure end -foreground [dict get $c error]
 			continue
 		}
@@ -8943,6 +9283,15 @@ proc extw_select {} {
 				-command [list extw_cert_review [dict get $row url] [dict get $row error]]
 			pack $det.review -anchor w -pady {4 0}
 		}
+		# A rotated signing key is the other dead source the user can act on (D118),
+		# and the act is the same shape: look at what is being asked for, then say yes
+		# to that one thing.
+		if {[dict get $row code] eq "key_changed" && [dict get $row newkey] ne ""} {
+			button $det.keyreview -text "Review signing key…" -font RioUIFont \
+				-state [expr {$::repo_busy ? "disabled" : "normal"}] \
+				-command [list extw_key_review [dict get $row url] [dict get $row newkey]]
+			pack $det.keyreview -anchor w -pady {4 0}
+		}
 		return
 	}
 	set head "[dict get $row name] — [dict get $row kind]"
@@ -8975,6 +9324,12 @@ proc extw_select {} {
 		set line "  [dict get $v version]"
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
 		append line " — [host_of [dict get $v source]]"
+		# Where the choice between two sources is actually made, so the thing that
+		# distinguishes them is stated here (D118). An offline row has no source to
+		# say anything about.
+		if {![dict exists $v offline]} {
+			append line " — [sig_mark [expr {[dict exists $v sig] ? [dict get $v sig] : "unsigned"}]]"
+		}
 		set this_installed [expr {$entry ne "" \
 			&& [source_same [dict get $v source] [dict get $entry source]] \
 			&& [dict get $v version] eq [dict get $entry version]}]
@@ -9376,6 +9731,87 @@ proc extw_cert_review {url {fetch_error ""}} {
 		report_error "Couldn't accept the certificate: [dict get $resp error message]"
 		return
 	}
+	if {[winfo exists .extw]} { extw_refresh }
+}
+
+# --- a signing key that changed (AGENTS.md D118) -------------------------------------
+#
+# The same act as accepting a changed certificate, for the other half of the trust
+# model: a repository rio has trusted is now signed by a different key. That is what a
+# deliberate rotation looks like (the publisher's own SIGNING.md tells them to expect
+# this dialog on their users' machines) and equally what an impersonation looks like,
+# and rio cannot tell them apart — so it shows both fingerprints and asks.
+#
+# Trusts the key THIS DIALOG SHOWED, never a freshly fetched one, for the reason
+# extw_cert_review gives: a server that swapped keys between the look and the click
+# would otherwise get the second one trusted.
+
+# The fingerprint seam: sig.fingerprint through the core, "" when it can't be had.
+proc sig_fingerprint {key} {
+	set resp [rio_call sig.fingerprint [dict create key $key]]
+	if {![dict get $resp ok]} { return "" }
+	return [dict get $resp result fingerprint]
+}
+
+proc extw_key_review {url newkey} {
+	if {$::repo_busy} return
+	set old [repo_key_of $url]
+	set oldfp [sig_fingerprint $old]
+	set newfp [sig_fingerprint $newkey]
+	set when ""
+	set sk [source_key $url]
+	if {[dict exists $::repo_keys $sk]} { set when [dict get $::repo_keys $sk trusted] }
+
+	set w .extkey
+	destroy $w
+	toplevel $w
+	wm title $w "Signing key changed"
+	wm transient $w [expr {[winfo exists .extw] ? ".extw" : "."}]
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set wrap 460
+	set ::extw_key_choice ""
+
+	label $w.head -anchor w -justify left -wraplength $wrap -font RioUIFont \
+		-text "[host_of $url] is signing its extensions with a different key than the one rio trusted[expr {$when ne "" ? " on $when" : ""}]. If the publisher rotated their key, this is expected — they have no way to tell you inside rio. If they didn't, someone else is answering for this repository." \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	pack $w.head -fill x -padx 8 -pady {8 4}
+	# The two fingerprints are data to compare, so they sit in a bordered box, apart
+	# from the sentences around them (D68); selectable, because comparing one by eye
+	# against a publisher's web page is exactly the intended use.
+	text $w.det -height 5 -width 64 -wrap word -font RioUIFont -relief solid \
+		-borderwidth 1 -highlightthickness 0 \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+	ctx_bind_view $w.det   ;# Copy / Select All: the fingerprint is the point (D115)
+	foreach {k v} [list "Repository" $url \
+			"Trusted" [expr {$oldfp ne "" ? $oldfp : $old}] \
+			"Offered" [expr {$newfp ne "" ? $newfp : $newkey}]] {
+		if {$v eq ""} continue
+		$w.det insert end [format "%-11s %s\n" $k: $v]
+	}
+	$w.det delete "end-1c" end
+	$w.det configure -state disabled
+	pack $w.det -fill x -padx 8 -pady {6 4}
+	label $w.hint -anchor w -justify left -wraplength $wrap -font RioUIFont \
+		-text "Trust the new key only if you can confirm it away from this connection — the publisher's own page, a release note, a message from them. rio then trusts exactly this key for this repository, and asks again if it ever changes. The keys it trusts are in repository-keys.conf beside your sources list; deleting a section there forgets that key." \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	pack $w.hint -fill x -padx 8 -pady {2 6}
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.back -text "Go Back" -font RioUIFont -default active \
+		-command [list destroy $w]
+	button $w.btns.trust -text "Trust the New Key" -font RioUIFont \
+		-command [list apply {{w} { set ::extw_key_choice trust ; destroy $w }} $w]
+	pack $w.btns.back -side right
+	pack $w.btns.trust -side left
+	pack $w.btns -fill x -padx 8 -pady {2 8}
+	bind $w <Escape> [list destroy $w]
+	bind $w <Return> [list destroy $w]
+	catch {grab $w}
+	focus $w.btns.back
+	tkwait window $w
+
+	if {$::extw_key_choice ne "trust"} return
+	repo_key_trust $url $newkey
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
@@ -10793,6 +11229,10 @@ proc prefs_fill_extensions {f} {
 		::ext_check_updates ext_check_pref_save] -row [incr r] -column 0 -sticky w -pady 1
 	grid [prefs_hint $f.hint "Off by default: rio asks its core to fetch from your repositories only when you tell it to. Updates are never installed automatically, and an update comes from the repository an extension was installed from — a same-named extension elsewhere is a different thing until you say otherwise."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
+	grid [prefs_check $f.unver "Use repositories rio can't check" \
+		::repo_allow_unverified ext_check_pref_save] -row [incr r] -column 0 -sticky w -pady {6 1}
+	grid [prefs_hint $f.unverhint "A repository can publish a signing key, and rio checks it by running ssh-keygen on the core's host (D118). Where that isn't installed, a repository whose key rio trusts is refused rather than used unchecked. Turn this on to use it anyway: it then lists and installs marked \"unverified\", never \"signed\". A signature that fails, a key that changed, or a file that doesn't match is refused either way."] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	grid [prefs_button $f.ext "Extensions…" extensions_window] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
@@ -11686,6 +12126,7 @@ prefs_load
 ledger_load   ;# which extensions this GUI installed, with their provenance (D39)
 ext_installed_compute  ;# the installed view (D107) — the core's half arrives with the first scan
 sources_seed_default   ;# first run: pre-fill sources.list with rio's own repo (D39)
+repo_keys_load         ;# which signing key speaks for which repository (D118)
 # Greet the core before any other op. This is the first exchange over the channel, so
 # it's also where a stale connection surfaces: a dead `ssh -L` forward accepts the
 # socket but never answers, and without this bounded handshake the GUI would hang with

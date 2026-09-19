@@ -271,6 +271,18 @@ test sig-op-sha256-must-be-a-hash {a garbage hash is bad_request, not a refusal}
 	rio::error::code_of $opts
 } -result bad_request
 
+test sig-op-fingerprint {sig.fingerprint answers with the string ssh-keygen prints,
+		and with "" for a key it can't read — never an error, because a client that
+		cannot show a fingerprint must say so, not fail} -constraints sshkeygen -body {
+	list [dict get [dict get [rio::ops::sig_fingerprint [dict create key $::signer]] result] fingerprint] \
+		[dict get [dict get [rio::ops::sig_fingerprint [dict create key "ssh-ed25519 nope"]] result] fingerprint]
+} -result [list [rio::sig::fingerprint $::signer] ""]
+
+test sig-op-fingerprint-requires-key {a missing key is bad_request} -body {
+	catch {rio::ops::sig_fingerprint {}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
 test sig-op-registered {sig.verify is a registered op; a bad request comes back as a
 		clean error reply through dispatch} -body {
 	set resp [rio::dispatch::handle \

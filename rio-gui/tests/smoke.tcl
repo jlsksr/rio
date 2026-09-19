@@ -1585,7 +1585,7 @@ proc _prov_variant {dir source} {
 		api [dict get $top provider-api] entry [dict get $top entry] too_new 0]
 }
 rename repo_fetch _real_repo_fetch
-proc repo_fetch {url} {
+proc repo_fetch {url {hash 0}} {
 	if {[regexp {/([^/]+)$} $url -> f] && [file isfile [file join $::oai_srcdir $f]]} {
 		set fh [open [file join $::oai_srcdir $f] r] ; fconfigure $fh -encoding utf-8
 		set t [::read $fh] ; close $fh
