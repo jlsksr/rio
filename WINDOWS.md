@@ -202,6 +202,13 @@ because it needs the least. What each adds:
   names, and says so if it's older; plain `http://` repositories need no `tls` at all.
   *Not yet verified on a Windows machine* — the store path is from tcltls's own
   documentation (INSTALL.md §1 has the full order).
+- **Signed repositories** — rio checks a repository's signature by running `ssh-keygen`
+  (D118), and Windows has shipped OpenSSH since Windows 10 1809. What matters is its
+  **version**: signature verification needs **OpenSSH 8.0+**, and 1809's build is 7.7.
+  Windows 10 1903+ and Windows 11 are fine (`ssh -V` says). On an older one, a repository
+  whose key rio trusts — rio's own, out of the box — is refused rather than used
+  unchecked, and says so; CAVEATS.md has the ways out, including the explicit
+  *Preferences ▸ Extensions* switch. Nothing is needed for an unsigned repository.
 - **Remote core (Windows client → Linux core)** — the most capable path, and the one
   with the least Windows-native risk. The GUI is a thin client; connected to a remote
   core it supports **whatever that core supports**, and since the core runs on Linux the

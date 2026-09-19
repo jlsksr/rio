@@ -100,7 +100,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0036](0036-find-replace-engine-in-core.md) | Find and replace: the engine in the core, a bar in the GUI | Accepted | 2026-07-12 |
 | [0037](0037-stale-link-watchdog.md) | Stale-link detection at the protocol layer | Accepted | 2026-07-12 |
 | [0038](0038-editing-modes.md) | Editing modes as a bind-tag layer | Accepted; amended by 0041 | 2026-07-12 |
-| [0039](0039-extension-repositories.md) | Extension repositories over plain HTTP, apt-sources style | Accepted; amended by 0066, 0107, 0109 | 2026-07-17 |
+| [0039](0039-extension-repositories.md) | Extension repositories over plain HTTP, apt-sources style | Accepted; amended by 0066, 0107, 0109, 0124 | 2026-07-17 |
 | [0040](0040-column-editing.md) | Column editing as a GUI-only vertical cursor | Accepted | 2026-07-23 |
 | [0041](0041-unbundled-editing-modes.md) | The core ships one editing mode; emacs and vi are extensions | Accepted | 2026-08-03 |
 | [0042](0042-files-pane-rich-list.md) | The files pane is a rich list drawn on a text widget | Accepted; amended by 0043, 0087 | 2026-08-06 |
@@ -185,3 +185,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted | 2026-09-17 |
 | [0122](0122-missing-dependency-names-its-package.md) | A missing dependency names the package to install | Accepted | 2026-09-17 |
 | [0123](0123-window-and-taskbar-icon.md) | rio has a window and taskbar icon | Accepted | 2026-09-18 |
+| [0124](0124-signed-repositories.md) | A repository can be signed, and rio checks it | Accepted | 2026-09-16 |

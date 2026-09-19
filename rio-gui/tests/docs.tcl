@@ -180,6 +180,7 @@ set producers {
 	{prefs_path}                                 config
 	{keys_path}                                  config
 	{sources_path}                               config
+	{repo_keys_path}                             config
 	{rio::tls::exceptions_path}                  config
 	{hl_user_dir}                                config
 	{modes_user_dir}                             config
@@ -747,6 +748,65 @@ foreach p $::menu_docs {
 }
 ok "the pre-seeded repository URL the docs quote" [lsort -unique $quoted] \
 	[list $::default_repo]
+
+# --- 14. the words a repository's signature makes rio say ---------------------
+#
+# D118 put three user-visible vocabularies on the screen and all three are quoted in
+# extensions.md: the one-word mark every version line ends in (`sig_mark`), and the
+# phrase a refused source carries on its row (`dead_phrase`). They are the same kind
+# of derived fact as the keymap table — a handful of strings a reader matches against
+# what rio actually printed, so a reworded phrase leaves the manual describing a
+# message nobody will ever see, and it reads perfectly while doing it.
+#
+# Behaviour, not source text: every phrase below comes out of calling the proc. The
+# code NAMES are enumerated from the live proc body (`info body`) rather than listed
+# here, so a refusal added to rio without a row in the manual fails this check instead
+# of waiting to be noticed; the body is only a source of candidates, and each one is
+# then put through dead_phrase to get the words. A comment cannot slip in — it would
+# have to be shaped like a switch arm and survive the call.
+
+proc md_col1 {text from to} {
+	set a [string first $from $text]
+	set b [string first $to $text]
+	if {$a < 0 || $b < $a} { return {} }
+	set out {}
+	foreach {_ cell} [regexp -all -inline -line {^\| `([^`]+)` \|} \
+		[string range $text $a [expr {$b - 1}]]] { lappend out $cell }
+	return [lsort -unique $out]
+}
+
+set ext [slurp [file join $::docs extensions.md]]
+
+# The mark a variant line ends in. Held as a set, both directions at once: the table
+# in "What you see" must be exactly the words sig_mark produces.
+set marks {}
+foreach state {signed unverified unsigned} { lappend marks [sig_mark $state] }
+ok "a repository is marked three ways" [llength [lsort -unique $marks]] 3
+ok "extensions.md's marks are the ones rio prints" \
+	[md_col1 $ext "### What you see" "### Trust on the first scan"] [lsort -unique $marks]
+
+# Why a source produced nothing, in the few words its row has. `dead_phrase` answers
+# for a code it doesn't know too, so that default is exercised alongside the arms.
+set codes {""}
+foreach {_ code} [regexp -all -inline -line {^\s+([a-z_]+)\s+\{ return} [info body dead_phrase]] {
+	lappend codes $code
+}
+ok "a refusal has more than one phrase" [expr {[llength $codes] > 4}] 1
+
+set unsaid {}
+foreach code $codes {
+	if {[string first [dead_phrase $code] $ext] < 0} { lappend unsaid "$code: [dead_phrase $code]" }
+}
+ok "extensions.md names every refusal a source can get" $unsaid {}
+
+set phrases {}
+foreach code $codes { lappend phrases [dead_phrase $code] }
+set invented {}
+foreach cell [md_col1 $ext "### When rio refuses a signed repository" \
+		"### Repositories rio can't check"] {
+	if {[lsearch -exact $phrases $cell] < 0} { lappend invented $cell }
+}
+ok "the refusal table quotes no phrase rio never prints" $invented {}
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

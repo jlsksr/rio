@@ -6745,6 +6745,110 @@ rule — the first draft violated it and parsed `info body`).
 the running GUI and renders the 16×16 back as ASCII art. Three injections, each failing
 by name: a size asked for but never cut, a file nobody asks for, a non-square image.
 
+### D118 — a repository can be signed, and rio checks it
+
+D39 keeps **plain http first-class**, and that is the whole reason this exists: anyone on
+the path between a user and a repository can rewrite `emacs.tcl` in flight, and rio would
+install it. A signature over the repository makes that fail without moving everyone to
+https, inventing a registry, or asking anyone for an account — the sources list stays the
+trust list. Designed with jka 2026-09-16 (ROADMAP's *Signing*), built now that the
+publisher half is live: rio.skylm.org/extensions has been signed since 2026-09-19.
+
+**Format: OpenSSH detached signatures, checked by running `ssh-keygen`.** The publisher
+signs one root `SHA256SUMS` — `sha256sum`'s own format, covering `rio-repository.conf`,
+`index`, every manifest and every payload — with `ssh-keygen -Y sign -n rio-repository`,
+exactly as git signs. rio verifies with `-Y verify` against an allowed-signers file it
+writes itself from the key it trusts. **Rejected: owning Ed25519 and SHA-512 in Tcl** —
+revised away on review 2026-09-16 as the heavier and less POSIX road. OpenSSH is on every
+host rio targets. The file hashes stay in Tcl (tcllib `sha256`).
+
+**The namespace is the binding, and the principal is not.** `-I` only selects a line in a
+file rio generated, so the same signature verifies under any principal — measured, and
+then written into `sig.tcl`, because a reader will otherwise take the source URL for a
+security claim. `-n rio-repository` is what stops a signature made for git or for ssh
+authentication being replayed here. An early draft also wrote `namespaces="…"` into the
+allowed-signers line; **fault injection found no test could make its absence fail** (`-n`
+already enforces it), so it went — an option no test can break is decoration.
+
+**Trust on first use, with rio's own key seeded.** A repository publishes `key =` in its
+marker; the first scan that verifies **records** it (`repository-keys.conf`, GUI-side
+beside `sources.list`, hand-editable), and from then on only that key speaks for that
+source. Keyed **scheme-lessly**, like `source_same`, so http→https (D109) is a change of
+route, not of publisher. A different key later is refused as **changed**, with *Review
+signing key…* → *Trust the New Key* — D111's shape for a changed certificate, showing
+both fingerprints and trusting **the key the dialog showed**. What first use cannot do is
+recorded rather than glossed: an attacker present on the *very first* scan serves a
+marker, sums and signature of their own and rio has nothing to compare them against; what
+is defended is every scan and install after it, which is an extension's whole lifetime.
+
+**No downgrade, and no partial trust.** Once a key is trusted, a key that vanishes, a
+missing or bad signature, and a file whose hash doesn't match are all refusals of the
+**whole source** — "most of it verified" is not a state a user can act on. The rule is
+about *losing* a signature: a marker that announces a key on a source nothing is trusted
+for yet, with no sums published to go with it, is simply **unsigned** — there is nothing
+to downgrade from. Every file rio fetches from a signed source must be *in* `SHA256SUMS`
+with that hash: a publisher's sums cover everything served, so an unlisted file is not an
+omission but a file from somewhere else. Three things are necessarily outside that rule —
+`SHA256SUMS` and its `.sig`, which are what the checking is *made of*, and the server's
+autoindex, which is not a file of the repository at all. The marker is inside it, checked
+by its own hash against the sums it pointed at; every directory an autoindex names must
+still produce a manifest the sums vouch for.
+
+**The one way out is "can't check", never "checked and failed"** (jka, 2026-09-19,
+pointing at D114 rather than accepting a flat refusal). *Can't check* is one state with
+several causes, and the code says so in one place (`_sig_cant_check`): no `ssh-keygen`,
+one older than 8.0, a core that doesn't know `sig.verify`, or **a core older than D118,
+which hashes nothing it fetches** — a real case, since D30 lets this GUI attach to any
+core, and one that must be found as that rather than as a Tcl error at the first file
+compared. A source nobody has trusted yet then simply lists as *unsigned* — rio was not
+going to check anything for it either way — but one whose key **is** trusted is refused;
+that is the fail-closed shape of https without tcltls.
+*Preferences ▸ Extensions ▸ "Use repositories rio can't check"*, off by default, lets
+those through marked **unverified**, never *signed*. It touches nothing else: a bad
+signature, a changed key or a mismatched hash is refused with the switch on. Unlike
+D114's, this switch is **GUI-side** (prefs.json): D114's also governs the agent's
+transport, this governs nothing but the Extensions window. `-Y verify` needs **OpenSSH
+8.0+**, so an older one is reported as the version problem it is, never as a bad
+signature (Windows 10 1809 shipped 7.7 — CAVEATS.md).
+
+**The core hashes; the GUI decides.** `repo.fetch` gained an opt-in `sha256` over the
+body **as it arrived** — opt-in because tcllib's sha256 is pure Tcl at ~400 KB/s, and an
+unsigned repository must not pay for it. That forced an honest change: the fetch is now
+`-binary`, and `rio::http::_decode` owns the charset the server declared as well as the
+UTF-8 guess it already had (D39/D109's live corruption fix, 2026-09-12). What it
+deliberately dropped is http's `\r\n` → `\n` translation — **that alone would make a
+repository published from Windows unverifiable**. A `sig.verify` bytes-guard closes the
+last gap: the GUI holds `SHA256SUMS` as text and hands it back, so the core re-encodes it
+and compares against the hash *it* reported, and a lost byte says *"the signed bytes
+couldn't be reconstructed"* instead of arriving as a forged signature — the one message a
+user must never see for a repository that was fine.
+
+**What the user sees**: every variant line ends in **signed / unsigned / unverified**
+(jka's call — the choice between two sources is made on that line), the install consent
+names the fingerprint that vouched for the files or says plainly that nothing does, a
+refused source gets its own phrase in the list (*signing key changed*, *signature doesn't
+verify*, *can't check the signature*, …), and the ledger records `signed_by`.
+
+**Deferred**: a *Repository signing keys…* list mirroring D111's *Accepted certificates…*
+(jka). Rotation has its own step, and forgetting a key is a section deleted from a
+commented, hand-editable file the dialog names. ROADMAP carries it.
+
+**Guards**: `sig.test` (30) runs the real tool against **committed fixtures** — a test
+key's public half and signatures made once, because a signature generated at test time
+from the same data path would agree with a systematic marshalling bug and prove nothing;
+plus the no-tool, too-old and no-reason answers, which are stubbed because a host that
+has OpenSSH cannot produce them. `http.test` covers the byte contract, including that the
+hash of a body and the hash of its decoded text differ. `repos.tcl` (+65 checks) covers
+the policy on a stubbed verify seam: first use, the seed, rotation refused then trusted,
+every downgrade, a tampered payload at install and a tampered manifest at scan, an
+unlisted file, a core that can't hash, and the switch — including that it does *not*
+excuse a bad signature. Seven injections, each failing by name; two **passed** and were
+acted on (the `namespaces=` option removed, the first-use ordering given the test it
+lacked). A self-review after that found the one real defect of the change: the old-core
+path reached `dict get` on a hash that isn't there, which is a crash, not a refusal.
+**Verified live** against rio.skylm.org/extensions through rio's own scan: five
+extensions, all marked signed, `SHA256:ThigJDQbjz1G8yvZMJ7grlLlcOA6uS+ZDWvJdJPVfG0`.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -7372,6 +7476,13 @@ status changes, rather than pretending a test could hold it.
   rio's first D35-style tool window (D39).
 - **safe-name rule** — `^[A-Za-z0-9][A-Za-z0-9._-]*$`, required of every
   remote-supplied name before any URL/path join (D39).
+- **signed repository** — one whose root `SHA256SUMS` (covering every served file)
+  carries an OpenSSH signature in the `rio-repository` namespace, made with the key
+  its marker publishes. rio verifies it with `ssh-keygen` on the core's host and
+  checks every file it fetches against those hashes (D118).
+- **trust on first use** — the first scan that verifies a repository's signature
+  records its key in `repository-keys.conf`; a different key later is refused as
+  *changed* until the user trusts it by hand (D118).
 - **update (of an extension)** — a *higher semver* offered by the repository an
   extension was installed from. Another repository's same-named extension is a
   **switch**, not an update, unless that extension's cross-source flag is set;

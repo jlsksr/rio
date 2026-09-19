@@ -1,0 +1,293 @@
+# Tests for rio::sig and the sig.verify op (AGENTS.md D118): verifying an OpenSSH
+# detached signature the way a signed extension repository is checked.
+#
+# Run against COMMITTED FIXTURES in tests/fixtures/sig — a signer's public key, a
+# second key, a SHA256SUMS in a publisher's exact shape, and three signatures made
+# once with the real tool. Deliberately not generated per run: a signature made here,
+# from the same data path the code under test uses, would agree with a systematic
+# marshalling bug (a stray newline, a re-encode) and prove nothing. A fixed artefact
+# signed elsewhere cannot.
+#
+# They were made once with (private halves discarded, never committed):
+#
+#   ssh-keygen -t ed25519 -N '' -f k1 ; ssh-keygen -t ed25519 -N '' -f k2
+#   cp k1.pub signer.pub ; cp k2.pub other.pub
+#   ssh-keygen -Y sign -f k1 -n rio-repository SHA256SUMS ; mv *.sig good.sig
+#   ssh-keygen -Y sign -f k2 -n rio-repository SHA256SUMS ; mv *.sig otherkey.sig
+#   ssh-keygen -Y sign -f k1 -n git            SHA256SUMS ; mv *.sig wrongns.sig
+#
+# Everything that needs the tool is constrained on `ssh-keygen` and SKIPPED where it
+# is absent (the `openssl` pattern in tls.test) — the no-tool answer itself is tested
+# everywhere, since that is the case a host without OpenSSH actually hits.
+package require tcltest
+namespace import ::tcltest::*
+
+source [file join [file dirname [info script]] .. error.tcl]
+source [file join [file dirname [info script]] .. dispatch.tcl]
+source [file join [file dirname [info script]] .. deps.tcl]
+source [file join [file dirname [info script]] .. sig.tcl]
+namespace eval rio::ops {}   ;# normally created by document.tcl, not loaded here
+source [file join [file dirname [info script]] .. ops-sig.tcl]
+
+set ::fx [file join [file dirname [info script]] fixtures sig]
+
+proc fx {name} {
+	set f [open [file join $::fx $name] rb]
+	set d [::read $f]
+	close $f
+	return [encoding convertfrom utf-8 $d]
+}
+# A .pub file as a repository publishes the key: type and base64, no comment.
+proc fxkey {name} { return [join [lrange [split [string trim [fx $name]]] 0 1]] }
+
+set ::sums   [fx SHA256SUMS]
+set ::good   [fx good.sig]
+set ::signer [fxkey signer.pub]
+set ::other  [fxkey other.pub]
+set ::principal "http://a.example/exts"
+
+testConstraint sshkeygen [expr {[auto_execok ssh-keygen] ne ""}]
+
+# --- what a key may be (pure, no tool) ----------------------------------------
+# The allowed-signers file rio writes IS the trust decision, so a key that could
+# add a line to it is refused before it ever reaches a file.
+test sig-key-ok {a published key is a type and base64, one line} -body {
+	list [rio::sig::key_ok $::signer] \
+		[rio::sig::key_ok "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGhx"] \
+		[rio::sig::key_ok "ssh-ed25519"] \
+		[rio::sig::key_ok "ssh-ed25519 AAAA comment"] \
+		[rio::sig::key_ok ""]
+} -result {1 1 0 0 0}
+
+test sig-key-refuses-newline {a newline would smuggle a second principal into the
+		allowed-signers file — the whole trust decision} -body {
+	rio::sig::key_ok "ssh-ed25519 AAAA\nhttp://evil.example ssh-ed25519 BBBB"
+} -result 0
+
+test sig-key-refuses-junk-base64 {base64 is base64} -body {
+	list [rio::sig::key_ok "ssh-ed25519 not base64"] \
+		[rio::sig::key_ok "ssh-ed25519 AAA/+B=="] \
+		[rio::sig::key_ok "bogus-type AAAA"]
+} -result {0 1 0}
+
+test sig-field-ok {a principal and a namespace are single fields} -body {
+	list [rio::sig::field_ok http://a.example/x] [rio::sig::field_ok "two words"] \
+		[rio::sig::field_ok ""] [rio::sig::field_ok "line\nbreak"]
+} -result {1 0 0 0}
+
+# --- no tool, or too old ------------------------------------------------------
+test sig-verify-without-tool {no ssh-keygen is `available 0`, never a bad signature} -setup {
+	rename rio::sig::tool _real_tool
+	proc rio::sig::tool {} { return "" }
+} -body {
+	set r [rio::sig::verify $::sums $::good $::signer $::principal rio-repository]
+	list [dict get $r available] [dict get $r verified] \
+		[string match "*ssh-keygen isn't installed*" [dict get $r reason]]
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+} -result {0 0 1}
+
+test sig-verify-tool-too-old {OpenSSH older than 8.0 has no -Y: a version problem,
+		reported as one, not as a refused signature} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 255 stdout "" stderr "unknown option -- Y"]
+	}
+} -body {
+	set r [rio::sig::verify $::sums $::good $::signer $::principal rio-repository]
+	list [dict get $r available] [dict get $r verified] \
+		[string match "*older than OpenSSH 8.0*" [dict get $r reason]]
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result {0 0 1}
+
+test sig-verify-refusal-always-has-a-reason {a wrong key exits non-zero with NOTHING
+		on stderr, so the reason falls back to what ssh-keygen did say} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 255 stdout "" stderr ""]
+	}
+} -body {
+	set r [rio::sig::verify $::sums $::good $::signer $::principal rio-repository]
+	list [dict get $r verified] [expr {[dict get $r reason] ne ""}]
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result {0 1}
+
+test sig-verify-needs-both-exit-and-verdict {a zero exit alone is not a verdict —
+		a tool that succeeded at doing nothing has verified nothing} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 0 stdout "" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
+test sig-verify-good-line-alone-is-not-enough {nor is the word Good on a failed run} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 255 \
+			stdout "Good \"rio-repository\" signature for x with ED25519 key SHA256:zz" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
+test sig-verify-good-for-another-namespace-is-not-good {the verdict line names the
+		namespace it is about, and it must be the one we asked for} -setup {
+	rename rio::sig::tool _real_tool
+	rename rio::sig::_run _real_run
+	proc rio::sig::tool {} { return ssh-keygen }
+	proc rio::sig::_run {argv stdin_path} {
+		return [dict create exitcode 0 \
+			stdout "Good \"git\" signature for x with ED25519 key SHA256:zz" stderr ""]
+	}
+} -body {
+	dict get [rio::sig::verify $::sums $::good $::signer $::principal rio-repository] verified
+} -cleanup {
+	rename rio::sig::tool {} ; rename _real_tool rio::sig::tool
+	rename rio::sig::_run {} ; rename _real_run rio::sig::_run
+} -result 0
+
+# --- the real tool against the fixtures ---------------------------------------
+test sig-verify-good {the signature the fixture key made over these bytes} -constraints sshkeygen -body {
+	set r [rio::sig::verify $::sums $::good $::signer $::principal rio-repository]
+	list [dict get $r available] [dict get $r verified] \
+		[expr {[dict get $r signer] eq [dict get $r fingerprint]}] \
+		[string match "SHA256:*" [dict get $r signer]] [dict get $r reason]
+} -result {1 1 1 1 {}}
+
+test sig-verify-tampered {one byte added to the signed data} -constraints sshkeygen -body {
+	set r [rio::sig::verify "$::sums#" $::good $::signer $::principal rio-repository]
+	list [dict get $r available] [dict get $r verified] \
+		[expr {[dict get $r reason] ne ""}]
+} -result {1 0 1}
+
+test sig-verify-truncated {a line removed from SHA256SUMS — the shape of a
+		repository serving stale sums} -constraints sshkeygen -body {
+	set cut [join [lrange [split [string trimright $::sums "\n"] "\n"] 0 1] "\n"]
+	dict get [rio::sig::verify "$cut\n" $::good $::signer $::principal rio-repository] verified
+} -result 0
+
+test sig-verify-wrong-key {the right signature, checked against another key} -constraints sshkeygen -body {
+	dict get [rio::sig::verify $::sums $::good $::other $::principal rio-repository] verified
+} -result 0
+
+test sig-verify-other-keys-signature {a signature by a key we do not trust} -constraints sshkeygen -body {
+	dict get [rio::sig::verify $::sums [fx otherkey.sig] $::signer $::principal rio-repository] verified
+} -result 0
+
+test sig-verify-wrong-namespace {a signature the same key made for git cannot be
+		replayed as a repository signature — the namespace is the binding} -constraints sshkeygen -body {
+	set r [rio::sig::verify $::sums [fx wrongns.sig] $::signer $::principal rio-repository]
+	list [dict get $r verified] [string match -nocase "*namespace*" [dict get $r reason]]
+} -result {0 1}
+
+test sig-verify-namespace-must-match-exactly {and verifying under the namespace it
+		WAS made for succeeds — proof the previous test failed for that reason} -constraints sshkeygen -body {
+	dict get [rio::sig::verify $::sums [fx wrongns.sig] $::signer $::principal git] verified
+} -result 1
+
+test sig-verify-junk-signature {not a signature at all} -constraints sshkeygen -body {
+	set r [rio::sig::verify $::sums "-----BEGIN SSH SIGNATURE-----\nnope\n" \
+		$::signer $::principal rio-repository]
+	list [dict get $r available] [dict get $r verified]
+} -result {1 0}
+
+test sig-verify-junk-key {a marker whose key = line is nonsense is refused before
+		anything is written to a file} -constraints sshkeygen -body {
+	set r [rio::sig::verify $::sums $::good "ssh-ed25519 not base64" $::principal rio-repository]
+	list [dict get $r verified] [string match "*usable SSH public key*" [dict get $r reason]]
+} -result {0 1}
+
+test sig-fingerprint {the fingerprint a user is shown, and "" for junk} -constraints sshkeygen -body {
+	list [string match "SHA256:*" [rio::sig::fingerprint $::signer]] \
+		[rio::sig::fingerprint "ssh-ed25519 not base64"] \
+		[expr {[rio::sig::fingerprint $::signer] ne [rio::sig::fingerprint $::other]}]
+} -result {1 {} 1}
+
+test sig-verify-trailing-newline-matters {the signature covers BYTES: dropping the
+		final newline is a different message} -constraints sshkeygen -body {
+	dict get [rio::sig::verify [string trimright $::sums "\n"] $::good \
+		$::signer $::principal rio-repository] verified
+} -result 0
+
+# --- the op -------------------------------------------------------------------
+test sig-op-requires-fields {data, sig and key are required} -body {
+	set out {}
+	foreach p [list {} {data x} {data x sig y}] {
+		catch {rio::ops::sig_verify $p} e opts
+		lappend out [rio::error::code_of $opts]
+	}
+	set out
+} -result {bad_request bad_request bad_request}
+
+test sig-op-good {the op's result carries the verdict} -constraints sshkeygen -body {
+	set r [dict get [rio::ops::sig_verify [dict create data $::sums sig $::good \
+		key $::signer principal $::principal namespace rio-repository]] result]
+	list [dict get $r available] [dict get $r verified]
+} -result {1 1}
+
+test sig-op-default-namespace {rio-repository is the default namespace} -constraints sshkeygen -body {
+	set r [dict get [rio::ops::sig_verify [dict create data $::sums sig $::good \
+		key $::signer principal $::principal]] result]
+	dict get $r verified
+} -result 1
+
+test sig-op-sha256-guard {given the bytes' own hash, a data round trip that lost
+		something says THAT, rather than arriving as a bad signature} -body {
+	set want [::sha2::sha256 -hex [encoding convertto utf-8 $::sums]]
+	set r [dict get [rio::ops::sig_verify [dict create data "$::sums " sig $::good \
+		key $::signer principal $::principal sha256 $want]] result]
+	list [dict get $r verified] [string match "*couldn't be reconstructed*" [dict get $r reason]]
+} -result {0 1}
+
+test sig-op-sha256-guard-passes {the same guard is silent when the bytes are intact} -constraints sshkeygen -body {
+	set want [::sha2::sha256 -hex [encoding convertto utf-8 $::sums]]
+	set r [dict get [rio::ops::sig_verify [dict create data $::sums sig $::good \
+		key $::signer principal $::principal sha256 $want]] result]
+	list [dict get $r verified] [dict get $r reason]
+} -result {1 {}}
+
+test sig-op-sha256-must-be-a-hash {a garbage hash is bad_request, not a refusal} -body {
+	catch {rio::ops::sig_verify [dict create data x sig y key $::signer sha256 nope]} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test sig-op-fingerprint {sig.fingerprint answers with the string ssh-keygen prints,
+		and with "" for a key it can't read — never an error, because a client that
+		cannot show a fingerprint must say so, not fail} -constraints sshkeygen -body {
+	list [dict get [dict get [rio::ops::sig_fingerprint [dict create key $::signer]] result] fingerprint] \
+		[dict get [dict get [rio::ops::sig_fingerprint [dict create key "ssh-ed25519 nope"]] result] fingerprint]
+} -result [list [rio::sig::fingerprint $::signer] ""]
+
+test sig-op-fingerprint-requires-key {a missing key is bad_request} -body {
+	catch {rio::ops::sig_fingerprint {}} e opts
+	rio::error::code_of $opts
+} -result bad_request
+
+test sig-op-registered {sig.verify is a registered op; a bad request comes back as a
+		clean error reply through dispatch} -body {
+	set resp [rio::dispatch::handle \
+		{id 1 op sig.verify params {data x}} [list apply {{ev} {}}]]
+	list [dict get $resp ok] [dict get $resp error code]
+} -result {false bad_request}
+
+cleanupTests

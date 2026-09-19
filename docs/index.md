@@ -33,8 +33,8 @@ jump to the topic you need.
 - [Keyboard shortcuts](keyboard.md) — the default chords and how to remap them.
 - [Panels & layout](panels-and-layout.md) — moving panes, themes, fonts, zoom.
 - [Editing modes](editing-modes.md) — Windows, vi, or emacs keys in the text area.
-- [Extensions](extensions.md) — repositories, installing themes, highlighters,
-  modes and agent providers.
+- [Extensions](extensions.md) — repositories, signatures, installing themes,
+  highlighters, modes and agent providers.
 
 ### Beyond one machine
 

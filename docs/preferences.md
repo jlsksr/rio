@@ -56,6 +56,7 @@ separate "make this the default" step and no "save settings" button.
   | `editmode` | `windows`, `vi` or `emacs` — the last two only take effect once installed as extensions |
   | `project` | the folder that was open at the last launch, reopened on the next one (local cores only) |
   | `check_updates` | `"1"` looks for newer versions of your installed extensions shortly after start-up, `"0"` (the default) never touches the network unasked |
+  | `allow_unverified_repos` | `"1"` uses a signed extension repository even where the core has no way to check its signature, `"0"` (the default) refuses it — see [below](#using-a-repository-rio-cant-check) |
   | `agent_selection_menu` | `"1"` (the default) offers **Change with Agent…** in the editor's right-click menu while a provider other than Echo is selected, `"0"` never shows it — see [the agent](agent.md#changing-just-the-selection) |
   | `layout` | a **nested object** holding the whole dock arrangement: which panes sit left, right or bottom, which are hidden, and their sizes |
 
@@ -90,9 +91,11 @@ Debian source, https is an option, not an obligation: plain http is just as
 supported. An https repository needs `tcltls` on the core's host — 1.8 or newer, or an
 older one with [the switch under Network](#network-how-the-core-checks-https) turned on
 (see [INSTALL.md](../INSTALL.md)) — and one whose certificate doesn't verify can be
-[reviewed and accepted](extensions.md#a-certificate-that-isnt-trusted). The dialog reads and
-writes this exact format, so hand-edits and the GUI stay in step; a hand-edit is
-picked up the next time the Extensions window scans.
+[reviewed and accepted](extensions.md#a-certificate-that-isnt-trusted). A repository of
+either scheme may be [signed](extensions.md#a-repository-that-is-signed), which is what
+gives a plain-http one the integrity a certificate would otherwise have to provide.
+The dialog reads and writes this exact format, so hand-edits and the GUI stay in
+step; a hand-edit is picked up the next time the Extensions window scans.
 
 On a **first run** rio pre-fills this file with the project's own repository
 (`http://rio.skylm.org/extensions`) so the Extensions window isn't empty out of the box.
@@ -102,9 +105,10 @@ Otherwise it's optional: no file means no repositories.
 
 What you have actually installed, and from where, is tracked separately in a
 provenance ledger, `extensions.json` — rio writes it, and each entry records the
-source URL and version a `kind/name` came from. The scheme is not part of that
-identity, so moving a repository from `http://host/rio` to `https://host/rio` keeps
-the updates for everything you installed from it.
+source URL and version a `kind/name` came from, plus the fingerprint that signed it
+where the repository was signed. The scheme is not part of that identity, so moving
+a repository from `http://host/rio` to `https://host/rio` keeps the updates for
+everything you installed from it.
 
 ## Checking for extension updates
 
@@ -126,6 +130,26 @@ repositories* on that extension in the Extensions window.
 what it found. It is **off** by default. A version that doesn't follow semver —
 a date stamp, say — is shown but never compared, and never claimed to be out of
 date.
+
+## Using a repository rio can't check
+
+A repository can publish a **signing key**, and rio then checks every file it
+fetches from it against that repository's signature — see
+[extensions](extensions.md#a-repository-that-is-signed). The checking is done by
+running `ssh-keygen` on the core's host, and it needs OpenSSH 8.0 or newer there —
+and a core that knows about signatures at all. Where either is missing, a repository
+whose key rio has trusted is **refused** rather than used unchecked.
+
+*Preferences ▸ Extensions ▸ "Use repositories rio can't check"* (the
+`allow_unverified_repos` key) lets those through anyway. It is **off** by default,
+and when you turn it on such a repository lists and installs marked `unverified` —
+never `signed` — and the install confirmation says so. It excuses nothing else: a
+signature that doesn't verify, a key that changed and a file whose hash doesn't
+match are refused with it on. The switch lives with the GUI, in `prefs.json`,
+because it governs nothing but the Extensions window.
+
+The keys rio trusts are its own list, in `repository-keys.conf` beside your
+`sources.list`; deleting a section there forgets a key.
 
 ## Network: how the core checks https
 
@@ -166,6 +190,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `prefs.json` | GUI preferences — every key is listed [above](#setting-a-default-is-just-setting-the-value) | yes — plain JSON (above); `layout` best left to the View menu |
 | `keys.json` | keyboard-shortcut **overrides** (defaults for everything you don't list) | yes — see [keyboard shortcuts](keyboard.md) |
 | `sources.list` | extension-repository URLs, one `http://` or `https://` base per line | yes (above) |
+| `repository-keys.conf` | the signing key rio trusts for each repository, one section per repository, recorded the first time a signature from it verified | yes — delete a section to forget that key; see [extensions](extensions.md#trust-on-the-first-scan) |
 | `certificates.conf` | certificates you accepted although they did not verify, one section per `host:port` — on the **core's** host | yes — delete a section to take one back; see [extensions](extensions.md#a-certificate-that-isnt-trusted) |
 | `themes/` | user theme files, read by the **core** | drop-in / installed |
 | `syntax/` | installed syntax highlighters (`*.tcl`) | drop-in / installed |
@@ -185,7 +210,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | ---- | ----- |
 | `sessions/` | per-project open files + active tab, keyed by project root |
 | `providers/` | installed agent providers — the extension kind that ships executable code, so it lives with the data, not the hand-edited config |
-| `extensions.json` | the provenance ledger — what's installed, from which repository, at which version |
+| `extensions.json` | the provenance ledger — what's installed, from which repository, at which version, and which key signed it |
 | `secrets/*.secret` | API keys, mode `0600` — never in `prefs.json` |
 
 **Project-local (in a project's own tree):**

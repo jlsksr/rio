@@ -21,6 +21,7 @@ The **core** needs:
 | `tcllib` | `tcllib` (Alpine: `tcl-lib`) | `tcllib` | the `json` package the wire protocol uses |
 | `tcltls` | `tcl-tls` | `tcltls` | **HTTPS from the core (D30): a hosted agent provider, and https extension repositories (D109)** |
 | `git` *(optional)* | `git` | `git` | the git pane shells out to it |
+| `ssh-keygen` *(optional)* | `openssh-client` (Alpine: `openssh-keygen`) | base system | **verifying signed extension repositories (D118)** — OpenSSH 8.0+ |
 
 The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not**
 need `tcltls` — all of rio's HTTPS happens wherever the *core* runs.

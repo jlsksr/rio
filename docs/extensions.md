@@ -11,8 +11,9 @@ installs to; provenance — which repository and version an installed extension 
 from, and choosing between same-named extensions from different authors; keeping
 them up to date (what `[1.1.0 → 1.2.0]` on a row means, *Update All*, and the
 optional check at start-up); what is code and what is merely data; and installing
-over a [remote core](remote.md). The section on
-[certificates](#a-certificate-that-isnt-trusted) below is complete.
+over a [remote core](remote.md). The sections on
+[signatures](#a-repository-that-is-signed) and on
+[certificates](#a-certificate-that-isnt-trusted) below are complete.
 
 For now, **Extensions & repositories** in [README.md](../README.md) explains the
 model, [preferences](preferences.md#your-repository-list-by-hand) documents the
@@ -21,6 +22,142 @@ model, [preferences](preferences.md#your-repository-list-by-hand) documents the
 *Extension repositories* in
 [CONTRIBUTING.md](../CONTRIBUTING.md) is the complete spec for publishing one
 yourself.
+
+## A repository that is signed
+
+A repository can **sign** what it publishes, and rio checks the signature before it
+offers you anything from it. This matters most over plain `http://`, which rio
+treats as first-class: there is no certificate in the way, so anyone between you and
+the server could rewrite an extension as it is fetched. A signature is what makes
+that attempt fail — no certificate, no registry and no account anywhere. An
+`https://` repository gains from it too, because a signature covers the files
+themselves rather than only the connection that carried them.
+
+Signing is optional, and what a publisher does to sign is in
+*Extension repositories* in [CONTRIBUTING.md](../CONTRIBUTING.md). From your side:
+
+- The repository publishes a **public key** in its `rio-repository.conf`, a root
+  `SHA256SUMS` listing every file it serves, and `SHA256SUMS.sig` signing that list.
+- rio verifies that signature by running **`ssh-keygen`** on the core's host, then
+  checks **every file it fetches** against those hashes — the marker, the index,
+  each extension's manifest, each payload. It checks while scanning, and again at
+  install time before anything is written to disk.
+- If one file doesn't match, the **whole** repository is refused. It is signed as
+  one thing, and "most of it verified" is not a state you could act on.
+
+### What you see
+
+Every version line in the detail pane of *Settings ▸ Extensions…* ends in one of
+three words:
+
+| Mark | Means |
+| ---- | ----- |
+| `signed` | the signature verified, and these files were checked against it |
+| `unsigned` | the repository publishes no key — nothing vouches for the files |
+| `unverified` | it is signed, but this core couldn't check it (see [below](#repositories-rio-cant-check)) |
+
+That word is on the version line because that is where you choose between two
+repositories offering the same extension. The install confirmation says the same
+thing at more length: on a signed repository it names the **fingerprint** that
+vouched for the files; on an unsigned one it says plainly that nothing does. The
+list *Update All* shows before it starts marks every row the same way, since that
+one confirmation stands in for all of them. The provenance ledger `extensions.json`
+records the fingerprint as `signed_by`.
+
+### Trust on the first scan
+
+There is no central index and no authority to ask, so rio works the way an SSH
+client does: **the first scan that verifies a repository records its key**, and
+from then on that key, and only that key, speaks for that repository. rio's own
+repository ships with its key already trusted, so a fresh install is never asked a
+question it has no way to answer.
+
+The keys are kept in `repository-keys.conf`, beside your `sources.list` (see
+[where everything lives](preferences.md#where-everything-lives)). It is commented
+and you may edit it: **deleting a section forgets that key**, and the next scan
+then trusts whatever the repository publishes, as it did the first time. Moving a
+repository from `http://` to `https://` is a change of route, not of publisher, so
+its key still counts.
+
+Worth knowing what first use cannot do: if someone is already between you and a
+repository the **very first** time rio looks at it, they can serve their own key,
+their own hashes and their own signature over them, and rio has nothing to compare
+that against. What it does protect is every scan and every install after that one
+— which is the whole life of an installed extension. Confirming a new repository's
+fingerprint against the publisher's own page is the way to close even that gap.
+
+### The publisher changed their key
+
+A repository later signed by a **different** key is refused, and lists as
+`!! <url> — signing key changed`. That is what a publisher rotating their key looks
+like — and exactly what someone else answering for the repository looks like. rio
+cannot tell them apart, so it asks you.
+
+**To look:** select that row. Its detail pane offers a **Review signing key…**
+button, which opens a dialog with the repository, the fingerprint rio **trusted**
+(and the date it did), and the one now **offered** — in a box you can select and
+copy, since comparing a fingerprint is the whole point. Two buttons: **Go Back**,
+the default, which changes nothing, and **Trust the New Key**.
+
+**Trust it only if you can confirm that fingerprint away from this connection** —
+the publisher's own page, a release note, a message from them. rio then trusts
+exactly the key the dialog showed you, for that repository, and asks again if it
+ever changes.
+
+### When rio refuses a signed repository
+
+Once a key is trusted for a repository, rio will not quietly stop checking it.
+Each of these refuses the whole repository and nothing from it is offered, with its
+own phrase on the row:
+
+| In the list | What happened |
+| ----------- | ------------- |
+| `signing key changed` | signed by a different key than the one rio trusted — review it, above |
+| `signature doesn't verify` | the signature is not a valid signature over that list of hashes |
+| `signature missing` | `SHA256SUMS` or `SHA256SUMS.sig` couldn't be fetched |
+| `no longer signed` | it used to publish a key and no longer does |
+| `files don't match the signature` | a file rio fetched isn't the file the signature vouches for, or isn't listed in `SHA256SUMS` at all |
+| `can't check the signature` | nothing is wrong with the signature: this core has no way to check it — see [below](#repositories-rio-cant-check) |
+
+Select the row and the detail pane gives the whole sentence, naming the file where
+there is one. The common innocent cause is a publisher who uploaded files without
+re-signing them, or who was mid-upload while you scanned; `⟳` after they finish
+clears it. Everything else is worth taking seriously, because the refusal is the
+signature doing its job.
+
+### Repositories rio can't check
+
+Checking a signature is the core's side of the work — it fetches the files and
+hashes them — and it needs two things there: **`ssh-keygen` from OpenSSH 8.0 or
+newer** ([INSTALL.md](../INSTALL.md) lists it as an optional dependency), and a core
+new enough to know about repository signatures at all, which matters only if you
+attach a window to an [older remote core](remote.md). Where either is missing rio
+says `can't check the signature` rather than pretending it checked, and:
+
+- a repository **nobody has trusted a key for** simply lists as `unsigned`, exactly
+  as it did before signing existed — rio was not going to check anything for it
+  either way;
+- one whose key rio **has** trusted is **refused**, as `can't check the signature`.
+  Using it unchecked is the one thing trusting the key was meant to prevent.
+
+*Can't check* never turns into *checked and failed*: whatever is missing, rio says
+which. The fix is to mend it on the core's host. Where that isn't possible,
+*Preferences ▸ Extensions ▸ "Use repositories rio can't check"* — off by default —
+lets such a repository through, marked `unverified` everywhere a checked one would
+say `signed`, and named as such in the install confirmation. It covers **only** the
+missing means to check: a signature that doesn't verify, a key that changed and a
+file that doesn't match its hash are refused with it on
+(see [preferences](preferences.md#using-a-repository-rio-cant-check)).
+
+Two more things worth knowing:
+
+- **The checking happens on the core's host**, because that is what fetches the
+  repositories — so it is that machine's `ssh-keygen` that matters. The keys you
+  trust, though, are the GUI's, in your own `repository-keys.conf`: the sources list
+  is your trust list, and a key belongs to an entry in it.
+- **Signing and certificates are separate checks.** A signed `https://` repository
+  whose certificate isn't trusted is still refused for its certificate, and a
+  certificate you accepted does not vouch for a single file.
 
 ## A certificate that isn't trusted
 

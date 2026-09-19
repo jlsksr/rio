@@ -6,7 +6,8 @@
 # code (INSTALL.md: a GUI-only box needs Tk and nothing else) and a remote
 # core fetches from ITS network, not the frontend's.
 #
-#   rio::http::get url ?timeout_ms? -> {status <ncode> url <final-url> text <body>}
+#   rio::http::get url ?timeout_ms? ?want_sha256?
+#       -> {status <ncode> url <final-url> text <body> ?sha256 <hex>?}
 #
 # HTTP IS FIRST-CLASS; HTTPS IS AN OPTION (D109) — the scheme in sources.list is
 # the user's choice, as in apt's. Plain http needs nothing beyond Tcl. An https
@@ -32,6 +33,12 @@
 
 package require http
 
+# sha256 is tcllib's, through the D116 gate — the body hashes a signed repository is
+# checked against (D118). Sourced here rather than relied on from the entry point,
+# because a test sources this module directly; re-sourcing the gate only defines procs.
+source [file join [file dirname [info script]] deps.tcl]
+rio::deps::require sha256
+
 namespace eval rio::http {
 	variable maxbody [expr {2 * 1024 * 1024}]  ;# body cap in bytes
 	variable maxhops 5                          ;# redirects followed
@@ -44,33 +51,72 @@ proc rio::http::_progress {tok total current} {
 	if {$current > $maxbody} { ::http::reset $tok toobig }
 }
 
+# THE BODY ARRIVES AS BYTES (D118). geturl is called with -binary 1, so ::http::data
+# hands back exactly what came off the wire — Content-Encoding already undone by http,
+# but no charset decoding and, just as load-bearing, no \r\n -> \n translation. rio
+# does the decoding below instead, for two reasons:
+#
+#   * a signature covers BYTES. The sha256 this file reports must be the one the
+#     publisher's sha256sum saw, and http's line-ending translation alone would make
+#     a repository published from Windows unverifiable.
+#   * it is one rule in one place, instead of a rule that changes with the server's
+#     Content-Type (http decodes text/* and leaves application/octet-stream alone).
+#
 # Decode a fetched body honestly (found live, 2026-09-12).
 #
-# ::http::data returns the body decoded with the charset the server DECLARED — and
-# a plain webdir serving a repository declares none, so Tcl falls back to
-# iso8859-1 (the old RFC 2616 default). Every non-ASCII byte then arrives as a
-# separate latin-1 character: an em-dash comes back as U+00E2 U+0080 U+0094. The
-# damage is not cosmetic — the GUI writes installed payloads back out as UTF-8, so
-# those three characters become six bytes on disk and the extension is silently
-# CORRUPTED at install time. (Observed: an installed provider's own option hints
-# reading "â" on a core that fetched them through this.)
+# A plain webdir serving a repository declares NO charset, and the old RFC 2616
+# default for that is iso8859-1. Every non-ASCII byte then becomes a separate latin-1
+# character: an em-dash reads as U+00E2 U+0080 U+0094. The damage is not cosmetic —
+# the GUI writes installed payloads back out as UTF-8, so those three characters
+# become six bytes on disk and the extension is silently CORRUPTED at install time.
+# (Observed: an installed provider's own option hints reading "â" on a core that
+# fetched them through this.)
 #
 # A repository is rio's own D21 conf-and-Tcl, which is UTF-8, so an undeclared
-# charset means UTF-8 here. The round-trip check keeps that from being a new
-# guess: if the bytes are not valid UTF-8 (a genuinely latin-1 repository, or
-# something binary), the re-encode won't match and we keep what http gave us
-# rather than replacing characters with U+FFFD.
+# charset means UTF-8 here. The round-trip check keeps that from being a new guess:
+# if the bytes are not valid UTF-8 (a genuinely latin-1 repository, or something
+# binary), the re-encode won't match and the bytes stand as they are, rather than
+# being sprayed with U+FFFD.
 #
 # The provider-side GET already did this (rio::llm::http::_on_get_end, D106); this
 # is the older repository path, which never learned.
-proc rio::http::_decode {body ctype} {
-	if {[string match -nocase *charset=* $ctype]} { return $body }
-	if {[catch {
-		set bytes [encoding convertto iso8859-1 $body]
-		set text  [encoding convertfrom utf-8 $bytes]
-	}]} { return $body }
-	if {[encoding convertto utf-8 $text] ne $bytes} { return $body }
+proc rio::http::_decode {bytes ctype} {
+	set cs ""
+	regexp -nocase {charset\s*=\s*"?([^;"\s]+)} $ctype -> cs
+	if {$cs ne ""} {
+		set enc [_encoding_for $cs]
+		# A charset this Tcl has no encoding for is not a reason to mangle anything:
+		# fall through to the guess, which keeps the bytes when they aren't UTF-8.
+		if {$enc ne "" && ![catch {encoding convertfrom $enc $bytes} text]} { return $text }
+	}
+	if {[catch {set text [encoding convertfrom utf-8 $bytes]}]} { return $bytes }
+	if {[encoding convertto utf-8 $text] ne $bytes} { return $bytes }
 	return $text
+}
+
+# An IANA charset name -> the name Tcl knows it by, or "" for one it doesn't.
+# Tcl's own names are the IANA ones with the punctuation moved about — `utf-8` and
+# `cp1252` are its spellings of themselves, `iso-8859-1` is `iso8859-1`,
+# `windows-1252` is `cp1252`, `us-ascii` is `ascii` — so try the obvious rewrites
+# and let `encoding names` be the judge of each.
+proc rio::http::_encoding_for {cs} {
+	set cs [string tolower [string trim $cs " \t\";"]]
+	if {$cs eq ""} { return "" }
+	set names [encoding names]
+	foreach cand [list $cs \
+			[regsub {^iso-8859-} $cs {iso8859-}] \
+			[regsub {^(windows|cp)-} $cs {cp}] \
+			[string map {us-ascii ascii utf8 utf-8} $cs]] {
+		if {$cand in $names} { return $cand }
+	}
+	return ""
+}
+
+# The SHA-256 of a body as it arrived, hex — the hash a publisher's `sha256sum`
+# wrote into SHA256SUMS (D118). Computed only when asked: tcllib's sha256 is pure
+# Tcl at roughly 400 KB/s here, and an unsigned repository must not pay for it.
+proc rio::http::_sha256 {bytes} {
+	return [::sha2::sha256 -hex $bytes]
 }
 
 # Resolve a redirect Location against the URL it came from: absolute URLs pass
@@ -130,7 +176,7 @@ proc rio::http::_fail {here scheme why} {
 	rio::error::raise io_error "fetch $here failed: $why"
 }
 
-proc rio::http::get {url {timeout_ms 15000}} {
+proc rio::http::get {url {timeout_ms 15000} {want_sha256 0}} {
 	variable maxhops
 	set here $url
 	set prev ""
@@ -146,7 +192,7 @@ proc rio::http::get {url {timeout_ms 15000}} {
 		set prev $scheme
 		if {$scheme eq "https"} { rio::tls::take_refusal [rio::tls::origin_of $here] }
 		if {[catch {
-			::http::geturl $here -timeout $timeout_ms \
+			::http::geturl $here -timeout $timeout_ms -binary 1 \
 				-progress rio::http::_progress
 		} tok]} {
 			_fail $here $scheme $tok
@@ -181,9 +227,11 @@ proc rio::http::get {url {timeout_ms 15000}} {
 				if {[string equal -nocase $k content-type]} { set ctype $v }
 			}
 		}
-		set body [_decode [::http::data $tok] $ctype]
+		set bytes [::http::data $tok]
 		::http::cleanup $tok
-		return [dict create status $ncode url $here text $body]
+		set out [dict create status $ncode url $here text [_decode $bytes $ctype]]
+		if {$want_sha256} { dict set out sha256 [_sha256 $bytes] }
+		return $out
 	}
 	rio::error::raise io_error "too many redirects fetching $url"
 }
