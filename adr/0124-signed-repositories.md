@@ -1,6 +1,6 @@
 # ADR-0124: A repository can be signed, and rio checks it
 
-- **Status:** Accepted; amended by [ADR-0125](0125-repository-signing-keys-list.md)
+- **Status:** Accepted; amended by [ADR-0125](0125-repository-signing-keys-list.md); trust on first use superseded by [ADR-0126](0126-signing-key-confirmed-by-the-user.md)
 - **Date:** 2026-09-16
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D118
