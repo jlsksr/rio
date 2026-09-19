@@ -7999,7 +7999,7 @@ proc sources_seed_default {} {
 	sources_save [list $::default_repo]
 }
 
-# --- signing: which key speaks for a repository (AGENTS.md D118) ---------------
+# --- signing: which key speaks for a repository (AGENTS.md D118, D119) ---------
 #
 # D39 keeps plain http first-class, which means anyone on the path between a user
 # and a repository can rewrite a payload in flight. A signature over the repository
@@ -8007,24 +8007,28 @@ proc sources_seed_default {} {
 # root SHA256SUMS with an ssh key (their SIGNING.md), rio checks that signature and
 # then checks every file it fetches against those hashes.
 #
-# TRUST ON FIRST USE, with a seed. A repository publishes its public key in
-# rio-repository.conf. The first scan that verifies against it RECORDS it, and from
-# then on that key — and only that key — speaks for that source. A different key
-# later is refused as `key_changed` until the user trusts it by hand (D111's shape
-# for a changed certificate). The default source ships with the project's own key
-# already trusted, so a fresh rio is not asked a question it has no way to answer.
+# TRUSTED WHEN THE USER SAYS SO, with a seed (D119). A repository publishes its
+# public key in rio-repository.conf. The first scan that verifies against it does NOT
+# record it: it refuses the source as `key_unconfirmed` and offers the fingerprint,
+# the way ssh prints one and waits for `yes`. Once confirmed, that key — and only that
+# key — speaks for that source; a different key later is refused as `key_changed`
+# until the user trusts that one too (D111's shape for a changed certificate). The
+# default source ships with the project's own key already trusted, so a fresh rio is
+# not asked a question it has no way to answer; the keys window can withdraw even
+# that.
 #
-# WHAT FIRST USE CANNOT DO, said plainly: an attacker already on the path the very
-# first time sees a marker, a SHA256SUMS and a signature made by their own key, and
-# rio has nothing to compare it against. What it does defend is every scan and every
-# install after that one — which is the whole lifetime of an installed extension.
+# WHAT CONFIRMING CANNOT DO, said plainly: an attacker already on the path the very
+# first time still gets to offer a marker, a SHA256SUMS and a signature made by their
+# own key, and rio has nothing to compare it against. What it buys is that they must
+# now get a human to accept a fingerprint the publisher's own page contradicts,
+# instead of winning silently and permanently.
 #
 # The keys live GUI-SIDE, beside sources.list: the sources list is the trust list
 # (D39), and a key is a property of an entry in it. The verifying is the CORE's
 # (sig.verify), because ssh-keygen must be on the host that has the tool — the same
 # split as tcltls and https (D109).
 
-set ::repo_keys {}   ;# scheme-less source -> {key <type+base64> trusted <date>}
+set ::repo_keys {}   ;# scheme-less source -> {key <type+base64> trusted <date> forgotten <date>}
 set ::repo_sig  {}   ;# source -> {state signed|unsigned|unverified signer <fp> sums {path hash …}}
 
 # May a repository rio CANNOT check be used anyway? Off by default, and it buys
@@ -8054,16 +8058,22 @@ proc repo_keys_path {} {
 # `[<scheme-less source>]` sections carrying `key` and `trusted` — rio's own conf
 # format (D21), hand-editable on purpose: deleting a section is how a user takes a
 # trust decision back, and is exactly what repo_keys_forget does for them.
+#
+# A section with NO `key` is meaningful and is kept (D119): it says rio knows this
+# source and trusts no key for it. That is the only way to withdraw the key rio ships
+# with for its own repository, which is a fallback rather than a stored entry — so
+# `forgotten = <date>` beats the seed, and repo_key_of stops falling back to it.
 proc repo_keys_load {} {
 	set ::repo_keys {}
 	set path [repo_keys_path]
 	if {$path eq "" || ![file exists $path]} return
 	if {[catch {rio::conf::parse [slurp_utf8 $path]} conf]} return
 	dict for {section kv} $conf {
-		if {$section eq "" || ![dict exists $kv key]} continue
+		if {$section eq ""} continue
 		dict set ::repo_keys $section [dict create \
-			key [string trim [dict get $kv key]] \
-			trusted [expr {[dict exists $kv trusted] ? [dict get $kv trusted] : ""}]]
+			key [expr {[dict exists $kv key] ? [string trim [dict get $kv key]] : ""}] \
+			trusted [expr {[dict exists $kv trusted] ? [dict get $kv trusted] : ""}] \
+			forgotten [expr {[dict exists $kv forgotten] ? [dict get $kv forgotten] : ""}]]
 	}
 }
 
@@ -8074,16 +8084,22 @@ proc repo_keys_save {} {
 		file mkdir [file dirname $path]
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
 		puts $f "# Signing keys rio trusts for extension repositories (D118). One section"
-		puts $f "# per repository, written the first time a signature from it verified."
+		puts $f "# per repository, written when you confirmed that repository's key."
 		puts $f "#"
-		puts $f "# Delete a section to forget that key: the next scan then trusts whatever"
-		puts $f "# the repository publishes, as it did the first time. The same thing is one"
+		puts $f "# Delete a section to forget that key: rio then asks again the next time"
+		puts $f "# that repository is scanned, and installs nothing from it until you say"
+		puts $f "# yes. A section with no key at all means the opposite of trust - rio"
+		puts $f "# trusts no key here, not even one it ships with. The same edits are one"
 		puts $f "# click in Preferences > Extensions > Repository signing keys..."
 		dict for {src e} $::repo_keys {
 			puts $f ""
 			puts $f "\[$src\]"
-			puts $f "key = [dict get $e key]"
-			if {[dict get $e trusted] ne ""} { puts $f "trusted = [dict get $e trusted]" }
+			if {[dict get $e key] ne ""} {
+				puts $f "key = [dict get $e key]"
+				if {[dict get $e trusted] ne ""} { puts $f "trusted = [dict get $e trusted]" }
+			} elseif {[dict get $e forgotten] ne ""} {
+				puts $f "forgotten = [dict get $e forgotten]"
+			}
 		}
 		close $f
 	}
@@ -8092,6 +8108,10 @@ proc repo_keys_save {} {
 # The key trusted for a source, or "". Scheme-less, like source_same: moving a
 # repository from http:// to https:// (D109) is a change of route, not of publisher,
 # and must not read as a rotated key.
+#
+# A stored section answers even when it carries no key: "" then means rio trusts
+# nothing here, and the seed below is NOT reached — that is what makes the built-in
+# key withdrawable (D119).
 proc repo_key_of {source} {
 	set key [source_key $source]
 	dict for {src e} $::repo_keys {
@@ -8108,7 +8128,8 @@ proc source_key {source} {
 
 proc repo_key_trust {source key} {
 	dict set ::repo_keys [source_key $source] [dict create \
-		key $key trusted [clock format [clock seconds] -format %Y-%m-%d]]
+		key $key trusted [clock format [clock seconds] -format %Y-%m-%d] \
+		forgotten ""]
 	repo_keys_save
 }
 
@@ -8275,7 +8296,15 @@ proc repo_sig_check {base pubkey markerhash} {
 		return [dict create ok 0 code hash_mismatch \
 			error "The signature verifies, but rio-repository.conf isn't the file it vouches for. The repository's SHA256SUMS is out of date, or these files are not the ones that were signed."]
 	}
-	if {$trusted eq ""} { repo_key_trust $base $pubkey }
+	# First sight (D119). The signature verifies and the marker is the file it vouches
+	# for — so there IS a key worth confirming, and rio can show a fingerprint that
+	# means something. It still refuses until the user says yes, the way ssh does:
+	# recording it here would hand a first-scan impostor a permanent trust decision the
+	# user never took, and rio would then defend that key faithfully forever.
+	if {$trusted eq ""} {
+		return [dict create ok 0 code key_unconfirmed key $pubkey \
+			error "This repository signs with a key rio has never been told to trust. Nothing is installed or listed from it until you confirm that key — review its fingerprint, and check it against the publisher's own page before you accept."]
+	}
 	return [dict create ok 1 state signed signer [dict get $v signer] sums $sums]
 }
 
@@ -9188,16 +9217,18 @@ proc extw_rows_build {} {
 
 # Why a source produced no extensions, in the few words a list row has. Everything
 # past `unreachable` is a signature refusal (D118) — the detail pane below carries
-# the sentence, and for a changed key the way to act on it.
+# the sentence, and for a key waiting to be confirmed or one that changed (D119) the
+# way to act on it.
 proc dead_phrase {code} {
 	switch -- $code {
-		untrusted_cert { return "certificate not trusted" }
-		key_changed    { return "signing key changed" }
-		sig_bad        { return "signature doesn't verify" }
-		sig_missing    { return "signature missing" }
-		sig_dropped    { return "no longer signed" }
-		sig_no_tool    { return "can't check the signature" }
-		hash_mismatch  { return "files don't match the signature" }
+		untrusted_cert  { return "certificate not trusted" }
+		key_unconfirmed { return "signing key not confirmed" }
+		key_changed     { return "signing key changed" }
+		sig_bad         { return "signature doesn't verify" }
+		sig_missing     { return "signature missing" }
+		sig_dropped     { return "no longer signed" }
+		sig_no_tool     { return "can't check the signature" }
+		hash_mismatch   { return "files don't match the signature" }
 	}
 	return "unreachable"
 }
@@ -9311,10 +9342,10 @@ proc extw_select {} {
 				-command [list extw_cert_review [dict get $row url] [dict get $row error]]
 			pack $det.review -anchor w -pady {4 0}
 		}
-		# A rotated signing key is the other dead source the user can act on (D118),
-		# and the act is the same shape: look at what is being asked for, then say yes
-		# to that one thing.
-		if {[dict get $row code] eq "key_changed" && [dict get $row newkey] ne ""} {
+		# A signing key waiting to be confirmed (D119) or a rotated one (D118) is the
+		# other dead source the user can act on, and the act is the same shape: look at
+		# what is being asked for, then say yes to that one thing.
+		if {[dict get $row code] in {key_unconfirmed key_changed} && [dict get $row newkey] ne ""} {
 			button $det.keyreview -text "Review signing key…" -font RioUIFont \
 				-state [expr {$::repo_busy ? "disabled" : "normal"}] \
 				-command [list extw_key_review [dict get $row url] [dict get $row newkey]]
@@ -9762,13 +9793,14 @@ proc extw_cert_review {url {fetch_error ""}} {
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
-# --- a signing key that changed (AGENTS.md D118) -------------------------------------
+# --- confirming a signing key (AGENTS.md D118, D119) ---------------------------------
 #
-# The same act as accepting a changed certificate, for the other half of the trust
-# model: a repository rio has trusted is now signed by a different key. That is what a
-# deliberate rotation looks like (the publisher's own SIGNING.md tells them to expect
-# this dialog on their users' machines) and equally what an impersonation looks like,
-# and rio cannot tell them apart — so it shows both fingerprints and asks.
+# The same act as accepting a certificate, for the other half of the trust model, in
+# the two situations that call for it: a repository rio has never had a key for, and
+# one whose key is now different. Both are what a legitimate publisher looks like (the
+# publisher's own SIGNING.md tells them to expect this dialog on their users' machines)
+# and equally what an impersonation looks like, and rio cannot tell them apart — so it
+# shows the fingerprints and asks. It never trusts a key because it arrived first.
 #
 # Trusts the key THIS DIALOG SHOWED, never a freshly fetched one, for the reason
 # extw_cert_review gives: a server that swapped keys between the look and the click
@@ -9784,7 +9816,12 @@ proc sig_fingerprint {key} {
 proc extw_key_review {url newkey} {
 	if {$::repo_busy} return
 	set old [repo_key_of $url]
-	set oldfp [sig_fingerprint $old]
+	# First sight (D119): there is no trusted key to compare against, so this is the
+	# same dialog with one fingerprint instead of two. Not a second window — the act is
+	# identical, and the one thing that matters is said in both: confirm it somewhere
+	# other than the connection that just offered it.
+	set first [expr {$old eq ""}]
+	set oldfp [expr {$first ? "" : [sig_fingerprint $old]}]
 	set newfp [sig_fingerprint $newkey]
 	set when ""
 	set sk [source_key $url]
@@ -9793,15 +9830,20 @@ proc extw_key_review {url newkey} {
 	set w .extkey
 	destroy $w
 	toplevel $w
-	wm title $w "Signing key changed"
+	wm title $w [expr {$first ? "Confirm signing key" : "Signing key changed"}]
 	wm transient $w [expr {[winfo exists .extw] ? ".extw" : "."}]
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 	set wrap 460
 	set ::extw_key_choice ""
 
+	if {$first} {
+		set headtext "[host_of $url] signs its extensions, and this is the first time rio has seen a key for it. The signature checks out against this key — but that only proves the key signed these files, not that it is the publisher's. Nothing is installed or listed from this repository until you say it is."
+	} else {
+		set headtext "[host_of $url] is signing its extensions with a different key than the one rio trusted[expr {$when ne "" ? " on $when" : ""}]. If the publisher rotated their key, this is expected — they have no way to tell you inside rio. If they didn't, someone else is answering for this repository."
+	}
 	label $w.head -anchor w -justify left -wraplength $wrap -font RioUIFont \
-		-text "[host_of $url] is signing its extensions with a different key than the one rio trusted[expr {$when ne "" ? " on $when" : ""}]. If the publisher rotated their key, this is expected — they have no way to tell you inside rio. If they didn't, someone else is answering for this repository." \
+		-text $headtext \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	pack $w.head -fill x -padx 8 -pady {8 4}
 	# The two fingerprints are data to compare, so they sit in a bordered box, apart
@@ -9820,14 +9862,20 @@ proc extw_key_review {url newkey} {
 	$w.det delete "end-1c" end
 	$w.det configure -state disabled
 	pack $w.det -fill x -padx 8 -pady {6 4}
+	if {$first} {
+		set hinttext "Confirm this fingerprint away from this connection — the publisher's own page, a release note, a message from them. Anyone who can answer for this repository can offer a key that verifies; only the publisher can tell you which one is theirs. rio then trusts exactly this key here, and asks again if it ever changes. Every key it trusts is listed under Preferences ▸ Extensions ▸ Repository signing keys…, where forgetting one puts that repository back to this question."
+	} else {
+		set hinttext "Trust the new key only if you can confirm it away from this connection — the publisher's own page, a release note, a message from them. rio then trusts exactly this key for this repository, and asks again if it ever changes. Every key it trusts is listed under Preferences ▸ Extensions ▸ Repository signing keys…, where forgetting one puts that repository back to being asked about."
+	}
 	label $w.hint -anchor w -justify left -wraplength $wrap -font RioUIFont \
-		-text "Trust the new key only if you can confirm it away from this connection — the publisher's own page, a release note, a message from them. rio then trusts exactly this key for this repository, and asks again if it ever changes. Every key it trusts is listed under Preferences ▸ Extensions ▸ Repository signing keys…, where forgetting one puts that repository back on its first scan." \
+		-text $hinttext \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	pack $w.hint -fill x -padx 8 -pady {2 6}
 	frame $w.btns -background [dict get $c ui.bg]
 	button $w.btns.back -text "Go Back" -font RioUIFont -default active \
 		-command [list destroy $w]
-	button $w.btns.trust -text "Trust the New Key" -font RioUIFont \
+	button $w.btns.trust -text [expr {$first ? "Trust This Key" : "Trust the New Key"}] \
+		-font RioUIFont \
 		-command [list apply {{w} { set ::extw_key_choice trust ; destroy $w }} $w]
 	pack $w.btns.back -side right
 	pack $w.btns.trust -side left
@@ -9922,18 +9970,21 @@ proc certs_remove {} {
 	certs_fill
 }
 
-# Preferences ▸ Extensions ▸ Repository signing keys…: every key rio recorded on a
-# first scan, and a way to take one back (D118; deferred with jka when D118 landed,
+# Preferences ▸ Extensions ▸ Repository signing keys…: every key the user has
+# confirmed, and a way to take one back (D118; deferred with jka when D118 landed,
 # built once the mechanism had settled). certs_dialog's counterpart for repositories,
 # and deliberately the same window: a list, one line per trust decision, Forget.
 #
-# Two things differ from the certificates, and both are said in the window rather
-# than assumed. The keys are the GUI's own — repository-keys.conf beside sources.list,
+# One thing differs from the certificates, and it is said in the window rather than
+# assumed: the keys are the GUI's own — repository-keys.conf beside sources.list,
 # because the sources list IS the trust list (D39) and a key is a property of an entry
-# in it, not of a host the core dialled. And forgetting one does NOT distrust the
-# repository: the next scan trusts on first use again, exactly as the first one did.
-# That is the whole of what the hand edit the conf file invites already did; this only
-# saves finding the file.
+# in it, not of a host the core dialled.
+#
+# Forget means what it says (D119). Since no scan trusts a key by itself, taking one
+# back really does put that repository behind the question again — it is refused until
+# the user confirms a key for it, which is the same thing deleting the section by hand
+# has always done. The built-in row is the exception and writes rather than deletes;
+# repo_keys_forget says why there.
 proc repo_keys_dialog {} {
 	set w .repokeys
 	destroy $w
@@ -9943,7 +9994,7 @@ proc repo_keys_dialog {} {
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 	label $w.hint -anchor w -justify left -wraplength 520 -font RioUIFont \
-		-text "The signing key rio trusts for each extension repository, recorded the first time a signature from it verified. A repository that later signs with a different key is refused until you review it. The scheme is left off on purpose — moving a repository from http:// to https:// is a change of route, not of publisher. They are kept in repository-keys.conf beside your sources list." \
+		-text "The signing key you have confirmed for each extension repository. A repository that later signs with a different key is refused until you review that one too. Forgetting a key does not just clear a note: rio asks about that repository again the next time it is scanned, and installs nothing from it until you answer. The scheme is left off on purpose — moving a repository from http:// to https:// is a change of route, not of publisher. They are kept in repository-keys.conf beside your sources list." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	frame $w.body -background [dict get $c ui.bg]
 	scrollbar $w.body.sb -command {.repokeys.body.list yview}
@@ -9984,21 +10035,30 @@ proc repo_keys_fill {} {
 	set ::repo_keys_rows {}
 	set rows {}
 	dict for {src e} $::repo_keys {
+		# A keyless section trusts nothing, so it has no key to list. The one that
+		# matters — the withdrawn seed — gets its own row just below.
+		if {[dict get $e key] eq ""} continue
 		lappend rows [dict create src $src key [dict get $e key] \
-			when [dict get $e trusted] builtin 0]
+			when [dict get $e trusted] builtin 0 withdrawn 0]
 	}
 	# rio's own key is trusted without ever being written down — it is the seed
-	# repo_key_of falls back to, so a first scan of that repository finds a key already
-	# trusted and stores nothing. Left out, this window would be empty on a fresh
-	# install while rio does trust a key, which is the one thing it exists to show.
-	# Only while that repository is still in the sources list, though: a key for a
-	# source the user removed speaks for nothing.
+	# repo_key_of falls back to, so a scan of that repository finds a key already
+	# trusted and never asks. Left out, this window would be empty on a fresh install
+	# while rio does trust a key, which is the one thing it exists to show. Only while
+	# that repository is still in the sources list, though: a key for a source the user
+	# removed speaks for nothing.
+	#
+	# Withdrawn, it is still shown (D119) — rio would otherwise report nothing at all
+	# about the one key it made a decision about on the user's behalf, and the row is
+	# where that decision is visible and reversible.
 	set seed [source_key $::default_repo]
-	if {![dict exists $::repo_keys $seed]} {
+	set gone [expr {[dict exists $::repo_keys $seed]
+		&& [dict get $::repo_keys $seed key] eq ""}]
+	if {![dict exists $::repo_keys $seed] || $gone} {
 		foreach u [sources_load] {
 			if {![source_same $u $::default_repo]} continue
 			lappend rows [dict create src $seed key $::default_repo_key \
-				when "" builtin 1]
+				when "" builtin 1 withdrawn $gone]
 			break
 		}
 	}
@@ -10016,7 +10076,8 @@ proc repo_keys_fill {} {
 		}
 		set line "[dict get $row src]  —  $fp"
 		if {[dict get $row builtin]} {
-			append line "  (built in)"
+			append line [expr {[dict get $row withdrawn]
+				? "  (built in, withdrawn)" : "  (built in)"}]
 		} elseif {[dict get $row when] ne ""} {
 			append line "  (trusted [dict get $row when])"
 		}
@@ -10024,19 +10085,25 @@ proc repo_keys_fill {} {
 		.repokeys.body.list insert end $line
 	}
 	if {$::repo_keys_rows eq ""} {
-		.repokeys.status configure -text "No repository has published a signing key that rio verified yet. An unsigned repository has no key to list."
+		.repokeys.status configure -text "You haven't confirmed a signing key for any repository yet. An unsigned repository has no key to list, and a signed one is refused until its key is confirmed."
 	}
 }
 
-# Why a selected row offers nothing to forget. Said on selection rather than only
-# when the button is pressed: a control that does nothing is worse than one that
-# says why beforehand.
+# What a selected row means, where that isn't the obvious thing. Said on selection
+# rather than only when the button is pressed: the built-in row is the one row whose
+# Forget does something a user would not predict, and reading about it first is worth
+# more than discovering it afterwards.
 proc repo_keys_sel {} {
 	if {![winfo exists .repokeys]} return
 	set sel [.repokeys.body.list curselection]
 	set t ""
-	if {$sel ne "" && [dict get [lindex $::repo_keys_rows $sel] builtin]} {
-		set t "rio ships with this key for its own repository, so there is nothing stored to forget. Removing the repository in Repositories… is what stops rio using it."
+	if {$sel ne ""} {
+		set row [lindex $::repo_keys_rows $sel]
+		if {[dict get $row builtin] && [dict get $row withdrawn]} {
+			set t "You have withdrawn the key rio ships with for its own repository. rio now asks about that repository's key like any other's — confirming one records it here."
+		} elseif {[dict get $row builtin]} {
+			set t "rio ships with this key for its own repository, so it is the one key you were never asked about. Forget withdraws it: rio then asks about this repository too, the next time it is scanned."
+		}
 	}
 	.repokeys.status configure -text $t
 }
@@ -10045,12 +10112,24 @@ proc repo_keys_forget {} {
 	set sel [.repokeys.body.list curselection]
 	if {$sel eq ""} return
 	set row [lindex $::repo_keys_rows $sel]
-	if {[dict get $row builtin]} { repo_keys_sel ; return }
+	if {[dict get $row builtin]} {
+		if {[dict get $row withdrawn]} { repo_keys_sel ; return }
+		# Nothing to delete — the seed is a fallback, not an entry — so withdrawing it
+		# is the one case that WRITES: a section with no key, which repo_key_of answers
+		# with "" instead of falling back (D119).
+		dict set ::repo_keys [dict get $row src] [dict create key "" trusted "" \
+			forgotten [clock format [clock seconds] -format %Y-%m-%d]]
+		repo_keys_save
+		repo_keys_fill
+		if {![winfo exists .repokeys]} return
+		.repokeys.status configure -text "rio has withdrawn its built-in key for [dict get $row src]. The next scan of that repository asks you to confirm whatever key it publishes, and installs nothing from it until you do."
+		return
+	}
 	dict unset ::repo_keys [dict get $row src]
 	repo_keys_save
 	repo_keys_fill
 	if {![winfo exists .repokeys]} return
-	.repokeys.status configure -text "rio has forgotten the key for [dict get $row src]. That is not a refusal: the next scan records whatever that repository publishes then, the way the first scan did."
+	.repokeys.status configure -text "rio has forgotten the key for [dict get $row src]. The next scan of that repository asks you to confirm whatever key it publishes then, and installs nothing from it until you do."
 }
 
 # ---------------------------------------------------------------------------

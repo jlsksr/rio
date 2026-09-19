@@ -926,6 +926,18 @@ proc s_scan {{keep 0}} {
 	sources_save [list $S]
 	repo_scan_all
 }
+# The same, with S's key already CONFIRMED. Since D119 no scan records a key by
+# itself, so this is the state nearly every check below is actually about: without it
+# the source is refused as key_unconfirmed and whatever the check meant to test never
+# happens. First sight has its own block, just below.
+proc s_scan_ok {{key ""}} {
+	global S KEY1
+	if {$key eq ""} { set key $KEY1 }
+	set ::repo_keys {}
+	repo_key_trust $S $key
+	sources_save [list $S]
+	repo_scan_all
+}
 proc s_dead {} {
 	global S
 	set d [lsearch -index 0 -inline $::repo_dead $S]
@@ -933,6 +945,12 @@ proc s_dead {} {
 	return [list [lindex $d 2] [lindex $d 1]]
 }
 proc s_code {} { return [lindex [s_dead] 0] }
+proc keys_file {} {
+	if {![file exists [repo_keys_path]]} { return "" }
+	set f [open [repo_keys_path] r] ; set t [read $f] ; close $f
+	return $t
+}
+set TODAY [clock format [clock seconds] -format %Y-%m-%d]
 
 # --- the sums file --------------------------------------------------------------
 ok "sums: the shape sha256sum prints" \
@@ -946,22 +964,39 @@ ok "sums: a line that names no file is skipped, not fatal" \
 ok "sums: hashes fold to lower case" \
 	[dict get [repo_sums_parse "[string repeat A 64]  index"] index] [string repeat a 64]
 
-# --- trust on first use -----------------------------------------------------------
+# --- first sight: a key is trusted when the user says so (D119) ---------------------
+# ssh prints the fingerprint and waits for `yes`; rio refuses the source and offers the
+# same fingerprint on its row. The scan itself records NOTHING — recording it would
+# hand an attacker on the path during the very first scan a permanent trust decision
+# the user never took, and rio would then defend that key faithfully forever.
 s_fixtures
 s_scan
-ok "signed: the source scanned"        [s_code] {}
-ok "signed: its extension is listed"   [llength $::repo_variants] 1
-ok "signed: marked signed"             [dict get [lindex $::repo_variants 0] sig] signed
-ok "signed: and says who signed it"    [dict get [lindex $::repo_variants 0] signer] [sig_fingerprint $KEY1]
-ok "first use: the key is now trusted" [repo_key_of $S] $KEY1
-ok "first use: and written down"       [dict get $::repo_keys [source_key $S] key] $KEY1
-ok "first use: with the date"          [dict get $::repo_keys [source_key $S] trusted] \
-	[clock format [clock seconds] -format %Y-%m-%d]
-ok "first use: the file is conf, sectioned by source" \
-	[string match "*\[s.example/signed\]*key = $KEY1*" [::read [set f [open [repo_keys_path] r]]]] 1
-close $f
-ok "signed: what was verified is the sums file, for this source" \
+ok "first sight: the source is refused"       [s_code] key_unconfirmed
+ok "first sight: nothing from it is listed"   [llength $::repo_variants] 0
+ok "first sight: no key is trusted"           [repo_key_of $S] ""
+ok "first sight: and nothing is written down" [dict exists $::repo_keys [source_key $S]] 0
+ok "first sight: not even a file"             [string match "*s.example/signed*" [keys_file]] 0
+ok "first sight: the row carries the offered key" \
+	[lindex [lsearch -index 0 -inline $::repo_dead $S] 3] $KEY1
+ok "first sight: in the words the row has"    [dead_phrase [s_code]] "signing key not confirmed"
+ok "first sight: and the sentence says what is being asked" \
+	[string match "*never been told to trust*confirm*fingerprint*" [lindex [s_dead] 1]] 1
+# The refusal is raised only after the signature verified AND the marker was checked
+# against the sums it pointed at, so rio never offers a key that signs nothing.
+ok "first sight: the signature was checked first, on this source's sums" \
 	[lrange [lindex $::sig_calls end] 1 2] [list $KEY1 $S]
+
+# The explicit step, as the dialog performs it.
+repo_key_trust $S $KEY1
+s_scan 1
+ok "confirmed: the source scanned"      [s_code] {}
+ok "confirmed: its extension is listed" [llength $::repo_variants] 1
+ok "confirmed: marked signed"           [dict get [lindex $::repo_variants 0] sig] signed
+ok "confirmed: and says who signed it"  [dict get [lindex $::repo_variants 0] signer] [sig_fingerprint $KEY1]
+ok "confirmed: written down"            [dict get $::repo_keys [source_key $S] key] $KEY1
+ok "confirmed: with the date"           [dict get $::repo_keys [source_key $S] trusted] $TODAY
+ok "confirmed: the file is conf, sectioned by source" \
+	[string match "*\[s.example/signed\]*key = $KEY1*" [keys_file]] 1
 
 # The trust store survives a restart, and is re-read per scan because it is meant to
 # be editable by hand.
@@ -978,11 +1013,31 @@ ok "seed: and the https route to it is the same trust (D109)" \
 	[repo_key_of [string map {http:// https://} $::default_repo]] $::default_repo_key
 ok "seed: an unrelated source is not" [repo_key_of http://other.example/x] ""
 
+# The seed is a fallback, not an entry, so withdrawing it is the one act that WRITES.
+# A section with no `key` at all is not an empty entry: it says rio trusts no key for
+# this source, and it beats the seed (D119).
+set ::repo_keys {}
+dict set ::repo_keys [source_key $::default_repo] \
+	[dict create key "" trusted "" forgotten $TODAY]
+repo_keys_save
+ok "seed: a keyless section withdraws it" [repo_key_of $::default_repo] ""
+ok "seed: over https too (D109)" \
+	[repo_key_of [string map {http:// https://} $::default_repo]] ""
+ok "seed: written as a date, with no key" \
+	[list [string match "*forgotten = $TODAY*" [keys_file]] [string match "*key = *" [keys_file]]] {1 0}
+set ::repo_keys {} ; repo_keys_load
+ok "seed: and the withdrawal survives a restart" [repo_key_of $::default_repo] ""
+repo_key_trust $::default_repo $::default_repo_key
+ok "seed: confirming a key later overwrites it" \
+	[repo_key_of $::default_repo] $::default_repo_key
+ok "seed: and the forgotten line is gone"        [string match "*forgotten*" [keys_file]] 0
+set ::repo_keys {} ; repo_keys_save
+
 # --- a tampered payload -------------------------------------------------------------
 # The signature still verifies (SHA256SUMS is untouched); it is the FILE that changed.
 # Nothing may be written, and the message must name the file.
 s_fixtures
-s_scan
+s_scan_ok
 set ::mb_log {}
 set v [variant sigmode $S]
 ok "tamper: the variant is installable" [expr {$v ne ""}] 1
@@ -997,7 +1052,7 @@ ok "tamper: and nothing written to disk" [file exists [file join [modes_user_dir
 s_fixtures
 set ::fix($S/sig-mode/rio-extension.conf) [list 200 \
 	"name = sigmode\nkind = mode\nversion = 9.9\nauthor = sam\nfiles = sigmode.tcl"]
-s_scan
+s_scan_ok
 ok "tamper: a manifest that isn't the signed one kills the source" [s_code] hash_mismatch
 ok "tamper: no variants survive it"     [llength $::repo_variants] 0
 ok "tamper: the row names the file"     [string match "*sig-mode/rio-extension.conf is not the file*" [lindex [s_dead] 1]] 1
@@ -1010,18 +1065,19 @@ set ::fix($S/index) [list 200 "sig-mode\nextra-mode\n"]
 set ::fix($S/extra-mode/rio-extension.conf) [list 200 \
 	"name = extra\nkind = mode\nversion = 1.0\nauthor = nobody\nfiles = extra.tcl"]
 fix_sign $S $KEY1 {rio-repository.conf index sig-mode/rio-extension.conf sig-mode/sigmode.tcl}
-s_scan
+s_scan_ok
 ok "unlisted: an unsigned extra file kills the source" [s_code] hash_mismatch
 
 # --- the marker is covered by the sums it pointed at --------------------------------
 # The marker carried the key, so it has to be one of the files the signature vouches
-# for. And the key is trusted only after a scan rio fully accepted: a first use that
-# ends in a refusal must leave nothing behind, or the user is pinned to a key from a
-# repository rio would not touch.
+# for — and that is checked BEFORE the user is ever asked about the key (D119), or rio
+# would put a fingerprint in front of them for a key that signs nothing here. So these
+# scans, with nothing trusted, must die of the marker rather than of the question.
 s_fixtures
 fix_sign $S $KEY1 {index sig-mode/rio-extension.conf sig-mode/sigmode.tcl}
 s_scan
 ok "marker: a marker the sums don't cover is refused" [s_code] hash_mismatch
+ok "marker: not offered for confirmation"             [expr {[s_code] eq "key_unconfirmed"}] 0
 ok "marker: and no key was trusted on the way out"    [repo_key_of $S] ""
 s_fixtures
 set ::fix($S/rio-repository.conf) [list 200 \
@@ -1032,7 +1088,7 @@ ok "marker: still nothing trusted"                    [repo_key_of $S] ""
 
 # --- a changed key --------------------------------------------------------------------
 s_fixtures
-s_scan
+s_scan_ok
 ok "rotation: trusted the first key"   [repo_key_of $S] $KEY1
 s_fixtures $KEY2
 s_scan 1
@@ -1049,7 +1105,7 @@ ok "rotation: signed by the new key"   [dict get [lindex $::repo_variants 0] sig
 
 # --- the signature going away ----------------------------------------------------------
 s_fixtures
-s_scan
+s_scan_ok
 set ::fix($S/rio-repository.conf) [list 200 "name = S repository\ndescription = a signed one"]
 s_scan 1
 ok "downgrade: dropping the key is refused" [s_code] sig_dropped
@@ -1129,18 +1185,18 @@ ok "marks: the three words"             [list [sig_mark signed] [sig_mark unsign
 ok "consent: an unsigned source says nothing vouches for it" \
 	[string match "NOT SIGNED*" [ext_consent_sig_line $A]] 1
 s_fixtures
-s_scan
+s_scan_ok
 ok "consent: a signed one names the key" \
 	[string match "Signed by [sig_fingerprint $KEY1],*" [ext_consent_sig_line $S]] 1
 ok "dead rows: a phrase per refusal" \
-	[list [dead_phrase key_changed] [dead_phrase sig_bad] [dead_phrase sig_no_tool] \
-		[dead_phrase untrusted_cert] [dead_phrase io_error]] \
-	[list "signing key changed" "signature doesn't verify" "can't check the signature" \
-		"certificate not trusted" "unreachable"]
+	[list [dead_phrase key_unconfirmed] [dead_phrase key_changed] [dead_phrase sig_bad] \
+		[dead_phrase sig_no_tool] [dead_phrase untrusted_cert] [dead_phrase io_error]] \
+	[list "signing key not confirmed" "signing key changed" "signature doesn't verify" \
+		"can't check the signature" "certificate not trusted" "unreachable"]
 
 # --- the ledger records who vouched ---------------------------------------------------------
 s_fixtures
-s_scan
+s_scan_ok
 set ::mb_answers {yes}
 ok "ledger: the signed install goes through" [ext_install [variant sigmode $S]] 1
 ok "ledger: signed_by is the signer"    [dict get $::ext_ledger mode/sigmode signed_by] [sig_fingerprint $KEY1]
@@ -1172,15 +1228,9 @@ proc keys_ready {script tries} {
 	uplevel #0 $script
 	if {[winfo exists .repokeys]} { destroy .repokeys }
 }
-proc keys_file {} {
-	if {![file exists [repo_keys_path]]} { return "" }
-	set f [open [repo_keys_path] r] ; set t [read $f] ; close $f
-	return $t
-}
-set TODAY [clock format [clock seconds] -format %Y-%m-%d]
 
 s_fixtures
-s_scan                                    ;# S trusted on first use; sources.list is S alone
+s_scan_ok                                 ;# S's key confirmed; sources.list is S alone
 keys_drive { set ::keys_seen [list [.repokeys.body.list size] [.repokeys.body.list get 0]] }
 # One row, and only one: rio's own repository is not in this sources list, and a key
 # for a source the user removed speaks for nothing.
@@ -1203,18 +1253,41 @@ keys_drive {
 	repo_keys_forget
 	set ::keys_after [list [.repokeys.body.list size] \
 		[dict exists $::repo_keys [source_key $::default_repo]] \
-		[.repokeys.status cget -text]]
+		[.repokeys.status cget -text] [.repokeys.body.list get 1]]
 }
 ok "keys: rio's own repository is listed as built in" \
 	[lindex $::keys_seen 1] "rio.skylm.org/extensions  —  [sig_fingerprint $::default_repo_key]  (built in)"
-ok "keys: selecting it says why there is nothing to forget" \
-	[string match "rio ships with this key*Repositories…*" $::keys_note] 1
+ok "keys: selecting it says it is the one key nobody was asked about" \
+	[string match "rio ships with this key*Forget withdraws it*" $::keys_note] 1
 ok "keys: and the selection really runs that" [lindex $::keys_bind 0] repo_keys_sel
-ok "keys: and Forget leaves it alone"   [lrange $::keys_after 0 1] {2 0}
-# …and does not claim to have forgotten anything. A status line that says a key was
-# forgotten while the row is still there is the one thing this window must not do.
-ok "keys: Forget on it says why, not that it worked" \
-	[string match "rio ships with this key*" [lindex $::keys_after 2]] 1
+# Forget on the built-in row WRITES rather than deletes: the seed is a fallback, so
+# the only way to take it back is to record that nothing is trusted here (D119).
+ok "keys: Forget withdraws it, and records that" [lrange $::keys_after 0 1] {2 1}
+ok "keys: and says the next scan will ask" \
+	[string match "*withdrawn its built-in key*asks you to confirm*" [lindex $::keys_after 2]] 1
+ok "keys: the row stays, marked withdrawn" \
+	[lindex $::keys_after 3] "rio.skylm.org/extensions  —  [sig_fingerprint $::default_repo_key]  (built in, withdrawn)"
+ok "keys: the seed no longer speaks for that repository" [repo_key_of $::default_repo] ""
+ok "keys: the conf file says so, with no key" \
+	[list [expr {[string first "\[rio.skylm.org/extensions\]\nforgotten = $TODAY" [keys_file]] >= 0}] \
+		[string match "*rio.skylm.org*key = *" [keys_file]]] {1 0}
+# Selecting the withdrawn row explains the state it is in, and Forget on it is a
+# no-op — it must not claim to have withdrawn anything a second time.
+keys_drive {
+	.repokeys.body.list selection set 1
+	repo_keys_sel
+	set ::keys_wnote [.repokeys.status cget -text]
+	repo_keys_forget
+	set ::keys_wafter [list [.repokeys.body.list size] [.repokeys.status cget -text]]
+}
+ok "keys: the withdrawn row says what it means" \
+	[string match "You have withdrawn*asks about that repository's key like any other*" $::keys_wnote] 1
+ok "keys: Forget on it changes nothing and says nothing new" \
+	[list [lindex $::keys_wafter 0] [string match "You have withdrawn*" [lindex $::keys_wafter 1]]] {2 1}
+# Put the seed back, the way confirming in the dialog would.
+repo_key_trust $::default_repo $::default_repo_key
+set ::repo_keys [dict remove $::repo_keys [source_key $::default_repo]]
+repo_keys_save
 
 keys_drive {
 	.repokeys.body.list selection set 0
@@ -1223,12 +1296,17 @@ keys_drive {
 		[.repokeys.status cget -text]]
 }
 ok "keys: Forget drops the stored key"  [lrange $::keys_gone 0 1] {1 0}
-ok "keys: and says what that means"     [string match "*forgotten the key for s.example/signed*next scan*" [lindex $::keys_gone 2]] 1
+ok "keys: and says the next scan will ask" \
+	[string match "*forgotten the key for s.example/signed*asks you to confirm*" [lindex $::keys_gone 2]] 1
 ok "keys: the conf file no longer holds it" [string match "*s.example/signed*" [keys_file]] 0
-# Forgetting is not distrust: the next scan trusts on first use, as the first one did.
+# An ordinary Forget needs no tombstone: with no silent trust anywhere, deleting the
+# section IS the whole act, and the next scan refuses the source until it is answered.
 s_scan 1
-ok "keys: the next scan trusts it again" [repo_key_of $S] $KEY1
-ok "keys: as a first use, dated today"  [dict get $::repo_keys [source_key $S] trusted] $TODAY
+ok "keys: the next scan asks again"     [s_code] key_unconfirmed
+ok "keys: and still trusts nothing"     [repo_key_of $S] ""
+repo_key_trust $S $KEY1                   ;# confirmed again, as the dialog does
+ok "keys: confirming records it, dated today" \
+	[dict get $::repo_keys [source_key $S] trusted] $TODAY
 
 # A core with no ssh-keygen has no fingerprint to give, and a row still has to say
 # WHICH key it is — that is the only reason the row exists.
@@ -1241,8 +1319,66 @@ ok "keys: no ssh-keygen, so the key itself names the row" \
 set ::repo_keys {} ; repo_keys_save
 sources_save [list $S]
 keys_drive { set ::keys_empty [list [.repokeys.body.list size] [.repokeys.status cget -text]] }
-ok "keys: nothing trusted, nothing listed" [lindex $::keys_empty 0] 0
-ok "keys: and the window says so"          [string match "No repository has published a signing key*" [lindex $::keys_empty 1]] 1
+ok "keys: nothing confirmed, nothing listed" [lindex $::keys_empty 0] 0
+ok "keys: and the window says so"          [string match "You haven't confirmed a signing key*" [lindex $::keys_empty 1]] 1
+
+# --- confirming a key from the Extensions window (D119) --------------------------------
+# The refused row's door, and what is behind it. Same shape as the certificate review
+# above: the row offers a button, the dialog shows the fingerprint, Go Back leaves the
+# source refused, and what gets trusted is the key the dialog SHOWED.
+proc keyreview {script} {
+	after 1 [list keyreview_ready $script 0]
+	.extw.det.keyreview invoke
+}
+proc keyreview_ready {script tries} {
+	set pending [expr {![winfo exists .extkey] || [focus -lastfor .extkey] eq ".extkey"}]
+	if {$pending && $tries < 300} {
+		after 10 [list keyreview_ready $script [incr tries]]
+		return
+	}
+	uplevel #0 $script
+}
+s_fixtures
+s_scan                                    ;# nothing confirmed: S is refused
+extensions_window
+ok "confirm: the row says the key isn't confirmed" \
+	[string match "*$S — signing key not confirmed" [.extw.body.list get [deadrow $S]]] 1
+select_row [deadrow $S]
+ok "confirm: and offers the review"     [winfo exists .extw.det.keyreview] 1
+keyreview {
+	set ::kdlg [list [wm title .extkey] [.extkey.head cget -text] [.extkey.det get 1.0 end] \
+		[.extkey.btns.back cget -default] [.extkey.btns.trust cget -text] \
+		[.extkey.hint cget -text] [focus -lastfor .extkey]]
+	.extkey.btns.back invoke
+}
+ok "confirm: the title asks rather than warns"  [lindex $::kdlg 0] "Confirm signing key"
+ok "confirm: the head says this is the first key rio has seen" \
+	[string match "*first time rio has seen a key for it*" [lindex $::kdlg 1]] 1
+ok "confirm: one fingerprint, and no Trusted line to compare against" \
+	[list [string match "*Offered*[sig_fingerprint $KEY1]*" [lindex $::kdlg 2]] \
+		[string match "*Trusted*" [lindex $::kdlg 2]]] {1 0}
+ok "confirm: Go Back is still the default, and has the focus" \
+	[list [lindex $::kdlg 3] [lindex $::kdlg 6]] {active .extkey.btns.back}
+ok "confirm: the other button says what it does" [lindex $::kdlg 4] "Trust This Key"
+ok "confirm: the hint sends the user off this connection" \
+	[string match "*away from this connection*publisher's own page*" [lindex $::kdlg 5]] 1
+ok "confirm: Go Back trusts nothing"    [repo_key_of $S] ""
+ok "confirm: and the source is still refused" [s_code] key_unconfirmed
+
+# Trust: the key the dialog showed is recorded, even if the repository has swapped its
+# marker in the meantime — the same rule extw_cert_review follows for a fingerprint.
+select_row [deadrow $S]
+keyreview {
+	s_fixtures $KEY2                      ;# the server changes its mind mid-click
+	.extkey.btns.trust invoke
+}
+ok "confirm: the key the dialog showed is the one trusted" [repo_key_of $S] $KEY1
+ok "confirm: written with today's date" [dict get $::repo_keys [source_key $S] trusted] $TODAY
+destroy .extw
+s_fixtures
+s_scan 1
+ok "confirm: and the source scans"      [s_code] {}
+ok "confirm: with its extension listed" [llength $::repo_variants] 1
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
