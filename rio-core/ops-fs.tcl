@@ -7,17 +7,25 @@
 
 # How big a file file.open will read without being asked twice (D125). A judgement
 # about a PERSON'S patience, not a technical ceiling: rio's own largest source file is
-# half a megabyte, so eight is generous for anything you meant to edit, while a log, a
+# half a megabyte, so this is generous for anything you meant to edit, while a log, a
 # core dump or a database lands well the other side of it. Deliberately NOT the same
 # number as project.tcl's search budget — a search skipping a file costs you nothing,
 # an editor refusing one costs you the file — and deliberately not a preference: the
 # answer to "I did mean it" is the question the frontend asks, not a setting to find.
 #
-# 8 MiB exactly, not a round 8000000, so that the number here and the number rio says
+# 64 MiB exactly, not a round 64000000, so that the number here and the number rio says
 # out loud are the same one: rio::fs::human_size counts in binary units under the
-# customary MB label (what Windows and most file managers show), and 8000000 bytes
-# would have announced itself as "7.6 MB" while the manual called the limit 8 MB.
-variable rio::ops::open_max_bytes 8388608
+# customary MB label (what Windows and most file managers show), and 64000000 bytes
+# would have announced itself as "61.0 MB" while the manual called the limit 64 MB.
+#
+# It was 8 MiB until D126, and the eight was never about patience — it was the cost of
+# three whole-file passes rio did not need to make. Removing them (a C-level UTF-8
+# verdict, highlighting only the visible window, and pulling the document over the
+# channel in chunks so the inbound JSON parser stays linear) took an 8 MB open from
+# ~13 s to ~1.6 s and made the curve linear, so the budget could follow the measurement
+# up. 64 MiB is where it lands: ~13 s, which is about what 8 MB used to cost and is
+# firmly back in "worth asking about" territory.
+variable rio::ops::open_max_bytes 67108864
 
 # file.open {path, ?force?} -> {buffer, name, encoding, eol, bom, mixed, linecount}
 #

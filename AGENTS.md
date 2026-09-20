@@ -7399,6 +7399,109 @@ release is for; ROADMAP carries it. **Lazy / windowed loading** remains out of s
 force-opened in a previous one: the alternative is remembering the answer, and being asked
 is what makes a session that would otherwise hang on every launch recoverable.
 
+> **Amended by D126 (2026-09-20).** The budget is now **64 MB**, not 8, and a forced open
+> is ~8x faster than when this was written. The paragraph above was right that the forced
+> path was slow and wrong about why it had to be: the cost was three whole-file passes rio
+> did not need to make, not the size of the file. `_valid_utf8` is now a C-level round
+> trip rather than a byte walk — which is the "exact, worth doing" fix this entry deferred,
+> arrived at from the other end. The prefix cap stays rejected; windowed loading stays out
+> of scope. Everything else here still holds.
+
+### D126 — a big file is slow because of what rio does to it, not because it is big
+
+**The question, asked by jka.** *"Isn't there a better way then warning about a big file?
+notepad++ handles huge files without any problem. Isn't there a native, clever way to
+handle very big files? (without C or external deps or bloat?)"* D125 had just shipped the
+warning. The premise deserved checking rather than defending, and checking it is the whole
+decision.
+
+**What the measurement said.** Per megabyte of source text, Tcl 8.6.16, this machine:
+
+| step | ms/MB | share |
+|---|---|---|
+| `hl_full` — whole-buffer highlight (GUI) | ~1350 | **81%** |
+| `rio::fs::_valid_utf8` — pure-Tcl byte walk (core) | 164 | 10% |
+| `rio::wire::obj` encode + `json::json2dict` | 108 | 6% |
+| the two `regexp -all` EOL counts in `fs::read` | 17 | 1% |
+| `doc::new` split, `convertfrom`, `doc::text` join | 11 | <1% |
+| **Tk text widget insert** | **~5** | **0.3%** |
+
+**Tk was never the bottleneck** — the text widget absorbs 20,000 lines in 4 ms. Notepad++
+is not doing something Tk cannot; it is not doing three whole-file passes in an interpreted
+language. (It also has a large-file restriction of its own, and drops highlighting above
+it — the same shape as D125. rio's number was simply ~8x too low.) So the answer to jka's
+question is yes, and it is not clever: **stop doing the unnecessary work.** Each fix below
+deletes a whole-file pass. None adds a dependency, a thread, or an architecture.
+
+**One: the UTF-8 verdict is a round trip, not a walk.** `_valid_utf8` expanded the file
+into a Tcl integer list with `binary scan ... cu*` and walked it with a proc call per
+multi-byte character. It now decodes the bytes as UTF-8, re-encodes the result, and asks
+whether the bytes came back identical — two C loops. Nothing malformed survives that: an
+overlong form collapses to the short spelling, a truncated sequence decodes to a
+replacement, a non-UTF-8 byte re-encodes wider. It is also a better *statement of intent*
+than the table walk was, because byte-exactness is precisely what D22 rests on. **164 → ~7
+ms/MB.** The one form round trip is more permissive about is a surrogate (CESU-8), which
+re-encodes to itself; "valid UTF-8" is a claim rio makes in the buffer's meta and in the
+manual, so the verdict stays exact and the surrogate is excluded behind a `string first`
+gate. Equivalence was *proved*, not assumed: a differential sweep over 504,488 inputs —
+every 1- and 2-byte string exhaustively, every 3-byte string over the lead bytes carrying
+special cases, boundary probes for the 4-byte arms, plus random and valid-text corpora —
+found zero disagreements with the implementation it replaces.
+
+**Two: highlighting paints the window, not the file.** This is D32's deferred viewport
+scoping, and the measurement is what warranted it. The change is mostly a *weakening* of
+something that already existed: `hl_enter` held the exact scan state entering every line,
+and now holds the exact state entering every line up to a frontier `E`, claiming nothing
+below. The splice in `hl_edit`, the convergence early-out in `hl_incremental` and the
+cache's indexing all work unchanged on a shorter list — and truncating the frontier becomes
+a legal move, which is what lets the incremental pass cap itself without carrying
+continuation state. A second pair, `hl_lo`/`hl_hi`, records which lines actually carry
+tags, so a scroll repaints only the newly exposed strip. **~1350 ms/MB → 5-7 ms, flat.**
+The scroll machinery D32 thought this needed was **one line in `edscroll`**: Tk's
+`-yscrollcommand` is already where the wheel, the scrollbar, `see`, vi's jumps and find's
+step all arrive.
+
+Entry states stay **exact**. A block comment opened on line 1 still colours line 400,000,
+because reaching a line still means having scanned the lines above it; that scan is chunked
+and yields to the event loop rather than being skipped. A bounded back-scan would have been
+faster and sometimes simply wrong. The suite fails if anyone tries it — that test is the
+point of the test.
+
+**Three: the document crosses the channel in chunks.** With the first two done, 62% of what
+was left was `json::json2dict`, and it was **quadratic**: 59, 145, 524, 2005 ms for 1, 2, 4,
+8 MB. tcllib's pure-Tcl parser degrades on one enormous JSON string, and `buffer.text`
+handed it the whole document as exactly that. `buffer.text` now takes an optional `start`
+line and returns ~256 KB at a time with `next`/`eof` (additive params, D55; no `start` means
+the whole document, as before, which is what the agent tool and the compare view still
+want). The chunks concatenate byte for byte — a non-final chunk carries its own trailing
+newline — so the frontend appends and never has to know where the separators went.
+**8 MB: 1935 → 262 ms, and linear.** Worth naming plainly: the channel was never slow
+(107 ms for 8 MB over a real socket). The *parser* was, and the fix is to stop handing it a
+pathological input rather than to replace it.
+
+**What it bought, and the new number.** An 8 MB file: **~13 s → 1.6 s**, with highlighting
+*on* rather than stripped to Plain Text. The curve is linear now, so the budget could follow
+the measurement: `open_max_bytes` **8 MiB → 64 MiB**, where an open costs ~13 s — about what
+8 MB used to, and firmly back in "worth asking about" territory. D125's question is
+unchanged in shape and stays: it is still a question, still additive `force`, still asked at
+every door. Only the number moved, and it moved because the code got faster, which is the
+right reason for a number about a person's patience to move.
+
+**Windowed loading: rejected, not deferred.** It is the one thing that would beat Notepad++
+outright, and it is the bloat jka's question explicitly excluded. It costs the Tk text
+widget as the document, and find, marks, selection, `line.col` undo indices, the gutter and
+vi's jumps all rest on the widget holding the whole buffer. The measurements say it buys
+nothing anyone needs: the widget is 0.3% of the cost.
+
+**Deliberately not done.** Two linear whole-file passes remain — `wire::obj`'s escape
+(~58 ms/MB) and `fs::read`'s two `regexp -all` EOL counts (~17 ms/MB, derivable for free
+from the `string map` that follows). Both are on ROADMAP; the EOL one touches encoding
+detection, where a wrong answer corrupts a file silently, so it wants its own sitting. And
+**jumping straight to the end** of a very large file still front-loads an O(N) scan — about
+9 s at 16 MB, most of a minute at 64 MB — non-blocking and progressive, but real. That is
+the irreducible price of exact multi-line state; checkpointing would help a *repeat* jump
+and never the first. CAVEATS carries it.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

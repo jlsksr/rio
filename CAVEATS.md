@@ -203,34 +203,38 @@ design limit that surprises, append it to the matching section.
   windows resume independently; noted as the deferred follow-up in AGENTS.md **D72**, not
   yet scheduled.
 
-### A file you open anyway is still slow, and "binary" is judged from the first 8 KB
+### Colour arrives late at the bottom of a very large file, and "binary" is judged from the first 8 KB
 
-- **Symptom.** Two halves of the same trade (AGENTS.md **D125**). (1) rio asks before
-  opening a file over 8 MB or one that looks binary — and if you answer **Open it
-  anyway**, it is *still* slow: a very large file takes seconds to appear and the core
-  answers nothing else while it works (in remote mode, that includes any other frontend
-  on the same core). (2) A file whose first 8 KB are clean but which turns binary later
-  is **not** caught, so it opens without a question.
-- **Cause.** `rio::fs::read` reads and decodes the whole file — the UTF-8
-  well-formedness pass alone costs roughly 150 ms per megabyte, in interpreted Tcl —
-  and the core is single-threaded. The guard in front of it (`rio::fs::classify`) is a
-  *cheap look*: one stat plus at most 8 KB off the front, because it runs before every
-  open and cannot afford to read the file it is deciding about. That is git's rule, for
+- **Symptom.** Two halves of the same trade (AGENTS.md **D125**, **D126**). (1) Jump
+  straight to the end of a very large file and the text arrives immediately but
+  *uncoloured*, filling in over the next several seconds — about 9 s at 16 MB, and
+  most of a minute at the 64 MB limit. The editor stays responsive throughout; you can
+  scroll, type and save while it catches up. (2) A file whose first 8 KB are clean but
+  which turns binary later is **not** caught, so it opens without a question.
+- **Cause.** Highlighting is viewport-scoped: rio paints the lines you can see, not the
+  whole file. But the scanners carry state between lines — a block comment opened on
+  line 1 still colours line 400,000 — so knowing how to colour a line means having
+  scanned every line above it. rio does that scan in chunks that yield to the event
+  loop, which is why nothing freezes, but the work is real and proportional to how far
+  down you jumped. The alternative, guessing the state from a few hundred lines of
+  back-scan, is faster and sometimes simply wrong; rio would rather be late than lie.
+  For the second half, the guard in front of a read (`rio::fs::classify`) is a *cheap
+  look*: one stat plus at most 8 KB off the front, because it runs before every open
+  and cannot afford to read the file it is deciding about. That is git's rule, for
   git's reason, and it buys its speed with exactly this inexactness.
 - **Where it's fine.** Ordinary editing, which is what the numbers were chosen around:
-  rio's own largest source file is half a megabyte, and nothing under 8 MB is ever
-  asked about. A real binary is caught — object files, archives, images and databases
-  all carry a NUL within the first few bytes, let alone the first 8 KB.
-- **Mitigation in rio.** The question is the mitigation: the cost is stated in the
-  dialog (*"…is 1.2 GB — large enough that opening it may make rio slow to respond"*)
-  before you pay it, and a forced open starts as **Plain Text** so the highlighter
-  doesn't add its share — *View ▸ Language…* turns it back on. For the deep-NUL case,
-  the same menu sets the buffer to Plain Text by hand.
-- **Planned.** Making the forced path itself fast is a **deliberate non-goal for now**:
-  capping the well-formedness pass at a prefix would break D22's guarantee that unknown
-  bytes round-trip intact. Chunking that pass so it can bail out early *without*
-  materialising the whole file as a byte list would be exact and is on
-  [ROADMAP.md](ROADMAP.md); lazy / windowed loading of a huge file stays out of scope.
+  rio's own largest source file is half a megabyte, colouring is instant well past any
+  file you would edit by hand, and nothing under 64 MB is asked about at all. A real
+  binary is caught — object files, archives, images and databases all carry a NUL
+  within the first few bytes, let alone the first 8 KB.
+- **Mitigation in rio.** Scrolling *down* through a file pays as it goes and never
+  feels like waiting; only a jump straight to the end front-loads the scan. A forced
+  open starts as **Plain Text**, which skips the scan entirely — *View ▸ Language…*
+  turns it back on. For the deep-NUL case, the same menu sets Plain Text by hand.
+- **Planned.** Nothing here is blocked on a missing idea; it is the honest cost of
+  exact multi-line state. Checkpointing the scan (snapshotting every N lines so a
+  *repeat* jump is cheap) would help the second visit and never the first, and is on
+  [ROADMAP.md](ROADMAP.md). Lazy / windowed loading of a huge file stays out of scope.
 
 ### A same-second, same-length rewrite can go unnoticed
 

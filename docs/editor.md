@@ -207,7 +207,7 @@ The [agent](agent.md) opens complex proposed edits in this same view.
 Most files just open. Two kinds get a question first, because reading them is a
 decision rather than a reflex:
 
-- **Too large** — bigger than 8 MB (8,388,608 bytes):
+- **Too large** — bigger than 64 MB (67,108,864 bytes):
 
   > core.dump is 1.2 GB — large enough that opening it may make rio slow to
   > respond. Open it anyway?
@@ -221,10 +221,12 @@ responsive as it was a moment ago. Answer **yes** and the file opens — and it 
 genuinely be slow, to appear and then to edit. That is what you were being warned
 about, not a fault.
 
-A file you open anyway starts as **Plain Text**. Highlighting is the other half of
-what makes a huge buffer crawl, so rio leaves it off; if the file turns out to be
-fine, ***View ▸ Language…*** turns it back on — see
-[syntax highlighting](#syntax-highlighting) above.
+A file you open anyway starts as **Plain Text**. Highlighting only ever colours the
+part of the file you are looking at, so it is no longer what makes a huge buffer
+slow — but it does have to read down from the top of the file to know what it is
+looking at, and on a file this size that reading is the slow part. rio leaves it
+off; if the file turns out to be fine, ***View ▸ Language…*** turns it back on —
+see [syntax highlighting](#syntax-highlighting) above.
 
 **Every way of opening a file into a tab asks**: the Files pane,
 ***File ▸ Open…***, a path on the command line, a file dragged in from your

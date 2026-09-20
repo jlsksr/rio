@@ -12,7 +12,7 @@ the ⟳ button — it does not watch the filesystem continuously); dragging a fi
 from your OS file manager; and sessions — the open files and active tab that come
 back when you reopen a project.
 
-Opening a file from the tree is not always instant and silent: a file over 8 MB,
+Opening a file from the tree is not always instant and silent: a file over 64 MB,
 or one that looks like a binary rather than text, is confirmed with a yes/no
 question first — including the files a session reopens for you. That half is
 documented in [the editor](editor.md#opening-a-very-large-or-binary-file).
