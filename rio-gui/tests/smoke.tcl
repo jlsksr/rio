@@ -325,9 +325,17 @@ rl_select .pfiles.well.body 0
 ok "pane: selection band on row 0" [.pfiles.well.body tag ranges selrow]   {1.0 2.0}
 rl_set_hover .pfiles.well.body 1
 ok "pane: hover band on row 1"     [.pfiles.well.body tag ranges hoverrow] {2.0 3.0}
-update idletasks
-ok "pane: scrollbar hidden when list fits" \
-	[expr {[lsearch -exact [pack slaves .pfiles.well] .pfiles.well.sb] < 0}] 1
+# The pane's bar auto-hides (autoscroll) when the rows fit. Drive that with fractions
+# rather than off the live pane, the same way the editor's hsb check below does: a
+# withdrawn window's text never reports real overflow, and how much geometry it reports
+# at all differs by host. Read off the pane, this asserted nothing where it passed (the
+# widget answered 0.0 1.0 whatever its height) and failed outright on a host whose
+# withdrawn pane came back short enough to look overflowing.
+proc nav_sb_shown {} { expr {[lsearch -exact [pack slaves .pfiles.well] .pfiles.well.sb] >= 0} }
+autoscroll .pfiles.well.sb .pfiles.well.body 0.0 0.5
+ok "pane: scrollbar shown when list overflows" [nav_sb_shown] 1
+autoscroll .pfiles.well.sb .pfiles.well.body 0.0 1.0
+ok "pane: scrollbar hidden when list fits"     [nav_sb_shown] 0
 
 # Unfold the subdir (row 0 = sub/) in place: its child renders indented right below it,
 # the twisty flips ▸→▾, and the subdir stays put (a tree, not a descend). Then fold it back.
