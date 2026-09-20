@@ -419,7 +419,90 @@ though the interactive behaviour is right.
 
 **Gate 3 is complete.** What remains before the tag is Gate 2's third box (the tag
 itself) and a platform pass at the release commit; see *Still open* above for what
-Windows has not yet run.
+Windows has not yet run. Going public is **Gate 4** below, deliberately after the
+platform work and the install path.
+
+## Gate 4 — Going public (github.com/jlsksr/rio)
+
+rio's source has no public home yet. The primary repository is and stays the private
+self-hosted **Forgejo** (`ssh://forgejo@vps01.jkdata.de:443/jka/rio.git`); the public
+face will be a **mirror** at **github.com/jlsksr/rio**, chosen for reach — the audience
+is there, and an alpha nobody can find gets no reports.
+
+**This gate comes last on purpose** (jka, 2026-09-20). The BSDs, macOS and a
+non-developer install path come first, because publishing is what makes the README's
+claims load-bearing: right now *Cross-platform* is honest precisely because almost
+nobody is reading it. Widening the audience before the platform work and the install
+story are true would turn an honest smaller claim into a stream of "doesn't work on my
+machine" that is nobody's fault but the timing's.
+
+### The two decisions to take before the first push
+
+Both are one-way-ish once the history is public, so they are here rather than inline.
+
+- **Author identity in the history.** All **501** commits are authored
+  `jka@xon1.home.arpa` (477) and `jka@win01.home.arpa` (23), plus one as
+  `jlsksr@gmail.com`. Those `.home.arpa` addresses are internal names GitHub cannot
+  verify, so every one of those commits will show **unlinked to the account** — no
+  avatar, no contribution graph — and the machine names travel with them.
+  **Recommended: accept it.** Rewriting means `git filter-repo` over the whole history,
+  which changes all 501 hashes and permanently desynchronises the GitHub mirror from
+  Forgejo — a large, irreversible change bought for cosmetics. Set `user.email` to a
+  GitHub-verified address going forward and let the past be the past.
+- **`vps01.jkdata.de` appears in this file** (the *Gate 0 findings* remote-core
+  sections, and *Still open*). It is jka's own infrastructure, named in notes that were
+  written for jka. Either generalise those mentions to "the remote core" or keep them
+  deliberately — the point is that it should be a decision and not something noticed
+  after the fact.
+
+### The steps
+
+- [ ] **Create an empty repo** `jlsksr/rio` on GitHub — **no** README, licence or
+      `.gitignore` from GitHub's side, or the first push will conflict with a history
+      that already has all three. `gh` is not installed on the dev box, so this is a
+      browser step. Add `~/.ssh/id_ed25519.pub` to the account if it isn't there.
+- [ ] **Add the remote and push `main`.** The mirror carries `main` and tags **only**;
+      unfinished branches stay private (there are 13 local branches and 4 refs on
+      origin today, and none of them is anyone else's business yet).
+
+          git remote add github git@github.com:jlsksr/rio.git
+          git push github main
+          git remote set-head github -a
+
+- [ ] **Look at the rendered landing page** once it is up: the README is the front
+      door, and its relative links (`docs/index.md`, `LICENSE`, `CODE_OF_CONDUCT.md`)
+      resolve on GitHub but are worth one click each. Set the repo description and
+      topics; GitHub will detect the language as Tcl on its own.
+- [ ] **Push the tag** when Gate 2's third box is done: `git push github --tags`, and
+      the same to `origin`. The tag is what turns About's *Build* into a release name
+      and the CHANGELOG's `[0.1.0] — unreleased` into a dated heading.
+
+### The ongoing workflow, and the one asymmetry
+
+Publishing stays a **deliberate** `git push github main` — not a mirror hook, not a
+CI job. The private repository is where unfinished work lives, and the public one
+should move only when jka means it to.
+
+The asymmetry worth knowing before it surprises: **issues only exist on GitHub.** The
+code flows Forgejo → GitHub, but the reports flow the other way and have nowhere else
+to live, so from the first push the GitHub tracker is a second place that has to be
+watched. That is the actual cost of going public, and it starts the day the repo
+appears — not the day the tag does.
+
+### What a pre-publish scan found
+
+Run 2026-09-20 over the tree and the whole log, because "full history" means every
+commit is public, not just the current files:
+
+- **No credentials.** No private keys anywhere in tracked files — the signing fixtures
+  under `rio-core/tests/fixtures/sig/` are `.pub` and `.sig` only. Nothing matching
+  `.pem`, `.key`, `id_rsa`, `.env` has ever been committed. (`rio-core/secret.tcl` is
+  the module that *stores* the agent's API key; it contains none.)
+- **Nothing personal in the tree.** `jka-test/` and `spike/ck8.6/` are gitignored and
+  were never committed; `.claude/` carries only the two agent definitions, not
+  `settings.local.json`.
+- **Size is a non-issue:** 73 MB of history, largest blob 969 KB (the icon source).
+- The **only** personal-infrastructure string is the `vps01.jkdata.de` one above.
 
 ## Named, and deferred on purpose
 
