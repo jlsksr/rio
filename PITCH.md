@@ -200,6 +200,12 @@ the project's own code.
 
 ## Changelog
 
+> **Historic — no longer maintained.** rio's changelog lives at
+> [CHANGELOG.md](CHANGELOG.md) now, in [Keep a Changelog](https://keepachangelog.com/)
+> form and brought up to date. What follows is the original, kept as it stood: it stops
+> at **D108**, 2026-09-12, and nothing is added to it. Read it for the older entries in
+> their first wording, and for nothing else.
+
 A curated history of the noticeable changes — features, improvements, and fixes —
 newest first. It is **not** every commit: each entry cites its design decision
 (*Dnn*, written up in [AGENTS.md](AGENTS.md)), a representative commit, and the date.
