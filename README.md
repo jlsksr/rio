@@ -293,6 +293,8 @@ as untested rather than claimed.
   `~/.config/rio/`; the
   [config & data files reference](docs/preferences.md#where-everything-lives)
   lists them all (paths, contents, which are hand-editable).
+- **[CHANGELOG.md](CHANGELOG.md)** — what changed and when, newest first: features,
+  improvements and fixes, each pointing at the decision behind it.
 - **[AGENTS.md](AGENTS.md)** — the living design & decision log (the *why* behind
   every choice). Start here if you want the full picture.
 - **[ROADMAP.md](ROADMAP.md)** — possible next steps: planned features, known gaps,

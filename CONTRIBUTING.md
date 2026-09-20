@@ -476,6 +476,20 @@ itself, shown in *Help ▸ About rio* and printed by `--version`. Nothing branch
 on it at runtime; it exists so a human can say what they are running and a
 changelog has something to attach to. Bump it when you ship.
 
+That changelog is [CHANGELOG.md](CHANGELOG.md), and **a change to what a user sees adds
+its entry in the same commit** — under the current release's `### Added`, `### Changed` or
+`### Fixed`, newest first, ending in its citation:
+
+    - **What changed** — a sentence or two on what it means for the reader. — *D124 ·
+      `0ffca02` · 2026-09-20*
+
+The essay belongs in your AGENTS.md decision, not here. You do not have to guess whether
+you forgot: `rio-core/tests/changelog.test` holds every decision in AGENTS.md against the
+changelog **both ways**, checks that each commit id resolves, and checks that each date is
+the one its commit actually carries. A change genuinely invisible to a user — an internal
+refactor, a policy, a revert — goes in that file's exemption table with its reason, which
+is a line of prose a reviewer can disagree with rather than a silence nobody sees.
+
 A **contract integer** names a *surface* and says whether two independently
 updated halves can work together. There are three, and each moves only on a
 **break**:

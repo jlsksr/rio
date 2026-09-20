@@ -151,9 +151,10 @@ human happened to read it.
 
 `docs/*.md` plus `README.md`, `INSTALL.md`, `WINDOWS.md`, `CONTRIBUTING.md`.
 
-**`AGENTS.md`, `ROADMAP.md`, `PITCH.md`, `CAVEATS.md` and this file are exempt.** They
-name retired menus and unbuilt ones on purpose; holding them to today's menubar would
-make them lie about their own history. Do not "fix" a menu name in a design log — if it
+**`AGENTS.md`, `ROADMAP.md`, `PITCH.md`, `CHANGELOG.md`, `CAVEATS.md` and this file are
+exempt.** They name retired menus and unbuilt ones on purpose; holding them to today's
+menubar would make them lie about their own history — a changelog entry describes the menu
+as it was the day the change landed, which is the whole point of a dated entry. Do not "fix" a menu name in a design log — if it
 describes what was true at the time, it is correct.
 
 ---
@@ -224,10 +225,18 @@ and a fact in the wrong document is drift waiting to happen.
 | `AGENTS.md` | The design log — *why* rio is the way it is. Numbered decisions |
 | `CONTRIBUTING.md` | Hacking on rio itself |
 | `ROADMAP.md` | Candidate next steps |
-| `PITCH.md` | The pitch and the human changelog |
+| `CHANGELOG.md` | The user-visible history, newest first |
+| `PITCH.md` | The pitch. Its changelog is historic and frozen |
 
 **Do not edit `PITCH.md`.** It is only ever touched on an explicit request from the
-project owner, and never with a proactive changelog entry.
+project owner. Its changelog stopped at D108 (AGENTS.md **D124**): the live one is
+`CHANGELOG.md`, and `rio-core/tests/changelog.test` fails if a newer entry appears in
+PITCH.
+
+**`CHANGELOG.md` is not the manual's, but the same rule applies**: it is
+[Keep a Changelog](https://keepachangelog.com/) form, one section per release, and every
+entry cites its decision, a commit and a date. A change to what a user sees adds its entry
+there in the same commit — `changelog.test` is what tells you when it did not.
 
 **Do not edit code to make a doc pass.** If a check fails, either the doc is wrong or
 you have found a real defect in rio. Both are worth reporting; only the first is yours

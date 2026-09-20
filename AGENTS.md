@@ -7245,8 +7245,80 @@ config/theme format (D21/D24) or the repository index (D39)** — both are addit
 construction, unknown keys ignored and unknown kinds listed-greyed, which is D19 already
 doing the work a format version would. **Per-component core and GUI versions** — argued
 above. **A `CHANGELOG.md`** — Gate 2's other half, still open, and content work rather than
-a decision. **Tagging** — `v0.1.0` waits for the remaining gates; About turns the tag into
+a decision. *[Taken up as D124, which found the decision hiding inside the content work.]*
+**Tagging** — `v0.1.0` waits for the remaining gates; About turns the tag into
 its Build row on its own, with no code change (D76).
+
+### D124 — rio has a changelog, and it cannot fall behind quietly
+
+**The gap.** D123 gave rio a number for a changelog to attach entries to; there was no
+changelog. What existed was the log at the foot of **PITCH.md** — a landing-page draft,
+"the playground" in RELEASING's own words, and a file DOCS.md forbids touching except on
+jka's explicit request. So rio's history lived in the one document nobody was allowed to
+maintain, and it showed: its newest entry was **D108** while the tree had reached D123.
+Fifteen decisions — https repositories, certificate exceptions, the language picker,
+*Change with Agent…*, the signing work, the licence, the version itself — had no entry at
+all. RELEASING Gate 2 called this "content work rather than a decision" (D123, above).
+That was half right. Moving the file is content work; *what stops it going stale again* is
+the decision, and it is the same one AGENTS §7 already took for the manual.
+
+**The decision (jka, 2026-09-20).** `CHANGELOG.md` at the repository root, in
+**[Keep a Changelog](https://keepachangelog.com/)** form, rewritten into that shape rather
+than transplanted: one `##` section per release, `### Added` / `### Changed` / `### Fixed`
+beneath it, newest first. The narrative entries are cut to changelog length — the essay is
+what AGENTS.md is for — and each keeps rio's citation, *Dnn · commit · date*, which is
+what makes the whole thing checkable.
+
+**Why the standard format, when rio usually writes its own.** A changelog is read by
+people who have never seen rio, often through a packaging tool, and it is the one document
+whose *shape* carries meaning: *Added* against *Fixed* answers "should I upgrade?" before
+a word is read. rio's month headings carried none of that, and the version they belong to
+is the fact D123 just made available. This is the same trade as D121's licence — recognition
+is worth more than a house dialect for the documents a stranger meets first.
+
+**PITCH keeps its copy, frozen.** jka: *"leave it there for historic reference, note that
+it's no longer used. PITCH.md will vanish anyways with the first release of rio."* So the
+old log stays byte-for-byte under a note saying it stopped at D108 and where the live one
+is. Deleting it would throw away the original wording of a hundred entries to save a
+duplicate that is about to be deleted with its file anyway; leaving it *unmarked* would be
+the worse failure — two changelogs, one silently stale, which is exactly the drift this
+decision exists to end. The guard holds the freeze: PITCH may cite no decision above D108.
+
+**The guard, and why it is both directions.** `rio-core/tests/changelog.test`. Every
+`### Dnn` in AGENTS.md is cited by an entry **or** named in an exemption table with its
+reason written out — so a decision cannot land without either a line in the changelog or a
+stated case that a user could not see it. The exemptions are themselves checked: one
+naming a decision that does not exist, or one that has since been written up, fails. Six
+decisions are exempt today (D25, D53, D59, D68, D95, D96 — an internal encoding, two
+policies, a revert, a UI convention and a test-harness rule) plus everything before D22,
+which predates anything runnable.
+
+The other direction catches a citation pointing at no decision. The shape checks hold the
+release heading to `rio::version`, the section names and their order to the format, and
+the entries to newest-first. And where there is a git repository to ask, **every commit id
+must resolve and every date must be the one its commit carries** — the dates are looked
+up, not proofread, which is §7's "assert against behaviour" reached as far as a document
+allows. Each check was proven by injecting the drift it exists for.
+
+**Why a test rather than a rule in CONTRIBUTING.** §7 has already argued this: "keep them
+in sync" is an instruction addressed to whoever happens to be editing, and it is exactly
+what failed in PITCH. CONTRIBUTING gets the rule too, because a human contributor needs to
+know what is expected — but the rule is not the mechanism, and a rule with no guard is a
+backlog item.
+
+**Deliberately not done.** **No link-reference block** (`[0.1.0]: …/tag/v0.1.0`) until a
+tag exists to link to — Gate 2's third box. **No `Unreleased` section**: everything so far
+*is* 0.1.0, so the heading reads `[0.1.0] — unreleased` and takes a date at the tag, which
+keeps one section per release rather than a section that has to be renamed. **No
+generation from git log** — the log is commits, a changelog is changes, and the difference
+is the whole value.
+
+**The first thing the guard caught was this decision.** D124 has no changelog entry, and
+cannot have one: the entry would cite the commit that creates the file, which does not
+exist while the entry is being written — and a changelog announcing its own existence
+tells its reader nothing. So it is the seventh line in the exemption table, which is the
+right outcome twice over: the hole is *written down* rather than left as a silence, and
+the table got its first use before anyone had to remember it exists.
 
 ## 4. "Simple debug/terminal" — scope decision
 
@@ -7744,7 +7816,11 @@ contributors, agents):
   agent's key lives, troubleshooting. README/CONTRIBUTING only *point* here —
   keep deploy specifics out of them so they can't drift.
 - **PITCH.md** — a short landing-page pitch (food for a static-site generator):
-  what rio is and why, for someone who's never heard of it.
+  what rio is and why, for someone who's never heard of it. Its changelog is
+  **historic and frozen** (D124); the live one is below.
+- **CHANGELOG.md** — the user-visible history, [Keep a Changelog](https://keepachangelog.com/)
+  form, one section per release (D124). Every entry cites its decision, a commit and a
+  date, and `changelog.test` holds it to this file both ways.
 - **CONTRIBUTING.md** — for **human programmers** who hack on rio: build, test,
   conventions. Points here for the "why"; build/test sections firm up with O7.
 - **`docs/`** — the **user manual**, in-tree: one Markdown topic per page, source
@@ -7787,6 +7863,8 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | INSTALL.md §1's OS package names | `rio::deps::provides` (D116), which rio prints when one is missing | `deps.test` — both directions, as sets |
 | the `LICENSE` file | the About box's **License** row (D121) | `smoke.tcl` — reads the file, holds the row to it |
 | the About box's facts rows | `docs/getting-started.md`'s table of them | `docs.tcl` — builds the box, reads the labels, order included |
+| this file's decisions (D124) | `CHANGELOG.md`'s entries | `changelog.test` — both directions, with a named exemption table that is itself checked |
+| `rio-core/version.tcl` | `CHANGELOG.md`'s release heading | `changelog.test` — reads the literal, not a copy of it |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 

@@ -358,8 +358,20 @@ though the interactive behaviour is right.
 
 ## Gate 2 — Release identity
 
-- [ ] Commit a `CHANGELOG.md`. The content is already drafted in PITCH.md — give it
-      a real home outside the playground.
+- [x] Commit a `CHANGELOG.md`. The content is already drafted in PITCH.md — give it
+      a real home outside the playground. **Done (D124).** Rewritten into
+      [Keep a Changelog](https://keepachangelog.com/) form rather than transplanted —
+      one section per release (`[0.1.0] — unreleased`, which takes a date at the tag
+      below), `Added` / `Changed` / `Fixed` beneath it, newest first — and **brought
+      current**: the PITCH draft stopped at D108 while the tree was at D123, so the
+      fifteen decisions since (https repositories and certificate exceptions, the
+      language picker, *Change with Agent…*, the context-menu sweep, the dependency
+      message, the icon, signing and key trust, the artwork, the licence, the version)
+      got the entries they never had. PITCH keeps its copy, frozen and marked historic,
+      until PITCH itself goes at the release. The file cannot fall behind quietly:
+      `rio-core/tests/changelog.test` holds every decision in AGENTS.md against it both
+      ways — an entry, or an exemption with a written reason — and looks every commit id
+      and date up in git rather than proofreading them.
 - [x] Choose a version, so a tester can say exactly which rio they're running.
       **Done (D123): `0.1.0`.** Plain `0.1.0` rather than the `-alpha` this line first
       drafted — semver's `0.y.z` band already *means* initial development, so the suffix
@@ -373,7 +385,9 @@ though the interactive behaviour is right.
       and an extension's semver stays its own.
 - [ ] **git-tag the release `v0.1.0`** when the other gates close. Nothing is tagged yet;
       until then **About**'s *Build* shows the short commit, and turns into the tag on its
-      own once this is done (AGENTS.md D76 — no code change at release).
+      own once this is done (AGENTS.md D76 — no code change at release). The tag is also
+      what turns `CHANGELOG.md`'s `[0.1.0] — unreleased` heading into a dated one, and
+      what makes a `[0.1.0]:` link target exist to add.
 
 ## Gate 3 — First run & intake
 

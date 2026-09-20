@@ -1,0 +1,274 @@
+# Tests for CHANGELOG.md (AGENTS.md D124) — the guard that keeps it current.
+#
+# A changelog is the classic derived fact (AGENTS.md §7): the decisions in AGENTS.md are
+# the truth, CHANGELOG.md restates the user-visible ones for a reader who will never open
+# the design log, and nothing fails when that copy falls behind. It already had: the copy
+# in PITCH.md stopped at D108 while the tree reached D123, and nobody noticed for eight
+# days. "Remember to add an entry" is the rule that failed there, so it is not the rule
+# here.
+#
+# So this holds the two BOTH WAYS. Every `### Dnn` in AGENTS.md is cited by an entry, or
+# it is in the exemption table below with a reason written out — and every exemption has
+# to still be true, so the table cannot quietly grow into a backlog. The other direction
+# catches an entry citing a decision that does not exist.
+#
+# The rest is shape: Keep a Changelog sections in their canonical order, the release
+# heading holding rio's actual version, entries newest first, and — where there is a git
+# repository to ask — every commit id resolving and every date being the one that commit
+# actually carries. That last pair is the "assert against behaviour" rule reached as far
+# as a document allows: the dates are not proofread, they are looked up.
+#
+# No network. git is only ever read.
+package require tcltest
+namespace import ::tcltest::*
+
+set ::root [file normalize [file join [file dirname [info script]] .. ..]]
+source [file join $::root rio-core version.tcl]
+
+proc slurp {path} {
+	set f [open $path]
+	fconfigure $f -encoding utf-8
+	set text [read $f]
+	close $f
+	return $text
+}
+
+set ::changelog [slurp [file join $::root CHANGELOG.md]]
+
+# --- the exemption table ---------------------------------------------------------------
+#
+# A decision with no changelog entry, and why it has none. Every line is a claim that a
+# reader would not have been able to see this one, and `changelog-exemptions-are-live`
+# holds each of them to a decision that exists and is genuinely uncited.
+array set ::no_entry {
+	D25 {JSON value encoding is shape-aware — a wire-format internal, invisible above the protocol}
+	D53 {the assisted-not-autonomous line for LLM work — policy, not a change to rio}
+	D59 {menus highlighting on hover — tried and REVERTED, so nothing shipped}
+	D68 {static help must look unlike an interactive control — a convention the UI follows, not an entry}
+	D95 {a headless run never asks a human anything — a test-harness rule}
+	D96 {rio speaks the protocol and does not dial — a refusal, and refusing a feature is not a change}
+	D124 {this file and the changelog itself — an entry would have to cite the commit that creates the changelog, which does not exist while the entry is being written, and a file announcing its own existence tells its reader nothing}
+}
+# D1–D21 predate anything runnable: the protocol seam, the core/frontend split and the
+# config format were all settled before rio could open a file, so there was no release
+# and no user for them to be a change to. D22 (the core foundation) is where the log
+# starts, and it has an entry.
+set ::no_entry_before 22
+
+# --- parsing ----------------------------------------------------------------------------
+#
+# An entry is a top-level list item under a `### Section`, possibly wrapped over several
+# lines, ending in its citation: *D101/D102/D103 · `b01bf98` · 2026-09-11* (the decisions
+# are optional — two entries predate the numbering). Nothing here greps the file for a
+# word: the parse yields a list of entries and every check below is about that list.
+proc parse_entries {text} {
+	set entries {} ; set section "" ; set release "" ; set cur ""
+	foreach line [split $text \n] {
+		if {[regexp {^## (.+)$} $line -> h]} {
+			if {$cur ne ""} { lappend entries [entry $release $section $cur] ; set cur "" }
+			set release [string trim $h] ; set section ""
+		} elseif {[regexp {^### (.+)$} $line -> h]} {
+			if {$cur ne ""} { lappend entries [entry $release $section $cur] ; set cur "" }
+			set section [string trim $h]
+		} elseif {[regexp {^- (.*)$} $line -> rest]} {
+			if {$cur ne ""} { lappend entries [entry $release $section $cur] }
+			set cur $rest
+		} elseif {$cur ne "" && [regexp {^  \S} $line]} {
+			append cur " " [string trim $line]
+		} elseif {$cur ne ""} {
+			lappend entries [entry $release $section $cur] ; set cur ""
+		}
+	}
+	if {$cur ne ""} { lappend entries [entry $release $section $cur] }
+	return $entries
+}
+
+# One entry as a dict: where it sits, what it cites, and the text as parsed.
+proc entry {release section text} {
+	set ds {} ; set commit "" ; set date ""
+	# The separator is U+00B7, written as an escape: this file is decoded with the SYSTEM
+	# encoding on Windows (rio-core/tests/all.tcl), where a literal would arrive mojibake.
+	set sep \u00b7
+	if {[regexp "\\*((?:D\[0-9A-Za-z/\]+ )?)(?:$sep )?`(\[0-9a-f\]{7,40})` $sep (\\d{4}-\\d{2}-\\d{2})\\*\\s*\$" \
+			$text -> dpart commit date]} {
+		foreach d [split [string trim $dpart] /] { if {$d ne ""} { lappend ds $d } }
+	}
+	return [dict create release $release section $section text $text \
+		decisions $ds commit $commit date $date]
+}
+
+set ::entries [parse_entries $::changelog]
+
+# The decisions AGENTS.md carries, and the ones a changelog entry cites.
+proc agents_decisions {} {
+	set out {}
+	foreach line [split [slurp [file join $::root AGENTS.md]] \n] {
+		if {[regexp {^### D(\d+) } $line -> n]} { lappend out $n }
+	}
+	return [lsort -integer -unique $out]
+}
+proc agents_subdecisions {} {
+	set out {}
+	foreach line [split [slurp [file join $::root AGENTS.md]] \n] {
+		if {[regexp {^#### (D\d+[a-z]) } $line -> d]} { lappend out $d }
+	}
+	return [lsort -unique $out]
+}
+proc cited_decisions {} {
+	set out {}
+	foreach e $::entries { foreach d [dict get $e decisions] { lappend out $d } }
+	return [lsort -unique $out]
+}
+
+testConstraint hasgit [expr {[file isdirectory [file join $::root .git]] &&
+	![catch {exec git --version}]}]
+
+# --- the register: both directions ------------------------------------------------------
+
+test changelog-every-decision-has-an-entry-or-a-reason {a decision reaches the user or it
+		does not; either way it is accounted for. The result is the list of decisions that
+		are neither — which is what "the changelog is behind" looks like, named} -body {
+	set cited [cited_decisions]
+	set missing {}
+	foreach n [agents_decisions] {
+		if {$n < $::no_entry_before} continue
+		if {[info exists ::no_entry(D$n)]} continue
+		if {"D$n" ni $cited} { lappend missing D$n }
+	}
+	set missing
+} -result {}
+
+test changelog-exemptions-are-live {an exemption is a claim about a real decision that
+		really has no entry. One naming a decision that does not exist, or one that has
+		since been written up, is stale and says so here rather than sitting in the table} -body {
+	set cited [cited_decisions]
+	set nums [agents_decisions]
+	set wrong {}
+	foreach d [lsort -dictionary [array names ::no_entry]] {
+		regexp {^D(\d+)$} $d -> n
+		if {$n ni $nums} { lappend wrong "$d: no such decision" }
+		if {$d in $cited} { lappend wrong "$d: has an entry now" }
+		if {[string trim $::no_entry($d)] eq ""} { lappend wrong "$d: no reason given" }
+	}
+	set wrong
+} -result {}
+
+test changelog-cites-only-decisions-that-exist {the other direction: an entry citing a
+		decision AGENTS.md does not have is a typo'd number, and a reader following it
+		lands nowhere} -body {
+	set have [list]
+	foreach n [agents_decisions] { lappend have D$n }
+	foreach d [agents_subdecisions] { lappend have $d }
+	set bad {}
+	foreach d [cited_decisions] { if {$d ni $have} { lappend bad $d } }
+	set bad
+} -result {}
+
+# --- shape --------------------------------------------------------------------------------
+
+test changelog-release-heading-carries-rios-version {the heading is a fact with a second
+		home — rio-core/version.tcl. Read from the file, not typed here, so a bump that
+		forgets the changelog fails} -body {
+	set headings {}
+	foreach line [split $::changelog \n] {
+		if {[regexp {^## (.+)$} $line -> h]} { lappend headings [string trim $h] }
+	}
+	set top [lindex $headings 0]
+	list [llength $headings] [regexp "^\\\[[string map {. \\.} $::rio::version]\\\]" $top]
+} -result {1 1}
+
+test changelog-sections-are-keep-a-changelog {the vocabulary is the format's, and the
+		order is the format's order — an invented section name means an entry lands
+		somewhere a reader is not looking for it} -body {
+	set canon {Added Changed Deprecated Removed Fixed Security}
+	set seen {}
+	foreach line [split $::changelog \n] {
+		if {[regexp {^### (.+)$} $line -> h]} { lappend seen [string trim $h] }
+	}
+	set bad {} ; set last -1
+	foreach s $seen {
+		set i [lsearch -exact $canon $s]
+		if {$i < 0} { lappend bad "$s: not a Keep a Changelog section" ; continue }
+		if {$i <= $last} { lappend bad "$s: out of order" }
+		set last $i
+	}
+	set bad
+} -result {}
+
+test changelog-every-entry-carries-a-citation {an entry without a commit and a date is
+		unverifiable prose, and the checks below would skip it in silence} -body {
+	set bad {}
+	foreach e $::entries {
+		if {[dict get $e commit] eq "" || [dict get $e date] eq ""} {
+			lappend bad [string range [dict get $e text] 0 50]
+		}
+	}
+	set bad
+} -result {}
+
+test changelog-entries-are-newest-first {within a section, so a reader meets the newest
+		change first — the one property a changelog has that a decision log does not} -body {
+	set bad {} ; set prev "" ; set sect ""
+	foreach e $::entries {
+		if {[dict get $e section] ne $sect} { set sect [dict get $e section] ; set prev "" }
+		set d [dict get $e date]
+		if {$prev ne "" && [string compare $d $prev] > 0} {
+			lappend bad "$sect: $d after $prev"
+		}
+		set prev $d
+	}
+	set bad
+} -result {}
+
+# --- against git --------------------------------------------------------------------------
+
+test changelog-commits-resolve {a citation is a pointer; one that does not resolve is
+		worse than none} -constraints hasgit -body {
+	set bad {}
+	foreach e $::entries {
+		set c [dict get $e commit]
+		if {[catch {exec git -C $::root cat-file -t $c} type] || $type ne "commit"} {
+			lappend bad $c
+		}
+	}
+	set bad
+} -result {}
+
+test changelog-dates-are-the-commits-own {the date is looked up, never proofread: it must
+		be the date the cited commit carries. This is what stops a copied entry keeping the
+		date of the one it was copied from} -constraints hasgit -body {
+	set bad {}
+	foreach e $::entries {
+		set c [dict get $e commit]
+		if {[catch {exec git -C $::root log -1 --date=short --pretty=%ad $c} real]} continue
+		if {$real ne [dict get $e date]} { lappend bad "$c: says [dict get $e date], is $real" }
+	}
+	set bad
+} -result {}
+
+# --- PITCH.md's copy stays frozen -----------------------------------------------------------
+
+test changelog-pitch-copy-is-marked-historic {PITCH.md keeps the old changelog for
+		reference until PITCH itself goes (D124), so it has to say that it is not the live
+		one — otherwise it is simply a second changelog, which is the drift this file
+		exists for} -body {
+	set pitch [slurp [file join $::root PITCH.md]]
+	set i [string first "\n## Changelog" $pitch]
+	set section [string range $pitch $i end]
+	list [expr {$i >= 0}] \
+		[expr {[string first "CHANGELOG.md" $section] >= 0}] \
+		[regexp -nocase {no longer maintained} $section]
+} -result {1 1 1}
+
+test changelog-pitch-copy-does-not-grow {frozen means frozen: PITCH stopped at D108, so a
+		decision newer than that appearing there is a new entry written in the old home} -body {
+	set pitch [slurp [file join $::root PITCH.md]]
+	set i [string first "\n## Changelog" $pitch]
+	set bad {}
+	foreach d [regexp -all -inline {D(\d+)} [string range $pitch $i end]] {
+		if {[string is integer -strict $d] && $d > 108} { lappend bad D$d }
+	}
+	lsort -unique $bad
+} -result {}
+
+cleanupTests
