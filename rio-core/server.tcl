@@ -144,6 +144,13 @@ proc rio::server::listen {{port 7711} {addr 127.0.0.1}} {
 }
 
 if {[info exists ::argv0] && [file normalize $::argv0] eq [file normalize [info script]]} {
+	# --version: print and exit, before any transport starts. The same literal the GUI
+	# prints (rio::version, D123) — a packager and a bug report want the number without
+	# having to greet a core for it. Checked first so it never races a transport.
+	if {[lsearch -exact $::argv --version] >= 0} {
+		puts "rio $rio::version"
+		exit 0
+	}
 	# --stdio: serve over the pipe (the default frontend transport, D30). Banner to
 	# stderr only — stdout IS the protocol stream.
 	if {[lsearch -exact $::argv --stdio] >= 0} {

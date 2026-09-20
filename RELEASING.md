@@ -360,10 +360,20 @@ though the interactive behaviour is right.
 
 - [ ] Commit a `CHANGELOG.md`. The content is already drafted in PITCH.md — give it
       a real home outside the playground.
-- [ ] Choose a version (`v0.1.0-alpha`) and git-tag the release, so a tester can say
-      exactly which rio they're running. *(Interim: **Help ▸ About rio** already shows the
-      build id via `git describe --tags --always` — the short commit today, the tag
-      automatically once this is done. AGENTS.md D76.)*
+- [x] Choose a version, so a tester can say exactly which rio they're running.
+      **Done (D123): `0.1.0`.** Plain `0.1.0` rather than the `-alpha` this line first
+      drafted — semver's `0.y.z` band already *means* initial development, so the suffix
+      restated it and then owed a promotion step; the alpha framing belongs in the README
+      and the release notes, which is where Gate 3 below already puts it. The number is
+      one literal, `rio-core/version.tcl`, sourced by both halves. **Help ▸ About rio**
+      gains a *Version* row above *Build* (the release line, and the exact commit under
+      it), `session.hello` reports it so a `--connect` session can name the core's, and
+      both entry points answer `--version`. The same decision settled the rest of the
+      scheme: the wire `protocol` and `provider-api` stay integers, `mode-api` is new,
+      and an extension's semver stays its own.
+- [ ] **git-tag the release `v0.1.0`** when the other gates close. Nothing is tagged yet;
+      until then **About**'s *Build* shows the short commit, and turns into the tag on its
+      own once this is done (AGENTS.md D76 — no code change at release).
 
 ## Gate 3 — First run & intake
 

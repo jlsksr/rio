@@ -264,6 +264,23 @@ ok "hello: warning names versions"   \
 ok "hello: mismatch code"            [lindex $::captured 0 0] protocol_mismatch
 set ::captured {}
 
+# The core's RELEASE version (D123), also learned from the greeting. This is the guard
+# that the two halves of a checkout agree: the core under test is a REALLY SPAWNED
+# child process reporting its own rio::version over the wire, and the GUI holds it
+# against the literal it sourced. One file defines it, so a second copy cannot appear
+# without this failing.
+ok "hello: core version recorded"    $::core_version $rio::version
+ok "hello: …and About just states it" [about_version] $rio::version
+
+# A core too old to report one must not be read as "the same version" — About says
+# nothing extra rather than making a claim (the D19 fallback). A DIFFERENT version is
+# the --connect case, and then the row names it, since that is what a bug report needs.
+set _cv $::core_version
+set ::core_version ""      ; ok "hello: no core version, no claim" [about_version] $rio::version
+set ::core_version "9.9.9" ; ok "hello: a differing core is named" \
+	[about_version] "$rio::version (core 9.9.9)"
+set ::core_version $_cv
+
 # --- file pane (project root + lazy fs.list navigator) -----------------------
 # Build a throwaway tree, open it as the project folder, and drive the pane the
 # way a double-click would (select a row, call nav_activate).
@@ -1789,26 +1806,41 @@ ok "tabs: Switch to Tab… in View"   [expr {![catch {.m.view index "Switch to T
 ok "find: menu has Find…"           [expr {![catch {.m.find index "Find…"}]}] 1
 ok "find: menu has Search…"         [expr {![catch {.m.find index "Search…"}]}] 1
 ok "find: Find… gone from Edit"     [expr {[catch {.m.edit index "Find…"}]}] 1
-# Help ▸ About rio shows the build id + its commit date (D76): the menu exists, both resolve
-# to non-empty strings, and the modal builds with the id and date on screen, then dismisses.
+# Help ▸ About rio shows the version, the build id + its commit date (D76, D123): the menu
+# exists, each resolves to a non-empty string, and the modal builds with them on screen.
+#
+# The rows are looked up BY LABEL, not by index. D121 had to append `License` last on
+# purpose to keep positional assertions meaning what they said; D123 put `Version` first,
+# which is where it belongs, so the fragility goes rather than the row order bending
+# around it. What the box is asserted to say no longer depends on where it says it.
+proc about_fact {label} {
+	for {set r 0} {[winfo exists .about.facts.k$r]} {incr r} {
+		if {[.about.facts.k$r cget -text] eq $label} { return [.about.facts.v$r cget -text] }
+	}
+	return ""
+}
 ok "help: About rio in Help menu"   [expr {![catch {.m.help index "About rio"}]}] 1
 ok "help: build id non-empty"       [expr {[string length [rio_build_id]] > 0}] 1
 ok "help: build date non-empty"     [expr {[string length [rio_build_date]] > 0}] 1
 about_dialog
 ok "help: About modal built"        [winfo exists .about] 1
-ok "help: About shows the build id" [expr {[string first [rio_build_id] [.about.facts.v0 cget -text]] >= 0}] 1
-ok "help: About shows the date"     [expr {[string first [rio_build_date] [.about.facts.v1 cget -text]] >= 0}] 1
-# …and the licence (D121), last of the facts rows. The name is written in the dialog, so the
-# guard is against the LICENSE file itself rather than against a second copy of the string:
-# relicense the project and forget the About box, and this fails by name. Both halves are
-# checked — the row is labelled License, and what it names is the licence the file grants.
+ok "help: About shows the version"  [about_fact Version] $rio::version
+ok "help: About shows the build id" [expr {[string first [rio_build_id] [about_fact Build]] >= 0}] 1
+ok "help: About shows the date"     [expr {[string first [rio_build_date] [about_fact Date]] >= 0}] 1
+# Version and Build are different facts and both earn their row: the release line, and the
+# exact commit under it. A build that reported the same string for both would mean one of
+# them had quietly become the other.
+ok "help: Version is not the build id" [expr {[about_fact Version] ne [about_fact Build]}] 1
+# …and the licence (D121). The name is written in the dialog, so the guard is against the
+# LICENSE file itself rather than against a second copy of the string: relicense the project
+# and forget the About box, and this fails by name. Both halves are checked — the row is
+# labelled License, and what it names is the licence the file grants.
 set _lic_first ""
 set _lic_fh [open [file join [file dirname [info script]] .. .. LICENSE] r]
 gets $_lic_fh _lic_first
 close $_lic_fh
-ok "help: About has a License row"  [.about.facts.k3 cget -text] "License"
-ok "help: …naming a licence"        [expr {[string length [.about.facts.v3 cget -text]] > 0}] 1
-ok "help: …the one LICENSE grants"  [expr {[string first [.about.facts.v3 cget -text] $_lic_first] >= 0}] 1
+ok "help: About has a License row"  [expr {[about_fact License] ne ""}] 1
+ok "help: …the one LICENSE grants"  [expr {[string first [about_fact License] $_lic_first] >= 0}] 1
 unset _lic_first _lic_fh
 # The About box wears rio's own icon (D117), left of the name. It REUSES an image
 # apply_window_icon already loaded for `wm iconphoto` rather than reading the file again,

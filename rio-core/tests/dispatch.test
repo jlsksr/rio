@@ -162,6 +162,21 @@ test session-hello-identity {session.hello reports protocol version and name} -b
 	list [dict get $r protocol] [dict get $r name]
 } -result {2 rio-core}
 
+# The RELEASE version (D123), additive beside `protocol` and reported as the one literal
+# in version.tcl — not a second copy that could drift from it. `protocol` says whether a
+# client can talk to this core; this says which rio it reached.
+test session-hello-version {session.hello reports rio's release version} -body {
+	set r [dict get [rio::core::call session.hello {}] response result]
+	list [dict get $r version] [expr {[dict get $r version] eq $rio::version}]
+} -result [list $rio::version 1]
+
+# It is a version a client can ORDER — the same shape rio holds extensions to (D107),
+# so "which of these two rios is newer" is answerable rather than a string compare.
+test session-hello-version-semver {the reported version is semver-shaped} -body {
+	regexp {^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$} \
+		[dict get [rio::core::call session.hello {}] response result version]
+} -result 1
+
 test session-hello-ops {session.hello lists registered ops, sorted, including itself} -body {
 	set ops [dict get [rio::core::call session.hello {}] response result ops]
 	list [expr {"session.hello" in $ops}] [expr {"buffer.replace" in $ops}] \

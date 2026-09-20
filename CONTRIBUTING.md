@@ -242,6 +242,7 @@ repository*, below.
 | `author`      | shown    | your name or handle — displayed with every variant             |
 | `description` | shown    | one line about the extension                                   |
 | `provider-api`| provider | (`kind = provider` only) the integer contract version your provider targets — see below |
+| `mode-api`    | no       | (`kind = mode` only) the integer contract version your mode targets. **Omitted means `1`**, so a mode written before the key existed still installs — see below |
 | `entry`       | provider | (`kind = provider` only) which payload file the core sources to load it |
 
 Rules of the tree:
@@ -428,7 +429,9 @@ Two guarantees make a repository you publish today durable:
   kinds nobody has thought of yet — a deploy tool, a protocol bridge, whatever
   comes. A rio that doesn't know a kind still lists the extension, greyed,
   marked "needs a newer rio"; it just won't install it. Only the
-  kind→install-target mapping above is version-specific.
+  kind→install-target mapping above, and the contract integers below, are
+  version-specific — and a too-new contract level greys the same way, for the
+  same reason and with the same wording.
 
 ### Testing your repository
 
@@ -460,6 +463,47 @@ still installed out there. Anything it can't read as a version (a bare date, a
 `v2-final`) is **shown but never compared**: your extension lists and installs
 normally, it just never tells anyone an update is waiting. That is the cost of
 not following the rule, and it is the whole cost.
+
+### Two kinds of version, and which one to bump
+
+rio has **semver versions** and **contract integers**, and they are not
+interchangeable. If you are ever unsure which you are looking at, ask what the
+number is *compared against*.
+
+A **semver version** names a thing people install and says which release of it
+they have. There is one on every extension (`version =`, above) and one on rio
+itself, shown in *Help ▸ About rio* and printed by `--version`. Nothing branches
+on it at runtime; it exists so a human can say what they are running and a
+changelog has something to attach to. Bump it when you ship.
+
+A **contract integer** names a *surface* and says whether two independently
+updated halves can work together. There are three, and each moves only on a
+**break**:
+
+| number | between | where it lives |
+| ------ | ------- | -------------- |
+| `protocol` | a frontend and a core | `rio-core/ops-session.tcl` |
+| `provider-api` | a core and a provider extension | `rio-core/provider.tcl` |
+| `mode-api` | the GUI and a mode extension | `modes/registry.tcl` |
+
+**Adding** to one of these surfaces does not bump it — a new key in a reply, a
+new helper a provider may call. The rule since the protocol was designed is that
+a reader ignores what it does not know and defaults what is missing, so growth
+costs nothing and only an incompatible change is an event worth a number. That
+is also why these are plain integers and not semver: the question asked of them
+is *do I speak this?*, answered with one comparison, and a MINOR/PATCH split
+would mean nothing on a wire.
+
+For an extension author the practical part is short: declare the level you built
+against, and **do not raise it to look current**. A rio implementing less than
+you declare lists your extension greyed, *needs a newer rio*, and will not
+install it — which is the point, and much better than the alternative, a payload
+that loads and then calls something that is not there. Declaring an older level
+is always safe, because these surfaces only grow.
+
+rio's own version is independent of all of this. An extension never declares
+which rio it needs; it declares which **surface** it needs, and that is what
+keeps the two free to move at different speeds.
 
 ### Updating & removing
 

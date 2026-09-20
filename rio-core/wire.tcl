@@ -181,12 +181,16 @@ proc rio::wire::_result_project_replace {result} {
 }
 rio::wire::result_encoder project.replace rio::wire::_result_project_replace
 
-# session.hello: {protocol, name, fsroot} are string leaves; `ops` is an array of
-# strings.
+# session.hello: {protocol, name, version, fsroot} are string leaves; `ops` is an
+# array of strings. Note that this encoder is an ALLOW-LIST — a key the op returns and
+# this proc does not name simply never reaches the wire. So "additive, no protocol
+# bump" (D55, D123) still means editing here; the greeting's own tests are what catch
+# forgetting to.
 proc rio::wire::_result_session_hello {result} {
 	set parts {}
 	lappend parts "\"protocol\":[str [dict get $result protocol]]"
 	lappend parts "\"name\":[str [dict get $result name]]"
+	lappend parts "\"version\":[str [dict get $result version]]"
 	lappend parts "\"ops\":[strarr [dict get $result ops]]"
 	lappend parts "\"fsroot\":[str [dict get $result fsroot]]"
 	return "{[join $parts ,]}"

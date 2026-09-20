@@ -22,7 +22,13 @@
 #     - rio::agent::settings::* (the provider's own durable choices, one flat
 #       hand-editable file per provider),
 #     - the runtime helper rio::llm::http::get (a plain GET, for a models listing).
-# A provider declaring an OLDER api still loads: the surface only grows.
+#   3 - the runtime helper rio::llm::jascii: \u-escapes every non-ASCII character of
+#       an already-valid JSON document, for the parts of a body a provider splices in
+#       ALREADY SERIALISED (a tool's input_schema, a captured tool_use input) and that
+#       therefore never went through jstr.
+# A provider declaring an OLDER api still loads: the surface only grows. Every level
+# belongs HERE, beside the ceiling it raises — a level documented only in CONTRIBUTING
+# is one the file that owns the number does not admit to implementing.
 #
 # The store is one dir per provider: <name>/rio-extension.conf (the D39 manifest,
 # parsed as conf — data, never executed — to decide WHETHER to source) plus its

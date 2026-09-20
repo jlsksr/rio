@@ -107,10 +107,21 @@ Seventeen groups of checks. Each exists because something drifted once.
     box's rows, so that table is a second home for a fact that lives in the dialog. The
     box is really built — it does not block, so unlike check 16 it needs no driving —
     the labels are read off the live widgets, and the table has to match them *in order*
-    (D121 appended `License` last on purpose). The licence the page quotes must be the
-    one the box shows. `smoke.tcl` holds the dialog against the `LICENSE` file; this
-    holds the manual against the dialog, so a relicensing that forgets one of the three
-    fails in code or in prose.
+    (D123 put `Version` first, which is also what retired the positional assertions in
+    `smoke.tcl` — they look a row up by label now, so row order is held in one place
+    instead of two). The licence the page quotes must be the one the box shows.
+    `smoke.tcl` holds the dialog against the `LICENSE` file; this holds the manual
+    against the dialog, so a relicensing that forgets one of the three fails in code or
+    in prose.
+
+    Since D123 it also holds the page's **version** claims, which are a fact of a
+    different kind: one that changes at every release. The page is therefore held to
+    quote **no version number at all** — a literal there would go stale on the next tag,
+    and the box already states it. What the page *may* say is that rio is on `0.x` and
+    what that means for the reader, and that sentence is held to `rio::version`: it must
+    be present while the version starts `0.`, and gone once it does not. The expiry is
+    real and singular — 1.0.0 is exactly the release most likely to ship with a
+    paragraph still promising early days.
 
 Checks 6 and 7 cover the same register row from two directions, because a menu can be
 named two ways and only guarding the quotable one left the failure that prompted them:

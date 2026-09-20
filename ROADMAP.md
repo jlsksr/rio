@@ -422,6 +422,11 @@ for later:
 - **Plugin interface** — *design.* Plugins (LLM providers, extra agent tools) exist,
   but the public interface is still being shaped and will change; not yet a stable
   contribution surface. (Syntax highlighters, by contrast, are stable today.)
+  Since D123 the two surfaces that *can* break say so with a contract integer —
+  `provider-api` and `mode-api` — so a plugin built against a newer rio is greyed
+  "needs a newer rio" instead of failing when it loads. That makes the instability
+  survivable, not over: what is still ahead is the interface settling down, which is
+  also what **1.0.0** is reserved for.
 - **Install / packaging path** — *planned.* A polished install and packaging story
   beyond the dev/server deploy scripts (see [INSTALL.md](INSTALL.md)).
 - **Code of conduct** — *planned.* To be added before rio opens up to outside

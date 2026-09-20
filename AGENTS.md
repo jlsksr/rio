@@ -3899,17 +3899,17 @@ commands, and accelerators; the keymap-refresh block's `entryconfigure` paths mo
 
 ### D76 — A Help menu with About rio (build identity)
 
-rio has no release version yet — **RELEASING.md Gate 2** is where a `v0.1.0-alpha` git tag
-will come from, "so a tester can say exactly which rio they're running". Until then a tester
-still needs to name their build, so a **Help** menu (last/rightmost, the Windows/VSCode
+rio had no release version when this was decided — **RELEASING.md Gate 2** was where one
+would come from, "so a tester can say exactly which rio they're running". Until then a tester
+still needed to name their build, so a **Help** menu (last/rightmost, the Windows/VSCode
 convention) gets an **About rio** modal that shows the identity we *do* have: the **short
 commit** of the checkout.
 
 - **Where the id comes from.** `git describe --tags --always`, run against rio's **own**
   source dir (`[file dirname $::rio_self]`, the normalized script path) — deliberately not the
   user's project, and not the core (which may be a different build on another machine, or
-  remote). `--always` yields the abbreviated commit today; the moment Gate 2 tags a release,
-  the *tag* shows instead — About upgrades itself for free. A git-less install falls back to
+  remote). `--always` yields the abbreviated commit until a release is tagged, and the *tag*
+  the moment one is — About sharpens itself for free. A git-less install falls back to
   `"unknown"`. Computed once and cached (`::rio_build`): About is rare, so nothing shells out
   at startup. This is the GUI shelling out to git directly — the one place that's right, since
   it's a fact about the local install, unlike the core-owned `git.*` project ops (D7). A
@@ -3925,6 +3925,12 @@ commit** of the checkout.
 
 Menubar is now **File · Edit · View · Find · Compare · Settings · Help**. Pure GUI change; no
 core op, no new theme role.
+
+*(The premise closed in **D123**: rio has a release version, `0.1.0` — plain, not the
+`-alpha` this entry anticipated — and About gained a **Version** row above Build. The build
+id was not replaced by it and did not need to be: Version names the release line, Build the
+exact commit under it, and between releases Build is still the precise one. Everything this
+entry decided about where the id comes from stands unchanged.)*
 
 ---
 
@@ -7113,6 +7119,134 @@ repository; for an extension it is the file. Tests are not stamped — they stay
 consent is given. But it is a manifest-contract change, it would be advisory (nothing can
 verify a claim in a `.conf`), and the notice in the payload is the part that has legal
 work to do. It stays deferred, now with a reason rather than by omission.
+
+### D123 — rio is 0.1.0, and every version number in the tree has a job
+
+**The gap.** rio had no version. Not an unset one — no constant, no `VERSION`, no
+`--version`, nothing. *Help ▸ About rio* showed `git describe --tags --always`, which
+with no tag in the repository is a bare commit hash, and D76's own opening sentence
+admitted the hole: *"rio has no release version yet; the first alpha tag is a release gate
+in RELEASING.md."* This is that gate. A tester who hits a bug has nothing to name, a
+changelog has nothing to attach an entry to, and "fixed in the next one" cannot be said.
+
+**What made it a naming job rather than a design one.** rio already had two versioning
+idioms and had been using both correctly for a year: a monotonic integer at each seam that
+can break (`protocol`, D11; `provider-api`, D66) and semver on each independently-shipped
+artifact (an extension's `version`, D107). What was missing was the number for rio itself,
+and — more corrosively — anywhere that said *which idiom answers which question*, so the
+next person to add a seam could only guess.
+
+**The decision (jka, 2026-09-20).** Two kinds of number, named, with rio's own added.
+
+A **release version** is semver and answers *which rio is this?* — **one** number for rio
+as a whole, core and GUI and the bundled syntax and themes, one git tag per release,
+nothing branching on it at runtime. The first is **`0.1.0`**. RELEASING had drafted
+`0.1.0-alpha`; the suffix lost because semver's `0.y.z` band already *means* initial
+development, so `-alpha` restates it and then owes a promotion step that buys nothing. The
+alpha framing is prose, and Gate 3 already puts it in the README and the release notes
+where a reader will actually meet it.
+
+A **contract version** is a monotonic integer and answers *can these two halves talk?* —
+one per seam between independently updatable parties, compared with a single equality or
+ceiling test. `protocol` (2) and `provider-api` (3) were already this. `mode-api` (1) is
+new, below.
+
+**Why the seams are not semver, argued once so it needn't be again.** A client asks a
+contract exactly one question and answers it with one comparison. Semver would offer an
+ordering nobody reads and a MINOR/PATCH split with no meaning on a wire — and the split
+would be *empty*, because the rule since D11 is that an additive change does not bump at
+all (`fsroot`, D55; the D120 switch; the `version` key this decision adds). The only event
+these numbers record is a break. That is what an integer is.
+
+**Why one release version and not one per component.** Weighed and refused. Core and GUI
+are genuinely different builds only when the GUI reaches a remote core over `--connect`
+(D29/D30) — and that case is *already* governed by `protocol`, which answers it precisely.
+A second semver on each half would look like a compatibility statement without being one:
+`core 0.2.1` against `gui 0.2.0` tells a reader nothing the protocol integer had not
+already said, less reliably. One repository, one tag, one changelog, one test run.
+
+**One literal, and no guard needed for once.** `rio-core/version.tcl` holds it, and also
+holds the doctrine above — the file exists as much to be *read* as to define a constant.
+The GUI sources it from the sibling tree exactly as it already sources `wire.tcl` and
+`conf.tcl`, so the two halves of a checkout cannot disagree and there is no second home to
+hold in step. That is the §7 register rule satisfied by construction rather than by a test,
+which is the better outcome whenever it is available.
+
+**Where the number surfaces.** `session.hello` reports it beside `protocol` — additive, no
+bump, on D55's terms — so the GUI learns which rio is on the far end of a `--connect`, the
+one thing `protocol` cannot tell it. *About* gains a **Version** row **first**, above
+Build: Version names the release line, Build names the exact commit under it, and between
+releases Build is the precise one, so both earn a row. The row names the core's version
+too, but *only when it differs*, since a spawned core is always this very tree and a second
+permanent row would repeat itself on every local run. A core too old to report one at all
+leaves the field empty and About says **nothing extra** — silence, not a claim that the two
+match, which is the same fallback `fsroot` gets and is asserted rather than assumed. Both
+entry points answer `--version`.
+
+**A trap the tests caught, worth recording.** `rio::wire`'s per-op encoders are an
+**allow-list**: a key an op returns and the encoder does not name never reaches the wire.
+So "additive, no protocol bump" still means editing `wire.tcl`, and the greeting's own test
+is what fails if you forget. Nothing about D55 said this, and nothing would have until the
+next additive key went silently missing.
+
+**And a second thing found by going looking.** `rio-core/provider.tcl` described
+`provider-api` levels 1 and 2 while its `api_version` had already been raised to **3** —
+level 3 (`rio::llm::jascii`, D112) existed only in CONTRIBUTING. Written up where it
+belongs, with the standing rule that produced the gap: **a level belongs beside the ceiling
+it raises.** A file that owns a contract number and does not describe what its top level
+grants is a file an extension author cannot write against, and CONTRIBUTING is the second
+home, not the first. `modes/registry.tcl` was given the same shape from the start, so
+`mode-api` cannot repeat it.
+
+**`mode-api`, the gap this found.** A provider declares `provider-api` and is refused by
+the core when it needs more than the core implements. A mode declared nothing — yet the
+mode surface is the one ROADMAP explicitly says *will change*, and its failure mode was the
+worst available: `modes_load` catches a failing `source` and writes to a stderr that `wish`
+on Windows has no console for (D116's own argument), so a mode built against a newer rio is
+not greyed, not refused, but **silently absent** from the Editing Mode list. It now declares
+`mode-api`, level 1 freezing `rio::modes::register {name label attach detach}`, the attach /
+detach duties, the `RioMode` tag's fixed precedence, and the group-proxy rule — a surface
+that was already written down in `modes/registry.tcl` and only needed a number attached.
+
+**Absent means 1, unlike `provider-api`, and the asymmetry is the point.** The core has
+*required* `provider-api` since providers became installable, so there was never a provider
+without one. Modes have shipped without the key since D38. Making it mandatory now would
+grey `vi` and `emacs` out of the live repository for the whole window between rio 0.1.0
+shipping and every manifest being re-signed — a self-inflicted outage in exchange for
+nothing, since the key only starts carrying weight when there is a `mode-api = 2`. So
+absence is read as 1: D19's forward-compatibility rule, applied to rio's own manifest.
+
+**Generalised, not special-cased.** `too_new` was already a plain key on a variant dict;
+only its *setting* was provider-shaped. One `ext_kind_api` table now maps a kind to its
+manifest key, its ceiling and its default, `ext_variant_installable` just honours `too_new`,
+and a kind with no contract sets nothing and can never be too new. That closed a real hole
+on the way: **`ext_install` never checked `too_new` at all.** A too-new provider was stopped
+by the core's own `put` — a check a mode, installed frontend-side with no core in the path,
+does not get. The gate now sits at the one place every install funnels through.
+
+**Guards.** The spawned core in `smoke.tcl` reports its own `rio::version` over a real
+socket and the GUI holds it against the literal it sourced, so the two halves are checked
+through the actual path rather than by comparing two strings. `docs.tcl` check 17 holds the
+manual's About table to the live dialog *in order* — and now also holds the page to quote
+**no version number at all** (a literal there goes stale at the next tag) while requiring
+its `0.x` sentence exactly while the version starts `0.`, an expiry that is real and
+singular: 1.0.0 is precisely the release most likely to ship with a paragraph still
+promising early days. Both were proven by injecting drift. `repos.tcl` covers a mode too
+new, a mode at the ceiling, and — the case that must never regress — a mode with no key.
+
+**What 1.0.0 will mean**, written down now so it is not decided by drift: the
+extension/plugin interface stops being *will change* and the protocol is something a
+third-party client can build against. Until then rio stays on `0.x`.
+
+**Left out, deliberately.** **`theme-api` and `syntax-api`** — a theme binds to the
+additive D24 role table and ROADMAP calls syntax stable today, so both would be numbers
+nothing ever checks; only a surface that can break earns one. **A version field in the
+config/theme format (D21/D24) or the repository index (D39)** — both are additive-only by
+construction, unknown keys ignored and unknown kinds listed-greyed, which is D19 already
+doing the work a format version would. **Per-component core and GUI versions** — argued
+above. **A `CHANGELOG.md`** — Gate 2's other half, still open, and content work rather than
+a decision. **Tagging** — `v0.1.0` waits for the remaining gates; About turns the tag into
+its Build row on its own, with no code change (D76).
 
 ## 4. "Simple debug/terminal" — scope decision
 

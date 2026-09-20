@@ -99,8 +99,15 @@ ok "start: fsroot is listable"        [dict get [rbrowse_rows_for $::core_fsroot
 # `fsroot` is additive, so a core older than it simply omits the key. The GUI must keep
 # whatever it had rather than blanking the browser's start directory or erroring — the
 # D19 forward-compatibility rule applied to the protocol. Stub a greeting without it.
+#
+# The same stub omits `version` (D123), which is additive on identical terms, so it
+# holds BOTH fallbacks at once: an old core leaves fsroot alone and reports no version
+# at all. The empty string matters — it must not be read as "the same version as this
+# GUI", which is why About says nothing extra rather than claiming a match.
 set ::saved_fsroot $::core_fsroot
 set ::core_fsroot "SENTINEL"
+set ::saved_corever $::core_version
+set ::core_version "SENTINEL"
 rename rio_call _real_rio_call
 proc rio_call {op params {timeout_ms 0}} {
 	if {$op eq "session.hello"} {
@@ -112,7 +119,10 @@ proc rio_call {op params {timeout_ms 0}} {
 hello_core
 rename rio_call {} ; rename _real_rio_call rio_call
 ok "start: old core leaves fsroot alone" $::core_fsroot "SENTINEL"
+ok "start: old core reports no version"  $::core_version ""
+ok "start: …so About makes no claim"     [about_version] $rio::version
 set ::core_fsroot $::saved_fsroot
+set ::core_version $::saved_corever
 open_folder $T
 ok "start: project open -> root" [rbrowse_start ""] $T
 

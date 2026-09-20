@@ -128,13 +128,27 @@ is, and a few facts about the copy in front of you:
 
 | Row | What it tells you |
 | --- | ----------------- |
+| `Version` | which release of rio this is |
 | `Build` | which build of the window this is, taken from the source it was started from — `unknown` for a copy with no git history beside it |
 | `Date` | when that build was made |
 | `Protocol` | the version of the protocol this window speaks to its core |
 | `License` | the licence rio is under — `MIT` |
 
-The first three describe the build, and are the ones worth quoting in a bug
-report. The last is about your copy: rio is under the MIT License, so you may use
+`Version` and `Build` answer different questions, and a bug report is best with
+both. `Version` names the release, which is what a changelog and a "fixed in…"
+are written against. `Build` names the exact commit underneath it, which between
+releases is the precise one. If you are running rio against a core on another
+machine (*File ▸ Connect to Remote Core…*) and that core is a different release,
+`Version` says so too, naming both — the window's, then the core's in brackets.
+
+rio is on `0.x` on purpose. It means what it means everywhere else: early days,
+and things may still change between releases.
+
+You can also ask without opening rio — `rio-gui.tcl --version` and
+`rio-core/server.tcl --version` both print it and exit.
+
+The first four rows describe the build. The last is about your copy: rio is under
+the MIT License, so you may use
 it, change it, build on it and pass it on, as long as the copyright notice and the
 licence text travel with the copies you hand out. The full text is in
 [LICENSE](../LICENSE); if you are sending a change back rather than taking one

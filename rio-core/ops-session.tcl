@@ -15,9 +15,14 @@ namespace eval rio::ops {
 	variable protocol 2
 }
 
-# session.hello {?...?} -> {protocol, name, ops, fsroot}
+# session.hello {?...?} -> {protocol, name, version, ops, fsroot}
 #   protocol — the version above; the client must speak it.
 #   name     — this implementation's identity.
+#   version  — this core's RELEASE version (rio::version, D123). Not a contract:
+#              nothing branches on it. `protocol` says whether the two can talk;
+#              this says WHICH rio is on the far end, which is the fact a bug
+#              report about a --connect session actually needs and the one thing
+#              the frontend could not otherwise know about a core it did not spawn.
 #   ops      — the ops actually registered right now (live, never stale).
 #   fsroot   — the root of THIS core's filesystem: "/" on POSIX, "C:/" on Windows.
 # Conventionally a client's first request. Params (the client's own capabilities)
@@ -30,12 +35,13 @@ namespace eval rio::ops {
 # core needed "C:/" and got an unlistable path. The core is the only party that knows,
 # so it says. Additive, so it does NOT bump `protocol`: an older core simply omits the
 # key and a client falls back, which is the D19 forward-compatibility rule applied to
-# the protocol itself.
+# the protocol itself. `version` (D123) is additive on exactly the same terms.
 proc rio::ops::session_hello {params} {
 	variable protocol
 	return [dict create result [dict create \
 		protocol $protocol \
 		name     rio-core \
+		version  $rio::version \
 		ops      [rio::dispatch::opnames] \
 		fsroot   [file normalize /]]]
 }

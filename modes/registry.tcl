@@ -29,6 +29,23 @@
 # mode; a mode binding ending in `break` wins over Tk's defaults; a mode binding
 # that does not `break` falls through to them. A later registration for the same
 # name WINS, which is what makes a user drop-in replace a shipped mode.
+#
+# `mode-api` — the VERSIONED contract an installable mode declares (D123), the way a
+# provider declares `provider-api` (rio-core/provider.tcl). ROADMAP calls this surface
+# one that WILL change, which is exactly why it carries a number: without one, a mode
+# built against a newer rio fails inside `source` and modes_load can only write to a
+# stderr that `wish` on Windows has no console for (D116) — so the mode silently is not
+# in the Editing Mode list. With one, the Extensions window greys it "(needs a newer
+# rio)" before it is ever installed.
+#
+#   1  everything above: rio::modes::register {name label attach detach}, the attach /
+#      detach duties and their idempotence, the RioMode tag's fixed precedence, and the
+#      rule that every edit reaches the core through the group proxy (%W) like any other
+#      keystroke. ::mode_api_max in rio-gui.tcl is the ceiling this rio implements.
+#
+# A manifest with NO `mode-api` is read as 1 — modes have shipped without the key since
+# D38, so absence is the D19 fallback rather than a refusal (D123). A new level is added
+# here, in the same words as the surface it freezes, or authors cannot target it.
 
 namespace eval rio::modes {
 	variable modes {}   ;# name -> {label <text> attach <cmdprefix> detach <cmdprefix>}

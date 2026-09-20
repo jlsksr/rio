@@ -71,9 +71,18 @@ set ::rio_dir [file dirname [info script]]
 set ::rio_self [file normalize [info script]]   ;# this script, for spawning a new window
 source [file join $::rio_dir .. rio-core wire.tcl]
 source [file join $::rio_dir .. rio-core conf.tcl]  ;# repository manifests are conf DATA (D21/D39)
+source [file join $::rio_dir .. rio-core version.tcl] ;# rio::version — ONE literal, shared (D123)
 
 set ::core_endpoint "" ;# host:port when attached to a daemon (remote); "" when local (D30)
 set ::last_connect  "" ;# last host:port typed into "Connect to Remote Core…" (dialog seed)
+
+# --version, before anything opens a window or spawns a core: a packager and a bug
+# report both want the number without launching a GUI. The core answers the same flag
+# (server.tcl), and both print the one literal above.
+if {[lsearch -exact $argv --version] >= 0} {
+	puts "rio $rio::version"
+	exit 0
+}
 
 if {![info exists ::connect_to]} { set ::connect_to "" }
 set ci [lsearch -exact $argv --connect]
@@ -724,6 +733,13 @@ proc rio_result {op params} {
 set ::rio_protocol  2
 set ::core_protocol ""   ;# what the attached core reported (for the title of a bug report)
 
+# The RELEASE version of the attached core (its session.hello `version`, D123). Distinct
+# from $rio::version, which is THIS checkout's: a spawned core is always the same tree,
+# but one reached over --connect can be any build, and then the two differ and About says
+# so. "" for a core too old to report it — the D19 rule, so absence is a fallback, never
+# an error.
+set ::core_version ""
+
 # The root of the CORE's filesystem, from its session.hello (re-read on reconnect).
 # The GUI must not compute this: it browses the core's disk (D30), and the core may be
 # a different platform — "/" is right for a POSIX core and unlistable on a Windows one.
@@ -769,6 +785,11 @@ proc hello_core {{fatal 0}} {
 	if {[dict exists $resp result fsroot] && [dict get $resp result fsroot] ne ""} {
 		set ::core_fsroot [dict get $resp result fsroot]
 	}
+	# The core's release version (D123), additive on the same terms — a core that predates
+	# it omits the key and About simply has nothing extra to say. Re-read on every greeting,
+	# so a reconnect to a DIFFERENT core replaces it rather than keeping a stale claim.
+	set ::core_version [expr {[dict exists $resp result version] \
+		? [dict get $resp result version] : ""}]
 	if {$::core_protocol ne $::rio_protocol} {
 		report_error "This core speaks wire protocol $::core_protocol, but this GUI expects $::rio_protocol — mixed versions may misbehave. Update the older side." protocol_mismatch
 	}
@@ -3682,11 +3703,12 @@ proc switch_tab_dialog {} {
 	if {$id ne ""} { activate $id }
 }
 
-# rio's own build identity for Help ▸ About rio (D76). rio has no release version yet
-# (RELEASING.md Gate 2 will git-tag one); until then the short commit of the checkout this
-# GUI runs from is the identity — "so a tester can say exactly which rio they're running".
+# rio's own build identity for Help ▸ About rio (D76). This is NOT rio's version — that
+# is $rio::version (D123), the row above it. The two answer different questions and both
+# are worth showing: Version says which RELEASE LINE this is, Build says which exact
+# COMMIT, and between releases Build is the precise one.
 # `git describe --tags --always` gives the *tag* once one exists and the abbreviated commit
-# otherwise, so About upgrades itself for free at release. Run against rio's OWN source dir
+# otherwise, so at a release Build sharpens itself for free. Run against rio's OWN source dir
 # ([file dirname $::rio_self], the normalized script path) — not the user's project, and not
 # the core, which may be a different build on another machine. An installed copy with no git
 # metadata (or no git) falls back to "unknown". Computed once and cached; About is rare, so
@@ -3717,14 +3739,33 @@ proc rio_build_date {} {
 	return $::rio_build_date
 }
 
+# What About's Version row says (D123). Normally just this checkout's release version —
+# a spawned core is the same tree, so naming it twice would be noise. But a core reached
+# over --connect (D29/D30) can be any build, and when it reports a DIFFERENT version that
+# is precisely the fact a bug report needs, so the row carries it: "0.1.0 (core 0.1.1)".
+# A core too old to report one leaves ::core_version empty and says nothing, which is the
+# D19 fallback rather than a claim that the versions match.
+proc about_version {} {
+	if {$::core_version ne "" && $::core_version ne $rio::version} {
+		return "$rio::version (core $::core_version)"
+	}
+	return $rio::version
+}
+
 # Help ▸ About rio (D76): a small themed modal with rio's name, one-line description, and the
-# build id, its commit date, the wire-protocol version (all handy in a bug report — see
-# ::rio_protocol) and the licence (D121) — the one fact here that is about the copy in front of
-# you rather than this build, and the reason it is legible without going back to the repository.
+# release version (D123), the build id, its commit date, the wire-protocol version (all handy
+# in a bug report — see ::rio_protocol) and the licence (D121) — the one fact here that is
+# about the copy in front of you rather than this build, and the reason it is legible without
+# going back to the repository.
 # The licence name is written here rather than read from LICENSE: the file need not sit beside a
 # deployed GUI, and smoke.tcl holds this string to it. Info is
 # static labels (muted), the lone control is Close; Esc/Return dismiss. Non-blocking (grab but
 # no tkwait) — it just informs, it returns nothing.
+#
+# Version comes FIRST: it is the coarsest and most quotable fact, and the one a bug report
+# leads with. It names the core too, but only when the core's differs (about_version) —
+# a second permanent row would repeat the same number on every local run, since a spawned
+# core is always this very tree.
 proc about_dialog {} {
 	set w .about
 	destroy $w
@@ -3747,8 +3788,8 @@ proc about_dialog {} {
 	# The static facts, as a dim two-column block so they read as info, not controls.
 	frame $w.facts -background [dict get $c ui.bg]
 	set r 0
-	foreach {k v} [list Build [rio_build_id] Date [rio_build_date] Protocol $::rio_protocol \
-		License "MIT"] {
+	foreach {k v} [list Version [about_version] Build [rio_build_id] \
+		Date [rio_build_date] Protocol $::rio_protocol License "MIT"] {
 		label $w.facts.k$r -text $k -font RioUIFont -anchor e \
 			-background [dict get $c ui.bg] -foreground $mute
 		label $w.facts.v$r -text $v -font RioUIFont -anchor w \
@@ -7855,6 +7896,11 @@ proc session_restore {} {
 
 set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed ?anysource?} (ledger_load)
 set ::provider_api_max 1 ;# highest provider-api the core loads (provider.list; D66)
+# Highest mode-api THIS GUI implements (D123, modes/registry.tcl). A literal, not a
+# core round-trip like provider_api_max above: a provider is sourced into the core, so
+# the core is the party that knows its ceiling, but a mode is sourced into the FRONTEND
+# — this file is the one that knows.
+set ::mode_api_max 1
 set ::repo_variants {}  ;# every installable variant found by the last scan
 set ::repo_dead {}      ;# {url error code} per unreachable/non-repository source
 set ::repo_srcinfo {}   ;# source url -> {name description} from its manifest
@@ -8506,15 +8552,22 @@ proc repo_source_scan {base} {
 			author [expr {[dict exists $top author] ? [dict get $top author] : "unknown"}] \
 			description [expr {[dict exists $top description] ? [dict get $top description] : ""}] \
 			files $files manifest [dict get $mr text]]
-		# A provider (D66) installs CORE-side and is sourced into the core, so it
-		# carries its versioned contract (provider-api) and its entry file, and is
-		# greyed when it needs a newer rio than this core loads.
-		if {$kind eq "provider"} {
-			set api [expr {[dict exists $top provider-api] ? [dict get $top provider-api] : ""}]
+		# A kind whose surface carries a VERSIONED contract declares which level it
+		# needs, and is greyed when that is past what this rio implements (D66, D123).
+		# ext_kind_api knows the manifest key and the ceiling per kind; a kind with no
+		# contract (syntax, theme) sets nothing and is never too new.
+		set contract [ext_kind_api $kind]
+		if {$contract ne ""} {
+			lassign $contract key ceiling dflt
+			set api [expr {[dict exists $top $key] ? [dict get $top $key] : $dflt}]
 			dict set variant api $api
-			dict set variant entry [expr {[dict exists $top entry] ? [dict get $top entry] : ""}]
 			dict set variant too_new [expr {
-				![string is integer -strict $api] || $api > $::provider_api_max}]
+				![string is integer -strict $api] || $api > $ceiling}]
+		}
+		# A provider (D66) installs CORE-side and is sourced into the core, so unlike
+		# every other kind it names the one file the core will source.
+		if {$kind eq "provider"} {
+			dict set variant entry [expr {[dict exists $top entry] ? [dict get $top entry] : ""}]
 		}
 		lappend exts $variant
 	}
@@ -8675,19 +8728,39 @@ proc ext_kind_dir {kind} {
 	return ""
 }
 
+# The VERSIONED CONTRACT a kind binds to, as {manifest-key ceiling default}, or ""
+# for a kind that has none (D123). Only a surface that can BREAK gets one: a provider
+# is sourced into the core (D66) and a mode into the frontend (modes/registry.tcl), and
+# the mode surface is the one ROADMAP says will change. A theme binds to the additive
+# D24 role table and syntax is stable today, so a number there would be one nothing
+# ever checks.
+#
+# The DEFAULT is the difference between the two. A provider with no `provider-api` is
+# refused outright (the core has required it since providers became installable, so ""
+# fails the integer test below and greys the row). A mode with no `mode-api` is read as
+# 1: modes have shipped without the key since D38, and making it mandatory now would
+# grey `vi` and `emacs` out of the live repository until every manifest is re-signed.
+# That is the D19 forward-compatibility rule, and it costs nothing — the key only
+# starts carrying weight when there is a mode-api 2.
+proc ext_kind_api {kind} {
+	switch -- $kind {
+		provider { return [list provider-api $::provider_api_max ""] }
+		mode     { return [list mode-api     $::mode_api_max     1] }
+	}
+	return ""
+}
+
 # Whether THIS rio can install a given variant. A kind it doesn't know can't be
-# installed (forward-compat); a provider (D66) additionally can't if it needs a
-# newer provider-api than the core loads (`too_new`, set at scan time).
+# installed (forward-compat); nor can one whose declared contract level is past what
+# this rio implements (`too_new`, set at scan time by ext_kind_api's ceiling).
 proc ext_variant_installable {v} {
 	if {![ext_kind_known [dict get $v kind]]} { return 0 }
-	if {[dict get $v kind] eq "provider" && [dict exists $v too_new] && [dict get $v too_new]} {
-		return 0
-	}
+	if {[dict exists $v too_new] && [dict get $v too_new]} { return 0 }
 	return 1
 }
 
 # A row is greyed ("needs a newer rio") when none of its variants can be installed
-# here — an unknown kind, or a provider every variant of which is too new.
+# here — an unknown kind, or one whose every variant needs a newer contract level.
 proc ext_row_installable {row} {
 	foreach v [dict get $row variants] {
 		if {[ext_variant_installable $v]} { return 1 }
@@ -8722,6 +8795,17 @@ proc ext_install {variant {consented 0}} {
 	dict with variant {}  ;# source dir name kind version author description files
 	if {![ext_kind_known $kind]} {
 		report_error "'$name' has kind '$kind', which this rio doesn't know — it needs a newer rio."
+		return 0
+	}
+	# The contract level, refused HERE and not only greyed in the list (D123). Greying is
+	# the UI telling the user; this is the enforcement, and until D123 there was none: a
+	# too-new PROVIDER was stopped by the core's own `put`, which is a check a mode — a
+	# frontend drop-in with no core in the path — does not get. Refusing at the one place
+	# every install funnels through covers both, and any kind that gains a contract later.
+	if {[dict exists $variant too_new] && [dict get $variant too_new]} {
+		lassign [ext_kind_api $kind] _key ceiling
+		report_error "'$name' needs $_key [dict get $variant api], but this rio implements\
+			$ceiling — it needs a newer rio."
 		return 0
 	}
 	set key $kind/$name
@@ -12291,9 +12375,9 @@ menu .m.settings.editmode -tearoff 0
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
 # Help is the last (rightmost) menu, the Windows/VSCode convention (D76). Contents… opens the
-# manual in rio itself (D99) and About names the build, so a tester can say which rio they're
-# running (there is no release version yet; RELEASING.md Gate 2 will git-tag one, which About
-# then shows instead). Contents first, About last — the Windows order.
+# manual in rio itself (D99) and About names the version and the build, so a tester can say
+# which rio they're running (D123 — the release line, and the exact commit under it).
+# Contents first, About last — the Windows order.
 menu .m.help -tearoff 0
 .m add cascade -label Help -menu .m.help
 .m.help add command -label "Contents…" -command help_window

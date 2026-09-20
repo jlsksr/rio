@@ -659,6 +659,60 @@ ok "provider: the core dropped it" \
 ok "provider: no longer installed"  [dict exists $::ext_installed provider/pp] 0
 set ::fix($U/index) [list 200 "up-syntax\nup2-syntax\nfresh-syntax\n"]
 
+# --- mode-api: the same contract check, on the mode surface (D123) --------------------
+# A mode is sourced into the FRONTEND, and its surface is the one ROADMAP says will
+# change — so it declares `mode-api` and is greyed "(needs a newer rio)" when it needs
+# more than ::mode_api_max, exactly as a provider is against the core's ceiling. Without
+# this the failure is a `source` error on stderr and a mode that is silently absent.
+#
+# Three cases, and the third is the one that matters most: modes have shipped without
+# the key since D38, so ABSENT must mean 1, not "refuse". Anything else would grey vi
+# and emacs out of the live repository until every manifest is re-signed.
+set ::fix($U/newmode-mode/rio-extension.conf) [list 200 \
+	"name = newmode\nkind = mode\nmode-api = 2\nversion = 1.0.0\nauthor = alice\nfiles = newmode.tcl"]
+set ::fix($U/newmode-mode/newmode.tcl) [list 200 "# needs a mode surface this rio lacks"]
+set ::fix($U/okmode-mode/rio-extension.conf) [list 200 \
+	"name = okmode\nkind = mode\nmode-api = 1\nversion = 1.0.0\nauthor = alice\nfiles = okmode.tcl"]
+set ::fix($U/okmode-mode/okmode.tcl) [list 200 \
+	{rio::modes::register okmode {OK Mode} {apply {tag {}}} {apply {tag {}}}}]
+set ::fix($U/oldmode-mode/rio-extension.conf) [list 200 \
+	"name = oldmode\nkind = mode\nversion = 1.0.0\nauthor = alice\nfiles = oldmode.tcl"]
+set ::fix($U/oldmode-mode/oldmode.tcl) [list 200 \
+	{rio::modes::register oldmode {Old Mode} {apply {tag {}}} {apply {tag {}}}}]
+set ::fix($U/index) [list 200 \
+	"up-syntax\nup2-syntax\nfresh-syntax\nnewmode-mode\nokmode-mode\noldmode-mode\n"]
+repo_scan_all
+
+ok "mode-api: a too-new mode is still LISTED" \
+	[expr {[variant newmode $::U] ne ""}] 1
+ok "mode-api: …and marked too new"      [dict get [variant newmode $::U] too_new] 1
+ok "mode-api: …so it cannot install"    [ext_variant_installable [variant newmode $::U]] 0
+set before [llength $::mb_log]
+ok "mode-api: install refused"          [ext_install [variant newmode $::U]] 0
+ok "mode-api: honest reason"            [string match "*needs a newer rio*" [mb_last]] 1
+ok "mode-api: no consent asked"         [llength $::mb_log] [expr {$before + 1}]
+
+ok "mode-api: a supported level is not too new" [dict get [variant okmode $::U] too_new] 0
+set ::mb_answers {yes}
+ok "mode-api: …and installs"            [ext_install [variant okmode $::U]] 1
+ok "mode-api: …and registered"          [rio::modes::exists okmode] 1
+
+# Absent means 1 (the D19 fallback). This is the case that must not regress: a mode
+# published before the key existed — every mode before D123 — stays installable.
+ok "mode-api: absent reads as 1"        [dict get [variant oldmode $::U] api] 1
+ok "mode-api: …and is not too new"      [dict get [variant oldmode $::U] too_new] 0
+set ::mb_answers {yes}
+ok "mode-api: …and still installs"      [ext_install [variant oldmode $::U]] 1
+
+# A kind with NO contract declares nothing and can never be too new — a number on the
+# additive theme role table or on syntax would be one nothing ever checks.
+ok "mode-api: a syntax carries no contract" [dict exists [variant up $::U] too_new] 0
+
+ok "mode-api: removed cleanly"          [ext_remove mode okmode] 1
+ok "mode-api: …and the old one too"     [ext_remove mode oldmode] 1
+set ::fix($U/index) [list 200 "up-syntax\nup2-syntax\nfresh-syntax\n"]
+repo_scan_all
+
 # --- the start-up check ---------------------------------------------------------------
 up_publish $U up 1.5.0
 repo_scan_all

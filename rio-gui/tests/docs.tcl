@@ -1016,5 +1016,17 @@ ok "the manual quotes the licence the About box shows" \
 	[expr {[lsearch -exact [lmap {_ c} [regexp -all -inline {`([^`]+)`} $licrow] {set c}] \
 		$lic] >= 0}] 1
 
+# The page tells the reader rio is on `0.x` and what that means — early days, things may
+# change (D123). That is a claim about the version, with a real expiry: it stops being
+# true at 1.0.0, which is the one release most likely to go out with the paragraph still
+# sitting there saying the opposite. So the page is held to the number rather than left
+# to be noticed. The page must NOT state the version itself — a literal here would be a
+# second home going stale at every release, which is why the prose names no number.
+set on_zerox [string match "0.*" $rio::version]
+ok "the manual's 0.x note matches the version" \
+	[string match "*rio is on `0.x` on purpose*" $gs] [expr {$on_zerox ? 1 : 0}]
+ok "…and the page quotes no version of its own" \
+	[regexp {`[0-9]+\.[0-9]+\.[0-9]+} $gs] 0
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]
