@@ -181,6 +181,19 @@ Each entry notes its state:
   This entry previously also carried *"`docs/` installing"* — a leftover from D91, written
   against a packaging path that does not exist. rio is deployed by cloning it, so `docs/` is
   already beside the code wherever it runs; there was nothing to install. Dropped, not done.
+- **`fs.read`'s doors have no guard yet** — *gap* (the other half of AGENTS.md **D125**,
+  which guarded `file.open` — the door a person actually walks through). Three callers
+  still read a whole file unbounded: the **agent's `read` tool**
+  (`rio-core/agent-tools.tcl`, both the `fs.read` primitive and `_current_text`), and the
+  **compare/diff view** (`rio-gui/rio-gui.tcl`, `fs.read` at the side-by-side load). The
+  agent case is the sharper one — its 100 KB cap is applied to the *result*, after the
+  whole file has already been read and decoded, so pointing it at a build log stalls the
+  core for the full read and then returns 100 KB anyway. What makes this its own decision
+  rather than a second line of D125: **declining is the wrong answer for at least one
+  caller.** The agent should get a *prefix* — the first 100 KB off disk, truncated exactly
+  as today but without paying for the rest — which needs a bounded-read primitive beside
+  `rio::fs::read`, while the compare view probably wants D125's question. One rule, two
+  answers, so it wants thinking through rather than pattern-matching.
 - **Opening a very large file is still slow once you say yes** — *deferred* (builds on
   AGENTS.md **D125**, which stopped rio *silently* crawling on a stray double-click: a file
   over 8 MB or one that looks binary is now a question — *"…is 412 MB. Open it anyway?"* —
