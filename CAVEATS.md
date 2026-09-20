@@ -222,7 +222,7 @@ design limit that surprises, append it to the matching section.
   asked about. A real binary is caught — object files, archives, images and databases
   all carry a NUL within the first few bytes, let alone the first 8 KB.
 - **Mitigation in rio.** The question is the mitigation: the cost is stated in the
-  dialog (*"…is 412 MB — large enough that opening it may make rio slow to respond"*)
+  dialog (*"…is 1.2 GB — large enough that opening it may make rio slow to respond"*)
   before you pay it, and a forced open starts as **Plain Text** so the highlighter
   doesn't add its share — *View ▸ Language…* turns it back on. For the deep-NUL case,
   the same menu sets the buffer to Plain Text by hand.

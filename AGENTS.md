@@ -7341,8 +7341,11 @@ not*, **ask** rather than refuse or plough on. `rio::fs::classify` does the look
 stat, then at most 8 KB off the front. Over the caller's budget → `too_large`; a NUL in
 that prefix → `binary`. `file.open` runs it first and declines with a taxonomy code of the
 same name, carrying the size in words (`rio::fs::human_size`). The GUI turns that into
-*"core.dump is 412 MB — large enough that opening it may make rio slow to respond. Open it
-anyway?"*, and a Yes re-issues the op with an additive `force`.
+*"core.dump is 1.2 GB — large enough that opening it may make rio slow to respond. Open it
+anyway?"*, and a Yes re-issues the op with an additive `force`. (Sizes quoted in this entry
+are strings `human_size` actually produces — it counts in binary units under the customary
+MB label, which is also why `open_max_bytes` is 8 MiB exactly rather than a round 8000000:
+that would have announced the limit as "7.6 MB" while every document called it 8 MB.)
 
 **Why an error is the right shape for a question.** The op genuinely did not open the file,
 so an error reply is honest, not a hack — and it makes the guard degrade properly. A

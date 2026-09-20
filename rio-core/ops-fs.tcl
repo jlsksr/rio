@@ -12,7 +12,12 @@
 # number as project.tcl's search budget — a search skipping a file costs you nothing,
 # an editor refusing one costs you the file — and deliberately not a preference: the
 # answer to "I did mean it" is the question the frontend asks, not a setting to find.
-variable rio::ops::open_max_bytes 8000000
+#
+# 8 MiB exactly, not a round 8000000, so that the number here and the number rio says
+# out loud are the same one: rio::fs::human_size counts in binary units under the
+# customary MB label (what Windows and most file managers show), and 8000000 bytes
+# would have announced itself as "7.6 MB" while the manual called the limit 8 MB.
+variable rio::ops::open_max_bytes 8388608
 
 # file.open {path, ?force?} -> {buffer, name, encoding, eol, bom, mixed, linecount}
 #
