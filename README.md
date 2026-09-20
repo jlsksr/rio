@@ -272,7 +272,7 @@ Linux (Debian, Alpine) and **Windows 11** — GUI today; the TUI when it lands. 
 driven against a Linux core over an SSH tunnel, so the remote path is exercised across
 platforms too ([RELEASING.md](RELEASING.md) Gate 0 records what that took, and the
 handful of things still open). Development happens on Linux, so the Windows run is
-periodic rather than continuous — the last was 2026-09-09. Setup on Windows is one
+periodic rather than continuous — the last was 2026-09-17. Setup on Windows is one
 script — see [WINDOWS.md](WINDOWS.md).
 
 The **BSDs** are a design target rather than a verified one: nothing in rio is
