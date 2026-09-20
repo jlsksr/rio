@@ -65,6 +65,50 @@ test fs-read-invalid-utf8 {invalid UTF-8 falls back to lossless iso8859-1} -body
 	dict get $d encoding
 } -result iso8859-1
 
+# The well-formedness verdict is decided by re-encoding and comparing bytes (D126).
+# That is exact everywhere except one place — a surrogate re-encodes to itself — so the
+# surrogate is excluded explicitly, and these cases are what pin that. Each is a form
+# that decodes to SOMETHING but is not well-formed UTF-8: the verdict must be the
+# byte-preserving iso8859-1 fallback, never a false "utf-8".
+test fs-read-overlong-utf8 {an overlong encoding is not UTF-8} -body {
+	# \xC0\x80 is a 2-byte spelling of U+0000 — the classic overlong NUL.
+	set p [tmpbytes "a\xC0\x80b\n"]
+	dict get [rio::fs::read $p] encoding
+} -result iso8859-1
+
+test fs-read-surrogate-utf8 {a surrogate (CESU-8) is not UTF-8} -body {
+	# \xED\xA0\x80 spells U+D800. It survives a decode/re-encode round trip intact,
+	# so it is the one form the round-trip test alone would wrongly accept.
+	set p [tmpbytes "a\xED\xA0\x80b\n"]
+	dict get [rio::fs::read $p] encoding
+} -result iso8859-1
+
+test fs-read-ed-is-not-a-surrogate {0xED below the surrogate range is still UTF-8} -body {
+	# \xED\x9F\xBF is U+D7FF — the code point just under the surrogates. The cheap
+	# 0xED gate must not reject it (퟿ is the expected decoded character).
+	set p [tmpbytes "a\xED\x9F\xBFb\n"]
+	set d [rio::fs::read $p]
+	list [dict get $d encoding] [dict get $d text]
+} -result "utf-8 {a퟿b\n}"
+
+test fs-read-truncated-utf8 {a truncated multibyte sequence is not UTF-8} -body {
+	# \xE6\x97 is the first two bytes of a three-byte character.
+	set p [tmpbytes "a\xE6\x97\n"]
+	dict get [rio::fs::read $p] encoding
+} -result iso8859-1
+
+test fs-read-out-of-range-utf8 {a lead byte above U+10FFFF is not UTF-8} -body {
+	# \xF5 would start a code point beyond the Unicode range RFC 3629 allows.
+	set p [tmpbytes "a\xF5\x80\x80\x80b\n"]
+	dict get [rio::fs::read $p] encoding
+} -result iso8859-1
+
+test fs-read-astral-utf8 {a four-byte astral character is UTF-8} -body {
+	# \xF0\x9F\x98\x80 is U+1F600. The four-byte arm must still be accepted.
+	set p [tmpbytes "a\xF0\x9F\x98\x80b\n"]
+	dict get [rio::fs::read $p] encoding
+} -result utf-8
+
 test fs-read-mixed {mixed endings: dominant chosen and surfaced} -body {
 	set p [tmpbytes "a\r\nb\r\nc\n"]
 	set d [rio::fs::read $p]

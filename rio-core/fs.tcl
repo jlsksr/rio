@@ -81,8 +81,10 @@ proc rio::fs::stamp {path} {
 
 # Judge a file BEFORE reading it whole (AGENTS.md D125). `rio::fs::read` above reads
 # and decodes the WHOLE file — right for source, ruinous for a 400 MB log or an ELF
-# binary: the well-formedness pass alone costs ~150 ms per MB, and the core is
-# single-threaded, so a remote core (D29) serving another frontend stalls with it.
+# binary: the read costs ~44 ms per MB even now that well-formedness is a C-level
+# round-trip rather than a byte walk (D126 cut that step from ~164 to ~7 ms/MB), and
+# the core is single-threaded, so a remote core (D29) serving another frontend stalls
+# for the whole of it. The budget moved; the reason to look first did not.
 # This is the cheap look that comes first: one stat, then at most `probe` bytes off
 # the front. Returns {verdict ok|too_large|binary, size <bytes>}.
 #
@@ -208,59 +210,32 @@ proc rio::fs::delete {path} {
 #
 # True iff every byte sequence is a valid UTF-8 encoding — rejecting overlong
 # forms and surrogate code points, so we don't mislabel arbitrary bytes as UTF-8.
+#
+# This ran as a hand-written byte walk once, and it was the single most expensive
+# step in opening a file: `binary scan ... cu*` expands the WHOLE file into a Tcl
+# integer list before the first byte is examined, and the walk then pays a Tcl
+# proc call per multi-byte character — ~164 ms per megabyte, on the one path that
+# every open goes through (D126).
+#
+# It is now decided by ROUND-TRIP instead, which is both exact and a C loop:
+# decode the bytes as UTF-8, re-encode the result, and ask whether the bytes came
+# back identical. Nothing else can survive that. An overlong form collapses to the
+# short form and differs; a truncated or stray sequence decodes to a replacement
+# and differs; a byte that is not UTF-8 at all (0xFF) decodes to U+00FF and
+# re-encodes as two bytes. ~7 ms per megabyte, ~23x faster, and it tests the
+# property D22 actually depends on — that a file rio calls UTF-8 is a file whose
+# bytes a later save reproduces exactly.
+#
+# The one place round-trip is MORE permissive than RFC 3629 is a surrogate
+# (CESU-8): \xED\xA0\x80 decodes to U+D800 and re-encodes to the same three
+# bytes. That would still be lossless, but "valid UTF-8" is a claim rio makes in
+# the buffer's meta and in the manual, so the verdict stays exact and the
+# surrogate is excluded up front. `string first` is the cheap gate — 0.7 ms/MB —
+# so the regexp is only paid for by a file that contains an 0xED byte at all.
 
 proc rio::fs::_valid_utf8 {bytes} {
-	binary scan $bytes cu* a      ;# one pass to an unsigned-byte list
-	set n [llength $a]
-	set i 0
-	while {$i < $n} {
-		set b [lindex $a $i]
-		if {$b < 0x80} { incr i; continue }
-		if {$b >= 0xC2 && $b <= 0xDF} {
-			if {![_cont $a [expr {$i+1}] 1]} { return 0 } ; incr i 2 ; continue
-		}
-		if {$b == 0xE0} {
-			if {![_in $a [expr {$i+1}] 0xA0 0xBF] || ![_cont $a [expr {$i+2}] 1]} { return 0 }
-			incr i 3 ; continue
-		}
-		if {($b >= 0xE1 && $b <= 0xEC) || $b == 0xEE || $b == 0xEF} {
-			if {![_cont $a [expr {$i+1}] 2]} { return 0 } ; incr i 3 ; continue
-		}
-		if {$b == 0xED} {
-			if {![_in $a [expr {$i+1}] 0x80 0x9F] || ![_cont $a [expr {$i+2}] 1]} { return 0 }
-			incr i 3 ; continue
-		}
-		if {$b == 0xF0} {
-			if {![_in $a [expr {$i+1}] 0x90 0xBF] || ![_cont $a [expr {$i+2}] 2]} { return 0 }
-			incr i 4 ; continue
-		}
-		if {$b >= 0xF1 && $b <= 0xF3} {
-			if {![_cont $a [expr {$i+1}] 3]} { return 0 } ; incr i 4 ; continue
-		}
-		if {$b == 0xF4} {
-			if {![_in $a [expr {$i+1}] 0x80 0x8F] || ![_cont $a [expr {$i+2}] 2]} { return 0 }
-			incr i 4 ; continue
-		}
+	if {[string first "\xED" $bytes] >= 0 && [regexp {\xED[\xA0-\xBF]} $bytes]} {
 		return 0
 	}
-	return 1
-}
-
-# `count` continuation bytes (0x80..0xBF) starting at index `start`.
-proc rio::fs::_cont {a start count} {
-	set n [llength $a]
-	for {set j 0} {$j < $count} {incr j} {
-		set k [expr {$start + $j}]
-		if {$k >= $n} { return 0 }
-		set v [lindex $a $k]
-		if {$v < 0x80 || $v > 0xBF} { return 0 }
-	}
-	return 1
-}
-
-# The byte at `idx` exists and lies in [lo, hi].
-proc rio::fs::_in {a idx lo hi} {
-	if {$idx >= [llength $a]} { return 0 }
-	set v [lindex $a $idx]
-	return [expr {$v >= $lo && $v <= $hi}]
+	return [expr {[encoding convertto utf-8 [encoding convertfrom utf-8 $bytes]] eq $bytes}]
 }
