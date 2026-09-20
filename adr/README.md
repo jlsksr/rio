@@ -193,3 +193,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0129](0129-extension-payload-carries-its-licence.md) | An extension payload carries its licence inside it | Accepted | 2026-09-20 |
 | [0130](0130-release-version-and-contract-versions.md) | rio is 0.1.0: semver for releases, integers for contracts | Accepted | 2026-09-20 |
 | [0131](0131-changelog-with-a-guard.md) | rio has a changelog, and a guard keeps it current | Accepted | 2026-09-20 |
+| [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted | 2026-09-20 |
