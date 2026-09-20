@@ -178,6 +178,75 @@ do_save_as [file join $::hldir fresh.tcl]
 ok "saveas: new name highlights"   [gget $::focus hl_lang] Tcl
 ok "saveas: comment painted"       [has_tag_at comment 1.0] 1
 
+# --- viewport scoping (D126) -------------------------------------------------
+# Painting is bounded by the window, not by the file; the SCAN is still exact, so a
+# block comment opened at line 1 must still colour line 3000 once the frontier gets
+# there. These two properties pull against each other, and that is the point: a
+# cheaper "back-scan a few hundred lines and hope" would pass the first and fail the
+# second. Big enough that the window cannot cover it (~3000 lines vs ~90 painted).
+set ::big ""
+for {set i 1} {$i <= 3000} {incr i} { append ::big "<b>line $i</b>\n" }
+do_open [spit big.html $::big]
+
+proc settle {{limit 2000}} {
+	# Pump until the group stops asking for more work — that is what a person
+	# scrolling and then pausing looks like to the event loop.
+	for {set i 0} {$i < $limit} {incr i} {
+		update ; update idletasks
+		if {![gget $::focus hl_vpending] && ![gget $::focus hl_pending]} return
+	}
+}
+settle
+set ::nlines [lindex [split [::rio_real_t index end-1c] .] 0]
+ok "vp: fixture is 3001 lines"     $::nlines 3001
+ok "vp: top of file is painted"    [has_tag_at tag 1.0] 1
+ok "vp: frontier stops short"      [expr {[llength [gget $::focus hl_enter]] < $::nlines}] 1
+ok "vp: painted interval bounded"  [expr {[gget $::focus hl_hi] - [gget $::focus hl_lo] < 500}] 1
+ok "vp: far line not painted yet"  [has_tag_at tag 3000.0] 0
+
+# Scrolling to the end must paint the end — the frontier grows to reach it.
+::rio_real_t yview moveto 1.0
+settle
+ok "vp: end painted after scroll"  [has_tag_at tag 3000.0] 1
+ok "vp: frontier reached the end"  [expr {[llength [gget $::focus hl_enter]] >= $::nlines}] 1
+ok "vp: painted interval moved"    [expr {[gget $::focus hl_hi] >= 3000}] 1
+ok "vp: interval still bounded"    [expr {[gget $::focus hl_lo] > 500}] 1
+
+# Scrolling back up repaints the top without losing exactness.
+::rio_real_t yview moveto 0.0
+settle
+ok "vp: top repainted on return"   [has_tag_at tag 1.0] 1
+
+# THE exactness test: open a comment on line 1 and never close it. Every line below
+# is inside that comment, and the scanner only knows so by carrying state down from
+# line 1. A bounded back-scan from the viewport would colour line 3000 as markup.
+::rio_real_t yview moveto 0.0
+settle
+.ed.t insert 1.0 "<!--"
+settle
+::rio_real_t yview moveto 1.0
+settle
+ok "vp: open comment reaches 3000" [has_tag_at comment 3000.0] 1
+ok "vp: and it is not still a tag" [has_tag_at tag 3000.0]     0
+
+# Closing it again must clear the far line — the state propagates both ways.
+::rio_real_t yview moveto 0.0
+settle
+.ed.t insert 1.4 "-->"
+settle
+::rio_real_t yview moveto 1.0
+settle
+ok "vp: closing clears line 3000"  [has_tag_at comment 3000.0] 0
+ok "vp: line 3000 tag restored"    [has_tag_at tag 3000.0]     1
+
+# A small file must behave exactly as it did before viewport scoping: frontier over
+# the whole buffer, every line painted. This is the parity check that keeps the new
+# machinery from being something to reason about on ordinary files.
+do_open [spit small.html "<b>a</b>\n<b>b</b>\n<b>c</b>"]
+settle
+ok "vp: small file fully scanned"  [llength [gget $::focus hl_enter]] 3
+ok "vp: small file fully painted"  [list [gget $::focus hl_lo] [gget $::focus hl_hi]] {1 3}
+
 file delete -force $::hldir
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
