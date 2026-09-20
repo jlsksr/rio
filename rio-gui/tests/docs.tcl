@@ -1028,5 +1028,188 @@ ok "the manual's 0.x note matches the version" \
 ok "…and the page quotes no version of its own" \
 	[regexp {`[0-9]+\.[0-9]+\.[0-9]+} $gs] 0
 
+# --- 18. the question rio asks before opening a huge or binary file -----------
+#
+# D125: file.open declines a file over the budget or one that looks binary, and the GUI
+# turns the refusal into a yes/no question. editor.md quotes both sentences and states
+# three numbers — the editor's budget, the binary probe, and (in find-and-replace.md)
+# the search budget — so the manual is a second home for wording the core owns and
+# limits the code owns. Both rot silently: a reworded message and a moved constant leave
+# the page reading perfectly. The budget has already moved once while this page was
+# being written (8000000 -> 8388608, so the boundary prints as "8.0 MB" rather than
+# announcing a 7.6 MB limit under an 8 MB label), which is the argument for the check.
+#
+# Behaviour, not source text. The sentences are taken from a real do_open against real
+# fixtures with tk_messageBox stubbed — smoke.tcl's way of testing a modal headless — so
+# what is compared is the string a user would see, question mark and all. The numbers
+# are derived from the live variables and compared BOTH ways: every size the three
+# passages quote must be a figure one of those constants can produce, which is the half
+# that catches a stale number rather than only a missing one.
+
+# The size strings a reader may honestly write for `bytes`. human_size is the one rio
+# prints, so it leads; a whole-unit ".0" is dropped because prose says "8 MB"; the exact
+# count with separators is always allowed; and the value rounded to whole units covers a
+# budget whose round number is decimal while human_size counts in binary ones (search's
+# 2000000 prints as "1.9 MB" but is fairly called "about 2 MB").
+proc d125_commas {n} {
+	set s $n ; set out ""
+	while {[string length $s] > 3} {
+		set out ",[string range $s end-2 end]$out"
+		set s [string range $s 0 end-3]
+	}
+	return "$s$out"
+}
+proc d125_figures {bytes} {
+	set h [rio::fs::human_size $bytes]
+	set out [list $h "[d125_commas $bytes] bytes"]
+	lappend out [regsub {\.0 } $h " "]
+	if {$bytes >= 1048576 && $bytes < 1073741824} {
+		lappend out "[expr {round($bytes / 1048576.0)}] MB"
+	}
+	return [lsort -unique $out]
+}
+
+# Every size a passage quotes, as written: "8 MB", "8,388,608 bytes", "1.2 GB".
+proc d125_sizes {text} {
+	return [lsort -unique [regexp -all -inline \
+		{[0-9][0-9,]*(?:\.[0-9]+)? (?:bytes|KB|MB|GB)} $text]]
+}
+# One section of a page, ending at the next heading of its own level — as in check 17,
+# so renaming a LATER heading cannot widen it and renaming THIS one empties it.
+proc d125_section {text heading} {
+	set a [string first "\n$heading\n" $text]
+	if {$a < 0} { return "" }
+	set body [string range $text [expr {$a + [string length $heading] + 1}] end]
+	set b [string first "\n## " $body]
+	if {$b >= 0} { set body [string range $body 0 $b] }
+	return $body
+}
+# The blockquote paragraphs in a section, each flattened to one line — a quoted message
+# wraps across source lines and is still one sentence.
+proc d125_quotes {body} {
+	set out {} ; set cur {}
+	foreach line [split $body "\n"] {
+		if {[regexp {^\s*> ?(.*)$} $line -> t]} {
+			lappend cur [string trim $t]
+		} elseif {[llength $cur]} {
+			lappend out [join $cur " "] ; set cur {}
+		}
+	}
+	if {[llength $cur]} { lappend out [join $cur " "] }
+	return $out
+}
+# A message with its file name and its size replaced, so the manual may keep its own
+# example ("core.dump", "1.2 GB") while the words around them are held to rio's.
+proc d125_template {s} {
+	set s [string trim [regsub -all {\s+} $s " "]]
+	set name [lindex [split $s] 0]
+	set size [d125_size_of $s]
+	return [string map [list $name "<name>" $size "<size>"] $s]
+}
+proc d125_size_of {s} {
+	set m [d125_sizes $s]
+	return [expr {[llength $m] ? [lindex $m 0] : ""}]
+}
+
+set ed  [slurp [file join $::docs editor.md]]
+set sec [d125_section $ed "## Opening a very large or binary file"]
+ok "editor.md has the big-file section" [expr {[string length $sec] > 200}] 1
+
+set quotes [d125_quotes $sec]
+ok "…and it quotes both questions" [llength $quotes] 2
+
+# The real sentences: drive do_open against fixtures, with the modal stubbed to record
+# what it was asked and answer no (so nothing opens and no session is written).
+set ::d125_msg ""
+rename tk_messageBox d125_real_mb
+proc tk_messageBox {args} { set ::d125_msg [dict get $args -message] ; return no }
+
+set d125dir [file join $::sandbox_dir d125] ; file mkdir $d125dir
+set d125big [file join $d125dir big.log]
+set f [open $d125big wb] ; puts -nonewline $f [string repeat x 4000] ; close $f
+set d125bin [file join $d125dir prog.bin]
+set f [open $d125bin wb] ; puts -nonewline $f "MZ\x00\x01rest" ; close $f
+
+# Shrink the budget for the too-large fixture only — a real 8 MB file would be a slow
+# way to learn nothing. The binary one runs against the untouched constant.
+set d125saved $rio::ops::open_max_bytes
+set rio::ops::open_max_bytes 1000
+set ::d125_msg "" ; set d125opened [do_open $d125big] ; set d125realbig $::d125_msg
+set rio::ops::open_max_bytes $d125saved
+set ::d125_msg "" ; do_open $d125bin ; set d125realbin $::d125_msg
+
+rename tk_messageBox {} ; rename d125_real_mb tk_messageBox
+
+ok "rio really declines a file over the budget" $d125opened 0
+ok "editor.md quotes the words rio uses about a file that is too large" \
+	[d125_template [lindex $quotes 0]] [d125_template $d125realbig]
+ok "editor.md quotes the words rio uses about a binary file" \
+	[d125_template [lindex $quotes 1]] [d125_template $d125realbin]
+
+# The sizes in those examples have to be strings human_size can actually print — "412 MB"
+# reads fine and never appears on screen, because MB always carries one decimal.
+set unprintable {}
+foreach q $quotes {
+	set s [d125_size_of $q]
+	if {![regexp {^([0-9][0-9,]*(?:\.[0-9]+)?) (bytes|KB|MB|GB)$} $s -> n u]} {
+		lappend unprintable $q ; continue
+	}
+	set factor [dict get {bytes 1 KB 1024 MB 1048576 GB 1073741824} $u]
+	if {[rio::fs::human_size [expr {round([string map {, ""} $n] * $factor)}]] ne $s} {
+		lappend unprintable $s
+	}
+}
+ok "every size the examples quote is one rio would print" $unprintable {}
+
+# The numbers, both directions. Nothing but a figure for the constant a passage
+# describes (or one of the two example sizes, checked just above) may appear in it —
+# that is the direction that catches a limit which moved — and each passage must state
+# its constant at all, which is the direction that catches one that was never written
+# down. A writer picks the form: "8 MB", "8.0 MB" or "8,388,608 bytes" all name it.
+proc d125_stale {text allowed} {
+	set out {}
+	foreach s [d125_sizes $text] {
+		if {[lsearch -exact $allowed $s] < 0} { lappend out $s }
+	}
+	return $out
+}
+proc d125_states {text bytes} {
+	set said [d125_sizes $text]
+	foreach f [d125_figures $bytes] { if {[lsearch -exact $said $f] >= 0} { return 1 } }
+	return 0
+}
+
+info default rio::fs::classify probe d125probe
+set examples [lmap q $quotes {d125_size_of $q}]
+set edfigs   [d125_figures $rio::ops::open_max_bytes]
+set fnp      [slurp [file join $::docs files-and-projects.md]]
+set far      [slurp [file join $::docs find-and-replace.md]]
+
+ok "the big-file section quotes no size that isn't rio's" \
+	[d125_stale $sec [concat $examples $edfigs [d125_figures $d125probe]]] {}
+ok "…and it states the editor's budget"   [d125_states $sec $rio::ops::open_max_bytes] 1
+ok "…and the size of the binary probe"    [d125_states $sec $d125probe] 1
+ok "files-and-projects.md quotes no other size" [d125_stale $fnp $edfigs] {}
+ok "…and names the editor's budget"       [d125_states $fnp $rio::ops::open_max_bytes] 1
+ok "find-and-replace.md quotes no other size" \
+	[d125_stale $far [d125_figures $rio::project::search_max_bytes]] {}
+ok "…and names the search budget" \
+	[d125_states $far $rio::project::search_max_bytes] 1
+
+# The manual says search's budget is the smaller of the two, which is a property of the
+# pair rather than of either number — it survives both of them being changed.
+ok "search's budget really is the smaller one" \
+	[expr {$rio::project::search_max_bytes < $rio::ops::open_max_bytes}] 1
+
+# What a forced open falls back to, named as the chooser names it: the section tells the
+# reader to undo it from View ▸ Language…, so the word has to match the row they look for.
+set d125plain ""
+foreach row [language_pick_rows] {
+	if {[lindex $row 0] eq "plain"} { set d125plain [lindex $row 1] }
+}
+ok "the language chooser has a plain row" [expr {$d125plain ne ""}] 1
+ok "the manual names it the way the chooser labels it" \
+	[expr {[string first "**$d125plain**" $sec] >= 0}] 1
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

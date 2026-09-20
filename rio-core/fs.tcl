@@ -79,6 +79,48 @@ proc rio::fs::stamp {path} {
 	return [dict create mtime $mt size $sz]
 }
 
+# Judge a file BEFORE reading it whole (AGENTS.md D125). `rio::fs::read` above reads
+# and decodes the WHOLE file — right for source, ruinous for a 400 MB log or an ELF
+# binary: the well-formedness pass alone costs ~150 ms per MB, and the core is
+# single-threaded, so a remote core (D29) serving another frontend stalls with it.
+# This is the cheap look that comes first: one stat, then at most `probe` bytes off
+# the front. Returns {verdict ok|too_large|binary, size <bytes>}.
+#
+#   too_large — bigger than `max_bytes`, which the CALLER supplies rather than this
+#               module fixing it: a project search's budget and an editor's patience
+#               are two policies over one rule, and they are free to differ.
+#   binary    — a NUL byte within the first `probe` bytes. That is git's rule, for
+#               git's reason: text does not begin with a NUL, and reading the whole
+#               file to be certain would defeat the point of looking first.
+#
+# A path that cannot be stat'd or opened is `ok`: the guard has nothing to say about
+# it, and the read that follows raises the real io_error rather than this inventing
+# one. `max_bytes` of 0 means "no size limit", leaving only the binary probe.
+proc rio::fs::classify {path max_bytes {probe 8192}} {
+	if {[catch {file size $path} sz]} { return [dict create verdict ok size 0] }
+	if {$max_bytes > 0 && $sz > $max_bytes} {
+		return [dict create verdict too_large size $sz]
+	}
+	if {[catch {open $path rb} f]} { return [dict create verdict ok size $sz] }
+	set head [::read $f $probe]   ;# ::read — rio::fs::read would shadow it here
+	close $f
+	if {[string first "\x00" $head] >= 0} {
+		return [dict create verdict binary size $sz]
+	}
+	return [dict create verdict ok size $sz]
+}
+
+# `bytes` as a person would say it — "913 KB", "8.4 MB", "1.2 GB". Lives here beside
+# classify because it exists to put a size in the message classify's verdict produces,
+# and the core owns that wording: the frontend asks the question, the core states the
+# fact (one phrasing for the GUI, a later TUI, and the log alike).
+proc rio::fs::human_size {bytes} {
+	if {$bytes < 1024}       { return "$bytes bytes" }
+	if {$bytes < 1048576}    { return "[expr {round($bytes / 1024.0)}] KB" }
+	if {$bytes < 1073741824} { return "[format %.1f [expr {$bytes / 1048576.0}]] MB" }
+	return "[format %.1f [expr {$bytes / 1073741824.0}]] GB"
+}
+
 # Write `text` (\n-separated, from the model) to `path`, restoring the encoding,
 # BOM, and line-ending recorded in `meta`. Missing keys default to a new-file
 # convention: UTF-8, no BOM, LF (D22) — so a save-as on a scratch buffer works.

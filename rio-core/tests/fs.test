@@ -144,6 +144,60 @@ test fs-roundtrip-no-trailing-newline {a missing final newline is preserved} -bo
 	rawbytes $out
 } -result {no newline at end}
 
+# --- classify: the cheap look before the expensive read (D125) ----------------
+
+test fs-classify-ok {an ordinary text file passes, and its size is reported} -body {
+	set p [tmpbytes "hello\nworld\n"]
+	set c [rio::fs::classify $p 8000000]
+	list [dict get $c verdict] [dict get $c size]
+} -result {ok 12}
+
+test fs-classify-too-large {over the caller's budget is too_large, with the real size} -body {
+	set p [tmpbytes [string repeat x 5000]]
+	set c [rio::fs::classify $p 4096]
+	list [dict get $c verdict] [dict get $c size]
+} -result {too_large 5000}
+
+test fs-classify-at-the-limit {exactly the budget is not over it} -body {
+	set p [tmpbytes [string repeat x 4096]]
+	dict get [rio::fs::classify $p 4096] verdict
+} -result ok
+
+test fs-classify-binary {a NUL in the probed prefix is binary} -body {
+	set p [tmpbytes "\x7FELF\x02\x01\x01\x00\x00\x00 payload"]
+	set c [rio::fs::classify $p 8000000]
+	list [dict get $c verdict] [dict get $c size]
+} -result {binary 18}
+
+test fs-classify-probe-is-a-prefix {a NUL beyond the probe is NOT seen — by design} -body {
+	# The prefix rule is a deliberate trade (git makes the same one): cheap enough to
+	# run before every open, so it cannot be exact. Pinned here so the trade is a
+	# decision someone made, not a surprise someone finds.
+	set p [tmpbytes "[string repeat a 100]\x00"]
+	dict get [rio::fs::classify $p 8000000 16] verdict
+} -result ok
+
+test fs-classify-no-size-limit {max_bytes 0 leaves only the binary probe} -body {
+	set p [tmpbytes [string repeat x 5000]]
+	list [dict get [rio::fs::classify $p 0] verdict] \
+		[dict get [rio::fs::classify [tmpbytes "a\x00b"] 0] verdict]
+} -result {ok binary}
+
+test fs-classify-missing {a path that cannot be stat'd is ok — the read raises the real error} -body {
+	set p [file join [temporaryDirectory] no-such-classify-[pid].txt]
+	dict get [rio::fs::classify $p 10] verdict
+} -result ok
+
+test fs-classify-empty {an empty file is ordinary} -body {
+	dict get [rio::fs::classify [tmpbytes ""] 8000000] verdict
+} -result ok
+
+test fs-human-size {sizes read the way a person says them} -body {
+	list [rio::fs::human_size 0] [rio::fs::human_size 512] [rio::fs::human_size 1024] \
+		[rio::fs::human_size 934000] [rio::fs::human_size 8800000] \
+		[rio::fs::human_size 412000000] [rio::fs::human_size 3000000000]
+} -result {{0 bytes} {512 bytes} {1 KB} {912 KB} {8.4 MB} {392.9 MB} {2.8 GB}}
+
 # --- the fs.* ops through the in-process core --------------------------------
 
 test fs-op-open {file.open creates a buffer and reports detected attributes} -body {
@@ -187,6 +241,77 @@ test fs-op-open-no-path {file.open without a path is a bad_request} -body {
 	set r [dict get [rio::core::call file.open {}] response]
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
+
+# --- file.open declines what it should not read unasked (D125) ---------------
+#
+# The guard is a QUESTION, so these assert both halves: that the op says no with a
+# code a frontend can branch on, and that `force` gets you past it.
+
+test fs-op-open-too-large {a file over the budget is declined, not read} -body {
+	set saved $rio::ops::open_max_bytes
+	set rio::ops::open_max_bytes 1000
+	set p [tmpbytes [string repeat x 4000]]
+	set r [dict get [rio::core::call file.open [dict create path $p]] response]
+	set rio::ops::open_max_bytes $saved
+	list [dict get $r ok] [dict get $r error code] \
+		[string match "*4 KB*" [dict get $r error message]] \
+		[string match "*[file tail $p]*" [dict get $r error message]]
+} -result {false too_large 1 1}
+
+test fs-op-open-binary {a binary file is declined by its own code} -body {
+	set p [tmpbytes "\x7FELF\x00\x00\x00 and more"]
+	set r [dict get [rio::core::call file.open [dict create path $p]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false binary_file}
+
+test fs-op-open-force-too-large {force opens it anyway, with the text intact} -body {
+	set saved $rio::ops::open_max_bytes
+	set rio::ops::open_max_bytes 10
+	set p [tmpbytes "plenty of text here\n"]
+	set r [dict get [rio::core::call file.open [dict create path $p force 1]] response]
+	set rio::ops::open_max_bytes $saved
+	list [dict get $r ok] [rio::doc::text [dict get $r result buffer]]
+} -result "true {plenty of text here\n}"
+
+test fs-op-open-force-binary {force opens a binary file too, bytes preserved} -body {
+	# NUL is perfectly valid UTF-8 (U+0000), so this one decodes as utf-8 — a reminder
+	# that "binary" here is the practical prefix rule, not an encoding verdict.
+	set p [tmpbytes "a\x00b\n"]
+	set r [dict get [rio::core::call file.open [dict create path $p force 1]] response]
+	list [dict get $r ok] [dict get $r result encoding] \
+		[string length [rio::doc::text [dict get $r result buffer]]]
+} -result {true utf-8 4}
+
+test fs-op-open-force-false {force 0 is the same as no force} -body {
+	set p [tmpbytes "a\x00b\n"]
+	set r [dict get [rio::core::call file.open [dict create path $p force 0]] response]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false binary_file}
+
+test fs-op-open-ordinary-file-unaffected {the common case never meets the guard} -body {
+	set p [tmpbytes "ordinary source\n"]
+	dict get [rio::core::call file.open [dict create path $p]] response ok
+} -result true
+
+test fs-guard-agrees-with-project-search {one rule, two callers: the editor and the
+	search reach the SAME verdict on the same file when given the same budget — so
+	extracting the rule into rio::fs::classify cannot be quietly undone on one side} -body {
+	source [file join [file dirname [info script]] .. project.tcl]
+	set saved $rio::ops::open_max_bytes
+	set rio::ops::open_max_bytes $rio::project::search_max_bytes
+	set out {}
+	foreach {label bytes} [list \
+			text   "findme here\n" \
+			binary "fi\x00ndme\n" \
+			big    "findme[string repeat . 3000000]\n"] {
+		set p [tmpbytes $bytes]
+		set opened [dict get [rio::core::call file.open [dict create path $p]] response ok]
+		set found  [expr {[llength [lindex [rio::project::_search_file $p findme 0 0 50] 0]] > 0}]
+		lappend out $label [expr {$opened eq "true" ? 1 : 0}] $found
+	}
+	set rio::ops::open_max_bytes $saved
+	set out
+} -result {text 1 1 binary 0 0 big 0 0}
 
 test fs-op-save-no-path {saving a buffer with no file errors cleanly} -body {
 	set buf [rio::doc::new "scratch" untitled]

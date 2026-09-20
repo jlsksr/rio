@@ -11,6 +11,15 @@ documents including unsaved edits, or just the current document; regex patterns
 with backreferences; replacing across a scope; and escalating from the find bar
 into the panel with your needle and options intact.
 
+One rule is worth knowing now, because nothing on screen announces it: searching
+**the whole project on disk** skips files bigger than about 2 MB and files that
+look binary — the same test the editor makes before it
+[opens one](editor.md#opening-a-very-large-or-binary-file), with a smaller budget,
+because a search that walks a whole tree can afford to pass over what it cannot
+usefully show. Those files are skipped silently, so a word that lives only inside
+a very large log will not be found. The other two scopes search documents you
+already have open, whatever their size.
+
 For now, the *Find & Replace* and *Search* entries under **What works now** in
 [README.md](../README.md) describe both tools in full.
 

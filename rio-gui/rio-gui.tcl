@@ -945,21 +945,41 @@ proc adopt_initial_buffers {} {
 	activate [dict get [lindex $buffers 0] buffer]
 }
 
-proc do_open {path} {
+# `force` re-asks for a file the core declined as too large or binary (D125) — it is
+# how the "Open it anyway?" answer travels, and is never passed by a caller directly.
+proc do_open {path {force 0}} {
 	# Already open in some group? Just switch to its tab (activate focuses its group).
 	foreach id [dict keys $::buffers] {
 		if {$path ne "" && [bufget $id path] eq $path} { activate $id ; return 1 }
 	}
-	set resp [rio_call file.open [dict create path $path]]
+	set req [dict create path $path]
+	if {$force} { dict set req force 1 }
+	set resp [rio_call file.open $req]
 	if {![dict get $resp ok]} {
+		set code [dict get $resp error code]
+		set msg  [dict get $resp error message]
+		# too_large and binary_file are not failures but QUESTIONS (D125): the core
+		# declined to read a file that would make rio crawl, and this is the asking.
+		# The core's message states the fact; the frontend owns the question.
+		if {!$force && ($code eq "too_large" || $code eq "binary_file")} {
+			if {[tk_messageBox -icon warning -type yesno -default no -title rio \
+				-message "$msg\n\nOpen it anyway?"] eq "yes"} {
+				return [do_open $path 1]
+			}
+			return 0
+		}
 		tk_messageBox -icon error -type ok -title rio \
-			-message "Could not open $path:\n[dict get $resp error message]"
+			-message "Could not open $path:\n$msg"
 		return 0
 	}
 	set res [dict get $resp result]
 	set id  [dict get $res buffer]
 	register_buffer $id $path \
 		[dict create encoding [dict get $res encoding] eol [dict get $res eol]]
+	# Opened against rio's advice: the highlighter is the other half of what makes a
+	# huge buffer crawl, so such a buffer starts as Plain Text — D112's own `lang`
+	# value, so *View ▸ Language…* turns it back on if the file proves fine.
+	if {$force} { bufset $id lang plain }
 	activate $id
 	prune_scratch $id
 	if {[dict get $res mixed]} {

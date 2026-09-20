@@ -2274,5 +2274,67 @@ set ::rio_dir [file join / nonexistent-rio-icon-check-[pid]]
 ok "icon: a checkout with no icons/ still starts (soft, like tkdnd)" [catch {apply_window_icon}] 0
 set ::rio_dir $_realdir
 
+# --- D125: a huge or binary file asks before it opens ---------------------------
+# The core declines (fs.test proves that half); what matters here is that the GUI
+# turns the refusal into a QUESTION rather than an error box, and that answering it
+# actually opens the file. The message box is stubbed to record what it was asked and
+# to answer on cue — the one way a modal can be tested headless.
+set _mb_msg "" ; set _mb_type "" ; set _mb_answer no
+rename tk_messageBox _real_mb
+proc tk_messageBox {args} {
+	set ::_mb_msg  [dict get $args -message]
+	set ::_mb_type [expr {[dict exists $args -type] ? [dict get $args -type] : ""}]
+	return $::_mb_answer
+}
+
+set _bigfile [tmpbytes [string repeat "x" 4000]]
+set _before [dict size $::buffers]
+
+# Shrink the core's budget for the duration. The core is in this process (the smoke
+# suite hosts its own server), so the variable is reachable — a remote core would need
+# a fixture file instead, which is the reason the core-side tests carry the real proof.
+set _saved_budget $rio::ops::open_max_bytes
+set rio::ops::open_max_bytes 1000
+
+set ::_mb_answer no
+set _opened [do_open $_bigfile]
+ok "bigfile: a file over the budget is refused, not opened" $_opened 0
+ok "bigfile: rio ASKED rather than reporting an error" $::_mb_type yesno
+ok "bigfile: the question carries the core's own sentence, size and all" \
+	[string match "*4 KB*Open it anyway?*" $::_mb_msg] 1
+ok "bigfile: the question names the file and offers the way past" \
+	[string match "*[file tail $_bigfile]*Open it anyway?*" $::_mb_msg] 1
+ok "bigfile: declining opened no buffer" [dict size $::buffers] $_before
+
+set ::_mb_answer yes
+set _opened [do_open $_bigfile]
+ok "bigfile: saying yes opens it" $_opened 1
+ok "bigfile: and it really is in a buffer" [dict size $::buffers] [expr {$_before + 1}]
+ok "bigfile: a forced open starts as Plain Text — the highlighter is the other\
+	half of the slowness (D112's own value, so View ▸ Language… can undo it)" \
+	[bufget $::cur lang] plain
+ok "bigfile: the text arrived whole" [string length [widget]] 4000
+
+close_buffer $::cur
+set rio::ops::open_max_bytes $_saved_budget
+
+# A binary file takes the same road, under its own code.
+set _binfile [tmpbytes "\x7FELF\x02\x00\x00\x00 payload here"]
+set ::_mb_answer no ; set ::_mb_msg ""
+ok "binary: a binary file is refused too" [do_open $_binfile] 0
+ok "binary: and the question says binary, not big" \
+	[string match "*binary*" $::_mb_msg] 1
+set ::_mb_answer yes
+ok "binary: force opens it" [do_open $_binfile] 1
+close_buffer $::cur
+
+# The common case must not have acquired a dialog.
+set ::_mb_msg ""
+set _plain [tmpbytes "ordinary source\n"]
+ok "guard: an ordinary file opens with no question at all" \
+	[list [do_open $_plain] $::_mb_msg] {1 {}}
+close_buffer $::cur
+rename tk_messageBox {} ; rename _real_mb tk_messageBox
+
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

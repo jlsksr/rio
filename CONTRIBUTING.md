@@ -710,8 +710,11 @@ who receives a copy — not merely something rio may use. The rule under
 [The application icon](#the-application-icon) is that question in its sharpest
 form, and it is why rio's earlier stock icons were removed rather than credited.
 
-A **code of conduct** is still to be added, before rio opens up to outside
-contributions.
+A **code of conduct** applies to everyone taking part:
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), the Contributor Covenant 2.1. It is the
+standard text for the same reason the licence is the standard licence — a reader
+recognises what it asks without having to read it closely — and reports go to
+**jlsksr@gmail.com**.
 
 ---
 

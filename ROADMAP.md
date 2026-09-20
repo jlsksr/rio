@@ -181,6 +181,33 @@ Each entry notes its state:
   This entry previously also carried *"`docs/` installing"* — a leftover from D91, written
   against a packaging path that does not exist. rio is deployed by cloning it, so `docs/` is
   already beside the code wherever it runs; there was nothing to install. Dropped, not done.
+- **`fs.read`'s doors have no guard yet** — *gap* (the other half of AGENTS.md **D125**,
+  which guarded `file.open` — the door a person actually walks through). Three callers
+  still read a whole file unbounded: the **agent's `read` tool**
+  (`rio-core/agent-tools.tcl`, both the `fs.read` primitive and `_current_text`), and the
+  **compare/diff view** (`rio-gui/rio-gui.tcl`, `fs.read` at the side-by-side load). The
+  agent case is the sharper one — its 100 KB cap is applied to the *result*, after the
+  whole file has already been read and decoded, so pointing it at a build log stalls the
+  core for the full read and then returns 100 KB anyway. What makes this its own decision
+  rather than a second line of D125: **declining is the wrong answer for at least one
+  caller.** The agent should get a *prefix* — the first 100 KB off disk, truncated exactly
+  as today but without paying for the rest — which needs a bounded-read primitive beside
+  `rio::fs::read`, while the compare view probably wants D125's question. One rule, two
+  answers, so it wants thinking through rather than pattern-matching.
+- **Opening a very large file is still slow once you say yes** — *deferred* (builds on
+  AGENTS.md **D125**, which stopped rio *silently* crawling on a stray double-click: a file
+  over 8 MB or one that looks binary is now a question — *"…is 412 MB. Open it anyway?"* —
+  and a forced open starts as Plain Text). What is left is the forced path's own cost. The
+  expense is `rio::fs::_valid_utf8`, which expands the **whole** file into a Tcl
+  unsigned-byte list before walking it, so ~150 ms per megabyte and a full materialisation
+  even when it bails at byte three. **Chunking it** — scan a window at a time, carrying any
+  split multi-byte sequence across the boundary — is exact, keeps D22's byte-preserving
+  round-trip, and would cut the common latin-1/binary case to almost nothing. Deliberately
+  not done in the week before a release: it is a performance change to *encoding detection*,
+  the one thing in rio whose wrong answer silently corrupts a file. Capping the pass at a
+  prefix instead would be faster still and is **rejected**, not deferred — declaring a whole
+  file UTF-8 on the strength of its first megabyte makes the read lossy. Lazy / windowed
+  loading remains out of scope (`fs.tcl`, since D22).
 - **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
   did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
   the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared
@@ -429,6 +456,8 @@ for later:
   also what **1.0.0** is reserved for.
 - **Install / packaging path** — *planned.* A polished install and packaging story
   beyond the dev/server deploy scripts (see [INSTALL.md](INSTALL.md)).
-- **Code of conduct** — *planned.* To be added before rio opens up to outside
-  contributions. (The licence half of this is **done**: rio is MIT-licensed,
-  D121 — see [LICENSE](LICENSE).)
+- **Code of conduct** — *landed.* The Contributor Covenant 2.1, with reports going to
+  jlsksr@gmail.com — see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Standard text over a
+  house-written one for the same reason as the licence (D121): recognition is worth more
+  than a house dialect for the documents a stranger meets first. (The licence half is
+  **done** too: rio is MIT-licensed, D121 — see [LICENSE](LICENSE).)

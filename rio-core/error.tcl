@@ -15,14 +15,22 @@
 #   io_error    — a file could not be read or written
 #   untrusted_cert — an https server's certificate did not verify and no exception
 #                 accepts it (D111); tls.inspect shows it, tls.accept accepts it
+#   too_large   — the file is bigger than the op will read unasked (D125)
+#   binary_file — the file looks like binary, not text (D125)
 #   internal    — an unexpected failure (an uncaught Tcl error); a bug
 #
 # `internal` is the catch-all the dispatcher assigns to any error raised WITHOUT
 # a rio code (a plain `error`, a Tcl runtime fault), so an overlooked failure
 # still reaches the client as a clean reply instead of leaking a stack trace.
+#
+# `untrusted_cert`, `too_large` and `binary_file` are the three codes that are less
+# a failure than a QUESTION: the op declined, and a frontend that knows the code can
+# offer the way past it (accept this certificate; open it anyway). One that does not
+# know it shows the message, which says the same thing in prose — so a new code is
+# additive, never a protocol break.
 
 namespace eval rio::error {
-	variable codes {bad_request unknown_op no_buffer no_path bad_index io_error untrusted_cert internal}
+	variable codes {bad_request unknown_op no_buffer no_path bad_index io_error untrusted_cert too_large binary_file internal}
 }
 
 # Raise a failure carrying a taxonomy code. Called inside op handlers; the
