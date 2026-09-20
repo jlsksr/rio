@@ -194,20 +194,32 @@ Each entry notes its state:
   as today but without paying for the rest — which needs a bounded-read primitive beside
   `rio::fs::read`, while the compare view probably wants D125's question. One rule, two
   answers, so it wants thinking through rather than pattern-matching.
-- **Opening a very large file is still slow once you say yes** — *deferred* (builds on
-  AGENTS.md **D125**, which stopped rio *silently* crawling on a stray double-click: a file
-  over 8 MB or one that looks binary is now a question — *"…is 412 MB. Open it anyway?"* —
-  and a forced open starts as Plain Text). What is left is the forced path's own cost. The
-  expense is `rio::fs::_valid_utf8`, which expands the **whole** file into a Tcl
-  unsigned-byte list before walking it, so ~150 ms per megabyte and a full materialisation
-  even when it bails at byte three. **Chunking it** — scan a window at a time, carrying any
-  split multi-byte sequence across the boundary — is exact, keeps D22's byte-preserving
-  round-trip, and would cut the common latin-1/binary case to almost nothing. Deliberately
-  not done in the week before a release: it is a performance change to *encoding detection*,
-  the one thing in rio whose wrong answer silently corrupts a file. Capping the pass at a
-  prefix instead would be faster still and is **rejected**, not deferred — declaring a whole
-  file UTF-8 on the strength of its first megabyte makes the read lossy. Lazy / windowed
-  loading remains out of scope (`fs.tcl`, since D22).
+- **Opening a very large file is still slow once you say yes** — *landed* (AGENTS.md
+  **D126**). Three whole-file passes were removed and the budget followed the measurement
+  up, from 8 MB to 64 MB: `rio::fs::_valid_utf8` now decides by a C-level encode/decode
+  round trip instead of walking a Tcl byte list (164 → ~7 ms/MB), highlighting paints the
+  visible window instead of the file (~1350 ms/MB → flat), and `buffer.text` is pulled in
+  chunks so tcllib's `json2dict`, which is quadratic in the length of one JSON string,
+  stays linear (8 MB: 1935 → 262 ms). An 8 MB open went from ~13 s to ~1.6 s, with
+  highlighting on rather than stripped to Plain Text. Capping encoding detection at a
+  prefix stays **rejected** — declaring a whole file UTF-8 on the strength of its first
+  megabyte makes the read lossy — and lazy / windowed loading stays out of scope: the Tk
+  text widget holds the document (it absorbs 20k lines in 4 ms), and find, marks,
+  selection, `line.col` undo indices and the gutter all rest on that.
+- **Two whole-file passes are left in the open path, both linear** — *gap*, and small.
+  `rio::wire::obj` escaping the document costs ~58 ms/MB, and `rio::fs::read` counts line
+  endings with two `regexp -all` sweeps (~17 ms/MB) that the `string map` immediately
+  after it could yield for free from the length delta. Together they are most of what a
+  64 MB open still spends outside the disk. Neither is urgent; both are the kind of thing
+  to do with a measurement in hand, and the EOL one touches encoding detection, whose
+  wrong answer silently corrupts a file.
+- **Checkpointing the highlighter's scan** — *deferred* (builds on **D126**). Entry states
+  are exact, so colouring line N means having scanned the N-1 lines above it; jumping
+  straight to the end of a 64 MB file takes most of a minute to finish colouring, chunked
+  and non-blocking but real. Snapshotting the scan state every N lines would make a
+  *repeat* jump cheap and the first one no faster, which is why it waits for someone to
+  actually be annoyed by it. `hl_enter` also still grows one entry per line scanned, so a
+  full read-through of a huge file ends up holding what the old whole-file pass held.
 - **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
   did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
   the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared
@@ -240,10 +252,12 @@ Each entry notes its state:
   built-ins — further ones are whatever a contributor reaches for next (R, Haskell,
   CMake, Diff, …), an isolated drop-in each. Diff would want added/removed roles the
   fixed token vocabulary doesn't have yet — a small vocabulary question, not a drop-in.
-- **Viewport scoping** — *deferred* (AGENTS.md D32 amendment). Re-highlighting is
-  now incremental, so per-edit cost is already small; viewport would only cap the
-  one-time whole-file scan on very large files and needs scroll-event machinery not
-  yet warranted.
+- **Viewport scoping** — *landed* (AGENTS.md D126, amending D32). The one-time
+  whole-file paint turned out to be 81% of the cost of opening a large file, which is
+  what warranted it. `hl_enter` became an exact *prefix* rather than an exact whole,
+  `hl_lo`/`hl_hi` record what actually carries tags, and the scroll machinery it needed
+  was one line in `edscroll`, since Tk's `-yscrollcommand` is already where the wheel,
+  the scrollbar, `see`, vi's jumps and find's step all arrive.
 - **Language from the shebang** — *deferred* (AGENTS.md D112). Detection is by file
   name only; an extension-less script (`bin/foo` starting `#!/usr/bin/env perl`) stays
   plain unless picked by hand (View ▸ Language…). A first-line fallback, used only when

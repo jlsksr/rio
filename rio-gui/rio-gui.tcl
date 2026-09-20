@@ -829,13 +829,29 @@ proc apply_change {g p} {
 # repaint. Runs on open / tab switch within the group.
 proc load_buffer {g} {
 	set t [gw $g]
-	set resp [rio_call buffer.text [dict create buffer [gcur $g]]]
+	set id [gcur $g]
 	$t delete 1.0 end
-	if {[dict get $resp ok]} {
-		$t insert 1.0 [dict get $resp result text]
-	} else {
-		set e [dict get $resp error]
-		report_error [dict get $e message] [dict get $e code]
+	# Pull the document a chunk at a time rather than as one enormous reply (D126).
+	# The channel was never the problem: tcllib's json2dict is quadratic in the
+	# length of a single JSON string, so an 8 MB document cost ~1.9 s to PARSE and
+	# ~0.26 s in 256 KB pieces. A document that fits in one chunk is still one round
+	# trip, exactly as before. Chunks concatenate to the document byte for byte, so
+	# they go in at end-1c — before the newline Tk keeps at the end of every widget.
+	set line 1
+	while {1} {
+		set resp [rio_call buffer.text [dict create buffer $id start $line]]
+		if {![dict get $resp ok]} {
+			set e [dict get $resp error]
+			report_error [dict get $e message] [dict get $e code]
+			break
+		}
+		set r [dict get $resp result]
+		set chunk [dict get $r text]
+		if {$chunk ne ""} { $t insert end-1c $chunk }
+		if {[dict get $r eof]} break
+		set next [dict get $r next]
+		if {$next <= $line} break   ;# no progress — refuse to spin on a bad reply
+		set line $next
 	}
 	hl_select $g   ;# the file type may have changed with the buffer (D32)
 	hl_reset $g    ;# repaint the visible window now and start the line-state cache (on switch/open)

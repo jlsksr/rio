@@ -55,9 +55,52 @@ proc rio::ops::buffer_list {params} {
 }
 rio::dispatch::register buffer.list rio::ops::buffer_list
 
-# buffer.text -> {text <whole document>}
+# How much text one chunked buffer.text reply carries, in characters (D126). Whole
+# lines only, so this is a floor the last line of a chunk overshoots, not a cap.
+# 256 KB is chosen against the INBOUND parser, not the channel: tcllib's json2dict
+# is quadratic in the length of a single JSON string, so one 8 MB reply costs ~1.9 s
+# to parse while the same bytes in 256 KB pieces cost ~0.26 s. Much smaller chunks
+# save nothing further (64 KB measures the same) and cost a round trip each, which a
+# remote core (D29) pays in latency.
+namespace eval rio::ops { variable text_chunk_chars 262144 }
+
+# buffer.text {?buffer?}                   -> {text <whole document>}
+# buffer.text {?buffer? start <line> ?max <chars>?}
+#                                          -> {text <chunk> next <line> eof 0|1}
+#
+# Without `start` this is what it always was: the whole document in one reply, which
+# is what the agent's buffer_text tool and the compare view still want. With `start`
+# (1-based line) the caller is walking the document a piece at a time; it asks again
+# from `next` until `eof`, and plain concatenation of the pieces reproduces the
+# document exactly — a chunk that is not the last carries its trailing newline, so
+# the caller never has to know where the separators went. Additive params, so an
+# older frontend keeps working unchanged (D55).
 proc rio::ops::buffer_text {params} {
-	return [dict create result [dict create text [rio::doc::text [_bufid $params]]]]
+	variable text_chunk_chars
+	set id [_bufid $params]
+	if {![dict exists $params start]} {
+		return [dict create result [dict create text [rio::doc::text $id]]]
+	}
+	set start [dict get $params start]
+	if {$start < 1} { set start 1 }
+	set max [expr {[dict exists $params max] ? [dict get $params max] : $text_chunk_chars}]
+	if {$max < 1} { set max 1 }
+	set lines [rio::doc::lines $id]
+	set n [llength $lines]
+	if {$start > $n} {
+		return [dict create result [dict create text "" next $start eof 1]]
+	}
+	set out {} ; set len 0 ; set L $start
+	while {$L <= $n && $len < $max} {
+		set s [lindex $lines [expr {$L - 1}]]
+		lappend out $s
+		incr len [expr {[string length $s] + 1}]
+		incr L
+	}
+	set text [join $out "\n"]
+	set eof [expr {$L > $n}]
+	if {!$eof} { append text "\n" }   ;# the separator to the line this chunk stops before
+	return [dict create result [dict create text $text next $L eof [expr {$eof ? 1 : 0}]]]
 }
 rio::dispatch::register buffer.text rio::ops::buffer_text
 
