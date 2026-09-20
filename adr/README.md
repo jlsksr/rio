@@ -137,7 +137,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0073](0073-compare-menu.md) | Compare gets its own top-level menu | Accepted | 2026-09-08 |
 | [0074](0074-buffer-picker.md) | A bounded buffer picker replaces the Tabs menu | Accepted; generalised by 0092 | 2026-09-08 |
 | [0075](0075-find-menu.md) | A top-level Find menu | Accepted | 2026-09-08 |
-| [0076](0076-about-build-identity.md) | About rio shows the build's commit identity | Accepted | 2026-09-08 |
+| [0076](0076-about-build-identity.md) | About rio shows the build's commit identity | Accepted; the release version it lacked arrived with 0130 | 2026-09-08 |
 | [0077](0077-open-multiple-files.md) | Open several files from the native chooser | Accepted | 2026-09-08 |
 | [0078](0078-multi-line-tab-rows.md) | Multi-line tabs flow into packed, justified rows | Accepted | 2026-09-08 |
 | [0079](0079-per-provider-prompts.md) | A per-provider prompt layer | Accepted | 2026-09-08 |
@@ -191,3 +191,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0127](0127-artwork-rio-can-pass-on.md) | rio ships only artwork it can pass on | Accepted | 2026-09-20 |
 | [0128](0128-mit-license.md) | rio is MIT-licensed | Accepted; amended by 0129 | 2026-09-20 |
 | [0129](0129-extension-payload-carries-its-licence.md) | An extension payload carries its licence inside it | Accepted | 2026-09-20 |
+| [0130](0130-release-version-and-contract-versions.md) | rio is 0.1.0: semver for releases, integers for contracts | Accepted | 2026-09-20 |
