@@ -237,6 +237,15 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Changed
 
+- **Big files open about eight times faster, and the limit moves to 64 MB** — amends
+  D125, which made a file over 8 MB a question. The 8 was never about how big a file is;
+  it was the cost of three whole-file passes rio did not need to make. Deciding UTF-8 by
+  re-encoding and comparing instead of walking every byte in Tcl, highlighting the visible
+  window instead of the whole buffer, and pulling the document over the channel in chunks
+  (tcllib's JSON parser is quadratic in the length of one string) took an 8 MB open from
+  ~13 seconds to ~1.6, *with* syntax highlighting rather than stripped to Plain Text. The
+  question is unchanged in shape and still asked at every door — only the number moved. —
+  *D126 · `5dcf9ec` · 2026-09-20*
 - **rio ships only artwork it can pass on** — the stock icons rio wore since D117 are
   removed rather than re-credited: what their licence allowed downstream of a `git clone`
   was not clear enough to ship. The replacement is the project's own artwork, so rio may
