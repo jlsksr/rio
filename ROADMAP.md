@@ -456,6 +456,8 @@ for later:
   also what **1.0.0** is reserved for.
 - **Install / packaging path** — *planned.* A polished install and packaging story
   beyond the dev/server deploy scripts (see [INSTALL.md](INSTALL.md)).
-- **Code of conduct** — *planned.* To be added before rio opens up to outside
-  contributions. (The licence half of this is **done**: rio is MIT-licensed,
-  D121 — see [LICENSE](LICENSE).)
+- **Code of conduct** — *landed.* The Contributor Covenant 2.1, with reports going to
+  jlsksr@gmail.com — see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Standard text over a
+  house-written one for the same reason as the licence (D121): recognition is worth more
+  than a house dialect for the documents a stranger meets first. (The licence half is
+  **done** too: rio is MIT-licensed, D121 — see [LICENSE](LICENSE).)

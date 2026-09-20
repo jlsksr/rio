@@ -17,7 +17,27 @@ telemetry, or the plugin bazaar.
 
 ## Status
 
-**Early implementation** — real and usable, but a long way from the full IDE.
+**rio is alpha — 0.1.0, the first release.** Real and usable, and used daily by the
+person who writes it, but handed to you with three things said plainly:
+
+- **There is no crash recovery.** A clean quit prompts you to save every modified
+  buffer; a *hard* kill — a power cut, an `SIGKILL`, an X session going down — loses
+  whatever was unsaved. rio does not autosave and keeps no recovery file. **Save
+  often.** This is the one gap most likely to cost you real work, and it is why it is
+  the first thing on this page rather than a footnote.
+- **Interfaces will change.** The plugin surface especially: syntax highlighters are
+  stable today, but the provider and mode contracts are still settling, which is what
+  **1.0.0** is reserved for. Since D123 the two that can break say so with a contract
+  number, so an extension built against a newer rio is greyed out rather than failing
+  when it loads.
+- **Platforms, honestly:** Linux and Windows 11 are *run*, not assumed (see
+  *Cross-platform* below). The BSDs are a design target nobody has yet sat down and
+  tested. macOS is neither.
+
+Bugs, rough edges and "this was confusing" all go to
+[the issue tracker](https://github.com/jlsksr/rio/issues). Known limitations that are
+deliberate live in [CAVEATS.md](CAVEATS.md).
+
 Everything below runs today:
 
     wish rio-gui/rio-gui.tcl [file ...]
@@ -309,7 +329,22 @@ as untested rather than claimed.
 - **[WINDOWS.md](WINDOWS.md)** — running rio on Windows 11: one deploy script that
   installs the toolchain for you, launch, the daily notes/scratch/logfile workflow in
   keys, and a section for hacking on rio from Windows.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — what is expected of everyone taking
+  part, and where to report it when someone falls short.
 - **[LICENSE](LICENSE)** — the MIT licence, in full.
+
+## Source, and reporting something
+
+rio lives at **[github.com/jlsksr/rio](https://github.com/jlsksr/rio)**:
+
+```sh
+git clone https://github.com/jlsksr/rio.git
+```
+
+Found a bug, or something that surprised you? **[Open an
+issue](https://github.com/jlsksr/rio/issues)** — including "this was confusing",
+which is a bug in the manual and worth the same report. If it is a crash, the one
+thing worth writing down is what you were doing just before it.
 
 ## License
 

@@ -96,7 +96,7 @@ manually** — the GUI spawns its own private core as a child process and talks 
 over a pipe.
 
 ```sh
-git clone <repo> rio && cd rio
+git clone https://github.com/jlsksr/rio.git && cd rio
 ./rio-dev-deploy.sh            # installs tcl, tk, tcltls, tcllib, git (+ verifies)
 wish rio-gui/rio-gui.tcl [file-or-folder ...]
 ```

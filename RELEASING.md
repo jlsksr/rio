@@ -353,8 +353,14 @@ though the interactive behaviour is right.
       contribution comes under the same licence), and **Help ▸ About rio** shows
       it, so the licence is legible from inside a running rio and not only from
       the repository root.
-- [ ] Add `CODE_OF_CONDUCT.md` (already a ROADMAP "planned" item, due before rio
-      opens to outside contributions).
+- [x] Add `CODE_OF_CONDUCT.md` (already a ROADMAP "planned" item, due before rio
+      opens to outside contributions). **Done.** The **Contributor Covenant 2.1**
+      verbatim, reports to **jlsksr@gmail.com** — the standard text for the same
+      reason D121 chose the standard licence: a reader should be able to tell what
+      it asks without reading it closely. CONTRIBUTING's two "still to be added"
+      sentences are retired and point at the file instead.
+
+**Gate 1 is complete.**
 
 ## Gate 2 — Release identity
 
@@ -401,8 +407,19 @@ though the interactive behaviour is right.
       exits 1. The GUI also puts it in a message box, since `wish` on Windows has no
       console for stderr. Verified by running both entry points with an emptied
       `auto_path`, and by `rio-core/tests/deps.test` (7 tests, 3 injections).
-- [ ] Add an issue-reporting path (a link in the README) and a short "alpha status"
+- [x] Add an issue-reporting path (a link in the README) and a short "alpha status"
       note: what's rough, save often, and that there is **no crash recovery yet**.
+      **Done.** rio's public home is **github.com/jlsksr/rio**, so the README now
+      carries a *Source, and reporting something* section (clone URL + issue tracker,
+      with "this was confusing" named as a reportable bug), and the **Status** section
+      opens with the three things a stranger is owed: no crash recovery and therefore
+      save often; interfaces will change, the plugin surface especially, which is what
+      1.0.0 is reserved for; and which platforms have actually been run. INSTALL.md's
+      `git clone <repo>` placeholder — the last one in the tree — is a real URL now.
+
+**Gate 3 is complete.** What remains before the tag is Gate 2's third box (the tag
+itself) and a platform pass at the release commit; see *Still open* above for what
+Windows has not yet run.
 
 ## Named, and deferred on purpose
 
