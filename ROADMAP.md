@@ -181,6 +181,20 @@ Each entry notes its state:
   This entry previously also carried *"`docs/` installing"* — a leftover from D91, written
   against a packaging path that does not exist. rio is deployed by cloning it, so `docs/` is
   already beside the code wherever it runs; there was nothing to install. Dropped, not done.
+- **Opening a very large file is still slow once you say yes** — *deferred* (builds on
+  AGENTS.md **D125**, which stopped rio *silently* crawling on a stray double-click: a file
+  over 8 MB or one that looks binary is now a question — *"…is 412 MB. Open it anyway?"* —
+  and a forced open starts as Plain Text). What is left is the forced path's own cost. The
+  expense is `rio::fs::_valid_utf8`, which expands the **whole** file into a Tcl
+  unsigned-byte list before walking it, so ~150 ms per megabyte and a full materialisation
+  even when it bails at byte three. **Chunking it** — scan a window at a time, carrying any
+  split multi-byte sequence across the boundary — is exact, keeps D22's byte-preserving
+  round-trip, and would cut the common latin-1/binary case to almost nothing. Deliberately
+  not done in the week before a release: it is a performance change to *encoding detection*,
+  the one thing in rio whose wrong answer silently corrupts a file. Capping the pass at a
+  prefix instead would be faster still and is **rejected**, not deferred — declaring a whole
+  file UTF-8 on the strength of its first megabyte makes the read lossy. Lazy / windowed
+  loading remains out of scope (`fs.tcl`, since D22).
 - **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
   did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
   the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared

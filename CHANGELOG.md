@@ -307,6 +307,15 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Fixed
 
+- **Opening a huge or binary file no longer freezes rio** — a stray double-click on a
+  build log, a core dump or an ELF binary used to read the whole thing, decode it and hand
+  it to the editor, which took seconds to minutes and answered nothing in the meantime (in
+  a `--connect` session, for every frontend on that core). rio now looks before it reads:
+  a file over 8 MB, or one that looks binary, is a question — *"core.dump is 412 MB —
+  large enough that opening it may make rio slow to respond. Open it anyway?"* — and a
+  file opened anyway starts as Plain Text, with *View ▸ Language…* to turn highlighting
+  back on. Project search's own size-and-binary rule is now the same one implementation.
+  — *D125 · `bae49b6` · 2026-09-20*
 - **Installing an extension no longer mangles it** — every download from a repository was
   decoded twice, so any non-ASCII character arrived corrupted (an em-dash became `â`).
   Fixed in the fetch; a re-install repairs what is already on disk. — *D106e · `af9dfd8` ·

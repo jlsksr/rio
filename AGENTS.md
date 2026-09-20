@@ -7320,6 +7320,82 @@ tells its reader nothing. So it is the seventh line in the exemption table, whic
 right outcome twice over: the hole is *written down* rather than left as a silence, and
 the table got its first use before anyone had to remember it exists.
 
+### D125 — a file too big or too binary to open is a question, not a crawl
+
+**The gap, found by looking for one.** A release-readiness sweep asked what was left before
+0.1.0 that no document carried. This was it, and jka had already met it: *"I opened a big
+file over the last weeks and it really slowed down rio. Something I noticed but forgot."*
+Nothing on either side of the wire guarded `file.open`. It read whatever it was pointed at,
+whole: `rio::fs::read` slurps the bytes, `_valid_utf8` expands **every one of them** into a
+Tcl unsigned-byte list and walks it in interpreted Tcl, and the result crosses the channel
+and lands in a Tk text widget with the highlighter behind it. Measured on this machine:
+**~148 ms per MB** in the well-formedness pass alone (82 ms for AGENTS.md's own 553 KB),
+and a 10.4 MB binary decoding to a **10.4M-character** latin-1 buffer in 490 ms before the
+widget saw a byte. The core is single-threaded, so in remote mode (D29) a second frontend
+on that core waits the whole time. One stray double-click in the files pane — a core dump,
+a database, a build log, an ELF binary — and rio stops answering for reasons the person
+who clicked has no way to guess.
+
+**The decision (jka, 2026-09-20).** Look before reading, and when the answer is *probably
+not*, **ask** rather than refuse or plough on. `rio::fs::classify` does the looking: one
+stat, then at most 8 KB off the front. Over the caller's budget → `too_large`; a NUL in
+that prefix → `binary`. `file.open` runs it first and declines with a taxonomy code of the
+same name, carrying the size in words (`rio::fs::human_size`). The GUI turns that into
+*"core.dump is 412 MB — large enough that opening it may make rio slow to respond. Open it
+anyway?"*, and a Yes re-issues the op with an additive `force`.
+
+**Why an error is the right shape for a question.** The op genuinely did not open the file,
+so an error reply is honest, not a hack — and it makes the guard degrade properly. A
+frontend that knows `too_large` offers the way past it; one that does not (an older GUI,
+the TUI when it lands, a script) shows the message, which says the same thing in prose.
+Nothing is silently swallowed and no protocol version had to move: `force` is a parameter
+an older client simply never sends, so it gets the guard, exactly the additive pattern D55
+used for `fsroot`. This is the third code of its kind — `untrusted_cert` (D111) was the
+first to be less a failure than an offer — and error.tcl now says so in as many words.
+
+**One rule, two budgets.** The size-and-NUL test already existed, in
+`rio::project::_search_file`: project search has skipped oversized and binary files since
+D51. Writing a second copy for the editor is how two rules drift into disagreeing about
+what "binary" means, so `classify` is the one implementation and both call it. What they do
+**not** share is the number: search passes its 2 MB budget, `file.open` passes 8 MB. A
+search skipping a file costs you nothing and it walks a whole tree; an editor refusing one
+costs you the file. `rio-core/tests/fs.test` holds the two call sites against each other —
+given the *same* budget they must reach the same verdict — so the extraction cannot be
+quietly undone on one side.
+
+**Why 8 MB, and why it is not a preference.** It is a judgement about a person's patience,
+not a technical ceiling: rio's own largest source file is half a megabyte, so eight is
+generous for anything you meant to edit, while a log, a dump or a database lands well the
+other side of it. A preference would be the wrong answer to "but I did mean it" — the right
+answer is the question rio now asks, which is in front of you at the moment you care,
+rather than a setting to go and find. One named variable, `rio::ops::open_max_bytes`, so
+the number is a decision in one place if it ever wants changing.
+
+**A forced open starts as Plain Text.** The decode is only half of what makes a huge buffer
+crawl; the highlighter is the other half. So a buffer opened against rio's advice gets
+D112's own `lang` value — `plain` — which means *View ▸ Language…* turns highlighting back
+on if the file proves fine. No new machinery: the seam D112 built for picking a language by
+hand is the seam that turns it off here.
+
+**The prefix rule is a deliberate inexactness.** 8 KB, which is git's own answer, for git's
+reason: a check that runs before *every* open cannot afford to read the file it is deciding
+about. A NUL deeper in is not seen, and a test pins that so it stays a trade someone made
+rather than a surprise someone finds. Project search keeps its post-read whole-text NUL
+check on top, because by then it has the text in hand and can afford to be exact — not a
+duplicate of the rule, but the same question asked again where it is cheap.
+
+**Deliberately not done.** **The forced path is still slow**, and that is allowed: you were
+told the size and said yes. Capping `_valid_utf8` at a prefix would speed it up and was
+rejected — declaring the whole file UTF-8 on the strength of its first megabyte would make
+the read *lossy* for a file that turns invalid later, and D22's byte-preserving round-trip
+is worth more than seconds on a path nobody reaches by accident. Chunking that pass so it
+can bail early without materialising the whole byte list would be exact and is worth doing,
+but it is a performance change to encoding detection, which is not what the week before a
+release is for; ROADMAP carries it. **Lazy / windowed loading** remains out of scope, as
+`fs.tcl` has said since D22. And a **resumed session asks again** about a file that was
+force-opened in a previous one: the alternative is remembering the answer, and being asked
+is what makes a session that would otherwise hang on every launch recoverable.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
