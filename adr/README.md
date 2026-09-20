@@ -93,7 +93,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0029](0029-gui-as-socket-client.md) | The GUI can drive a remote core over a socket | Superseded by 0030 | 2026-06-30 |
 | [0030](0030-always-a-channel-client.md) | The frontend is always a client over a channel | Accepted; amended by 0096 | 2026-06-30 |
 | [0031](0031-sessions-and-preferences.md) | Sessions and preferences, split by owner, out of tree | Accepted | 2026-07-01 |
-| [0032](0032-syntax-highlighting-in-frontend.md) | Syntax highlighting: swappable per-line scanners in the frontend | Accepted | 2026-07-01 |
+| [0032](0032-syntax-highlighting-in-frontend.md) | Syntax highlighting: swappable per-line scanners in the frontend | Accepted; the viewport scoping deferred here arrived with 0133 | 2026-07-01 |
 | [0033](0033-two-editor-groups.md) | Two side-by-side editor groups | Accepted | 2026-07-06 |
 | [0034](0034-agent-system-prompt.md) | A core-owned, provider-agnostic system prompt | Accepted; amended by 0070, 0079, 0105 | 2026-07-08 |
 | [0035](0035-tool-windows-dock-sites.md) | Tool windows live in dock sites, not in the document tabs | Accepted | 2026-07-12 |
@@ -193,4 +193,5 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0129](0129-extension-payload-carries-its-licence.md) | An extension payload carries its licence inside it | Accepted | 2026-09-20 |
 | [0130](0130-release-version-and-contract-versions.md) | rio is 0.1.0: semver for releases, integers for contracts | Accepted | 2026-09-20 |
 | [0131](0131-changelog-with-a-guard.md) | rio has a changelog, and a guard keeps it current | Accepted | 2026-09-20 |
-| [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted | 2026-09-20 |
+| [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted; the budget was raised by 0133 | 2026-09-20 |
+| [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |

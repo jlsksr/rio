@@ -1,6 +1,6 @@
 # ADR-0032: Syntax highlighting: swappable per-line scanners in the frontend
 
-- **Status:** Accepted
+- **Status:** Accepted; the viewport scoping deferred here arrived with [ADR-0133](0133-big-files-are-slow-for-what-rio-does-to-them.md)
 - **Date:** 2026-07-01
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D32

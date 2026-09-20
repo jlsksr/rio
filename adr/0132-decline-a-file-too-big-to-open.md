@@ -1,6 +1,6 @@
 # ADR-0132: A file too big or too binary to open is declined, not read
 
-- **Status:** Accepted
+- **Status:** Accepted; the budget was raised by [ADR-0133](0133-big-files-are-slow-for-what-rio-does-to-them.md)
 - **Date:** 2026-09-20
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D125
