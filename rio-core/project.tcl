@@ -79,6 +79,11 @@ proc rio::project::close {} {
 # Rows are capped so a broad needle can't walk away with the core; the cap
 # surfaces as `truncated`.
 variable rio::project::search_max_rows  2000
+# Decimal, deliberately, though its sibling rio::ops::open_max_bytes is 8 MiB exactly
+# (D125). That one had to be binary because rio SAYS it out loud — human_size counts in
+# binary units, so a round 8000000 would have announced itself as "7.6 MB". This budget
+# is never quoted at anybody: a search just passes silently over what it can't usefully
+# show. So the plain number stays, and the manual says "about 2 MB", which it is.
 variable rio::project::search_max_bytes 2000000
 
 proc rio::project::search {needle nocase wholeword {regex 0}} {
