@@ -5,12 +5,42 @@
 # (D22) so file.save can reproduce the original on-disk form. As with buffer.*,
 # the real work lives elsewhere (rio::fs, rio::doc).
 
-# file.open {path} -> {buffer, name, encoding, eol, bom, mixed, linecount}
+# How big a file file.open will read without being asked twice (D125). A judgement
+# about a PERSON'S patience, not a technical ceiling: rio's own largest source file is
+# half a megabyte, so eight is generous for anything you meant to edit, while a log, a
+# core dump or a database lands well the other side of it. Deliberately NOT the same
+# number as project.tcl's search budget — a search skipping a file costs you nothing,
+# an editor refusing one costs you the file — and deliberately not a preference: the
+# answer to "I did mean it" is the question the frontend asks, not a setting to find.
+variable rio::ops::open_max_bytes 8000000
+
+# file.open {path, ?force?} -> {buffer, name, encoding, eol, bom, mixed, linecount}
+#
+# Unless `force` is true, a file that is too large or looks binary is DECLINED rather
+# than read (D125) — see rio::fs::classify. The frontend turns that into "open it
+# anyway?" and asks again with force; a frontend that doesn't know the codes shows the
+# message, which is the same sentence. `force` is additive, so an older client simply
+# gets the guard.
 proc rio::ops::file_open {params} {
+	variable open_max_bytes
 	if {![dict exists $params path]} {
 		rio::error::raise bad_request "file.open requires a path"
 	}
 	set path [dict get $params path]
+	if {!([dict exists $params force] && [dict get $params force])} {
+		set verdict [rio::fs::classify $path $open_max_bytes]
+		set human [rio::fs::human_size [dict get $verdict size]]
+		switch -- [dict get $verdict verdict] {
+			too_large {
+				rio::error::raise too_large "[file tail $path] is $human — large\
+					enough that opening it may make rio slow to respond."
+			}
+			binary {
+				rio::error::raise binary_file "[file tail $path] looks like a binary\
+					file rather than text ($human)."
+			}
+		}
+	}
 	if {[catch {rio::fs::read $path} info]} {
 		rio::error::raise io_error $info
 	}

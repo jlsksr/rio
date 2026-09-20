@@ -143,7 +143,15 @@ proc rio::project::_search_walk {dir accVar} {
 # what it can't show.
 proc rio::project::_search_file {path needle nocase wholeword budget {regex 0}} {
 	variable search_max_bytes
-	if {[catch {file size $path} sz] || $sz > $search_max_bytes} { return [list {} 0 0] }
+	# The size-and-NUL rule is rio::fs::classify (D125), shared with file.open so the
+	# editor and the search cannot drift on what "too big" or "binary" means — only on
+	# the budget each passes it. The second NUL test below is not a duplicate of it:
+	# classify looks at a cheap prefix because it runs BEFORE the read, while here the
+	# whole text is already in hand, so a file that turns out to hold a NUL deeper in
+	# can still be skipped rather than spilling control bytes into the results.
+	if {[dict get [rio::fs::classify $path $search_max_bytes] verdict] ne "ok"} {
+		return [list {} 0 0]
+	}
 	if {[catch {rio::fs::read $path} rd]} { return [list {} 0 0] }
 	set text [dict get $rd text]
 	if {[string first "\x00" $text] >= 0} { return [list {} 0 0] }
