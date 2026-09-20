@@ -202,6 +202,41 @@ in the editor than in a diff. You can still select in either pane and copy out o
 it, from the keyboard or with a [right-click](getting-started.md#right-click-menus).
 The [agent](agent.md) opens complex proposed edits in this same view.
 
+## Opening a very large or binary file
+
+Most files just open. Two kinds get a question first, because reading them is a
+decision rather than a reflex:
+
+- **Too large** — bigger than 8 MB (8,388,608 bytes):
+
+  > core.dump is 1.2 GB — large enough that opening it may make rio slow to
+  > respond. Open it anyway?
+
+- **Not text** — a core dump, a database, a compiled program:
+
+  > a.out looks like a binary file rather than text (10.4 MB). Open it anyway?
+
+Answer **no** and nothing opens at all: no tab, no buffer, and rio is as
+responsive as it was a moment ago. Answer **yes** and the file opens — and it may
+genuinely be slow, to appear and then to edit. That is what you were being warned
+about, not a fault.
+
+A file you open anyway starts as **Plain Text**. Highlighting is the other half of
+what makes a huge buffer crawl, so rio leaves it off; if the file turns out to be
+fine, ***View ▸ Language…*** turns it back on — see
+[syntax highlighting](#syntax-highlighting) above.
+
+**Every way of opening a file into a tab asks**: the Files pane,
+***File ▸ Open…***, a path on the command line, a file dragged in from your
+desktop's file manager, and the files a session reopens when you come back to a
+project. So a file you opened anyway is asked about again the next time rio
+starts — rio does not remember the answer, which is what keeps a saved session
+from reloading yesterday's core dump on every launch.
+
+Whether a file "looks binary" is judged from its **first 8 KB**: a NUL byte in
+there and rio calls it binary. The check runs before every single open, so it has
+to be cheap — a file that only turns binary further in opens without a question.
+
 ## Encoding and line endings
 
 rio reads a file's text encoding and its line endings and writes back exactly what
