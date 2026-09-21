@@ -246,6 +246,14 @@ set ::rio_started 0       ;# false during boot: view-state/workspace writes wait
 # globals, keyed per widget.
 set ::hl_margin 50   ;# lines highlighted beyond each edge of the viewport (D126)
 set ::hl_chunk 1000  ;# lines a single scan pass may walk before yielding to the event loop
+# One shared Tcl object per distinct {state param} pair, so hl_enter's one entry per line
+# costs a pointer rather than a freshly allocated two-element list. A scanner has a handful
+# of distinct pairs — measured over a 4 MB Tcl file, exactly TWO for 131,072 lines — so the
+# table is tiny and the sharing near-total. The cap is there only so a scanner whose `param`
+# carries data (a heredoc delimiter, a fence's character and length) cannot grow it without
+# bound; past the cap, entries are simply not shared and everything still works.
+set ::hl_states {}
+set ::hl_states_max 256
 
 # ---------------------------------------------------------------------------
 # Tool-panel registry (AGENTS.md D35, incremental path step (a)). The four tool
@@ -7694,30 +7702,59 @@ proc hl_window {g nlines} {
 	return [list $w0 $w1]
 }
 
+# The cached entry state for a line, as ONE object shared by every line that enters in
+# the same state (see ::hl_states). hl_enter holds one entry per line and a 16 MB file is
+# 500,000 of them, so a freshly allocated two-element list per line is most of what the
+# frontier costs in memory — and it is the same two or three values over and over.
+proc hl_state {state param} {
+	set key [list $state $param]
+	if {[dict exists $::hl_states $key]} { return [dict get $::hl_states $key] }
+	if {[dict size $::hl_states] < $::hl_states_max} { dict set ::hl_states $key $key }
+	return $key
+}
+
 # Grow group `g`'s scan frontier toward line `target`, at most ::hl_chunk lines per
 # call. This SCANS without painting — roughly 23 us a line against 56 for a painted
 # one — because all we need from the lines above the viewport is the state they hand
 # down. If the target is still out of reach the pass re-arms itself; the continuation
 # re-enters hl_ensure rather than this proc, so if the user scrolled somewhere else in
 # the meantime the next chunk aims at the new window instead of the stale one.
+#
+# The chunk's text is pulled from the widget ONCE and split, rather than per line. Two Tk
+# index parses and a B-tree descent cost 1.7 us a line where the bulk fetch costs 0.1, and
+# this loop always walks its whole budget, so nothing is fetched that is not scanned.
+# (hl_incremental below keeps its per-line `get` for the opposite reason: it usually
+# re-converges within a line or two of the edit, so a chunk-sized fetch there would pull
+# a thousand lines to read three.)
+#
+# Worth stating plainly, because it bounds what is left: at 20.2 us a line the SCANNER is
+# 19.5 of them. The fetch was 8% and the entry-state allocation was inside the noise. No
+# further work on this loop can matter much — the next lever, if one is ever wanted, is a
+# per-line fast path inside the scanners themselves, and that is a change to D32's contract
+# across 33 of them. Measured and written down, deliberately not built (ROADMAP).
 proc hl_extend {g target nlines} {
 	set t [gw $g] ; set scan [gget $g hl_scan]
 	set enter [gget $g hl_enter]
 	set E [llength $enter]
 	if {$E == 0} {
 		lassign [rio::syntax::start] state param
-		lappend enter [list $state $param]          ;# state entering line 1
+		lappend enter [hl_state $state $param]      ;# state entering line 1
 		set E 1
 	} else {
 		lassign [lindex $enter end] state param
 	}
 	if {$target > $nlines} { set target $nlines }
-	set budget $::hl_chunk
-	while {$E < $target && $budget > 0} {
-		lassign [rio::syntax::scan_line $scan [$t get $E.0 "$E.0 lineend"] $state $param] \
-			_ state param
-		lappend enter [list $state $param]          ;# state entering line E+1
-		incr E ; incr budget -1
+	set stop [expr {$E + $::hl_chunk - 1}]          ;# last line this pass may scan
+	if {$stop > $target - 1} { set stop [expr {$target - 1}] }
+	if {$stop >= $E} {
+		# `get` to a lineend keeps the newlines BETWEEN the lines and drops the one
+		# after the last, so this splits into exactly the lines E..stop — including the
+		# buffer's final line, which has no newline after it either way.
+		foreach line [split [$t get $E.0 "$stop.0 lineend"] "\n"] {
+			lassign [rio::syntax::scan_line $scan $line $state $param] _ state param
+			lappend enter [hl_state $state $param]  ;# state entering line E+1
+			incr E
+		}
 	}
 	gset $g hl_enter $enter
 	if {$E < $target} { hl_vmark $g 0 }
@@ -7901,7 +7938,7 @@ proc hl_incremental {g} {
 			break
 		}
 		if {$L == $E} break                  ;# no cached line below to carry state into
-		set next [list $state $param]
+		set next [hl_state $state $param]
 		set old [lindex $enter $L]           ;# cached state entering line L+1
 		lset enter $L $next
 		if {$L >= $last && $next eq $old} break   ;# past the edit and re-converged
