@@ -2,13 +2,26 @@
 
 Every artwork rio has worn lives here under a name of its own, and `../active` (one
 committed line) says which one the `rio-*.png` set was cut from. `../make-icons.sh`
-switches between them; nothing here is ever overwritten.
+switches between them.
+
+Candidates are kept rather than overwritten, so that going back to one stays a single
+command. A **revision of the same artwork** is the exception: it lands under the same
+name, because what it replaces is a draft nobody would switch back to, and git still has
+the old bytes if anyone ever wants them. A revision says so in the note below; a
+different artwork gets a different name.
 
 ## Where these come from
 
 ### `redeemer-1.png`
 
-The project's own. Made by jka on 2026-09-20 from a prompt of jka's, with ChatGPT.
+The project's own. Made by jka from a prompt of jka's, with ChatGPT.
+
+Revised **2026-09-21**: a disc on a transparent background, replacing the first cut of
+2026-09-20, which drew the same statue on an opaque square tile. The tile's corners were
+dead weight at 16px and the disc inside it left the subject small; this one is trimmed to
+its own edge, so the statue fills the icon. It is also a fifth of the size (516×516,
+~180 KB, against 1254×1254 and ~950 KB).
+
 rio may ship it, and anyone may redistribute a copy of rio with it — which is the whole
 requirement (see below).
 

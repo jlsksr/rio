@@ -6956,6 +6956,17 @@ in the manual; that is the guard doing its job and is why it exists.
 
 ### D120 — rio ships only artwork it can pass on
 
+> **The artwork under this name was revised on 2026-09-21 — not a new decision, which is
+> the point.** `redeemer-1` is now the statue on a **teal disc with a transparent
+> background**, trimmed to its own edge: the opaque square tile described below is gone,
+> and with it both the margin that cost the subject its canvas at 16px and the ~1 MB
+> (516×516, ~180 KB now). It went under D117's test again and holds on dark and light
+> chrome. What *this* section decides — which artwork rio may ship at all — is untouched.
+> Two paragraphs below describe the file as it was; read them as history. The revision
+> landed **under the same name**, the one departure from D117's keep-don't-overwrite rule
+> (jka: the tile was a draft, not a candidate to go back to); `sources/README.md` records
+> it, and git holds the old bytes.
+
 The icon is not decoration sitting in a repository: it travels with **every copy of rio
 anyone makes** — clone, package, mirror, a tarball on a mailing list. So the question a
 licence has to answer is not *may we use this* but *may everyone who receives rio pass it

@@ -60,8 +60,11 @@ All committed.
 
 Any square PNG, 512×512 or larger. A transparent margin is trimmed before scaling;
 an opaque tile is cut exactly as drawn, margin and all. The script re-cuts every
-size and the Windows `.ico`. Nothing is overwritten — old artwork stays in
-`sources/`, so going back is the same command with the other name. It needs
+size and the Windows `.ico`. Old artwork stays in `sources/`, so going back is the
+same command with the other name — but mind the filename: adopting a file whose
+name already exists there replaces that artwork instead of joining it. That is how
+you land a *revision* of the same artwork, and it is the only time to do it; say so
+in `sources/README.md`. Anything else gets a name of its own. It needs
 ImageMagick, which **only contributors doing this** need: rio never runs the
 script, and reads the finished PNGs with Tk's own PNG support.
 
