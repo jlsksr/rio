@@ -28,6 +28,87 @@ test wire-str-controls-roundtrip {control characters survive encode -> json2dict
 	expr {[dict get [json::json2dict $enc] params text] eq $payload}
 } -result 1
 
+# --- the two-tier escape, held to the one-tier map it replaced ------------------
+#
+# `str` used to run one 34-pair `string map` over every value on the wire. It now asks
+# one regexp whether the value contains any of the twenty-nine rare C0 controls, and runs
+# either that same 34-pair map or a five-pair one over a value proven not to need the
+# rest. Cheaper (56 -> 20 ms/MB) and, because the two maps never both run, equivalent for
+# a reason that fits in a sentence — but "equivalent" is a claim about every possible
+# string, so it is checked against the original over every string short enough to
+# enumerate and a corpus of ones that are not.
+
+# The single-map implementation, verbatim, as the oracle.
+proc str_reference {s} {
+	set m [list \\ \\\\ \" \\\"]
+	for {set c 0} {$c < 32} {incr c} {
+		switch -- $c {
+			8       { lappend m \b \\b }
+			9       { lappend m \t \\t }
+			10      { lappend m \n \\n }
+			12      { lappend m \f \\f }
+			13      { lappend m \r \\r }
+			default { lappend m [format %c $c] [format {\u%04x} $c] }
+		}
+	}
+	return "\"[string map $m $s]\""
+}
+
+test wire-str-differential-1 {every single character encodes as it did before} -body {
+	set bad {}
+	for {set c 0} {$c < 256} {incr c} {
+		set s [format %c $c]
+		if {[rio::wire::str $s] ne [str_reference $s]} { lappend bad $c }
+	}
+	return $bad
+} -result {}
+
+test wire-str-differential-2 {every two-character string over the control-heavy alphabet} -body {
+	# 0x00-0x1f (every control), the two metacharacters, and a few ordinary characters —
+	# 40 x 40, so the pair where a rare control sits BESIDE a quote or a backslash, which
+	# is where a two-map split would go wrong if the guard were misjudged, is covered
+	# exhaustively rather than sampled.
+	set alphabet {}
+	for {set c 0} {$c < 32} {incr c} { lappend alphabet [format %c $c] }
+	foreach ch {\\ \" a " " é 😀} { lappend alphabet $ch }
+	set bad {}
+	foreach a $alphabet {
+		foreach b $alphabet {
+			set s $a$b
+			if {[rio::wire::str $s] ne [str_reference $s]} {
+				lappend bad [list [scan $a %c] [scan $b %c]]
+			}
+		}
+	}
+	return $bad
+} -result {}
+
+test wire-str-differential-3 {random strings mixing controls, quotes and astral characters} -body {
+	set alphabet [list \\ \" a b " " \n \t \r \x00 \x1b \x1f \x0b \b \f é 😀 ÿ]
+	set seed 20260921
+	set bad {}
+	for {set i 0} {$i < 2000} {incr i} {
+		set s ""
+		set n [expr {$i % 30 + 1}]
+		for {set j 0} {$j < $n} {incr j} {
+			set seed [expr {($seed * 1103515245 + 12345) & 0x7fffffff}]
+			append s [lindex $alphabet [expr {$seed % [llength $alphabet]}]]
+		}
+		if {[rio::wire::str $s] ne [str_reference $s]} { lappend bad $i }
+	}
+	return $bad
+} -result {}
+
+test wire-str-differential-4 {a document-sized value, with and without a control} -body {
+	set doc ""
+	for {set i 0} {$i < 2000} {incr i} {
+		append doc "set x \[expr {\$a + \$b}\] ;# a \"quoted\" line, one \\ backslash\n"
+	}
+	set withctl [string replace $doc 5000 5000 \x1b]
+	list [expr {[rio::wire::str $doc] eq [str_reference $doc]}] \
+	     [expr {[rio::wire::str $withctl] eq [str_reference $withctl]}]
+} -result {1 1}
+
 test wire-obj-flat {a flat dict becomes an object of string values} -body {
 	rio::wire::obj {start 1.0 end 1.0 text X}
 } -result {{"start":"1.0","end":"1.0","text":"X"}}

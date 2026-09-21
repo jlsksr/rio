@@ -34,12 +34,47 @@ namespace eval rio::wire {
 		}
 	}
 	unset c
+
+	# The same map with the rare half taken out, and a character class that says when
+	# the rare half is needed.
+	#
+	# `string map` compares every character of the input against every pair's first
+	# character, so a 34-pair map is 34 comparisons per character of every value that
+	# crosses the wire — including a whole 256 KB `buffer.text` chunk (D126). Twenty-nine
+	# of those pairs are C0 controls that a document essentially never contains: they have
+	# to be ESCAPED correctly when they do occur (above), but they should not be PAID FOR
+	# when they do not.
+	#
+	# So `str` asks first, with one regexp, and then runs one of two maps. Either the
+	# original 34-pair map runs, byte for byte as before, or a five-pair one runs on a
+	# string the regexp has just proven contains none of the other twenty-nine — which is
+	# the whole correctness argument, and it needs no reasoning about escaping order
+	# because the two maps never both run. Both are DERIVED from `strmap` here rather than
+	# written out again, so they cannot drift from it.
+	#
+	# 56 -> 20 ms/MB for ordinary text; a 256 KB chunk, 13.9 -> 4.9 ms. A value that does
+	# contain a control pays the regexp and nothing else (56.1 -> 56.5 ms/MB, measured).
+	variable strmap_common {}
+	variable rare_re {}
+	foreach {from to} $strmap {
+		if {[string length $from] == 1} {
+			set code [scan $from %c]
+			if {$code < 32 && $code ni {9 10 13}} {   ;# tab, newline, return stay common
+				append rare_re [format {\u%04x} $code]
+				continue
+			}
+		}
+		lappend strmap_common $from $to
+	}
+	set rare_re "\[$rare_re\]"
+	unset from to code
 }
 
 # A JSON string literal.
 proc rio::wire::str {s} {
-	variable strmap
-	return "\"[string map $strmap $s]\""
+	variable strmap ; variable strmap_common ; variable rare_re
+	if {[regexp $rare_re $s]} { return "\"[string map $strmap $s]\"" }
+	return "\"[string map $strmap_common $s]\""
 }
 
 # A flat Tcl dict -> a JSON object with string values.
