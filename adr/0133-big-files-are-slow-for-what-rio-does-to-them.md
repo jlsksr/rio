@@ -127,3 +127,60 @@ same judgement lands on a different number.
   the old parse cost for doing so.
 - The performance claims here were measured on one machine at one time. They justify the
   shape of the decision, not any particular number a later reader will reproduce.
+
+## Amendment, 2026-09-21: the two remaining passes, and what the frontier scan measured
+
+Both whole-file passes the Consequences left open are gone, and the cost of the frontier
+scan was measured instead of reasoned about. Nothing above is decided differently; this is
+the same argument with its closing numbers, and two corrections to it.
+
+**Line-ending detection stopped counting.** The normalization that rewrites CRLF to LF
+loses exactly one character per pair, so the number of pairs is the length it lost, and
+that costs nothing. With that number in hand the common case needs no pass either: no CRLF
+means every newline is a bare LF, nothing is mixed, and the convention is settled without
+looking at the text. An LF file went from about 15.5 to 0.9 ms/MB, a CRLF one from 22.3 to
+10.5. This is the one computation in rio whose wrong answer corrupts a file in silence,
+which is why the Consequences said it wanted its own sitting; what the sitting produced is
+a differential test holding the new verdict against the counting implementation it
+replaced, over adversarial and randomly generated inputs rather than over examples.
+
+**The JSON escape asks before it works.** A `string map` compares every input character
+against the first character of every pair, so the full escape map spent twenty-nine of its
+thirty-four comparisons on C0 controls that a source document does not contain. One
+regular expression now asks whether the value contains any of them. If it does, the
+original map runs unchanged; if it does not, a five-pair map runs over a value just proven
+to need nothing else. Asking first rather than escaping in two stages is the point: the two
+maps never both run, so there is no ordering between them to get wrong, and a value that
+does contain a control pays only the question — 56.5 against 56.1 ms/MB, nothing traded for
+the win. Ordinary text went from about 56 to 20 ms/MB, and a 256 KB document chunk from
+13.9 to 4.9 ms. Both maps are derived from the one original where they are defined, so they
+cannot drift apart, and their equivalence is again a differential test.
+
+**The frontier scan is finished.** Its chunk is now fetched from the text widget once and
+split, rather than a line at a time, and the recorded entry states are interned, so every
+line entering in the same state shares one object. On an 8 MB file the scan went from 22.6
+to 20.5 µs a line and the entry-state cache from 36.5 to 8.7 MB. The memory is the real
+result: a 4 MB file has two distinct entry states across its 131,072 lines, so sharing them
+makes the cache a pointer per line.
+
+The breakdown settles what is left. At about 20 µs a line the scanners themselves are 19.5
+of them; the widget fetch was 1.7 and is now 0.1, and the allocation was inside the noise.
+Nothing in the loop around the scanners is worth another pass. The only lever remaining is
+a per-line predicate inside each scanner, declaring that a line cannot change the entry
+state — an addition to [ADR-0032](0032-syntax-highlighting-in-frontend.md)'s scanner
+contract across every language rio ships, and one differential test per language to be safe
+about it. It was measured and deliberately not built. It is a decision for another day, not
+a deferred task with a plan attached.
+
+**Checkpointing is un-planned, not deferred.** The Consequences above say that
+checkpointing the scan state every so many lines would help a repeat jump and never the
+first. That is wrong. The entry-state cache is a dense prefix that persists, so a second
+jump to the same place skips the scan entirely and a repeat jump is already free.
+Checkpointing would trade that property away for memory, and interning the entry states
+recovers the memory without the trade. The cost of the *first* jump stands as stated, and
+remains the price of exact multi-line state.
+
+One change the plan called for was not made: the same bulk fetch in the incremental
+repaint's scan-only branch. That pass usually re-converges within a line or two of an edit,
+so a chunk-sized fetch would pull a thousand lines to read three — a pessimisation on the
+one path that runs on every keystroke.
