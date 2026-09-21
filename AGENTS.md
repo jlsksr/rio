@@ -7502,6 +7502,54 @@ detection, where a wrong answer corrupts a file silently, so it wants its own si
 the irreducible price of exact multi-line state; checkpointing would help a *repeat* jump
 and never the first. CAVEATS carries it.
 
+**Amendment, 2026-09-21 — the three passes that were left, and what the last one taught.**
+Both whole-file passes above are now done, and the frontier scan was measured rather than
+guessed at. No new decision: this is the same argument with closing numbers.
+
+*The EOL counts.* The `string map` that normalizes CRLF removes exactly one character per
+pair, so the length it loses **is** the CRLF count — free. And with that count in hand the
+common case needs no pass at all: no CRLF means every newline is a bare LF, nothing is
+mixed, and the convention is `lf` without counting anything. **15.5 → 0.9 ms/MB** for an LF
+file (every source file on this machine), 22.3 → 10.5 for a CRLF one. Because this is the
+one computation in rio whose wrong answer corrupts a file in silence, moving the detection
+to *after* normalization is held to a differential test against the two-pass original —
+`\r\r\n`, lone CR, CR and CRLF at EOF, the `crlf >= lf` tie, no trailing newline, 400 random
+permutations — not to examples.
+
+*The wire escape.* `string map` compares every input character against every pair's first
+character, so the 34-pair map spent twenty-nine of them on C0 controls a document never
+contains. `str` now asks **one regexp first** and then runs one of two maps: the original
+34-pair one, byte for byte as before, or a five-pair one over a value the regexp has just
+proven needs nothing else. Guard-first matters — the two maps never both run, so there is no
+escaping-order argument to get wrong, and a value that *does* contain a control pays only
+the regexp (56.1 → 56.5 ms/MB, i.e. nothing traded for the win). **56 → 20 ms/MB**; a 256 KB
+`buffer.text` chunk, 13.9 → 4.9 ms. Both maps are derived from the original at source time
+so they cannot drift from it, and the equivalence is checked over every single character,
+every two-character string from a 40-character control-heavy alphabet, 2000 random mixed
+strings and a document-sized value.
+
+*The frontier scan, and the thing worth keeping.* `hl_extend` now pulls its chunk from the
+widget once and splits it, and entry states go through a canonicalising table. On an 8 MB
+Tcl file, back to back: **22.6 → 20.5 µs/line**, and `hl_enter` **36.5 MB → 8.7 MB**. The
+memory is the real result and the honest answer to ROADMAP's "`hl_enter` grows one entry per
+line scanned" — a 4 MB file has exactly **two** distinct `{state param}` pairs across 131,072
+lines, so one shared object per distinct state makes the list a pointer per line.
+
+But the breakdown is what settles the question: **at 20.2 µs a line the scanner is 19.5 of
+them.** The widget fetch was 1.7 (now 0.1), the allocation was inside the noise. So this loop
+is finished — the only lever left is a per-line "this line cannot change the entry state"
+predicate *inside* the scanners, an addition to D32's contract across 33 of them needing a
+differential test per language. Measured, written down, **not built**.
+
+*And checkpointing is now un-planned, not deferred.* The ROADMAP bullet claimed snapshotting
+every N lines "would make a *repeat* jump cheap". That is simply wrong: `hl_enter` is a dense
+prefix that **persists**, so `hl_ensure` skips the scan entirely on a second visit — a repeat
+jump is already free. Checkpointing would trade that away for memory, and sharing the entry
+states buys the memory back without the trade. Corrected in ROADMAP and CAVEATS. The 9 s /
+16 MB and 64 MB figures above stand as rounded statements: the scan got ~10% cheaper, which
+does not move them, and re-stating them from a synthetic file of a different line width
+would be a worse number, not a better one.
+
 ### D127 — a headless run must not be able to receive real input
 
 **The symptom.** `rio-gui/tests/context_menu.tcl` failed about **one run in twelve** on

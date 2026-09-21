@@ -262,9 +262,14 @@ design limit that surprises, append it to the matching section.
   open starts as **Plain Text**, which skips the scan entirely — *View ▸ Language…*
   turns it back on. For the deep-NUL case, the same menu sets Plain Text by hand.
 - **Planned.** Nothing here is blocked on a missing idea; it is the honest cost of
-  exact multi-line state. Checkpointing the scan (snapshotting every N lines so a
-  *repeat* jump is cheap) would help the second visit and never the first, and is on
-  [ROADMAP.md](ROADMAP.md). Lazy / windowed loading of a huge file stays out of scope.
+  exact multi-line state. A **repeat** jump is already free — `hl_enter` is a dense prefix
+  that persists, so the second visit skips the scan entirely — which is why *checkpointing*
+  the scan is **not planned**: it would trade that away for memory and make the first jump
+  no faster (the reasoning that once put it on [ROADMAP.md](ROADMAP.md) had this backwards).
+  Where the first jump's time actually goes has now been measured: at **20.2 µs a line the
+  scanners are 19.5 of them**, so the only remaining lever is a per-line fast path inside
+  the scanners themselves — an addition to D32's contract across 33 languages, its own
+  decision. Lazy / windowed loading of a huge file stays out of scope.
 
 ### A same-second, same-length rewrite can go unnoticed
 
