@@ -43,6 +43,36 @@ design limit that surprises, append it to the matching section.
   rio is unbounded today, and a new one should not be: a list that grows with installed
   extensions, open buffers or project contents belongs in `pick_dialog`, not a cascade.
 
+### A headless test run needs a real window, and X11 would hand it your keyboard
+
+- **Symptom.** A GUI suite run on a developer's own display fails about **one run in twelve**,
+  in a way that looks like nonsense: `context_menu.tcl` reports the boot scratch buffer as
+  non-empty, and one later check reads `Search for “r0123456789…”` — a stray letter, a
+  different one each time, that nothing in rio computes. Every other check passes.
+- **Cause.** Two halves, and both are needed to see it. A headless run has to **map its
+  window once**, because neither platform lays the layout out otherwise: Windows never sizes
+  an unmapped toplevel at all (`winfo width .` stays at 120x1, the tab strip measured 47px),
+  and on X11 a **panedwindow** — which is what rio's editor groups are panes of — lays its
+  panes out only once mapped, leaving `.eg0` and the editor inside it at 1x1. And on X11 a
+  **click-to-focus window manager gives a newly mapped window the input focus**: measured,
+  the X focus moved to the editor widget itself. For those few milliseconds the run owns your
+  keyboard, and whatever you type lands in a buffer every suite assumes is empty.
+- **Where it's fine.** **Any display with no human at it** — CI, a spare X server, a machine
+  you are not typing on. The flake needs a keystroke to exist, which is exactly why it looked
+  random and why re-running "fixed" it.
+- **Mitigation in rio.** Two lines, both in `rio-gui.tcl` (**D127**). The window is
+  **withdrawn at the top of the file**, before anything else, because nothing maps it on
+  purpose — the first entry into the event loop does, and boot's blocking op calls each
+  `vwait`. The sizing map at the far end then runs under `wm overrideredirect . 1`, so the
+  window is mapped and `winfo viewable .` is 1, but the **WM never manages it and cannot
+  focus it**. A boot-time tripwire records `focus -displayof .` and **fails the run** if this
+  process holds the X focus at all, the way `::headless_dialogs` fails a run that asked a
+  question.
+- **Planned.** Nothing. The Windows leg of this is unverified from Linux: there the map is
+  the same shape as it always was, with the window additionally undecorated for the moment it
+  is up, and the tripwire is deliberately not armed (a Windows map is WM-managed by
+  definition). If a Windows run ever shows a collapsed layout, that is the line to look at.
+
 ### A killed command's exit code differs on Windows (there are no signals)
 
 - **Symptom.** When the agent's `run_command` tool **times out** and rio kills the child, the
