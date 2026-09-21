@@ -41,6 +41,15 @@ rio::deps::gui_require json
 # dragging still holds — that gesture needs no extension; OS file-drop is the one that does.)
 set ::have_tkdnd [expr {![catch {package require tkdnd}]}]
 
+# A test harness sets RIO_GUI_HEADLESS to keep the window off the screen, and the window
+# has to go off it HERE, first thing (D127). Nothing below maps `.` on purpose — the FIRST
+# ENTRY INTO THE EVENT LOOP does, wherever it happens to be, and boot is full of them: every
+# blocking op call vwaits on its reply (the one at the top of this file), and that is enough
+# for Tk to map the toplevel. Withdrawing it before there is anything to map is the only
+# placement that covers all of them; the sizing block at the far end of this file deals with
+# the geometry a withdrawn window still needs. See CAVEATS.md.
+if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }
+
 # ---------------------------------------------------------------------------
 # Transport (AGENTS.md D30): the GUI is ALWAYS a client to a core at the far end of
 # a channel — it never embeds the core. Two channel kinds, one client code path:
@@ -12778,19 +12787,66 @@ if {$::have_tkdnd && !$::core_remote} {
 	bind . <<Drop>> {dnd_open_files %D}
 }
 
-# A test harness sets RIO_GUI_HEADLESS to keep the window off-screen.
+# The other half of the withdraw at the top of this file: a headless window still has to
+# have a real SIZE, or a check that asks whether something FITS its pane reads a layout
+# nothing could fit in. So map it once, off-screen, and withdraw it again.
 #
-# Map it once, off-screen, before withdrawing it. X11 assigns a toplevel real
-# geometry whether or not it is ever mapped, so plain `wm withdraw .` was enough
-# there; Windows does not — `winfo width .` stays at the trivial 120x1 and every
-# child collapses with it (the tab strip measured 47px), so any check that asks
-# whether something FITS its pane reads the wrong answer. The sizes survive the
-# withdraw, so the final state is the same withdrawn window as before, only with
-# a usable layout underneath it. See CAVEATS.md.
+# The map is unavoidable, on both platforms, and for different reasons. Windows never sizes
+# an unmapped toplevel at all: `winfo width .` stays at the trivial 120x1 and every child
+# collapses with it (the tab strip measured 47px). X11 does size one — but a PANEDWINDOW
+# lays its panes out only once it is mapped, and rio's editor groups are panes of `.groups`,
+# so without the map `.eg0` and the editor widget inside it stay at 1x1 while everything
+# around them measures correctly. Only a full `update` maps; `update idletasks` does not.
+#
+# What is avoidable is the map being visible to the WINDOW MANAGER (D127). A click-to-focus
+# WM hands a newly mapped window the input focus, and measured on this box, the X focus
+# landed on the editor widget itself — so for those few milliseconds the developer's
+# keystrokes went into the boot scratch buffer. One of them is one stray character in a
+# buffer every GUI suite assumes is empty, which is what made context_menu.tcl fail about
+# one run in twelve.
+#
+# `wm overrideredirect . 1` is what takes the WM out of it: the window is still mapped and
+# `winfo viewable .` is 1, so the geometry is real, but the WM never manages it and so
+# cannot focus it. Measured through the map: `focus -displayof .` stays empty and
+# _NET_ACTIVE_WINDOW stays on another client, where before both named this process.
+# Off-screen at -4000-4000 it is not visible either way. See CAVEATS.md.
 if {[info exists ::env(RIO_GUI_HEADLESS)]} {
+	wm overrideredirect . 1      ;# the WM never manages it, so it cannot be given the focus
 	wm geometry . 1200x800-4000-4000
+	wm deiconify .
 	update                       ;# a full update: idletasks alone does not MAP it
 	wm withdraw .
+	wm overrideredirect . 0
+}
+
+# The tripwire for the above, in the idiom ::headless_dialogs already uses: record it here,
+# fail the run at exit, so nothing can swallow it.
+#
+# `focus -displayof .` names the focus widget only when the X input focus really belongs to
+# THIS application; it answers with the empty string when it belongs to anyone else. A run
+# the WM was never allowed to manage cannot hold it — measured both ways: with a plain map
+# this reads `.eg0.t` (the boot editor, which is precisely how a keystroke got into the
+# buffer), with the override-redirect one above, the empty string. So a non-empty answer
+# here means real input can reach this run, whatever else looks right.
+#
+# This is not hypothetical arming: before it existed, four suites (browse, pipe, reconnect,
+# session) were leaking the focus and nothing said so. Their route in was not the block
+# above at all — boot's first blocking op call vwaits, that enters the event loop, and the
+# event loop maps a toplevel that has not been withdrawn. Hence the withdraw at the very
+# top of this file, and hence a check that asks about the RESULT rather than about any one
+# line that could cause it.
+#
+# One shot, at boot, before any suite has built a toplevel of its own — a suite that maps
+# something and focuses it deliberately is not what this is about. Windows is exempt: there
+# the WM legitimately manages the map above, so holding the focus is expected.
+#
+# (Considered instead: log every <KeyPress> and tell real ones from the suite's own
+# `event generate` by %t. Dropped — it records the damage rather than preventing it, the
+# Text class binding has already inserted the character by the time any `all` binding runs,
+# and %t could not be verified here without a human at the keyboard to press a key.)
+set ::headless_focus {}
+if {[info exists ::env(RIO_GUI_HEADLESS)] && $::tcl_platform(platform) ne "windows"} {
+	set ::headless_focus [focus -displayof .]
 }
 
 # Headless means there is NO HUMAN at this display — so a blocking dialog has only two
@@ -12843,6 +12899,11 @@ if {[info exists ::env(RIO_GUI_HEADLESS)]} {
 		if {[llength $::headless_dialogs]} {
 			puts stderr "\nRUN FAILED — [llength $::headless_dialogs] dialog(s) reached with no stub; a headless run must never ask:"
 			foreach d $::headless_dialogs { puts stderr "  $d" }
+			flush stderr
+			if {$code == 0} { set code 1 }
+		}
+		if {$::headless_focus ne ""} {
+			puts stderr "\nRUN FAILED — this run held the X input focus at boot (at $::headless_focus); a headless window must never be mapped on X11, or a keystroke at the display lands in the buffer (D127)."
 			flush stderr
 			if {$code == 0} { set code 1 }
 		}

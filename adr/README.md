@@ -195,3 +195,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0131](0131-changelog-with-a-guard.md) | rio has a changelog, and a guard keeps it current | Accepted | 2026-09-20 |
 | [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted; the budget was raised by 0133 | 2026-09-20 |
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
+| [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted | 2026-09-21 |

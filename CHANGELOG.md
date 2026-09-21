@@ -316,6 +316,14 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Fixed
 
+- **A headless test run can no longer take your keyboard** — running the GUI suites on the
+  display you are working at, rio's off-screen test window was mapped like any other, so a
+  click-to-focus window manager gave it the input focus and the next key you pressed landed
+  in the buffer a test was about to check. It made `context_menu.tcl` fail about one run in
+  twelve, with a different stray letter each time. The window is now withdrawn before
+  anything can map it, and the one map it still needs — to lay out the panes — happens
+  where the window manager cannot see it. A run that holds the X focus at all now fails and
+  says so. — *D127 · `7ce1c9d` · 2026-09-21*
 - **Opening a huge or binary file no longer freezes rio** — a stray double-click on a
   build log, a core dump or an ELF binary used to read the whole thing, decode it and hand
   it to the editor, which took seconds to minutes and answered nothing in the meantime (in

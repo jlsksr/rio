@@ -7502,6 +7502,75 @@ detection, where a wrong answer corrupts a file silently, so it wants its own si
 the irreducible price of exact multi-line state; checkpointing would help a *repeat* jump
 and never the first. CAVEATS carries it.
 
+### D127 — a headless run must not be able to receive real input
+
+**The symptom.** `rio-gui/tests/context_menu.tcl` failed about **one run in twelve** on
+`main`, independently of D126 (verified by stashing: 11/12 clean on the baseline, 12/12 on
+the D126 branch, the same failure mode both sides). Two checks failed and the rest passed:
+the boot scratch buffer was not empty, and a later label read `Search for “r0123456789…”`
+with a leading letter that was **different each run** — `r`, then `t`. Nothing rio computes
+produces a random letter. It was recorded nowhere, which is the worst property a flake can
+have: it trains you to re-run.
+
+**The cause, established causally rather than statistically.** The letter is a keystroke of
+jka's, typed into the test's own window. A headless run **maps its toplevel** — it has to,
+see below — and on X11 a click-to-focus window manager **hands a newly mapped window the
+input focus**. Measured through the map, with `xprop` and Tk agreeing: before it,
+`focus -displayof .` is empty; after it, it is **`.eg0.t`, the boot editor**, and
+`_NET_ACTIVE_WINDOW` names this very process. Tk then routes the key through the Text class
+binding, which inserts it. Delivering one `<Key-r>` at that instant reproduced **exactly the
+two observed failures, including the `r0123456789…` label** — same build, and clean when no
+key arrives. One-in-twelve is simply "was a key down during those milliseconds".
+
+No Xvfb, xdotool or xte on this machine, so isolation-by-second-display was not available
+and was not worth adding a build-time dependency to get. Making the race deterministic was
+better evidence than a clean statistical run would have been.
+
+**Why the map exists at all, on both platforms.** The comment it carried said Windows: an
+unmapped toplevel there is never sized, `winfo width .` stays at 120x1 and every child
+collapses with it (the tab strip measured 47px), so any check asking whether something FITS
+its pane reads the wrong answer. **X11 needs it too**, for a different reason found while
+removing it: X does size an unmapped toplevel, but a **panedwindow lays its panes out only
+once mapped**, and rio's editor groups are panes of `.groups` — without the map, `.status`
+and `.groups` measure correctly while `.eg0` and the editor inside it sit at 1x1. So
+"don't map on the platform that never needed it" was the wrong fix, and the measurement
+said so before it was committed.
+
+**The fix is to take the window manager out of it, not the map.** `wm overrideredirect . 1`
+around the map: the window is mapped and `winfo viewable .` is 1, so the geometry is real —
+every widget measures byte-identically to before, `.eg0.t` at 930x758 — but the WM never
+manages it and therefore cannot focus it. Measured through the map afterwards:
+`focus -displayof .` stays empty and `_NET_ACTIVE_WINDOW` stays on another client.
+
+**The second half, which the investigation found rather than assumed.** Arming a tripwire
+showed **four more suites** leaking the focus — `browse`, `pipe`, `reconnect`, `session` —
+and their route in was not that block at all. **Nothing maps `.` on purpose: the first entry
+into the event loop does**, and boot is full of them, because every blocking op call
+`vwait`s on its reply. `context_menu.tcl` talks to an in-process core and its replies land
+too fast to matter; a suite that spawns a core waits long enough to be mapped every time.
+The window is therefore **withdrawn at the very top of `rio-gui.tcl`**, before there is
+anything to map, and the sizing block deiconifies under override-redirect and withdraws
+again. Only a check on the *result* could have found this; a check on any one line that
+causes it could not.
+
+**The tripwire.** `focus -displayof .` names a widget only when the X input focus really
+belongs to this application. It is read once at boot and **fails the run at exit**, in the
+idiom `::headless_dialogs` already uses — stray input is the same class of bug, something
+from outside the suite deciding the result. It caught both halves under injected drift:
+remove the override-redirect, or remove the early withdraw, and a run that otherwise prints
+`ALL CHECKS PASSED` exits 1. Windows is exempt, where the map is legitimately WM-managed.
+
+**Rejected: keep the map, filter the keys.** Log every `<KeyPress>` and tell a real one from
+the suite's own `event generate` by `%t`. It records the damage instead of preventing it —
+the Text class binding has already inserted the character before any `all` binding runs —
+and `%t` could not be verified here without a human at the keyboard to press a key. A
+precondition check needs neither.
+
+**Also considered: what the flake teaches.** The bug was invisible on CI and only ever bit
+the developer's own display, so it could have been "fixed" by running the suites somewhere
+else. That would have left rio able to take a keyboard it was never supposed to have. The
+invariant is the title of this entry, not the flake.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
