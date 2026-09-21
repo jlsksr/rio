@@ -7493,7 +7493,8 @@ widget as the document, and find, marks, selection, `line.col` undo indices, the
 vi's jumps all rest on the widget holding the whole buffer. The measurements say it buys
 nothing anyone needs: the widget is 0.3% of the cost.
 
-**Deliberately not done.** Two linear whole-file passes remain — `wire::obj`'s escape
+**Deliberately not done** *(as it stood on the day — all three of these were taken up the
+next day; see the amendment below)*. Two linear whole-file passes remain — `wire::obj`'s escape
 (~58 ms/MB) and `fs::read`'s two `regexp -all` EOL counts (~17 ms/MB, derivable for free
 from the `string map` that follows). Both are on ROADMAP; the EOL one touches encoding
 detection, where a wrong answer corrupts a file silently, so it wants its own sitting. And
