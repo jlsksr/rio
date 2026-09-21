@@ -206,20 +206,31 @@ Each entry notes its state:
   megabyte makes the read lossy — and lazy / windowed loading stays out of scope: the Tk
   text widget holds the document (it absorbs 20k lines in 4 ms), and find, marks,
   selection, `line.col` undo indices and the gutter all rest on that.
-- **Two whole-file passes are left in the open path, both linear** — *gap*, and small.
-  `rio::wire::obj` escaping the document costs ~58 ms/MB, and `rio::fs::read` counts line
-  endings with two `regexp -all` sweeps (~17 ms/MB) that the `string map` immediately
-  after it could yield for free from the length delta. Together they are most of what a
-  64 MB open still spends outside the disk. Neither is urgent; both are the kind of thing
-  to do with a measurement in hand, and the EOL one touches encoding detection, whose
-  wrong answer silently corrupts a file.
-- **Checkpointing the highlighter's scan** — *deferred* (builds on **D126**). Entry states
-  are exact, so colouring line N means having scanned the N-1 lines above it; jumping
-  straight to the end of a 64 MB file takes most of a minute to finish colouring, chunked
-  and non-blocking but real. Snapshotting the scan state every N lines would make a
-  *repeat* jump cheap and the first one no faster, which is why it waits for someone to
-  actually be annoyed by it. `hl_enter` also still grows one entry per line scanned, so a
-  full read-through of a huge file ends up holding what the old whole-file pass held.
+- **The two whole-file passes left in the open path** — *closed* (**D126**, measured).
+  `wire::str` escaped every value with one 34-pair `string map`, twenty-nine pairs of which
+  are C0 controls a document never contains; it now asks one regexp and runs either that
+  same map or a five-pair one over a value proven not to need the rest (**56 → 20 ms/MB**,
+  and no regression for a value that does contain a control). `fs::read` counted line
+  endings with two `regexp -all` sweeps before normalising; the `string map` that follows
+  loses exactly one character per CRLF pair, so the count is free from the length delta and
+  the common case needs no sweep at all (**15.5 → 0.9 ms/MB** for an LF file). The EOL one
+  is the computation whose wrong answer corrupts a file silently, so it is held to a
+  differential test against the two-pass original rather than to examples.
+- **Checkpointing the highlighter's scan** — *not planned*, and the reasoning that put it
+  here was wrong. It said snapshotting the scan state every N lines "would make a *repeat*
+  jump cheap": a repeat jump is already free, because `hl_enter` is a dense prefix that
+  **persists**, so `hl_ensure` skips the scan entirely on a second visit. Checkpointing
+  would trade that away for memory and buy nothing. The **first** jump is the only cost —
+  most of a minute at 64 MB, chunked and non-blocking but real — and D126's follow-up
+  measured where it goes: at **20.2 µs a line the scanner is 19.5 of them**, the per-line
+  widget fetch was 1.7 (now bulk, 0.1) and the entry-state allocation was inside the noise.
+  So the only lever left is a per-line "this line cannot change the entry state" fast path
+  *inside the scanners*, which is an addition to D32's contract across 33 of them and needs
+  a differential test per language. Its own decision, if anyone is ever annoyed enough.
+  The memory half of this bullet is **closed**: entry states are now shared objects rather
+  than one freshly allocated list per line (a 4 MB Tcl file has exactly **two** distinct
+  ones across 131,072 lines), which cut `hl_enter` on an 8 MB read-through from **36.5 MB
+  to 8.7 MB**.
 - **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
   did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
   the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared

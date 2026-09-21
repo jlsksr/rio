@@ -237,6 +237,14 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Changed
 
+- **The last three passes over a big file are gone too** — continues D126 with the work it
+  left on the table. rio no longer walks a document twice to see whether it uses CRLF line
+  endings (the normalisation it does next already knows, and a file with none needs no
+  counting at all), no longer tests every character of every value it sends against
+  twenty-nine control characters a document never contains, and pulls the highlighter's
+  scan out of the editor in chunks rather than a line at a time. That scan also stops
+  keeping a separate copy of the same handful of states for every line: on an 8 MB file,
+  36 MB of memory down to 9. — *D126 · `668b47d` · 2026-09-21*
 - **Big files open about eight times faster, and the limit moves to 64 MB** — amends
   D125, which made a file over 8 MB a question. The 8 was never about how big a file is;
   it was the cost of three whole-file passes rio did not need to make. Deciding UTF-8 by

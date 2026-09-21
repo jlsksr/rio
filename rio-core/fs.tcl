@@ -54,12 +54,34 @@ proc rio::fs::read {path} {
 		set text [encoding convertfrom iso8859-1 $bytes]
 	}
 
-	# Detect the line-ending convention, then normalize to \n for the model.
-	set crlf [regexp -all "\r\n" $text]
-	set lf   [expr {[regexp -all "\n" $text] - $crlf}]
-	set mixed [expr {$crlf > 0 && $lf > 0}]
-	set eol [expr {$crlf > 0 && $crlf >= $lf ? "crlf" : "lf"}]
+	# Normalize to \n for the model, and read the line-ending convention OUT of that
+	# normalization instead of walking the document twice to work it out first.
+	#
+	# The `string map` removes exactly one character per CRLF pair and touches nothing
+	# else, so the length it loses IS the CRLF count — free, where `regexp -all "\r\n"`
+	# was a whole pass. And with that count in hand the common case needs no pass at all:
+	# no CRLF means every newline is a bare LF, so there is nothing mixed and the
+	# convention is `lf` without counting anything. Only a file that really does contain
+	# CRLF pays for the second count, and `lf` is then the bare-LF count as before —
+	# every newline after normalization, minus the ones the map just created.
+	#
+	# 15.5 -> 0.9 ms/MB for an LF file, 22.3 -> 10.5 for a CRLF one (D126's leftovers).
+	#
+	# This is the one proc in rio whose wrong answer silently corrupts a file — D22's
+	# round-trip rests on `eol` — so the equivalence is held to a differential test
+	# against the two-pass original rather than to a handful of cases (fs.test,
+	# `fs-eol-differential`), including the ties and the awkward `\r\r\n`.
+	set n0 [string length $text]
 	set text [string map [list "\r\n" "\n"] $text]
+	set crlf [expr {$n0 - [string length $text]}]
+	if {$crlf == 0} {
+		set mixed 0
+		set eol lf
+	} else {
+		set lf [expr {[regexp -all "\n" $text] - $crlf}]
+		set mixed [expr {$lf > 0}]
+		set eol [expr {$crlf >= $lf ? "crlf" : "lf"}]
+	}
 
 	return [dict merge [dict create \
 		text $text encoding $encoding bom $bom eol $eol mixed $mixed] $st]

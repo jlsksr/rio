@@ -115,6 +115,67 @@ test fs-read-mixed {mixed endings: dominant chosen and surfaced} -body {
 	list [dict get $d eol] [dict get $d mixed]
 } -result {crlf 1}
 
+# --- the EOL detection, held to the implementation it replaced ----------------
+#
+# `rio::fs::read` used to count line endings with two `regexp -all` passes BEFORE
+# normalizing, and now derives the CRLF count from the normalization itself and skips the
+# second pass entirely when there is no CRLF. That is the one computation in rio whose
+# wrong answer corrupts a file in silence — D22's round-trip writes back whatever `eol`
+# says — so it is not tested by example. The two-pass original is kept here verbatim as
+# the reference, and the answers have to agree over everything awkward: the `crlf >= lf`
+# tie, `\r\r\n` (where the pair starts at the SECOND carriage return), a lone CR, a CR or
+# a CRLF at EOF, no trailing newline at all, and a few hundred random permutations.
+
+# The two-pass implementation this replaced, verbatim, as the oracle.
+proc eol_reference {text} {
+	set crlf [regexp -all "\r\n" $text]
+	set lf   [expr {[regexp -all "\n" $text] - $crlf}]
+	set mixed [expr {$crlf > 0 && $lf > 0}]
+	set eol [expr {$crlf > 0 && $crlf >= $lf ? "crlf" : "lf"}]
+	set text [string map [list "\r\n" "\n"] $text]
+	return [list eol $eol mixed $mixed text $text]
+}
+# What rio::fs::read answers for the same content, through the real proc and a real file.
+proc eol_actual {text} {
+	set p [tmpbytes [encoding convertto iso8859-1 $text]]
+	set d [rio::fs::read $p]
+	file delete $p
+	return [list eol [dict get $d eol] mixed [dict get $d mixed] text [dict get $d text]]
+}
+
+test fs-eol-differential {every eol verdict agrees with the two-pass original} -body {
+	set cases {}
+	# the named awkward ones
+	foreach c {
+		{}  "a"  "a\n"  "a\r\n"  "a\r"  "\r"  "\n"  "\r\n"
+		"a\nb\n"  "a\r\nb\r\n"  "a\r\nb\nc\n"  "a\nb\r\nc\n"
+		"a\r\nb\n"              "a\n\r\nb"
+		"a\r\r\nb"  "\r\r\n"  "\r\r\r\n"  "a\n\rb"  "a\r\n\r\n"
+		"no trailing newline"   "a\r\nb\r\nc"   "x\ny\rz\r\nw"
+	} { lappend cases $c }
+	# the tie: equal numbers of CRLF and bare LF must still answer `crlf`
+	lappend cases "a\r\nb\n"  "a\r\nb\r\nc\nd\n"
+	# a few hundred random permutations over the alphabet that matters
+	set alphabet [list "\r" "\n" "\r\n" "a" "b" " "]
+	set seed 20260921
+	for {set i 0} {$i < 400} {incr i} {
+		set s ""
+		set n [expr {$i % 40 + 1}]
+		for {set j 0} {$j < $n} {incr j} {
+			set seed [expr {($seed * 1103515245 + 12345) & 0x7fffffff}]
+			append s [lindex $alphabet [expr {$seed % [llength $alphabet]}]]
+		}
+		lappend cases $s
+	}
+	set bad {}
+	foreach c $cases {
+		set want [eol_reference $c]
+		set got  [eol_actual $c]
+		if {$got ne $want} { lappend bad [list [string map {\r \\r \n \\n} $c] $got $want] }
+	}
+	return $bad
+} -result {}
+
 # --- disk identity: mtime + size (D94) ---------------------------------------
 # What a buffer stamps at open/save and a later stat is compared against, so it can ask
 # "did this file change under us?" — the pair, because mtime alone misses a same-second
