@@ -209,6 +209,7 @@ set ::editor_font_size   0   ;# user size override, 0 = use the theme's
 set ::editor_theme_family monospace ;# the active theme's editor family (apply_theme records it)
 set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
+set ::chat_thinking_open 0 ;# mid-stream: a run of reasoning is open (provider-api 4)
 set ::pending_turn ""  ;# turn id of a proposed edit awaiting Approve/Reject (D26 s5)
 # The agent "working" indicator (D82): while a turn is in flight the .chat.status.busy label
 # animates a cycling retro-productivity phrase with a "Please wait…" dot cadence, so a
@@ -3064,7 +3065,7 @@ proc chat_send_text {text {scope {}} {note ""}} {
 	chat_label you-label "You"
 	chat_log "$text\n"
 	if {$note ne ""} { chat_log "· $note\n" tool }
-	set ::chat_turn_open 0
+	set ::chat_turn_open 0 ; set ::chat_thinking_open 0
 	set params [dict merge [dict create text $text] $scope]
 	set resp [rio_call agent.send $params]
 	if {![dict get $resp ok]} {
@@ -3078,10 +3079,34 @@ proc chat_send_text {text {scope {}} {note ""}} {
 
 # Apply one streamed agent.* event to the transcript.
 proc chat_event {ev} {
-	switch -- [dict get $ev event] {
+	set name [dict get $ev event]
+	# Anything that is not more reasoning ends the run of it — one place, rather than a
+	# close in every other arm, and the rule is exactly "the model moved on".
+	if {$name ne "agent.thinking" && $::chat_thinking_open} {
+		chat_log "\n" ; set ::chat_thinking_open 0
+	}
+	switch -- $name {
 		agent.delta {
 			if {!$::chat_turn_open} { chat_label agent-label "Agent" ; set ::chat_turn_open 1 }
 			chat_log [dict get $ev params text]
+		}
+		agent.thinking {
+			# The model's reasoning (provider-api 4): shown muted and indented, because
+			# it is not the answer — the core never records it, so it is not re-sent on a
+			# later step either. A local thinking model can spend a whole short turn
+			# here, and the alternative to showing it is an empty reply.
+			#
+			# It stays in the transcript once the answer starts. Everything else written
+			# to this log is append-only, a mid-stream delete would take any selection
+			# the user made while reading with it, and a multi-step turn interleaves
+			# several of these with tool calls — there is no principled rule for which to
+			# erase. The way not to see it is the provider's own setting.
+			if {!$::chat_turn_open} { chat_label agent-label "Agent" ; set ::chat_turn_open 1 }
+			if {!$::chat_thinking_open} {
+				chat_log "· thinking\n" tool
+				set ::chat_thinking_open 1
+			}
+			chat_log [dict get $ev params text] thinking
 		}
 		agent.message {
 			# A provider that didn't stream deltas still shows its full reply.
@@ -3355,7 +3380,7 @@ proc chat_clear {} {
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
 	.chat.log configure -state disabled
-	set ::chat_turn_open 0
+	set ::chat_turn_open 0 ; set ::chat_thinking_open 0
 }
 
 # Show/hide the chat pane by tab presence (kept for callers that flip the ::chat_shown
@@ -6921,7 +6946,7 @@ proc reset_session_state {} {
 	if {$::compare_shown} { compare_close }
 	catch {pack forget .chat.approve}
 	set ::pending_turn ""
-	set ::chat_turn_open 0
+	set ::chat_turn_open 0 ; set ::chat_thinking_open 0
 	# Collapse any split back to a single group — the new core is a fresh session — then
 	# forget the old buffers/tabs and blank the surviving group; the new core has its own.
 	while {[llength $::groups] > 1} {
@@ -7592,6 +7617,11 @@ proc apply_theme {theme} {
 	.chat.log tag configure error-label -font RioUIFont -foreground [dict get $c error]
 	.chat.log tag configure tool        -font RioUIFont -foreground [dict get $c gutter.fg]
 	.chat.log tag configure tool-error  -font RioUIFont -foreground [dict get $c error]
+	# Reasoning reads as an aside: the muted colour the tool lines already use, plus an
+	# indent that survives wrapping, so a long think is visibly not the answer. No new
+	# theme role — a theme that styles the tool lines styles this with them.
+	.chat.log tag configure thinking    -font RioUIFont -foreground [dict get $c gutter.fg] \
+		-lmargin1 12 -lmargin2 12
 	.chat.log tag configure diff-add    -font RioUIFont -foreground [dict get $c diff.added]
 	.chat.log tag configure diff-del    -font RioUIFont -foreground [dict get $c diff.removed]
 	.chat.approve configure -background [dict get $c chat.bg]
@@ -12633,6 +12663,8 @@ scrollbar .chat.sb -command {.chat.log yview}
 .chat.log tag configure error-label -font {monospace 9}
 .chat.log tag configure tool        -font {monospace 9} -foreground "#888888"
 .chat.log tag configure tool-error  -font {monospace 9} -foreground "#cc0000"
+.chat.log tag configure thinking    -font {monospace 9} -foreground "#888888" \
+	-lmargin1 12 -lmargin2 12
 .chat.log tag configure diff-add    -font {monospace 9} -foreground "#118811"
 .chat.log tag configure diff-del    -font {monospace 9} -foreground "#cc0000"
 pack .chat.hdr    -side top    -fill x

@@ -1213,6 +1213,61 @@ set tlog [.chat.log get 1.0 end]
 ok "chat: tool call rendered"   [string match "*fs_list path=src*" $tlog] 1
 ok "chat: tool result rendered" [string match "*12 entries in src*"  $tlog] 1
 chat_clear
+
+# The model's reasoning (provider-api 4). Shown muted, marked, and NOT part of the
+# answer — a local thinking model can spend a whole short turn in here, so dropping it
+# renders an empty reply, while folding it into the deltas would put it in the
+# conversation the core re-sends.
+proc log_tags {needle} {
+	set idx [.chat.log search -- $needle 1.0 end]
+	if {$idx eq ""} { return "<not found>" }
+	return [.chat.log tag names $idx]
+}
+chat_clear
+chat_event {event agent.thinking params {turn 4 text "first I weigh it up"}}
+chat_event {event agent.delta    params {turn 4 text "the answer"}}
+chat_event {event agent.message  params {turn 4 role assistant text {the answer}}}
+set thlog [.chat.log get 1.0 end]
+ok "thinking: it is shown"            [string match "*first I weigh it up*" $thlog] 1
+ok "thinking: under one Agent block"  [string match "*Agent*thinking*first I weigh*the answer*" $thlog] 1
+ok "thinking: tagged as an aside"     [expr {"thinking" in [log_tags "first I weigh"]}] 1
+ok "thinking: the answer is not"      [expr {"thinking" in [log_tags "the answer"]}] 0
+ok "thinking: the run closed"         $::chat_thinking_open 0
+# Tk invents a tag on first use, so "it carries the tag" would pass with no styling at
+# all. What must be true is that the tag was CONFIGURED — muted, and indented so a long
+# think reads as an aside even where it wraps.
+ok "thinking: the tag is actually styled" \
+	[expr {[.chat.log tag cget thinking -foreground] ne ""
+		&& [.chat.log tag cget thinking -lmargin2] ne ""}] 1
+# And that it is themed, not merely painted once at construction: the default theme's
+# gutter.fg is the same #888888 the bootstrap line uses, so comparing colours under the
+# default theme proves nothing. Switching is what tells the two sites apart.
+do_theme solarized-dark
+ok "thinking: follows a theme switch, like every other chat tag" \
+	[expr {[.chat.log tag cget thinking -foreground]
+		eq [.chat.log tag cget tool -foreground]}] 1
+ok "thinking: and actually moved off the bootstrap colour" \
+	[expr {[.chat.log tag cget thinking -foreground] ne "#888888"}] 1
+do_theme default
+
+# A second run gets its own marker — a multi-step turn thinks between tool calls, and
+# one marker for the lot would read as a single train of thought.
+chat_clear
+chat_event {event agent.thinking params {turn 5 text "hmm"}}
+chat_event {event agent.tool     params {turn 5 id t1 name fs_list args path=src}}
+chat_event {event agent.thinking params {turn 5 text "now then"}}
+chat_event {event agent.message  params {turn 5 role assistant text done}}
+ok "thinking: a second run is marked again" \
+	[llength [lsearch -all [split [.chat.log get 1.0 end] "\n"] "· thinking"]] 2
+
+# A turn that is nothing but reasoning still opens its block, rather than orphaning the
+# muted text under whatever came before.
+chat_clear
+chat_event {event agent.thinking params {turn 6 text "pondering"}}
+ok "thinking: it opens the Agent block itself" \
+	[string match "*Agent*thinking*pondering*" [.chat.log get 1.0 end]] 1
+chat_clear
+ok "thinking: clearing the chat resets the run" $::chat_thinking_open 0
 chat_event {event agent.tool_result params {turn 4 id t2 name fs_read ok 0 summary {refused: outside project}}}
 ok "chat: a failed tool result uses the error tag" \
 	[expr {[llength [.chat.log tag ranges tool-error]] > 0}] 1
