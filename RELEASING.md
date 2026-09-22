@@ -450,15 +450,19 @@ run rather than which ones are supported in principle.
 
 Both are one-way-ish once the history is public, so they are here rather than inline.
 
-- **Author identity in the history.** All **501** commits are authored
-  `jka@xon1.home.arpa` (477) and `jka@win01.home.arpa` (23), plus one as
+- **Author identity in the history.** All **540** commits are authored
+  `jka@xon1.home.arpa` (516) and `jka@win01.home.arpa` (23), plus one as
   `jlsksr@gmail.com`. Those `.home.arpa` addresses are internal names GitHub cannot
   verify, so every one of those commits will show **unlinked to the account** — no
   avatar, no contribution graph — and the machine names travel with them.
-  **Recommended: accept it.** Rewriting means `git filter-repo` over the whole history,
-  which changes all 501 hashes and permanently desynchronises the GitHub mirror from
-  Forgejo — a large, irreversible change bought for cosmetics. Set `user.email` to a
-  GitHub-verified address going forward and let the past be the past.
+  **Recommended: accept it**, and note that the recommendation is now close to
+  binding. Rewriting means `git filter-repo` over the whole history, which changes
+  all 540 hashes — and since D124 that is not merely cosmetic churn: every entry in
+  `CHANGELOG.md` cites a commit id, and `rio-core/tests/changelog.test` resolves each
+  one in git and checks its date against the commit that carries it. A rewrite
+  invalidates ~130 citations at once and fails that suite until every entry is
+  re-derived, on top of permanently desynchronising the mirror from Forgejo. Set
+  `user.email` to a GitHub-verified address going forward and let the past be the past.
 - **`vps01.jkdata.de` appears in this file** (the *Gate 0 findings* remote-core
   sections, and *Still open*). It is jka's own infrastructure, named in notes that were
   written for jka. Either generalise those mentions to "the remote core" or keep them
@@ -472,8 +476,10 @@ Both are one-way-ish once the history is public, so they are here rather than in
       that already has all three. `gh` is not installed on the dev box, so this is a
       browser step. Add `~/.ssh/id_ed25519.pub` to the account if it isn't there.
 - [ ] **Add the remote and push `main`.** The mirror carries `main` and tags **only**;
-      unfinished branches stay private (there are 13 local branches and 4 refs on
-      origin today, and none of them is anyone else's business yet).
+      unfinished branches stay private (there are 15 local branches and 3 on origin
+      today, and none of them is anyone else's business yet). Nothing is lost by
+      leaving them: every one is already merged into `main`, and the `--no-ff` merges
+      preserve each branch's topology inside it.
 
           git remote add github git@github.com:jlsksr/rio.git
           git push github main
@@ -502,7 +508,8 @@ appears — not the day the tag does.
 ### What a pre-publish scan found
 
 Run 2026-09-20 over the tree and the whole log, because "full history" means every
-commit is public, not just the current files:
+commit is public, not just the current files. **Re-run 2026-09-22** at 540 commits,
+with the same result; the figures below are that run's:
 
 - **No credentials.** No private keys anywhere in tracked files — the signing fixtures
   under `rio-core/tests/fixtures/sig/` are `.pub` and `.sig` only. Nothing matching
@@ -511,7 +518,13 @@ commit is public, not just the current files:
 - **Nothing personal in the tree.** `jka-test/` and `spike/ck8.6/` are gitignored and
   were never committed; `.claude/` carries only the two agent definitions, not
   `settings.local.json`.
-- **Size is a non-issue:** 73 MB of history, largest blob 969 KB (the icon source).
+- **Size is a non-issue:** 80 MB of history, largest blob 969 KB (the icon source,
+  `rio-gui/icons/sources/redeemer-1.png`). Well inside GitHub's limits — it warns at
+  1 GB and rejects a single file over 100 MB.
+- **The only key-shaped strings in the tree are test fixtures** — `sk-ant-XYZ`,
+  `sk-ant-smoke-123` and friends in `extensions/claude/tests/` and
+  `rio-gui/tests/smoke.tcl`. Worth knowing they are there, because a secret scanner
+  pointed at the public repo will flag them and they are not findings.
 - The **only** personal-infrastructure string is the `vps01.jkdata.de` one above.
 
 ## Named, and deferred on purpose
