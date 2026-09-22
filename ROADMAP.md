@@ -374,13 +374,23 @@ for later:
 - **Providers** — *landed* (AGENTS.md D26, D65, D66, D69). The core now ships **only** the
   offline **`echo`** stub built in (D69); every real provider is an **installable**
   `provider` extension. **Claude** (Anthropic API, [extensions/claude/](extensions/claude/))
-  and the **OpenAI-compatible** provider (**ChatGPT** by default; point its base URL at a
-  local server — Ollama / llama-server / LM Studio / vLLM — to run a **local model**;
-  [extensions/openai/](extensions/openai/)) both install from a repository like any other
-  extension. Each keeps its own 0600 key; the GUI's provider picker + key dialog enumerate
+  and the **OpenAI-compatible** provider ([extensions/openai/](extensions/openai/)) — hosted
+  ChatGPT, or **any server speaking the same protocol**: Ollama, llama.cpp / llama-server,
+  llama-swap, vLLM, LM Studio — both install from a repository like any other extension.
+  Each keeps its own 0600 key; the GUI's provider picker + key dialog enumerate
   from the core (`agent.providers`). A first-party provider is a plugin mirroring these two;
   **anyone** can now publish one to a repository (see Extensions ▸ "Provider as an
   installable `kind`").
+- **A server of your own** — *landed* (AGENTS.md D128). The OpenAI-compatible provider is
+  configured entirely from the GUI: ***Preferences ▸ Agent ▸ `<provider>` settings…*** takes
+  the server's URL, lists what that machine actually offers (⟳ Refresh), and holds the
+  caps, the token-cap field and a free-form **extra request JSON** for whatever a given
+  server understands (`chat_template_kwargs`, `temperature`, …). **No API key is required** —
+  most self-hosted servers want none. A thinking model's **reasoning** is shown in the chat
+  as an aside and is never recorded in the conversation, so it is not re-sent or re-billed.
+  The settings window renders whatever a provider *declares* (`kind` / `group` / `quick` on
+  an option descriptor, `provider-api = 4`), so a provider that grows a knob needs no GUI
+  change. Verified live against llama-swap + llama.cpp.
 - **Run-command tool** — *landed* (AGENTS.md D83). The agent runs commands
   (`run_command`) through the same propose/approve gate as an edit, but **always
   gated** (auto-accept is edits-only), **argv-only** (no shell) with a redirection-

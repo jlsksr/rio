@@ -106,9 +106,10 @@ argument you get an empty scratch buffer.
 
 Out of the box the only agent provider is the offline **echo** stub. To use a real
 agent, **install a provider** from *Settings ▸ Extensions…* (e.g. **Claude** over the
-Anthropic API, or **ChatGPT** over the OpenAI API), restart rio, then pick it under
-*Settings ▸ Agent Provider* and enter its key under *Preferences ▸ Agent* (stored
-0600 — see §5).
+Anthropic API, or the **OpenAI-compatible** one for hosted ChatGPT or a server of your
+own), restart rio, then pick it under *Settings ▸ Agent Provider* and configure it under
+*Preferences ▸ Agent* — a hosted provider needs a key there (stored 0600, see §5); a
+server of your own usually needs only its URL.
 
 ---
 
@@ -240,7 +241,7 @@ intended remote story is loopback + SSH (mode B), not a public socket.
 ## 5. The agent — where the key and HTTPS live
 
 Since D30 the **agent runs inside the core**, so a hosted provider's HTTPS (Claude,
-ChatGPT) happens **wherever the core runs** — locally in mode A, on the server in mode B.
+OpenAI) happens **wherever the core runs** — locally in mode A, on the server in mode B.
 Consequences:
 
 - **`tcltls` must be installed on the core's host.** A core without it fails the first
@@ -262,8 +263,9 @@ Consequences:
   remote files some other way — the GUI is identical. The choice of *where the agent
   runs* is just *where you point the GUI*.
 - **Provider** is chosen at runtime (*Settings ▸ Agent Provider*). The only built-in is
-  `echo`, an offline stub needing no key or network; a real provider (Claude, ChatGPT, …)
-  is **installed** from *Settings ▸ Extensions…* and needs a stored key + `tcltls`.
+  `echo`, an offline stub needing no key or network; a real provider (Claude, OpenAI-compatible, …)
+  is **installed** from *Settings ▸ Extensions…* and needs `tcltls`, plus a stored key
+  for a hosted service (a server of your own usually needs none).
 
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,
 `agent.key.set` / `clear`, `agent.autoaccept.set`, `agent.mode.set`,
