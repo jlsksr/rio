@@ -27,10 +27,14 @@ model.
 Real providers install as **extensions** from ***Settings ▸ Extensions…***:
 
 - **Claude**, over the official Anthropic API.
-- **ChatGPT**, over the OpenAI API. Because it speaks the OpenAI-compatible
-  protocol, pointing its base URL at a **local** server — Ollama, llama-server, LM
-  Studio, vLLM — runs a local model through exactly the same path, usually with no
-  key at all.
+- **OpenAI-compatible**, which drives hosted ChatGPT *or* any server that speaks the
+  same protocol — Ollama, llama.cpp / llama-server, llama-swap, vLLM, LM Studio.
+  Which of those it talks to is a **setting**, not a different extension; see
+  [running a model of your own](#running-a-model-of-your-own).
+
+A provider runs inside the core, and the core loads the ones it has only when it
+starts — so **restart rio** after installing one. Until you do, that extension's row
+in the Extensions window says so instead of offering its settings.
 
 Pick the live one in ***Settings ▸ Agent Provider*** (a quick switch you make
 mid-session) or in ***Preferences ▸ Agent***, which is also where each provider's
@@ -40,8 +44,10 @@ repository to install from.
 ## Choosing a model, and how hard it thinks
 
 The strip along the **bottom of the agent pane** names the agent you are talking to
-— **`Claude · Sonnet 5 ▾`** — and clicking it is how you change that. It is one menu
-with a section for each choice:
+— **`Claude · Sonnet 5 ▾`** — and clicking it is how you change that. It holds the
+handful of choices worth changing between turns; everything else a provider lets you
+configure is in [its settings window](#settings-a-provider-declares). It is a single
+menu, with a section for each choice:
 
 - **Provider** — the same picker as ***Settings ▸ Agent Provider***, next to the
   rest of the decision rather than two menus away.
@@ -73,9 +79,64 @@ model = claude-opus-5
 effort = high
 ```
 
-It sits beside that provider's prompt layer and its allow-list, and it lives **on
-the core's machine** — with a remote core, the menu shows the models that core can
-reach, and the file is on the server.
+Everything in the settings window below lands in that same file, so which keys it
+holds depends on the provider. It sits beside that provider's prompt layer and its
+allow-list, and it lives **on the core's machine** — with a remote core, the menu
+shows the models that core can reach, and the file is on the server.
+
+## Settings a provider declares
+
+The rest of what a provider lets you set — where its server is, how big a reply may
+be, how long a turn may take — lives in a window of its own:
+***Preferences ▸ Agent ▸ `<provider>` settings…***, with one button there per
+installed provider that has any settings at all. An installed provider's row in the
+Extensions window opens the same window, which is the convenient door right after you
+install one.
+
+The form is built from **what that provider declares**, so rio keeps no list of its
+own to go stale: the sections, the fields and the muted explanation under each come
+from the provider. A choice is a drop-down; anything else is a field you type in.
+
+There is no OK and no Cancel. **Each change is saved as you make it** — a drop-down
+the moment you pick from it, a field when you press `Return` or move away from it —
+and saved on the machine the core runs on, in that provider's settings file above. The
+window is not modal, so you can leave it open while you work; **Close** or `Esc`
+dismisses it.
+
+## Running a model of your own
+
+The **OpenAI-compatible** provider reaches hosted ChatGPT and a server of your own
+through exactly the same path — Ollama, llama.cpp / llama-server, llama-swap, vLLM and
+LM Studio all speak that protocol. Only the URL differs, and a key is usually not
+needed at all.
+
+1. Install the **openai** extension and **restart rio**.
+2. Pick **OpenAI-compatible** in ***Settings ▸ Agent Provider***.
+3. Open ***Preferences ▸ Agent ▸ `<provider>` settings…***.
+4. Set **Server URL** to your server's API base, with no trailing path:
+   `http://your-box:11434/v1` for Ollama, `http://localhost:8080/v1` for
+   llama-server. rio appends `/chat/completions` and `/models` itself — paste one of
+   those on the end, or a trailing slash, and it trims them for you.
+5. Click **⟳ Refresh from provider** beside **Model**. The list is replaced by what
+   *that* server actually offers. Pick one.
+6. Leave the API key unset. rio then sends no authorization at all and lets the server
+   decide, which is what a server of your own normally wants.
+
+rio refuses a turn before it starts in exactly one case: **no key and no server URL of
+your own**, because then it really is hosted OpenAI, which really does need a key.
+
+Two settings matter more than usual for a server of your own:
+
+- **Request timeout (ms)** bounds the **whole** turn, not the idle time in it. A
+  server that loads a model on demand, or a long generation on modest hardware, needs
+  a generous value.
+- **Extra request JSON** is a JSON object merged into every request — for whatever
+  your server understands that rio has never heard of: `temperature`, `top_p`, or
+  llama.cpp's and vLLM's `chat_template_kwargs`. Any field rio sends itself is refused
+  here, with a message naming the setting to use instead.
+
+The two **Advanced** URLs stay blank unless your server keeps its completions and its
+model list somewhere other than under one base.
 
 ## Your API key
 
@@ -86,9 +147,11 @@ you can put a key in, but not lift one back out as plain text.
 
 The key is never written into `prefs.json` or any other settings file. It lives on
 its own, mode `0600`, in rio's data directory — see
-[preferences](preferences.md#where-everything-lives) for the exact path. A local
-OpenAI-compatible server usually needs no key; providers that do are marked
-*(API key)* in the picker, and the offline ones *(offline)*.
+[preferences](preferences.md#where-everything-lives) for the exact path.
+
+*(API key)* in the provider picker means a provider **can take** one, not that it
+must have one; the offline ones are marked *(offline)*. A server of your own usually
+needs none — leave it unset and rio sends no authorization header at all.
 
 **The agent runs in the core, not in the window.** With a remote core, the turn is
 made on the server and the key is stored there — which is a real consideration if
@@ -150,6 +213,22 @@ useful for lifting a path or a command out of a reply. The box you type in has t
 full editing menu, as does the instruction box of
 [Change with Agent…](#changing-just-the-selection); see
 [right-click menus](getting-started.md#right-click-menus).
+
+## Thinking, shown apart from the answer
+
+Some models stream their reasoning separately from their reply — llama.cpp's and
+vLLM's thinking builds, and the DeepSeek-derived ones. rio shows it in the chat under
+a muted `· thinking` marker, indented and visibly not the answer.
+
+It is **never part of the answer, and never sent back to the model**: rio shows it and
+forgets it, so it costs nothing on the next step of the turn. Once the answer begins,
+the thinking stays above it in the transcript rather than vanishing — a turn that took
+several steps can be read back in the order it happened.
+
+To stop seeing it, set **Reasoning** to *Hide it* — the OpenAI-compatible provider
+offers that in [its settings](#settings-a-provider-declares). Some servers can also be
+told not to produce any in the first place: on llama.cpp,
+`{"chat_template_kwargs":{"enable_thinking":false}}` in **Extra request JSON** does it.
 
 ## Changing just the selection
 
@@ -329,6 +408,7 @@ ones that matter.
 
 ## Further reading
 
-- [Extensions](extensions.md) — installing Claude, ChatGPT, or another provider.
+- [Extensions](extensions.md) — installing Claude, the OpenAI-compatible provider, or
+  another one.
 - [Preferences](preferences.md) — where the key, prompts and allow-lists live.
 - [Working remotely](remote.md) — what changes when the core is on another box.

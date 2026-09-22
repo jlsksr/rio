@@ -1211,5 +1211,142 @@ ok "the language chooser has a plain row" [expr {$d125plain ne ""}] 1
 ok "the manual names it the way the chooser labels it" \
 	[expr {[string first "**$d125plain**" $sec] >= 0}] 1
 
+# --- 19. the door to a provider's settings, and the form behind it ------------
+#
+# D128 gave a provider a settings window of its own, and agent.md walks a reader to it
+# by a path check 11 cannot see: the button is named after the provider, so the manual
+# writes `<provider>` settings… and check 11 skips any item carrying a `<`. That is the
+# same blind spot check 15 was written for — a door the manual names and nothing holds
+# to the widget — except that this door exists only once a provider is installed, which
+# is why neither of those checks can reach it. Rename the button and both stay green.
+#
+# The form behind it is the other half. The page states what a reader will see there —
+# sections with their own headings, a drop-down for a choice and a field for anything
+# else, the muted explanation under each, and no OK or Cancel — and every one of those
+# is a claim about widgets this code builds.
+#
+# Behaviour, not source text: the real prefs_fill_agent and the real
+# provider_settings_dialog are run, and every string is read off the live widget. Two
+# fixtures make that possible headless — a provider list, because this test's core
+# carries only echo and echo declares nothing, and an option list, because the
+# providers that declare any are extensions and are not installed here. What the
+# fixtures stand in for is data; what is under test is rio's rendering of it.
+
+set ::d128providers {
+	{name docsopt label "Docs Provider" keyed 1 key_set 0 signup "" options 1}
+}
+set ::d128nobody {
+	{name docsopt label "Docs Provider" keyed 1 key_set 0 signup "" options 0}
+}
+# Descriptors as the core hands them over — every key present, which is what
+# rio::agent::_option_norm guarantees a frontend (D106). Two groups, a choice and a
+# field, so the form has to make both distinctions the page describes.
+set ::d128options [list \
+	[dict create name pick label "Pick one" group Model kind choice quick 1 \
+		hint "Docs hint for the chooser." value b free 1 refresh 1 \
+		choices {{value a label "Ay"} {value b label "Bee"}}] \
+	[dict create name where label "Where" group Server kind text quick 0 \
+		hint "Docs hint for the field." value "http://example/v1" \
+		free 0 refresh 0 choices {}]]
+
+# Keep the fixture: prefs_fill_agent re-reads the provider list from the core first.
+rename agent_providers_refresh d128_refresh_real
+proc agent_providers_refresh {} {}
+set d128saved $::agent_providers
+set ::agent_providers $::d128providers
+
+# Which button IS the door is derived rather than assumed: the pane is built twice from
+# the same provider, once declaring settings and once not, and the door is the button
+# the first build has and the second does not. So the check knows nothing about the
+# label it is about to hold the manual to — and a provider with nothing to declare is
+# held to grow no button that would open an empty window.
+proc d128_agent_buttons {providers} {
+	set ::agent_providers $providers
+	destroy .d128pane
+	frame .d128pane
+	prefs_fill_agent .d128pane
+	set out {}
+	foreach c [winfo children .d128pane] {
+		if {[winfo class $c] eq "Button"} { lappend out [$c cget -text] }
+	}
+	return $out
+}
+set d128with [d128_agent_buttons $::d128providers]
+set d128without [d128_agent_buttons $::d128nobody]
+set d128doors {}
+foreach l $d128with {
+	if {[lsearch -exact $d128without $l] < 0} { lappend d128doors $l }
+}
+ok "a provider that declares settings gets one more door in the Agent pane" \
+	[llength $d128doors] 1
+
+# The wording the manual has to quote, derived rather than written down here: strip the
+# provider's own label off the front of the button and what is left is the part a reader
+# looks for. The page writes `<provider>` where the label goes.
+set d128tail [string trim [string range [lindex $d128doors 0] \
+	[string length "Docs Provider"] end]]
+set d128agent [slurp [file join $::docs agent.md]]
+set d128flat [regsub -all {\s+} [string map [list * "" ` ""] $d128agent] " "]
+ok "the manual names that door the way the pane labels it" \
+	[expr {[string first "Preferences ▸ Agent ▸ <provider> $d128tail" $d128flat] >= 0}] 1
+
+destroy .d128pane
+set ::agent_providers $d128saved
+rename agent_providers_refresh {}
+rename d128_refresh_real agent_providers_refresh
+
+# The form itself. agent.options.list is intercepted so the window renders the fixture;
+# every other op still goes to the real core, so this is the real dialog on a real
+# channel and not a mock of one.
+rename rio_call d128_call_real
+proc rio_call {op params} {
+	if {$op eq "agent.options.list"} {
+		return [dict create ok 1 result [dict create options $::d128options]]
+	}
+	return [d128_call_real $op $params]
+}
+set ::agent_providers $::d128providers
+provider_settings_dialog docsopt
+update idletasks
+
+proc d128_widgets {w class} {
+	set out {}
+	foreach c [winfo children $w] {
+		if {[winfo class $c] eq $class} { lappend out $c }
+		lappend out {*}[d128_widgets $c $class]
+	}
+	return $out
+}
+proc d128_texts {w class} {
+	set out {}
+	foreach c [d128_widgets $w $class] { lappend out [$c cget -text] }
+	return $out
+}
+set d128labels [d128_texts .provset.body Label]
+
+# A section heading per declared group, a drop-down for the choice, a field for
+# anything else, and both hints shown — the four things the page promises are there.
+ok "the form heads each group the provider declares" \
+	[expr {[lsearch -exact $d128labels Model] >= 0
+		&& [lsearch -exact $d128labels Server] >= 0}] 1
+ok "a choice renders as a drop-down" \
+	[llength [d128_widgets .provset.body Menubutton]] 1
+ok "anything else renders as a field you type in" \
+	[llength [d128_widgets .provset.body Entry]] 1
+ok "…carrying the value the provider declared" \
+	[[lindex [d128_widgets .provset.body Entry] 0] get] "http://example/v1"
+ok "each setting's hint is shown" \
+	[expr {[lsearch -exact $d128labels "Docs hint for the chooser."] >= 0
+		&& [lsearch -exact $d128labels "Docs hint for the field."] >= 0}] 1
+
+# "There is no OK and no Cancel" — a sentence about this button row. The ⟳ refresh is
+# beside the field it refills, not in it, so the row is the whole claim.
+ok "the window's only button is Close" [d128_texts .provset.btns Button] Close
+
+destroy .provset
+set ::agent_providers $d128saved
+rename rio_call {}
+rename d128_call_real rio_call
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]
