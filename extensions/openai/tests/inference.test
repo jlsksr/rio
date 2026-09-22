@@ -239,4 +239,119 @@ test openai-timeout-forwarded {a configured request_timeout rides in the transpo
 	dict get $::seen timeout
 } -result 987000
 
+# --- reasoning (provider-api 4) ----------------------------------------------
+#
+# A thinking model streams its reasoning beside — or instead of — its content.
+# `reasoning_content` is the llama.cpp / vLLM / DeepSeek spelling; `reasoning` is the
+# other one in the wild. Either becomes a `thinking` post, never a `delta`: the core
+# shows it without recording it, so it is not re-sent on a later step of the turn.
+
+proc thinks {} {
+	set t ""
+	foreach p $::posts { if {[lindex $p 0] eq "thinking"} { append t [lindex $p 1] } }
+	return $t
+}
+proc run_conf {c chunks {status 200}} {
+	set ::posts {}
+	rio::openai::infer $c {{role user text hi}} {} {Authorization {Bearer T}} \
+		[list fake_transport $chunks $status ""] collect_post
+}
+set ::rsse ""
+append ::rsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning_content\":\"weigh\"},\"finish_reason\":null}\]}\n\n"
+append ::rsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning_content\":\" it up\"},\"finish_reason\":null}\]}\n\n"
+append ::rsse "data: {\"choices\":\[{\"index\":0,\"delta\":{\"content\":\"the answer\"},\"finish_reason\":null}\]}\n\n"
+append ::rsse "data: {\"choices\":\[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}\]}\n\n"
+append ::rsse "data: \[DONE\]\n\n"
+
+test openai-reasoning-content {reasoning_content becomes thinking posts} -body {
+	run_conf $::conf [list $::rsse]
+	list [thinks] [deltas]
+} -result {{weigh it up} {the answer}}
+
+test openai-reasoning-never-a-delta {reasoning never rides the delta stream} -body {
+	run_conf $::conf [list $::rsse]
+	expr {[string match *weigh* [deltas]] ? "leaked" : "clean"}
+} -result clean
+
+test openai-reasoning-alt-spelling {the bare `reasoning` field works too} -body {
+	set s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning\":\"hmm\"},\"finish_reason\":\"stop\"}\]}\n\n"
+	append s "data: \[DONE\]\n\n"
+	run_conf $::conf [list $s]
+	thinks
+} -result hmm
+
+test openai-reasoning-both-once {a server sending both spellings says it once} -body {
+	set s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning_content\":\"aa\",\"reasoning\":\"aa\"},\"finish_reason\":\"stop\"}\]}\n\n"
+	append s "data: \[DONE\]\n\n"
+	run_conf $::conf [list $s]
+	thinks
+} -result aa
+
+test openai-reasoning-hidden {reasoning = hide drops it, and the answer still arrives} -body {
+	run_conf [dict merge $::conf {reasoning hide}] [list $::rsse]
+	list [thinks] [deltas]
+} -result {{} {the answer}}
+
+test openai-reasoning-absent-shows {a conf that says nothing shows it — the old behaviour was to drop it} -body {
+	run_conf $::conf [list $::rsse]
+	expr {[thinks] ne ""}
+} -result 1
+
+test openai-reasoning-null-ignored {a null reasoning field is absent, not the word "null"} -body {
+	set s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"content\":\"x\",\"reasoning_content\":null},\"finish_reason\":\"stop\"}\]}\n\n"
+	append s "data: \[DONE\]\n\n"
+	run_conf $::conf [list $s]
+	list [thinks] [deltas]
+} -result {{} x}
+
+test openai-reasoning-with-tools {reasoning between tool-call fragments leaves the call intact} -body {
+	set s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning_content\":\"which tool\"},\"finish_reason\":null}\]}\n\n"
+	append s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"fs_read\",\"arguments\":\"\"}}\]},\"finish_reason\":null}\]}\n\n"
+	append s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"reasoning_content\":\" this one\"},\"finish_reason\":null}\]}\n\n"
+	append s "data: {\"choices\":\[{\"index\":0,\"delta\":{\"tool_calls\":\[{\"index\":0,\"function\":{\"arguments\":\"{}\"}}\]},\"finish_reason\":\"tool_calls\"}\]}\n\n"
+	append s "data: \[DONE\]\n\n"
+	run_conf $::conf [list $s]
+	list [thinks] [lindex [posts_of tool] 0 1] [terminal]
+} -result {{which tool this one} fs_read {done tool_use}}
+
+# --- extra_json (provider-api 4) ---------------------------------------------
+#
+# The user's own request fields, spliced raw. The face has already checked it parses as
+# an object and refused any key rio emits, so there is no duplicate key to resolve here.
+
+test openai-extra-json-merged {extra_json's fields reach the body} -body {
+	set c [dict merge $::conf {extra_json {{"temperature":0.2,"top_p":0.9}}}]
+	set d [json::json2dict [rio::openai::_request_json $c {{role user text hi}} {}]]
+	list [dict get $d temperature] [dict get $d top_p] [dict get $d model]
+} -result {0.2 0.9 gpt-test}
+
+test openai-extra-json-keeps-types {a nested object and a boolean survive — they are not re-serialised} -body {
+	# tcllib flattens every leaf to a string, so parsing and rebuilding this would send
+	# "true" where the user wrote true. Splicing raw is what keeps the type.
+	set c [dict merge $::conf {extra_json {{"chat_template_kwargs":{"enable_thinking":true}}}}]
+	set body [rio::openai::_request_json $c {{role user text hi}} {}]
+	string match {*"chat_template_kwargs":{"enable_thinking":true}*} $body
+} -result 1
+
+test openai-extra-json-empty {an empty object adds nothing, and leaves valid JSON} -body {
+	set c [dict merge $::conf {extra_json {{}}}]
+	set body [rio::openai::_request_json $c {{role user text hi}} {}]
+	list [string match *,,* $body] [dict get [json::json2dict $body] model]
+} -result {0 gpt-test}
+
+test openai-extra-json-unset {no extra_json at all is the request rio has always sent} -body {
+	set a [rio::openai::_request_json $::conf {{role user text hi}} {}]
+	set b [rio::openai::_request_json [dict merge $::conf {extra_json {}}] {{role user text hi}} {}]
+	expr {$a eq $b}
+} -result 1
+
+test openai-extra-json-ascii {non-ASCII inside extra_json still leaves as a pure-ASCII body} -body {
+	# The same rule the tool schemas taught us live: anything spliced raw never went
+	# through jstr, and the HTTP layer counts characters while writing bytes.
+	set c [dict merge $::conf [list extra_json "{\"note\":\"café\"}"]]
+	set body [rio::openai::_request_json $c {{role user text hi}} {}]
+	list [regexp {^[\x00-\x7f]*$} $body] \
+		[dict get [json::json2dict $body] note]
+} -result "1 café"
+
 cleanupTests
