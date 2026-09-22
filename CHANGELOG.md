@@ -18,6 +18,17 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Added
 
+- **Run a model of your own** — the OpenAI-compatible provider is configured from the
+  GUI: ***Preferences ▸ Agent*** gains a settings window per provider, and for this one it
+  takes the server's URL (Ollama, llama.cpp, llama-swap, vLLM, LM Studio), lists what that
+  machine actually offers, and holds the caps, the token-cap field and a free-form **extra
+  request JSON** for whatever a given server understands. **No API key is needed** for a
+  server of your own. Pointing rio at one was documented before this and reachable only by
+  editing the extension's Tcl on the core's disk. A thinking model's **reasoning** now
+  shows in the chat as an aside, set apart from the answer and never sent back with it, so
+  it is not re-billed on the next round-trip. The window renders whatever a provider
+  *declares*, so one that grows a setting needs no change to rio. — *D128 · `25c5d5a` ·
+  2026-09-22*
 - **rio has a version, and every number in the tree has a job** — rio is **0.1.0**.
   *Help ▸ About rio* leads with a *Version* row, both entry points answer `--version`, and
   a `--connect` session can name the core's version as well as its own. The wire

@@ -167,7 +167,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0103](0103-plan-tool-in-every-mode.md) | The plan tool is offered in every mode | Accepted | 2026-09-11 |
 | [0104](0104-stop-instead-of-step-cap.md) | No step cap; a Stop button instead | Accepted | 2026-09-11 |
 | [0105](0105-shipped-prompt-visible.md) | rio's shipped prompt is complete and visible | Accepted | 2026-09-11 |
-| [0106](0106-model-and-effort-options.md) | Model and effort are provider-declared options | Accepted | 2026-09-12 |
+| [0106](0106-model-and-effort-options.md) | Model and effort are provider-declared options | Accepted; extended by 0135 | 2026-09-12 |
 | [0107](0107-semver-extension-updates.md) | Extension versions are semver and are compared | Accepted | 2026-09-12 |
 | [0108](0108-editor-context-menu.md) | The editor has a context menu built from the Edit menu's table | Accepted; amended by 0121 | 2026-09-12 |
 | [0109](0109-https-repositories.md) | https beside http, trusted from the host's CA store | Accepted; amended by 0110, 0111, 0120 | 2026-09-12 |
@@ -196,3 +196,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted; the budget was raised by 0133 | 2026-09-20 |
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
 | [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted | 2026-09-21 |
+| [0135](0135-provider-declares-its-own-settings.md) | A provider declares its own settings, and rio renders them | Accepted | 2026-09-22 |
