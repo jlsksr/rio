@@ -139,6 +139,20 @@ test options-none {a provider with no options answers softly with an empty list}
 	list [rio::agent::options echo] [rio::agent::options_summary echo]
 } -result {{} {}}
 
+# Whether a provider has options at all rides in the providers list, so a frontend can
+# decide whether to offer a settings door without one round-trip per provider.
+test providers-info-options-flag {the providers list says who declares options} -setup {
+	reset_opts
+} -body {
+	set out {}
+	foreach p [rio::agent::providers_info] {
+		if {[dict get $p name] in {fake echo}} {
+			lappend out [dict get $p name] [dict get $p options]
+		}
+	}
+	set out
+} -result {echo 0 fake 1}
+
 test options-summary {the flat summary is name -> current value} -setup {
 	reset_opts
 } -body {

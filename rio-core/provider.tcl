@@ -26,6 +26,11 @@
 #       an already-valid JSON document, for the parts of a body a provider splices in
 #       ALREADY SERIALISED (a tool's input_schema, a captured tool_use input) and that
 #       therefore never went through jstr.
+#   4 - an option descriptor's rendering vocabulary — `kind` (choice | text | number),
+#       `group` and `quick` (rio::agent::_option_norm) — so a provider can declare a
+#       setting that is a FIELD rather than a menu of choices, and say where it belongs,
+#       - the `post thinking <text>` verb: reasoning that is shown but never recorded in
+#         the conversation, so it is not re-sent or re-billed on a later step.
 # A provider declaring an OLDER api still loads: the surface only grows. Every level
 # belongs HERE, beside the ceiling it raises — a level documented only in CONTRIBUTING
 # is one the file that owns the number does not admit to implementing.
@@ -37,7 +42,7 @@
 
 namespace eval rio::provider {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path
-	variable api_version 3     ;# the highest provider-api this core implements
+	variable api_version 4     ;# the highest provider-api this core implements
 }
 
 # The highest provider-api this core implements — a frontend compares a repo

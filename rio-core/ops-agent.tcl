@@ -203,7 +203,7 @@ proc rio::ops::agent_key_clear {params} {
 }
 rio::dispatch::register agent.key.clear rio::ops::agent_key_clear
 
-# agent.providers -> {providers:[{name, label, keyed, key_set, signup}]} ; every
+# agent.providers -> {providers:[{name, label, keyed, key_set, signup, options}]} ; every
 # registered provider, so a frontend renders its picker and per-provider key dialog
 # from data the provider declares rather than hardcoding names (D30; serves the
 # installable-provider milestone). A non-flat result — the wire layer registers a

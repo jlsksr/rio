@@ -59,17 +59,17 @@ test provider-list-op {provider.list op returns the store as data} -setup {
 	set res [dict get $r response result]
 	set p [lindex [dict get $res providers] 0]
 	# api_max is asserted as a LITERAL: the surface a provider may promise against is
-	# a published number (3 since D106b added rio::llm::jascii to the shared runtime;
-	# 2 was D106's -options / settings / http::get), and an accidental bump is
-	# exactly what this should catch.
+	# a published number (4 since the option descriptor's rendering vocabulary and the
+	# `post thinking` verb; 3 was D106b's rio::llm::jascii; 2 was D106's -options /
+	# settings / http::get), and an accidental bump is exactly what this should catch.
 	list [dict get $p name] [dict get $p loadable] [dict get $res api_max]
-} -result {dummy 1 3}
+} -result {dummy 1 4}
 
 test provider-older-api-loads {a provider written for an OLDER api still loads — the surface only grows} -setup {
 	reset_store
 	rio::provider::put dummy [manifest] [dict create entry.tcl [entry_src dummy]]
 } -body {
-	# [manifest] declares provider-api = 1 while this core implements 3.
+	# [manifest] declares provider-api = 1 while this core implements 4.
 	set p [lindex [rio::provider::installed] 0]
 	list [dict get $p api] [dict get $p loadable]
 } -result {1 1}

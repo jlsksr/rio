@@ -150,9 +150,13 @@ proc rio::agent::provider_known {name} {
 }
 
 # A rendering of every registered provider for a frontend's picker + key UI
-# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup}. Sorted by
-# name for a stable menu order. All leaves are strings (the wire's flat-object
+# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup, options (0/1)}.
+# Sorted by name for a stable menu order. All leaves are strings (the wire's flat-object
 # encoder applies).
+#
+# `options` says only whether the provider declares any — enough for a frontend to decide
+# whether to offer a settings door, without a round-trip per provider just to find out
+# that most of them have nothing to show.
 proc rio::agent::providers_info {} {
 	variable providers
 	set out {}
@@ -164,7 +168,8 @@ proc rio::agent::providers_info {} {
 			label   [dict get $e label] \
 			keyed   [expr {$keyed ? 1 : 0}] \
 			key_set [expr {$keyed ? [key_status $name] : 0}] \
-			signup  [dict get $e signup]]
+			signup  [dict get $e signup] \
+			options [expr {[dict exists $e options] ? 1 : 0}]]
 	}
 	return $out
 }

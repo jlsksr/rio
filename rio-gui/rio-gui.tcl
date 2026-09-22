@@ -8171,7 +8171,7 @@ proc session_restore {} {
 # ---------------------------------------------------------------------------
 
 set ::ext_ledger {}     ;# "kind/name" -> {source dir version files installed ?anysource?} (ledger_load)
-set ::provider_api_max 1 ;# highest provider-api the core loads (provider.list; D66)
+set ::provider_api_max 4 ;# highest provider-api the core loads (provider.list; D66)
 # Highest mode-api THIS GUI implements (D123, modes/registry.tcl). A literal, not a
 # core round-trip like provider_api_max above: a provider is sourced into the core, so
 # the core is the party that knows its ceiling, but a mode is sourced into the FRONTEND
