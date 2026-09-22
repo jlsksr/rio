@@ -376,5 +376,21 @@ test op-status-wire-keeps-every-field {what agent.status returns is exactly what
 	expr {[lsort [dict keys [dict get $r result]]] eq [lsort [dict keys [dict get $j result]]]}
 } -result 1
 
+# The same guard one level down, for the descriptor itself. rio::wire::_option is an
+# allow-list too, so a key _option_norm learns to fill in but the encoder never names is
+# dropped silently between the core and the frontend — every core test still passing,
+# because they all call the op rather than encode it. Compared as SETS through the real
+# op and the real encoder, so neither side can be satisfied by reading the other's source.
+test op-list-wire-keeps-every-descriptor-key {every key a descriptor carries crosses the wire} -setup {
+	reset_opts
+} -body {
+	set r [rio::ops::agent_options_list {provider fake}]
+	set j [json::json2dict [rio::wire::response \
+		[dict merge {id 1 ok true op agent.options.list} $r]]]
+	set core [lindex [dict get $r result options] 0]
+	set wire [lindex [dict get $j result options] 0]
+	expr {[lsort [dict keys $core]] eq [lsort [dict keys $wire]]}
+} -result 1
+
 file delete -force $::optdir
 cleanupTests
