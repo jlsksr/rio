@@ -548,11 +548,19 @@ proc rio::agent::_close_interrupted {} {
 #            sends however its API spells "system prompt"; a provider without one (echo)
 #            ignores it. The provider never sees the layers — only the composed string.
 #   {*}$post delta <text>                 a chunk of assistant text
+#   {*}$post thinking <text>              a chunk of the model's REASONING — shown, but
+#                                         deliberately not part of the answer: it never
+#                                         enters `conversation`, so it is not re-sent on
+#                                         a later step of the turn and not billed again
 #   {*}$post tool  <id> <name> <in> <raw> a requested tool call (in = parsed dict,
 #                                         raw = the original input JSON)
 #   {*}$post done  ?stop_reason?          the provider step finished; stop_reason
 #                                         "tool_use" means "run the tools, continue"
 #   {*}$post error <code> <message>       the turn failed (a classified error; D26)
+#
+# A verb this core does not know is IGNORED, not an error — a provider written against a
+# newer rio degrades to silence on the parts this one cannot render, rather than hanging
+# the turn or failing it.
 proc rio::agent::_run {turn emit} {
 	variable conversation
 	variable provider
@@ -579,6 +587,15 @@ proc rio::agent::_run {turn emit} {
 					{*}$emit [dict create event agent.delta \
 						params [dict create turn $turn text $text]]
 				}
+				thinking {
+					# Shown, never recorded: `acc` is what becomes the assistant turn's
+					# text block below and is re-sent on every later step, so reasoning
+					# routed through `delta` would join the conversation and be paid for
+					# again each round-trip. A local model can spend a whole short turn
+					# here, so the alternative — dropping it — renders an empty answer.
+					{*}$emit [dict create event agent.thinking \
+						params [dict create turn $turn text [lindex $msg 1]]]
+				}
 				tool {
 					lassign $msg _ id name input raw
 					lappend calls [dict create id $id name $name input $input raw $raw]
@@ -598,6 +615,7 @@ proc rio::agent::_run {turn emit} {
 							code [lindex $msg 1] message [lindex $msg 2]]]
 					set failed 1 ; break
 				}
+				default {}   ;# a newer provider's verb: ignored, never fatal (see above)
 			}
 		}
 		if {$failed} return
