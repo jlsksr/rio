@@ -312,7 +312,7 @@ proc rio::wire::_option {o} {
 	set cs {}
 	foreach c [dict get $o choices] { lappend cs [obj $c] }
 	set parts {}
-	foreach k {name label hint value free refresh} {
+	foreach k {name label hint value free refresh kind group quick} {
 		lappend parts "[str $k]:[str [dict get $o $k]]"
 	}
 	lappend parts "\"choices\":[arr $cs]"

@@ -96,11 +96,62 @@ test options-declared-kept {a fully declared option comes back as declared} -set
 		[llength [dict get $o choices]]
 } -result {Flavour {which one} 1 1 2}
 
+# --- the rendering vocabulary (provider-api 4) -------------------------------
+#
+# Three keys a frontend draws with and the core never interprets. The defaults are what
+# keep a provider written against provider-api 2 rendering exactly as it does today.
+
+test options-render-defaults {a descriptor that declares none gets choice / no group / quick} -setup {
+	reset_opts
+} -body {
+	set o [lindex [rio::agent::options fake] 1]   ;# `heat`, declared with the bare minimum
+	list [dict get $o kind] [dict get $o group] [dict get $o quick]
+} -result {choice {} 1}
+
+test options-render-declared {kind, group and quick come back as declared} -body {
+	set o [rio::agent::_option_norm [dict create name u value v \
+		kind text group Server quick 0]]
+	list [dict get $o kind] [dict get $o group] [dict get $o quick]
+} -result {text Server 0}
+
+test options-quick-normalized {quick is coerced to 0/1 like free and refresh} -body {
+	set out {}
+	foreach v {1 0 yes no 2 true} {
+		lappend out [dict get [rio::agent::_option_norm [dict create name u quick $v]] quick]
+	}
+	set out
+} -result {1 0 1 0 1 1}
+
+test options-kind-empty-is-choice {an empty kind reads as the default, not as a blank control} -body {
+	dict get [rio::agent::_option_norm [dict create name u kind ""]] kind
+} -result choice
+
+# The core does not police the vocabulary: an unknown kind travels untouched, and the
+# FRONTEND falls back (choice when there are choices, else text). That split is what lets
+# provider-api 5 add a kind without an older core eating it.
+test options-kind-unknown-passes-through {an unrecognised kind is carried, not rewritten} -body {
+	dict get [rio::agent::_option_norm [dict create name u kind slider]] kind
+} -result slider
+
 test options-none {a provider with no options answers softly with an empty list} -setup {
 	reset_opts
 } -body {
 	list [rio::agent::options echo] [rio::agent::options_summary echo]
 } -result {{} {}}
+
+# Whether a provider has options at all rides in the providers list, so a frontend can
+# decide whether to offer a settings door without one round-trip per provider.
+test providers-info-options-flag {the providers list says who declares options} -setup {
+	reset_opts
+} -body {
+	set out {}
+	foreach p [rio::agent::providers_info] {
+		if {[dict get $p name] in {fake echo}} {
+			lappend out [dict get $p name] [dict get $p options]
+		}
+	}
+	set out
+} -result {echo 0 fake 1}
 
 test options-summary {the flat summary is name -> current value} -setup {
 	reset_opts
@@ -374,6 +425,22 @@ test op-status-wire-keeps-every-field {what agent.status returns is exactly what
 	set j [json::json2dict [rio::wire::response \
 		[dict merge {id 1 ok true op agent.status} $r]]]
 	expr {[lsort [dict keys [dict get $r result]]] eq [lsort [dict keys [dict get $j result]]]}
+} -result 1
+
+# The same guard one level down, for the descriptor itself. rio::wire::_option is an
+# allow-list too, so a key _option_norm learns to fill in but the encoder never names is
+# dropped silently between the core and the frontend — every core test still passing,
+# because they all call the op rather than encode it. Compared as SETS through the real
+# op and the real encoder, so neither side can be satisfied by reading the other's source.
+test op-list-wire-keeps-every-descriptor-key {every key a descriptor carries crosses the wire} -setup {
+	reset_opts
+} -body {
+	set r [rio::ops::agent_options_list {provider fake}]
+	set j [json::json2dict [rio::wire::response \
+		[dict merge {id 1 ok true op agent.options.list} $r]]]
+	set core [lindex [dict get $r result options] 0]
+	set wire [lindex [dict get $j result options] 0]
+	expr {[lsort [dict keys $core]] eq [lsort [dict keys $wire]]}
 } -result 1
 
 file delete -force $::optdir

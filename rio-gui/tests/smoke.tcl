@@ -1213,6 +1213,61 @@ set tlog [.chat.log get 1.0 end]
 ok "chat: tool call rendered"   [string match "*fs_list path=src*" $tlog] 1
 ok "chat: tool result rendered" [string match "*12 entries in src*"  $tlog] 1
 chat_clear
+
+# The model's reasoning (provider-api 4). Shown muted, marked, and NOT part of the
+# answer — a local thinking model can spend a whole short turn in here, so dropping it
+# renders an empty reply, while folding it into the deltas would put it in the
+# conversation the core re-sends.
+proc log_tags {needle} {
+	set idx [.chat.log search -- $needle 1.0 end]
+	if {$idx eq ""} { return "<not found>" }
+	return [.chat.log tag names $idx]
+}
+chat_clear
+chat_event {event agent.thinking params {turn 4 text "first I weigh it up"}}
+chat_event {event agent.delta    params {turn 4 text "the answer"}}
+chat_event {event agent.message  params {turn 4 role assistant text {the answer}}}
+set thlog [.chat.log get 1.0 end]
+ok "thinking: it is shown"            [string match "*first I weigh it up*" $thlog] 1
+ok "thinking: under one Agent block"  [string match "*Agent*thinking*first I weigh*the answer*" $thlog] 1
+ok "thinking: tagged as an aside"     [expr {"thinking" in [log_tags "first I weigh"]}] 1
+ok "thinking: the answer is not"      [expr {"thinking" in [log_tags "the answer"]}] 0
+ok "thinking: the run closed"         $::chat_thinking_open 0
+# Tk invents a tag on first use, so "it carries the tag" would pass with no styling at
+# all. What must be true is that the tag was CONFIGURED — muted, and indented so a long
+# think reads as an aside even where it wraps.
+ok "thinking: the tag is actually styled" \
+	[expr {[.chat.log tag cget thinking -foreground] ne ""
+		&& [.chat.log tag cget thinking -lmargin2] ne ""}] 1
+# And that it is themed, not merely painted once at construction: the default theme's
+# gutter.fg is the same #888888 the bootstrap line uses, so comparing colours under the
+# default theme proves nothing. Switching is what tells the two sites apart.
+do_theme solarized-dark
+ok "thinking: follows a theme switch, like every other chat tag" \
+	[expr {[.chat.log tag cget thinking -foreground]
+		eq [.chat.log tag cget tool -foreground]}] 1
+ok "thinking: and actually moved off the bootstrap colour" \
+	[expr {[.chat.log tag cget thinking -foreground] ne "#888888"}] 1
+do_theme default
+
+# A second run gets its own marker — a multi-step turn thinks between tool calls, and
+# one marker for the lot would read as a single train of thought.
+chat_clear
+chat_event {event agent.thinking params {turn 5 text "hmm"}}
+chat_event {event agent.tool     params {turn 5 id t1 name fs_list args path=src}}
+chat_event {event agent.thinking params {turn 5 text "now then"}}
+chat_event {event agent.message  params {turn 5 role assistant text done}}
+ok "thinking: a second run is marked again" \
+	[llength [lsearch -all [split [.chat.log get 1.0 end] "\n"] "· thinking"]] 2
+
+# A turn that is nothing but reasoning still opens its block, rather than orphaning the
+# muted text under whatever came before.
+chat_clear
+chat_event {event agent.thinking params {turn 6 text "pondering"}}
+ok "thinking: it opens the Agent block itself" \
+	[string match "*Agent*thinking*pondering*" [.chat.log get 1.0 end]] 1
+chat_clear
+ok "thinking: clearing the chat resets the run" $::chat_thinking_open 0
 chat_event {event agent.tool_result params {turn 4 id t2 name fs_read ok 0 summary {refused: outside project}}}
 ok "chat: a failed tool result uses the error tag" \
 	[expr {[llength [.chat.log tag ranges tool-error]] > 0}] 1
@@ -1534,6 +1589,57 @@ rio::claude::api::clear_key   ;# the later block checks the keyless error path
 # Back to something sane for the rest of the run.
 agent_option_pick model claude-sonnet-5
 
+# --- the strip shows only what it can draw and the provider calls quick -------
+#
+# provider-api 4 lets a provider declare a field (a base URL, a timeout) alongside its
+# quick choices. A Tk menu can draw neither a field nor an option the provider marked
+# settings-only, and the strip is 340 px wide — so both stay out of it, and the "first
+# option is always shown" rule runs over what is left, not over the declaration order.
+# The fake deliberately declares the field FIRST, which is the case that would put a URL
+# in the strip.
+namespace eval stripfake {
+	variable url  http://127.0.0.1:1080/v1
+	variable mood calm
+	variable size big
+}
+proc stripfake::provider {conversation tools system post} { {*}$post done stop }
+proc stripfake::opts {} {
+	variable url ; variable mood ; variable size
+	return [list \
+		[dict create name base_url label "Base URL" value $url kind text group Server] \
+		[dict create name size label Size value $size kind choice quick 0 \
+			choices {{value big label Big} {value small label Small}}] \
+		[dict create name mood label Mood value $mood \
+			choices {{value calm label Calm} {value wild label Wild}}]]
+}
+proc stripfake::opt_set {name value} {
+	variable mood
+	if {$name ne "mood"} { rio::error::raise bad_request "unknown option: $name" }
+	set mood $value
+}
+rio::agent::register_provider stripfake ::stripfake::provider -label "Strip Fake" \
+	-options [dict create list ::stripfake::opts set ::stripfake::opt_set]
+providers_menu_fill
+set ::agent_provider stripfake ; apply_provider
+set ::strip_labels [menu_labels .chat.status.sel.m]
+ok "strip: a text option stays out of the menu" [expr {"Base URL" in $::strip_labels}] 0
+ok "strip: so does a quick-0 choice"            [expr {"Size" in $::strip_labels}] 0
+ok "strip: a quick choice is offered"           [expr {"Mood" in $::strip_labels}] 1
+ok "strip: the label names the first QUICK option, not the first declared" \
+	[string match "*Calm ▾" [.chat.status.sel cget -text]] 1
+ok "strip: and no URL reached those 340 px" \
+	[string match "*127.0.0.1*" [.chat.status.sel cget -text]] 0
+# The tooltip is the long form, and it is honest about every option, quick or not.
+ok "strip: the tooltip still names the field"   [string match "*Base URL*" $::tt_text(.chat.status.sel)] 1
+# An unrecognised kind — a provider built against a newer rio — resolves to something
+# renderable rather than to a blank: choices mean a chooser, no choices mean a field.
+ok "strip: unknown kind with choices draws as a chooser" \
+	[agent_option_kind [dict create kind slider choices {{value a label A}}]] choice
+ok "strip: unknown kind without choices draws as a field" \
+	[agent_option_kind [dict create kind slider choices {}]] text
+ok "strip: a missing kind is a chooser"         [agent_option_kind [dict create choices {}]] choice
+set ::agent_provider claude ; apply_provider
+
 # adopt_agent_status MIRRORS the core's live settings into the menus without
 # writing back — attaching to an already-configured core must not reset it (D30).
 # The core here has provider=claude (set just above); turn its auto-accept on, then
@@ -1643,9 +1749,9 @@ ok "provider: openai now in the picker cache" \
 	[expr {[agent_provider_entry openai] ne ""}] 1
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai
-ok "status: names ChatGPT agent"       [string match "ChatGPT*" [.chat.status.sel cget -text]] 1
+ok "status: names the provider"       [string match "OpenAI-compatible*" [.chat.status.sel cget -text]] 1
 provider_key_dialog openai
-ok "keydlg: titled for openai"         [wm title .providerkey] "ChatGPT API key"
+ok "keydlg: titled for openai"         [wm title .providerkey] "OpenAI-compatible API key"
 .providerkey.e insert end "sk-oai-smoke-123"
 provider_key_save .providerkey openai
 ok "keydlg: openai key stored"         [rio::openai::api::configured] 1

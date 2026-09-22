@@ -150,9 +150,13 @@ proc rio::agent::provider_known {name} {
 }
 
 # A rendering of every registered provider for a frontend's picker + key UI
-# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup}. Sorted by
-# name for a stable menu order. All leaves are strings (the wire's flat-object
+# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup, options (0/1)}.
+# Sorted by name for a stable menu order. All leaves are strings (the wire's flat-object
 # encoder applies).
+#
+# `options` says only whether the provider declares any — enough for a frontend to decide
+# whether to offer a settings door, without a round-trip per provider just to find out
+# that most of them have nothing to show.
 proc rio::agent::providers_info {} {
 	variable providers
 	set out {}
@@ -164,7 +168,8 @@ proc rio::agent::providers_info {} {
 			label   [dict get $e label] \
 			keyed   [expr {$keyed ? 1 : 0}] \
 			key_set [expr {$keyed ? [key_status $name] : 0}] \
-			signup  [dict get $e signup]]
+			signup  [dict get $e signup] \
+			options [expr {[dict exists $e options] ? 1 : 0}]]
 	}
 	return $out
 }
@@ -228,10 +233,33 @@ proc rio::agent::_options_caps {name} {
 
 # One descriptor with every key present. `choices` is normalized too: a bare value is
 # its own label, so a provider may declare {claude-opus-5 …} or the long form.
+#
+# Three of the keys are a frontend's rendering vocabulary, and the core stays as blind
+# to them as it is to what an option MEANS (D106):
+#
+#   kind   choice (the default) | text | number — which control to draw. `number` is a
+#          rendering hint only: the provider remains the authority on what is valid, so
+#          the core carries no range and never checks one.
+#   group  a section heading, "" for none. Sections appear in the order their first
+#          member is declared, members in declaration order within them — a contract a
+#          provider relies on when it orders its list.
+#   quick  1 = a frontend MAY also offer this in a quick control (rio's GUI: the chat
+#          status strip), 0 = settings-only. It defaults to 1, a constant, rather than
+#          being derived from `kind`: that a Tk menu cannot hold an entry field is a
+#          frontend fact and does not belong in a core default. The frontend applies
+#          that test where the knowledge lives. The constant is also the more
+#          compatible default — a provider built against provider-api 2 declares no
+#          `quick` and keeps the strip presence it has today.
+#
+# A frontend meeting an unrecognised `kind` (a newer provider, or a typo) falls back to
+# `choice` when the descriptor carries choices and to `text` otherwise, so an unknown
+# kind is always renderable and provider-api 5 can add one safely.
 proc rio::agent::_option_norm {o} {
-	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {}]
+	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {} \
+		kind choice group "" quick 1]
 	set out [dict merge $out $o]
 	if {[dict get $out label] eq ""} { dict set out label [dict get $out name] }
+	if {[dict get $out kind] eq ""} { dict set out kind choice }
 	set cs {}
 	foreach c [dict get $out choices] {
 		if {[llength $c] == 1} {
@@ -245,6 +273,7 @@ proc rio::agent::_option_norm {o} {
 	dict set out choices $cs
 	dict set out free    [expr {[dict get $out free]    ? 1 : 0}]
 	dict set out refresh [expr {[dict get $out refresh] ? 1 : 0}]
+	dict set out quick   [expr {[dict get $out quick]   ? 1 : 0}]
 	return $out
 }
 
@@ -524,11 +553,19 @@ proc rio::agent::_close_interrupted {} {
 #            sends however its API spells "system prompt"; a provider without one (echo)
 #            ignores it. The provider never sees the layers — only the composed string.
 #   {*}$post delta <text>                 a chunk of assistant text
+#   {*}$post thinking <text>              a chunk of the model's REASONING — shown, but
+#                                         deliberately not part of the answer: it never
+#                                         enters `conversation`, so it is not re-sent on
+#                                         a later step of the turn and not billed again
 #   {*}$post tool  <id> <name> <in> <raw> a requested tool call (in = parsed dict,
 #                                         raw = the original input JSON)
 #   {*}$post done  ?stop_reason?          the provider step finished; stop_reason
 #                                         "tool_use" means "run the tools, continue"
 #   {*}$post error <code> <message>       the turn failed (a classified error; D26)
+#
+# A verb this core does not know is IGNORED, not an error — a provider written against a
+# newer rio degrades to silence on the parts this one cannot render, rather than hanging
+# the turn or failing it.
 proc rio::agent::_run {turn emit} {
 	variable conversation
 	variable provider
@@ -555,6 +592,15 @@ proc rio::agent::_run {turn emit} {
 					{*}$emit [dict create event agent.delta \
 						params [dict create turn $turn text $text]]
 				}
+				thinking {
+					# Shown, never recorded: `acc` is what becomes the assistant turn's
+					# text block below and is re-sent on every later step, so reasoning
+					# routed through `delta` would join the conversation and be paid for
+					# again each round-trip. A local model can spend a whole short turn
+					# here, so the alternative — dropping it — renders an empty answer.
+					{*}$emit [dict create event agent.thinking \
+						params [dict create turn $turn text [lindex $msg 1]]]
+				}
 				tool {
 					lassign $msg _ id name input raw
 					lappend calls [dict create id $id name $name input $input raw $raw]
@@ -574,6 +620,7 @@ proc rio::agent::_run {turn emit} {
 							code [lindex $msg 1] message [lindex $msg 2]]]
 					set failed 1 ; break
 				}
+				default {}   ;# a newer provider's verb: ignored, never fatal (see above)
 			}
 		}
 		if {$failed} return

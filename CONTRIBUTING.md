@@ -300,11 +300,13 @@ understanding before you publish one:
   manifest and your `.tcl` payloads (no subdirectories, v1); the core sources the
   file named by `entry`, which should register the provider.
 - **Write against `provider-api`.** Declare the contract version you built for
-  (`provider-api = 3` today). The core loads the API surface — `rio::agent::register_provider`
+  (`provider-api = 4` today). The core loads the API surface — `rio::agent::register_provider`
   (with `-label`, `-signup`, a `-key` capability, and since **2** an `-options`
-  capability), the provider proc contract
+  capability whose descriptors since **4** carry `kind` / `group` / `quick`, so a
+  setting can be a field rather than a menu), the provider proc contract
   `{conversation tools system post}` with its `delta` / `tool` / `done` / `error`
-  callbacks, and the runtime helpers `rio::llm::http::stream` (and `::get`),
+  callbacks (and since **4** `thinking`, for reasoning that is shown but never recorded
+  in the conversation), and the runtime helpers `rio::llm::http::stream` (and `::get`),
   `rio::llm::jstr` / `rio::llm::obj_json` (and since **3** `rio::llm::jascii`),
   `rio::secret::*` and `rio::agent::settings::*` — *before* your code,
   so you ship no copy of it. A rio that implements an older `provider-api` than you
@@ -672,7 +674,9 @@ none for an uncaught error.)
 More focused GUI suites live beside it in `rio-gui/tests/` — for example
 `repos.tcl` drives the whole extension-repository flow (scan, consent,
 install, remove, the Extensions window) against fixture data, with no network
-involved.
+involved, and `agent_settings.tcl` drives the provider settings window against a
+fake provider whose options are deliberately not the shipped ones, so a check
+cannot pass merely because the window recognised a familiar name.
 
 ## Sending a change
 

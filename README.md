@@ -112,10 +112,12 @@ in [docs/](docs/index.md).
 - **Agent chat** — a right-hand chat column wired to pluggable providers: a
   built-in offline **echo** provider ships in the box, and real agents install from a
   repository as agent-provider extensions (*Settings ▸ Extensions…*) — **Claude** over
-  the official Anthropic API and **ChatGPT** over the OpenAI API. ChatGPT is
-  OpenAI-*compatible*, so pointing its base URL at a **local** server (Ollama,
-  llama-server, LM Studio, vLLM) runs a local model through the same path. Each provider
-  brings its own API key, entered under *Preferences ▸ Agent* (a local server may need none). The agent lives in the core
+  the official Anthropic API, and an **OpenAI-compatible** one for hosted ChatGPT or for
+  **a server of your own**: Ollama, llama.cpp, vLLM, LM Studio. Give it the server's URL
+  in *Preferences ▸ Agent*, list what that machine actually has, and pick a model; your
+  own server usually needs no API key at all. A thinking model's reasoning is shown in
+  the chat, set apart from its answer and never sent back with it. Each provider
+  brings its own API key, entered under *Preferences ▸ Agent* (a server of your own may need none). The agent lives in the core
   and runs wherever it does — so over a remote core the turn and your key stay
   server-side, with the same GUI either way (see D30). It holds a streaming
   conversation and can **read your project** (listing folders, reading files and
@@ -148,7 +150,7 @@ in [docs/](docs/index.md).
   may be left empty. The system and per-provider prompts live with your rio settings; the
   project prompt in a `.rio/agent.md` at the project root, so it travels with the code. The
   instructions live in rio, not the provider — so your general ones shape whichever model
-  runs (Claude, ChatGPT, a local model), while the per-provider layer tunes just one.
+  runs (Claude, ChatGPT, a model of your own), while the per-provider layer tunes just one.
   **rio's own instructions are on that same list, and you can read them** — the shipped
   base prompt and the plan-mode one, as files on disk and rendered in the app, with *Show
   the whole prompt…* for the composed text exactly as the model receives it. Nothing the

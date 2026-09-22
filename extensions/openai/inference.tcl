@@ -55,6 +55,7 @@ namespace eval rio::openai {
 	variable finish  ;# sid -> the choice's finish_reason ("" until one arrives)
 	variable tcalls  ;# sid -> dict: tool-call index -> {id .. name .. args ..}
 	variable retry   ;# sid -> {conf conversation tools auth transport}: a one-shot re-send
+	variable think   ;# sid -> 1 if this stream's reasoning is shown (the face's setting)
 }
 
 # tcllib's json decodes a JSON `null` to the STRING "null" (indistinguishable from
@@ -66,17 +67,22 @@ proc rio::openai::_nn {v} { return [expr {$v eq "null" ? "" : $v}] }
 
 # Start one streaming completion. `conf` carries the config-as-data (D26):
 # messages_url, model, token_param, max_tokens, ?system?, ?effort_json? (the face's
-# already-spelled effort fragment, D106), ?request_timeout?.
+# already-spelled effort fragment, D106), ?request_timeout?, ?extra_json? (the user's
+# own request fields, already validated by the face), ?reasoning? (show|hide).
 # `auth` is a {header value} pair the face supplies (Authorization "Bearer <key>").
 # `transport` is `{*}$transport request on_chunk on_done` (the shared rio::llm
 # transport, or a test fake). `post` is the agent provider callback. Returns
 # immediately; the turn completes asynchronously as the transport drives back.
 proc rio::openai::infer {conf conversation tools auth transport post} {
 	variable seq ; variable buf ; variable raw ; variable cb ; variable fin
-	variable finish ; variable tcalls ; variable retry
+	variable finish ; variable tcalls ; variable retry ; variable think
 	set sid [incr seq]
 	set buf($sid) "" ; set raw($sid) "" ; set cb($sid) $post ; set fin($sid) 0
 	set finish($sid) "" ; set tcalls($sid) [dict create]
+	# Absent means SHOW. Until this existed the reasoning was dropped on the floor, so
+	# a caller that says nothing gets the fix rather than the old silence.
+	set think($sid) [expr {![dict exists $conf reasoning]
+		|| [dict get $conf reasoning] ne "hide"}]
 	# Everything needed to send this turn again, for the one retry _done may make
 	# when the server tells us the token-cap parameter is the other one (D106c).
 	set retry($sid) [list $conf $conversation $tools $auth $transport]
@@ -118,10 +124,21 @@ proc rio::openai::_request_json {conf conversation tools} {
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
+	# The user's own request fields (temperature, top_p, a server's chat_template_kwargs
+	# — whatever this endpoint understands that rio has never heard of). Spliced RAW and
+	# last: the face has already checked it parses as an object and refused any key rio
+	# emits itself, so there is no duplicate key here and so no merge question. Parsing
+	# and re-serialising it would be worse than useless — tcllib flattens every leaf to a
+	# string, and `true` would go back out as "true".
+	if {[dict exists $conf extra_json]} {
+		set x [string trim [dict get $conf extra_json]]
+		set inner [string trim [string range $x 1 end-1]]
+		if {$inner ne ""} { lappend parts $inner }
+	}
 	# jascii is the last word on the body, because not every part of it came through
-	# jstr: a tool's `input_schema` is spliced raw (it is already JSON). The HTTP
-	# layer is handed a pure-ASCII body or it mangles what it doesn't expect — see
-	# rio::llm::jascii for the failure this cost live.
+	# jstr: a tool's `input_schema` is spliced raw (it is already JSON), and so is
+	# extra_json. The HTTP layer is handed a pure-ASCII body or it mangles what it
+	# doesn't expect — see rio::llm::jascii for the failure this cost live.
 	return [rio::llm::jascii "{[join $parts ,]}"]
 }
 
@@ -198,7 +215,7 @@ proc rio::openai::_chunk {sid bytes} {
 }
 
 proc rio::openai::_line {sid line postcmd} {
-	variable fin ; variable finish ; variable tcalls
+	variable fin ; variable finish ; variable tcalls ; variable think
 	if {![string match "data:*" $line]} return
 	set payload [string trim [string range $line 5 end]]
 	if {$payload eq ""} return
@@ -224,6 +241,21 @@ proc rio::openai::_line {sid line postcmd} {
 		if {[dict exists $delta content]} {
 			set c [_nn [dict get $delta content]]
 			if {$c ne ""} { {*}$postcmd delta $c }
+		}
+		# Reasoning, which a thinking model streams beside (or instead of) its content.
+		# `reasoning_content` is the llama.cpp / vLLM / DeepSeek spelling and `reasoning`
+		# the other one in the wild; a server sending both means the same thing twice, so
+		# the first wins. It posts `thinking`, never `delta`: the core shows it but does
+		# not record it, so it is not re-sent on a later step of the turn (provider-api 4).
+		if {$think($sid)} {
+			set r ""
+			foreach k {reasoning_content reasoning} {
+				if {[dict exists $delta $k]} {
+					set r [_nn [dict get $delta $k]]
+					if {$r ne ""} break
+				}
+			}
+			if {$r ne ""} { {*}$postcmd thinking $r }
 		}
 		if {[dict exists $delta tool_calls]} {
 			foreach tc [dict get $delta tool_calls] { _accumulate $sid $tc }
@@ -280,7 +312,7 @@ proc rio::openai::_flush_terminal {sid postcmd} {
 # otherwise classify by HTTP status into an actionable agent.error (D26).
 proc rio::openai::_done {sid status err} {
 	variable buf ; variable raw ; variable cb ; variable fin ; variable finish
-	variable tcalls ; variable retry
+	variable tcalls ; variable retry ; variable think
 	if {![info exists cb($sid)]} return
 	set postcmd $cb($sid)
 	if {!$fin($sid) && $status == 400 && [_repair_400 $sid $postcmd]} {
@@ -288,7 +320,7 @@ proc rio::openai::_done {sid status err} {
 		# report the outcome. Nothing is posted for this attempt — the user never sees
 		# a failure rio knew how to answer.
 		unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) \
-			tcalls($sid) retry($sid)
+			tcalls($sid) retry($sid) think($sid)
 		return
 	}
 	if {!$fin($sid)} {
@@ -311,7 +343,7 @@ proc rio::openai::_done {sid status err} {
 		}
 	}
 	unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) tcalls($sid) \
-		retry($sid)
+		retry($sid) think($sid)
 }
 
 # Two request fields are per MODEL while rio's choice of them is per PROVIDER, and

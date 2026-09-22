@@ -203,7 +203,7 @@ proc rio::ops::agent_key_clear {params} {
 }
 rio::dispatch::register agent.key.clear rio::ops::agent_key_clear
 
-# agent.providers -> {providers:[{name, label, keyed, key_set, signup}]} ; every
+# agent.providers -> {providers:[{name, label, keyed, key_set, signup, options}]} ; every
 # registered provider, so a frontend renders its picker and per-provider key dialog
 # from data the provider declares rather than hardcoding names (D30; serves the
 # installable-provider milestone). A non-flat result — the wire layer registers a
@@ -230,7 +230,9 @@ proc rio::ops::_option_provider {params} {
 }
 
 # agent.options.list {?provider?} -> {provider, options:[{name,label,hint,value,free,
-# refresh, choices:[{value,label}]}]} ; what this provider lets you choose right now.
+# refresh,kind,group,quick, choices:[{value,label}]}]} ; what this provider lets you
+# choose right now. The last three are the frontend's rendering vocabulary, which the
+# core carries without interpreting — see _option_norm for what each one means.
 # A provider with no options answers with an empty list (echo), so a frontend can ask
 # unconditionally — but a provider this core does NOT CARRY is a bad_request, as it is
 # for every other agent op. The two must not read alike: "nothing to choose" and "no

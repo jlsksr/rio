@@ -1452,4 +1452,97 @@ test agent-history-wire {agent.history encodes messages as an array of objects} 
 	rio::wire::response [dict create id 3 ok true op agent.history result $result]
 } -result {{"id":"3","ok":true,"result":{"messages":[{"role":"user","text":"hi"},{"role":"assistant","text":"echo: hi"}]}}}
 
+# --- the `thinking` post verb (provider-api 4) -------------------------------
+#
+# A model's reasoning is SHOWN but is not part of the answer. The distinction is not
+# cosmetic: the loop re-sends the recorded assistant turn on every later step, so
+# reasoning routed through `delta` would rejoin the conversation and be paid for again
+# each round-trip. These tests pin both halves — it reaches the frontend, and it never
+# reaches the provider.
+
+proc thinking_provider {conversation tools system post} {
+	{*}$post thinking "weighing it up"
+	{*}$post delta "the answer"
+	{*}$post done end_turn
+}
+
+test agent-thinking-event {a thinking post reaches the frontend as its own event} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	set out [run_turn "hi" thinking_provider]
+	set found {}
+	foreach ev [dict get $out evs] {
+		if {[dict get $ev event] eq "agent.thinking"} {
+			set found [list [dict get $ev params text] [expr {[dict get $ev params turn] > 0}]]
+		}
+	}
+	set found
+} -result {{weighing it up} 1}
+
+test agent-thinking-not-in-message {the finished message is the answer, without the reasoning} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	set out [run_turn "hi" thinking_provider]
+	set text ""
+	foreach ev [dict get $out evs] {
+		if {[dict get $ev event] eq "agent.message"} { set text [dict get $ev params text] }
+	}
+	set text
+} -result {the answer}
+
+test agent-thinking-not-in-history {history carries the answer only} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	run_turn "hi" thinking_provider
+	set msgs [dict get [rio::core::call agent.history {}] response result messages]
+	dict get [lindex $msgs 1] text
+} -result {the answer}
+
+# The load-bearing one. A second turn hands the provider the whole conversation; if
+# thinking had ridden `delta` it would be in there, re-sent and re-billed every step.
+proc thinking_spy {conversation tools system post} {
+	set ::seen_conv $conversation
+	{*}$post thinking "second thoughts"
+	{*}$post delta "done"
+	{*}$post done end_turn
+}
+
+test agent-thinking-never-resent {the conversation a later turn receives holds no reasoning} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	run_turn "first" thinking_provider
+	set ::seen_conv {}
+	run_turn "second" thinking_spy
+	set flat ""
+	foreach m $::seen_conv {
+		if {[dict exists $m text]} { append flat [dict get $m text] }
+		if {[dict exists $m content]} {
+			foreach b [dict get $m content] {
+				if {[dict get $b type] eq "text"} { append flat [dict get $b text] }
+			}
+		}
+	}
+	list [string match *weighing* $flat] [string match *answer* $flat]
+} -result {0 1}
+
+test agent-unknown-verb-ignored {a verb this core does not know is silence, not a failure} -setup {
+	rio::core::call agent.reset {}
+} -body {
+	set out [run_turn "hi" [list apply {{conversation tools system post} {
+		{*}$post sparkle "from a newer rio"
+		{*}$post delta "still fine"
+		{*}$post done end_turn
+	}}]]
+	set text ""
+	foreach ev [dict get $out evs] {
+		if {[dict get $ev event] eq "agent.message"} { set text [dict get $ev params text] }
+	}
+	list [dict get $out fin] $text
+} -result {done {still fine}}
+
+test agent-thinking-wire {agent.thinking encodes as a flat event like agent.delta} -body {
+	rio::wire::event [dict create event agent.thinking \
+		params [dict create turn 1 text "hmm"]]
+} -result {{"event":"agent.thinking","params":{"turn":"1","text":"hmm"}}}
+
 cleanupTests

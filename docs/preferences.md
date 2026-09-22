@@ -227,7 +227,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `agent/providers/<name>.md` | a **per-provider prompt**, applied only while that provider is live | yes — plain Markdown |
 | `agent/allow.list` | trusted commands for **all projects** — one rule per line | yes — plain text |
 | `agent/providers/<name>.allow.list` | trusted commands active only while that provider is live | yes — plain text |
-| `agent/providers/<name>.conf` | the choices that provider remembers, such as model and effort — see [the agent](agent.md#choosing-a-model-and-how-hard-it-thinks) | yes — `key = value` |
+| `agent/providers/<name>.conf` | everything that provider remembers — the model and effort it was last set to, and whatever else it declares (the OpenAI-compatible one keeps its server URL, token cap, timeout and request fields here) — see [the agent](agent.md#settings-a-provider-declares) | yes — `key = value` |
 | `tls.conf` | how the core's https connections are checked — today only `unchecked_hostnames`, on the **core's** host (see [above](#network-how-the-core-checks-https)) | yes — `key = value` |
 
 **Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**

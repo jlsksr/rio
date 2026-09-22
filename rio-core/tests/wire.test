@@ -288,14 +288,16 @@ test wire-result-agent-options {agent.options.list encodes BOTH levels — optio
 	rio::wire::response [dict create id 5 ok true op agent.options.list \
 		result [dict create provider claude options [list \
 			[dict create name model label Model hint "" value m1 free 1 refresh 1 \
+				kind choice group Model quick 1 \
 				choices [list [dict create value m1 label "One"] \
 				              [dict create value m2 label "Two"]]]]]]
-} -result {{"id":"5","ok":true,"result":{"provider":"claude","options":[{"name":"model","label":"Model","hint":"","value":"m1","free":"1","refresh":"1","choices":[{"value":"m1","label":"One"},{"value":"m2","label":"Two"}]}]}}}
+} -result {{"id":"5","ok":true,"result":{"provider":"claude","options":[{"name":"model","label":"Model","hint":"","value":"m1","free":"1","refresh":"1","kind":"choice","group":"Model","quick":"1","choices":[{"value":"m1","label":"One"},{"value":"m2","label":"Two"}]}]}}}
 
 test wire-roundtrip-agent-options {the encoded option list survives json2dict} -body {
 	set enc [rio::wire::response [dict create id 6 ok true op agent.options.list \
 		result [dict create provider openai options [list \
 			[dict create name effort label Effort hint "how hard" value high free 0 refresh 0 \
+				kind choice group Model quick 1 \
 				choices [list [dict create value low label Low] \
 				              [dict create value high label High]]]]]]]
 	set d [json::json2dict $enc]
@@ -303,6 +305,18 @@ test wire-roundtrip-agent-options {the encoded option list survives json2dict} -
 	list [dict get $o name] [dict get $o value] \
 		[dict get [lindex [dict get $o choices] 1] label]
 } -result {effort high High}
+
+# The rendering vocabulary a frontend reads (D106/provider-api 4). A `text` option has no
+# choices at all, which is the shape the old encoder never had to carry.
+test wire-result-agent-options-kinds {kind, group and quick cross the wire, choices or not} -body {
+	set enc [rio::wire::response [dict create id 7 ok true op agent.options.list \
+		result [dict create provider openai options [list \
+			[dict create name base_url label "Base URL" hint "where" value http://x/v1 \
+				free 0 refresh 0 kind text group Server quick 0 choices {}]]]]]
+	set o [lindex [dict get [json::json2dict $enc] result options] 0]
+	list [dict get $o kind] [dict get $o group] [dict get $o quick] \
+		[llength [dict get $o choices]]
+} -result {text Server 0 0}
 
 test wire-result-agent-status {agent.status nests the option summary as an object} -body {
 	rio::wire::response [dict create id 7 ok true op agent.status \
