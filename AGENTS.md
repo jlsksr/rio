@@ -36,8 +36,9 @@ tree, a git pane that both reads and **writes** (stage, unstage, commit, discard
 D44/D45/D80/D93/D97/D98), a side-by-side compare view, live theming, rio's own
 manual rendered inside it (D99/D100), and a working
 **agent** (read + propose-edit + gated run-command with an opt-in trusted-command
-allow-list, Claude over the official
-Anthropic API). The GUI is **always a client to the core over a channel** — a pipe
+allow-list, Claude over the official Anthropic API, and an OpenAI-compatible
+provider configured from the GUI for hosted ChatGPT or a server of your own —
+D128). The GUI is **always a client to the core over a channel** — a pipe
 to a private core it spawns locally, or a socket to a remote core; **there is no
 in-process path** (D29/D30 retired it). Still mapped-but-unbuilt: the TUI and the
 full plugin platform — see Sequencing. Decisions carry an *Implemented* note where
@@ -7631,6 +7632,145 @@ the developer's own display, so it could have been "fixed" by running the suites
 else. That would have left rio able to take a keyboard it was never supposed to have. The
 invariant is the title of this entry, not the flake.
 
+### D128 — a provider is configured from the GUI, whatever it declares
+
+**The gap, and it was a promise rio was already making.** `extensions/openai` has called
+itself OpenAI-*compatible* since D65, its manifest named Ollama and llama-server, and both
+ROADMAP and `docs/agent.md` told the reader to "point its base URL at a local server". None
+of that was reachable: `messages_url` was a line in the extension's source, not a declared
+option, so the only way to do it was to edit the Tcl **on the core's disk** — which over a
+remote core (D30) means another machine — and lose it at the next reinstall. That is the
+exact complaint D106 opened with about the *model*, left unfixed for everything else. The
+face also **refused to run without an API key**, and its own error text advised inventing a
+placeholder, while every server this was supposed to serve wants none.
+
+D106 could not have fixed it. Its descriptor is a menu of choices, and a menu cannot hold a
+URL, a token cap and a blob of request JSON — the strip they render in is 340 px wide. So
+the fix is two halves: a descriptor that can say *"this one is a field"*, and somewhere to
+draw it.
+
+**Where the settings live (jka's call, against his own first suggestion).** jka proposed a
+top-level **Extensions** menu that extensions register settings windows under, the
+Notepad++ shape, and invited a counter-argument. There was one, and it is rio's own record:
+D85 settled that a top-level menu is for fast switches and a window is the config home, and
+put the agent's keys, prompts and allow-list in Preferences ▸ Agent on exactly that
+reasoning; **D67** had already moved *Extensions…* **out** of a top-level menu into Settings
+for being a management modal; D64 keeps the menubar within a screen. And the analogy does
+not carry: Notepad++ has a Plugins menu because its plugins contribute **commands**, while
+rio's four kinds (syntax, mode, theme, provider) contribute no command at all — such a menu
+would hold nothing but settings windows, which is the Preferences window's job. It would
+also need a menu-contribution mechanism, which is D17/D18 territory and still deferred, and
+it would have to span two homes, since syntax and modes live GUI-side while providers live
+in the core. jka took the counter-argument. The window is reached from Preferences ▸ Agent,
+with a second door on the Extensions window's own row for the provider you just installed.
+
+**The descriptor grows three keys, and the core still does not know what they mean.**
+`kind` (choice | text | number), `group`, `quick`. The interesting one is `quick`, which
+defaults to the **constant 1** rather than being derived from `kind`. Deriving it would
+have been mechanically fine and was the first design; it is wrong because *"a Tk menu
+cannot hold an entry field"* is a **frontend** fact, and D106's whole argument is that the
+core never learns what an option is for. The frontend applies the kind test where that
+knowledge lives (`agent_option_quick` = `quick && kind eq choice`). The constant is also
+the more compatible default: a provider built against provider-api 2 declares no `quick`
+and keeps the strip presence it has today.
+
+Deliberately **not** in the vocabulary, each for a reason worth keeping: **`bool`** (the
+core would have to decide which string is true, and it collides with the *first choice is
+the quiet one* convention — a `{show,hide}` option would render as "checked = hide"; a
+two-choice `choice` says it without the ambiguity); **`min`/`max`** (duplicates the
+provider's own validation and can disagree with it, and the window already re-reads after
+every write, so the provider's refusal is what it shows); **`placeholder`** (D68 wants help
+styled *apart* from controls, and `hint` exists).
+
+And one rule the frontend owes a **newer** provider: an unrecognised `kind` falls back to
+`choice` when the descriptor carries choices and to `text` otherwise. Without it,
+provider-api 5 cannot add a kind safely and a typo becomes an unrenderable field.
+
+**Reasoning needed a verb of its own, and the reason is not cosmetic.** A thinking model
+streams its reasoning in a field beside its content (`reasoning_content` on llama.cpp /
+vLLM / the DeepSeek-derived models; `reasoning` elsewhere), and this face read neither — a
+short thinking turn rendered as an **empty answer**, reproduced on the first probe against
+jka's endpoint. The obvious fix, posting it as `delta`, is worse than the bug:
+[agent.tcl](rio-core/agent.tcl)'s `delta` arm appends to `acc`, `acc` becomes the recorded
+assistant text block, and the loop re-sends that on **every later step of the turn** — so
+the reasoning would join the conversation and be paid for again each round-trip. Hence
+`{*}$post thinking <text>`: emitted as `agent.thinking`, never touching `acc`.
+Provider-agnostic by construction, so Claude's extended thinking can use it later with no
+further core change. Additive on the wire — `dispatch_event` has no default arm — so **no
+`protocol` bump**; that integer is for breaking shapes.
+
+It **stays in the transcript** once the answer starts. `.chat.log` is append-only
+everywhere else, a mid-stream delete would take any selection the reader made with it, and
+a multi-step turn interleaves several runs of reasoning with tool calls, so there is no
+principled rule for which to erase — and the `reasoning` setting already *is* the control
+for not seeing it, so a second mechanism would be the two-door drift D85 exists to end.
+Collapsing it to "thought for 4s" needs `-elide` and a disclosure control rio has no
+precedent for; ROADMAP.
+
+**`extra_json` is validated and never rebuilt.** The free-form escape hatch jka asked for —
+`temperature`, `top_p`, llama.cpp's `chat_template_kwargs` — is spliced into the body **raw**.
+Parsing and re-serialising it would be actively lossy: tcllib flattens every JSON leaf to a
+string, so a user's `true` would go out as `"true"`. Raw splicing then raises the duplicate-key
+question (every server resolves those differently, none of them documented), and the answer is
+to **forbid rather than merge**: any top-level key rio emits itself is refused at *set* time,
+with a message naming the option to use instead. The forbidden set is **computed** — the live
+`token_param` and the key parsed out of the config-as-data `effort_json` fragment — so an
+upstream rename stays the one-line edit D106 made it. Embedded newlines are flattened rather
+than refused, which is safe and not a hack: RFC 8259 forbids a raw control character inside a
+JSON string, so in a document that has already parsed, every raw newline is insignificant
+whitespace between tokens.
+
+**A key is optional now**, which is the honest default for a provider whose main use is a
+server you run. With none stored, no `Authorization` header is sent and the server decides.
+The one case still worth an up-front refusal is *no key **and** the shipped hosted URL* —
+then it really is OpenAI, and a 401 is a worse way to learn that. Compared against a named
+constant, never a hostname test: this face has no opinion about which hosts are OpenAI's.
+
+**Two bugs in the existing plumbing that only a second surface could expose.** The
+`agent.options` event was guarded on the **active** provider, so a settings window open on
+any other one never repainted and its ⟳ Refresh did nothing, silently. And
+`agent_option_pick` wrote through `rio_result`, which raises `report_error` — a modal, wrong
+for a window with a status line of its own and **fatal** to a headless run, which the
+injection proving it confirmed by killing the suite outright (D95 working as designed).
+
+**provider-api 4**, for the three descriptor keys and the `thinking` verb. It makes the
+published openai uninstallable on an older core — irrelevant while 0.1.0 is unreleased and
+core and provider ship together, but the cost is real and is stated here so it is priced
+next time.
+
+**Deliberately not built.** A `system_role` knob (`system` / `developer` / `user`): every
+server named accepts `role:"system"`, and D106's promise is that adding it later needs no
+core change. A "don't send tools" switch: rio's agent **is** its tools (D20/D101), so a
+provider with them off is a chat box, not a degraded agent — and `tools` being on
+`extra_json`'s forbidden list closes that back door deliberately.
+
+**Verified live** against llama-swap + llama.cpp on jka's machine, which is what this
+exists for: the extension installed at provider-api 4 and loaded; ⟳ Refresh enumerated six
+models off the running server; a turn with **no key stored** answered; a `fs_list` tool call
+round-tripped and the model answered from its result; the reasoning streamed (286 characters)
+and was **absent from the conversation history** afterwards — the load-bearing property; and
+`extra_json` set to `{"chat_template_kwargs":{"enable_thinking":false}}` silenced the
+thinking, which is exactly what jka's own client uses that field for.
+
+**Honest limit:** `reasoning_content` is verified against llama.cpp only. vLLM and Ollama
+are unverified here, and OpenAI's *Responses* API sends `reasoning` as an **object** — on
+Chat Completions it is a string for every server named, and a non-string would render as
+muted noise rather than crash.
+
+**Guards** (core 828, openai 93, GUI suites all green): the descriptor's defaults,
+normalization and unknown-kind pass-through; a **meta-test comparing the key set
+`_option_norm` produces with the set `wire::_option` emits**, written and landed *before*
+any key was added, because that encoder is an allow-list and a key it does not name vanishes
+with every other test still passing — proven by injecting exactly that; the `thinking` verb
+including the conversation a *later* turn receives; the face's URL derivation,
+canonicalisation, keyless path and every `extra_json` rule (with a value full of `=`, `#`
+and braces, for the conf round-trip); the strip filter; and a new GUI suite
+[agent_settings.tcl](rio-gui/tests/agent_settings.tcl) driving the window against a fake
+provider whose options are deliberately **not** the shipped ones, so a check cannot pass
+merely because the window recognised a familiar name. The docs guard gained a check that
+derives the settings door from the difference between a provider that declares options and
+one that does not, so the label is never written in the test.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
@@ -8165,6 +8305,8 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | --------------- | -------- | ----- |
 | `::keymap_default` (D23) | `docs/keyboard.md`'s chord table | `docs.tcl` — both directions |
 | the `docs/*.md` on disk | `docs/index.md`'s contents | `docs.tcl` — no orphans, no dead entries |
+| the provider settings door + window | what `docs/agent.md` promises of it | `docs.tcl` — derives the door from a provider that declares options vs one that does not |
+| `rio::agent::_option_norm`'s keys | `rio::wire::_option`'s allow-list | `agent-options.test` — both directions, through the real op and encoder |
 | what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
@@ -8250,6 +8392,16 @@ status changes, rather than pretending a test could hold it.
   API, used to dogfood it (D17).
 - **provider** — a plugin implementing the core LLM provider interface (Claude,
   local LLM, …); supplies the model, absorbs the wire specifics (D8, D20).
+- **option descriptor** — how a provider declares one runtime setting:
+  `{name, label, hint, value, free, refresh, choices}` (D106) plus, since
+  provider-api 4, `kind` (choice | text | number), `group` and `quick` — the
+  rendering vocabulary a frontend draws with and the core never interprets (D128).
+- **quick option** — one a frontend may also offer in a quick control (rio's GUI:
+  the chat status strip) as well as in the settings window. `quick` defaults to 1;
+  whether a *menu* can draw it at all is the frontend's own test (D128).
+- **thinking** — a provider post verb (provider-api 4) carrying a model's reasoning:
+  shown in the chat as an aside, never recorded in the conversation, so it is not
+  re-sent or re-billed on a later step of the turn (D128).
 - **MCP** — Model Context Protocol; a JSON-RPC standard for exposing
   tools/resources to LLM apps. Candidate basis for rio's provider/tool
   interfaces (D20, O12).
