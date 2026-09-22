@@ -653,6 +653,36 @@ repo_scan_all
 ok "provider: update detected from the core's version" \
 	[list [dict get $::ext_updates provider/pp from] [dict get $::ext_updates provider/pp to]] \
 	{1.0.0 1.4.0}
+# Installed is not the same as running: a provider is sourced at the next core start
+# (D66), so the window says so rather than offering settings for something that cannot
+# answer. `pp` is in the core's store and was never loaded, which is exactly that state.
+extensions_window
+update idletasks
+proc pick_row {kind name} {
+	set i [rowidx $kind $name]
+	.extw.body.list selection clear 0 end
+	.extw.body.list selection set $i
+	extw_select
+}
+pick_row provider pp
+ok "provider: an installed-but-unloaded one says to restart" \
+	[winfo exists .extw.det.restart] 1
+ok "provider: and offers no settings button"  [winfo exists .extw.det.settings] 0
+# Once the core HAS it — which for a real install means the next start — the same row
+# offers the settings it declares. Registering it here is what a restart would do.
+namespace eval pploaded {}
+proc pploaded::provider {conversation tools system post} { {*}$post done stop }
+proc pploaded::opts {} { return {{name flavour value vanilla choices {vanilla mint}}} }
+proc pploaded::opt_set {name value} { return }
+rio::agent::register_provider pp ::pploaded::provider -label "Peppy" \
+	-options [dict create list ::pploaded::opts set ::pploaded::opt_set]
+agent_providers_refresh
+pick_row provider pp
+ok "provider: a loaded one offers its settings" \
+	[expr {[winfo exists .extw.det.settings]
+		&& [.extw.det.settings cget -text] eq "Peppy settings…"}] 1
+ok "provider: and stops telling you to restart" [winfo exists .extw.det.restart] 0
+destroy .extw
 ok "provider: remove works with no ledger entry" [ext_remove provider pp] 1
 ok "provider: the core dropped it" \
 	[expr {"pp" in [lmap p [dict get [rio_result provider.list {}] providers] {dict get $p name}]}] 0

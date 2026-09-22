@@ -9847,6 +9847,9 @@ proc extw_refresh {} {
 	# the default, and every provider then lists as api 1 (what such a core could
 	# load anyway).
 	ext_core_providers_refresh
+	# Which providers this core has actually LOADED, which is a different question from
+	# which are in its store — and the one the detail pane's settings button turns on.
+	agent_providers_refresh
 	repo_scan_all {apply {{src n total} {
 		extw_status "fetching [host_of $src] ($n/$total)…"
 		update idletasks
@@ -10060,6 +10063,26 @@ proc extw_select {} {
 	set entry ""
 	if {[dict exists $::ext_installed $key]} { set entry [dict get $::ext_installed $key] }
 	set st [expr {$::repo_busy ? "disabled" : "normal"}]
+	# An installed provider: say whether it is actually running, and if it is, offer the
+	# settings it declares from here as well as from Preferences. A provider installs
+	# core-side and is sourced only at the next core start (D66), so "installed" and
+	# "live" are genuinely different states — and the window that just installed it is
+	# where saying so is most use. The test is the REGISTERED list, never the ledger:
+	# asking a core about a provider it has not loaded gets nothing to show.
+	if {$entry ne "" && [dict get $row kind] eq "provider"} {
+		set pname [dict get $row name]
+		if {[provider_has_options $pname]} {
+			button $det.settings -text "[agent_provider_label $pname] settings…" \
+				-font RioUIFont -state $st \
+				-command [list provider_settings_dialog $pname]
+			pack $det.settings -anchor w -pady {2 2}
+		} elseif {[agent_provider_entry $pname] eq ""} {
+			label $det.restart -anchor w -justify left -wraplength $wrap -font RioUIFont \
+				-text "Restart rio to use this provider." \
+				-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+			pack $det.restart -fill x -pady {2 2}
+		}
+	}
 	# The cross-source opt-in, on installed rows only: it is a statement about THIS
 	# extension's identity across repositories, so it belongs on the extension, not in
 	# Preferences. Off by default (D107).
