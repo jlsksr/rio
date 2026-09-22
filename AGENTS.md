@@ -7771,6 +7771,114 @@ merely because the window recognised a familiar name. The docs guard gained a ch
 derives the settings door from the difference between a provider that declares options and
 one that does not, so the label is never written in the test.
 
+---
+
+### D129 — one install script per platform, and a launcher that makes rio an application
+
+**jka, the day before the release:** *"the two deployment scripts currently have
+'dev-deploy' in their names and which script belongs to which OS is only recognized by the
+file extension."*
+
+Both halves of that were true, and a third was worse. `rio-dev-deploy.sh` and
+`rio-dev-deploy.ps1` announced themselves as **development-environment** setup, which is
+not what a stranger cloning rio is looking for; the platform lived only in `.sh` vs `.ps1`;
+and the POSIX script **stopped at packages**. It installed the toolchain, verified it, and
+ended — leaving the user to type `wish rio-gui/rio-gui.tcl` from inside the checkout. There
+was no `rio` command, no menu entry, no icon, though `rio-gui/icons/` has carried the full
+size set since D117/D120. Meanwhile `rio-dev-deploy.ps1`'s own synopsis read *"set up rio
+for daily use on Windows 11"*: it winget-installed the toolchain, set persistence and could
+drop a shortcut. **Its name was the lie, not its content.**
+
+```
+rio-dev-deploy.sh    ->  install-unix.sh        Linux, the BSDs, macOS
+rio-dev-deploy.ps1   ->  install-windows.ps1    Windows 11
+rio-server-deploy.sh ->  install-server.sh      a headless box, edited remotely
+```
+
+**One script per platform, not a user/dev pair.** jka offered either — separate user
+scripts, or make the existing ones fit a user. Two scripts that both apt-install Tcl would
+drift apart, which is the failure this project's own history records (D124: PITCH's
+changelog sat fifteen decisions behind while nobody was told to update it). The dev extras
+stay as flags on the one script: `--with-ck` is marked *for contributors*, and
+`--no-launcher` is what a contributor with several clones wants.
+
+**What "installed" means, when there is nothing to install.** rio runs from a checkout —
+there is no packaging path (ROADMAP), and D100 already established that `docs/` ships
+simply by being beside the code. So the install is the toolchain plus **a launcher that
+points back into the checkout**: a `rio` command in `~/.local/bin`, the icon at every
+shipped size in `~/.local/share/icons/hicolor`, and a `.desktop` entry in
+`~/.local/share/applications`. Per-user, no root, no file outside the account,
+`--uninstall` to take it back. A `--prefix` covers a system-wide install for anyone who
+wants one. What it deliberately does **not** do is uninstall packages: other things on the
+machine need Tcl.
+
+**The launcher is a wrapper, not a symlink — measured, not assumed.** Tcl's `file
+normalize` does **not** resolve symlinks (probed before the design was fixed), so
+`[info script]` stays the *link's* path. rio-gui.tcl's very first act is
+`source [file dirname [info script]]/../rio-core/deps.tcl`, so a symlink at
+`~/.local/bin/rio` would send rio looking for its core in `~/.local/` and die before the
+D116 dependency gate could say anything useful. The wrapper `exec`s the real path, so
+`[info script]` is the real path. It must also exec **`wish`, not `tclsh`**: rio-gui.tcl
+calls `rio::deps::gui_require`, which assumes Tk is already up, and never requires Tk
+itself.
+
+**`StartupWMClass` was set only once it could be set honestly.** Without it a running rio
+shows in the taskbar as a stray window rather than grouping under its own launcher. The
+value is whatever the window's real `WM_CLASS` is — and Tk derives that from the *script*
+name, so it is `rio-gui.tcl`, not `wish`. Read with `xprop` off a live window rather than
+guessed, the same way D117 verified `_NET_WM_ICON`.
+
+**macOS ships attempted, not verified** (jka: the Mac was unreachable before the release).
+The old script stopped a Mac dead at *"no supported package manager found"*. It now knows
+Homebrew, and two facts that would otherwise make a first run fail confusingly: Homebrew's
+Tcl is **keg-only**, so its `tclsh`/`wish` are off `PATH`, and the `tclsh` that *is* on a
+Mac's PATH is Apple's deprecated 8.5 without Tk or tcllib — so the probe and the launcher
+are both pointed at Homebrew's by full path. The formula names are a guess; `tcllib` may
+not be one at all, so a missing formula **warns instead of aborting** and the verify step
+decides. That is not a new policy, it is the one the script has always stated: *"if a name
+is wrong on your distro, fix it here and the verifier will confirm."* The run says plainly
+that macOS is unverified and asks for a report.
+
+**Windows changes are small because the content was already right.** The shortcut becomes
+the **default** (`-NoShortcut` opts out) and a **Start Menu** entry joins the Desktop one,
+since that is where an installed application lives there. Both now carry rio's committed
+`rio.ico` rather than inheriting wish.exe's Tk feather — a shortcut to `wish.exe` with
+rio's script as its argument, never to the `.tcl` file, which would follow whatever Windows
+currently associates with `.tcl`.
+
+**Why `rio::deps::provides` was left alone.** `deps.test` holds that table against
+INSTALL.md §1's OS package names as sets, both directions, so naming brew packages in §1's
+table would have demanded naming them in the one message a user gets when a package is
+missing. On an unverified platform that is a claim to make *after* somebody has run it, so
+the macOS note is prose beside the table — which the parser skips by construction — and the
+guard keeps its full strength.
+
+**The register row this created (§7).** A rename is invisible to every check rio had: a
+document naming a script that no longer exists reads perfectly well and is simply wrong,
+which is how `rio-dev-deploy` survived in WINDOWS.md until a reader noticed. `docs.tcl`
+check 20 now holds the shipped `install-*` scripts against the names README, INSTALL,
+WINDOWS, CONTRIBUTING and `getting-started.md` quote — **both directions**, plus INSTALL.md
+naming all of them, since it is the canonical home. The design log is exempt on the same
+terms as the menu checks: it is allowed to name what a decision renamed. `Start` also
+joined `prose_not`, because Windows' Start Menu is a proper noun belonging to somebody
+else and check 7 would otherwise demand rio have a *Start* menu.
+
+**Verified** by running it: `--dry-run`, `--launcher-only`, an install, a second install,
+`--uninstall`, `rio --version` from outside the checkout (which is what proves the wrapper
+resolves rio's modules), `desktop-file-validate`, and a live window read with `xprop`. Core
+828, syntax 536 and all 28 GUI suites green. Check 20 was proven by injecting drift in both
+directions, and the `Start` entry by removing it — five real hits across three documents.
+One validator **hint was deliberately refused**: it suggested adding `Utility` beside
+`Development` in `Categories`, which produces *two main categories* and a rio that can
+appear twice in the application menu. A hint is not a defect; a duplicate menu entry is.
+
+**Not done:** a systemd unit for the headless core; real packaging (.deb, .apk, a Homebrew
+formula — ROADMAP's *Install / packaging path* stays open, and this is a much smaller
+claim: the checkout now *feels* installed); and a `MimeType` association making rio a
+handler for `text/plain`, which competes for every text file on the machine and should be
+the user's own choice. **`install-windows.ps1` is unrun** — this box has no PowerShell, so
+its changes are reviewed but not executed until a Windows run.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
