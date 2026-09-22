@@ -96,6 +96,43 @@ test options-declared-kept {a fully declared option comes back as declared} -set
 		[llength [dict get $o choices]]
 } -result {Flavour {which one} 1 1 2}
 
+# --- the rendering vocabulary (provider-api 4) -------------------------------
+#
+# Three keys a frontend draws with and the core never interprets. The defaults are what
+# keep a provider written against provider-api 2 rendering exactly as it does today.
+
+test options-render-defaults {a descriptor that declares none gets choice / no group / quick} -setup {
+	reset_opts
+} -body {
+	set o [lindex [rio::agent::options fake] 1]   ;# `heat`, declared with the bare minimum
+	list [dict get $o kind] [dict get $o group] [dict get $o quick]
+} -result {choice {} 1}
+
+test options-render-declared {kind, group and quick come back as declared} -body {
+	set o [rio::agent::_option_norm [dict create name u value v \
+		kind text group Server quick 0]]
+	list [dict get $o kind] [dict get $o group] [dict get $o quick]
+} -result {text Server 0}
+
+test options-quick-normalized {quick is coerced to 0/1 like free and refresh} -body {
+	set out {}
+	foreach v {1 0 yes no 2 true} {
+		lappend out [dict get [rio::agent::_option_norm [dict create name u quick $v]] quick]
+	}
+	set out
+} -result {1 0 1 0 1 1}
+
+test options-kind-empty-is-choice {an empty kind reads as the default, not as a blank control} -body {
+	dict get [rio::agent::_option_norm [dict create name u kind ""]] kind
+} -result choice
+
+# The core does not police the vocabulary: an unknown kind travels untouched, and the
+# FRONTEND falls back (choice when there are choices, else text). That split is what lets
+# provider-api 5 add a kind without an older core eating it.
+test options-kind-unknown-passes-through {an unrecognised kind is carried, not rewritten} -body {
+	dict get [rio::agent::_option_norm [dict create name u kind slider]] kind
+} -result slider
+
 test options-none {a provider with no options answers softly with an empty list} -setup {
 	reset_opts
 } -body {

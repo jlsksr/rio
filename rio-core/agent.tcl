@@ -228,10 +228,33 @@ proc rio::agent::_options_caps {name} {
 
 # One descriptor with every key present. `choices` is normalized too: a bare value is
 # its own label, so a provider may declare {claude-opus-5 …} or the long form.
+#
+# Three of the keys are a frontend's rendering vocabulary, and the core stays as blind
+# to them as it is to what an option MEANS (D106):
+#
+#   kind   choice (the default) | text | number — which control to draw. `number` is a
+#          rendering hint only: the provider remains the authority on what is valid, so
+#          the core carries no range and never checks one.
+#   group  a section heading, "" for none. Sections appear in the order their first
+#          member is declared, members in declaration order within them — a contract a
+#          provider relies on when it orders its list.
+#   quick  1 = a frontend MAY also offer this in a quick control (rio's GUI: the chat
+#          status strip), 0 = settings-only. It defaults to 1, a constant, rather than
+#          being derived from `kind`: that a Tk menu cannot hold an entry field is a
+#          frontend fact and does not belong in a core default. The frontend applies
+#          that test where the knowledge lives. The constant is also the more
+#          compatible default — a provider built against provider-api 2 declares no
+#          `quick` and keeps the strip presence it has today.
+#
+# A frontend meeting an unrecognised `kind` (a newer provider, or a typo) falls back to
+# `choice` when the descriptor carries choices and to `text` otherwise, so an unknown
+# kind is always renderable and provider-api 5 can add one safely.
 proc rio::agent::_option_norm {o} {
-	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {}]
+	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {} \
+		kind choice group "" quick 1]
 	set out [dict merge $out $o]
 	if {[dict get $out label] eq ""} { dict set out label [dict get $out name] }
+	if {[dict get $out kind] eq ""} { dict set out kind choice }
 	set cs {}
 	foreach c [dict get $out choices] {
 		if {[llength $c] == 1} {
@@ -245,6 +268,7 @@ proc rio::agent::_option_norm {o} {
 	dict set out choices $cs
 	dict set out free    [expr {[dict get $out free]    ? 1 : 0}]
 	dict set out refresh [expr {[dict get $out refresh] ? 1 : 0}]
+	dict set out quick   [expr {[dict get $out quick]   ? 1 : 0}]
 	return $out
 }
 

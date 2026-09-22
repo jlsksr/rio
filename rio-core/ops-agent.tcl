@@ -230,7 +230,9 @@ proc rio::ops::_option_provider {params} {
 }
 
 # agent.options.list {?provider?} -> {provider, options:[{name,label,hint,value,free,
-# refresh, choices:[{value,label}]}]} ; what this provider lets you choose right now.
+# refresh,kind,group,quick, choices:[{value,label}]}]} ; what this provider lets you
+# choose right now. The last three are the frontend's rendering vocabulary, which the
+# core carries without interpreting — see _option_norm for what each one means.
 # A provider with no options answers with an empty list (echo), so a frontend can ask
 # unconditionally — but a provider this core does NOT CARRY is a bad_request, as it is
 # for every other agent op. The two must not read alike: "nothing to choose" and "no
