@@ -436,6 +436,16 @@ nobody is reading it. Widening the audience before the platform work and the ins
 story are true would turn an honest smaller claim into a stream of "doesn't work on my
 machine" that is nobody's fault but the timing's.
 
+**The install path is now there** (D129, 2026-09-22): one script per platform, named for
+it, and on POSIX it leaves a `rio` command and an application-menu entry instead of
+stopping at packages. Two of the three premises above are still standing, though — the
+BSDs remain unrun, and **macOS is attempted rather than verified**: the script knows
+Homebrew but nobody has run rio on a Mac, and the formula names are a guess the verify
+step is meant to catch. `install-windows.ps1` has not been executed since it was changed
+either (the development box has no PowerShell). So a Mac or Windows pass at the release
+commit is still owed, and the release notes should say which platforms have actually been
+run rather than which ones are supported in principle.
+
 ### The two decisions to take before the first push
 
 Both are one-way-ish once the history is public, so they are here rather than inline.

@@ -197,3 +197,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
 | [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted | 2026-09-21 |
 | [0135](0135-provider-declares-its-own-settings.md) | A provider declares its own settings, and rio renders them | Accepted | 2026-09-22 |
+| [0136](0136-install-script-per-platform.md) | One install script per platform, and a launcher that makes rio an application | Accepted | 2026-09-22 |

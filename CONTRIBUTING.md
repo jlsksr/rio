@@ -585,20 +585,25 @@ rio is written in Tcl/Tk, so there's nothing to compile — but you do need the
 runtime in place: `tclsh` and Tk, plus a couple of small libraries — `tcltls`
 (for the agent's HTTPS) and `tcllib` (for JSON) — and `git`.
 
-The quickest way is the setup script in the repo root:
+The quickest way is the install script in the repo root:
 
-    ./rio-dev-deploy.sh                # install the core toolchain
-    ./rio-dev-deploy.sh --verify-only  # just check what you already have
+    ./install-unix.sh --no-launcher   # install the core toolchain
+    ./install-unix.sh --verify-only   # just check what you already have
 
-It works on Debian/Ubuntu, Alpine, and OpenBSD, and finishes by loading the
-pieces through `tclsh` so you know they actually work. If you also want to hack
-on the terminal version, add `--with-ck` to build the curses toolkit from
+It works on Debian/Ubuntu, Alpine, OpenBSD and (unverified) macOS, and finishes by
+loading the pieces through `tclsh` so you know they actually work. If you also want
+to hack on the terminal version, add `--with-ck` to build the curses toolkit from
 source — otherwise skip it; the GUI doesn't need it.
 
+`--no-launcher` is the flag worth knowing here: without it the script also installs
+a `rio` command and a menu entry pointing at *that* checkout, which is what a user
+wants and usually not what you want with several clones around. Drop it if you do
+want one — and note it bakes in an absolute path, so re-run after moving the clone.
+
 To run only the **headless core** on a remote box (server mode, no GUI), there's
-a slimmer sibling — `./rio-server-deploy.sh` installs `tclsh` + `tcllib` + `tcl-tls`
-(Tk-free, but the agent runs in the core now, so its Claude HTTPS needs TLS here),
-and verifies it by binding a throwaway socket.
+a slimmer sibling — `./install-server.sh` installs `tclsh` + `tcllib` + `tcl-tls`
+(Tk-free, but the agent runs in the core now, so a hosted provider's HTTPS needs TLS
+here), and verifies it by binding a throwaway socket.
 
 Full install & deployment details — local vs. remote, the SSH-tunnel recipe, where
 the agent's key lives, and troubleshooting — live in [INSTALL.md](INSTALL.md).

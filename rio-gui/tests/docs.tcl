@@ -398,7 +398,12 @@ ok "every menu path in the docs exists" $stale {}
 set ::prose_not {
 	The A An This That These Those Its Their Each Every Same Other Both
 	Right-click Context Pop-up
+	Start
 }
+# "Start" is the one capitalised name here that belongs to somebody else: Windows' own
+# Start Menu, which WINDOWS.md names because install-windows.ps1 puts a shortcut in it.
+# Listed rather than worked around in the prose, so the next writer can say "Start Menu"
+# in whatever sentence reads best instead of having to end it with a prose_tail word.
 # ...and the compounds where "menu" is the adjective rather than the thing.
 set ::prose_tail {path paths bar entry entries item items label labels}
 
@@ -1347,6 +1352,63 @@ destroy .provset
 set ::agent_providers $d128saved
 rename rio_call {}
 rename d128_call_real rio_call
+
+# --- 20. the install scripts, and the documents that name them ----------------
+#
+# The register row this change created, and the drift it exists for: the scripts were
+# renamed once already (D129, from rio-dev-deploy.sh / rio-server-deploy.sh), and a
+# rename is invisible to every other check here — a document naming a script that no
+# longer exists reads perfectly well and is simply wrong. Nothing failed when the
+# `dev-deploy` names went stale in WINDOWS.md; a reader noticed.
+#
+# BOTH directions, for the reason the register gives: a doc naming a script that is
+# gone is the half a human misses, and a script nobody documents is one nobody runs.
+# The repo root is the source of truth on both sides — the files are what exists.
+
+set ::root [file normalize [file join [file dirname [info script]] .. ..]]
+
+set shipped {}
+foreach p [lsort [glob -nocomplain -directory $::root install-*]] {
+	lappend shipped [file tail $p]
+}
+ok "the repo root ships install scripts" [expr {[llength $shipped] >= 3}] 1
+
+# Every `install-*` name the user-facing documents quote in backticks. AGENTS.md,
+# ROADMAP.md and the spike are left out on purpose: like the menu checks above, the
+# design log is allowed to name what a decision renamed.
+set doc_scripts {}
+set script_docs [list \
+	[file join $::root README.md] \
+	[file join $::root INSTALL.md] \
+	[file join $::root WINDOWS.md] \
+	[file join $::root CONTRIBUTING.md] \
+	[file join $::docs getting-started.md]]
+foreach p $script_docs {
+	foreach {_ name} [regexp -all -inline {`(install-[A-Za-z0-9._-]+)`} [slurp $p]] {
+		lappend doc_scripts $name
+	}
+}
+set doc_scripts [lsort -unique $doc_scripts]
+
+set missing {}
+foreach s $doc_scripts {
+	if {[lsearch -exact $shipped $s] < 0} { lappend missing $s }
+}
+ok "every install script the docs name exists" $missing {}
+
+set undocumented {}
+foreach s $shipped {
+	if {[lsearch -exact $doc_scripts $s] < 0} { lappend undocumented $s }
+}
+ok "every install script rio ships is documented" $undocumented {}
+
+# INSTALL.md is the canonical home (§7 of AGENTS.md), so it alone must name them all.
+set install_md [slurp [file join $::root INSTALL.md]]
+set unnamed {}
+foreach s $shipped {
+	if {![string match "*`$s`*" $install_md]} { lappend unnamed $s }
+}
+ok "INSTALL.md names every install script" $unnamed {}
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

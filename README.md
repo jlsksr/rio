@@ -41,11 +41,14 @@ deliberate live in [CAVEATS.md](CAVEATS.md).
 
 Everything below runs today:
 
-    wish rio-gui/rio-gui.tcl [file ...]
+    git clone https://github.com/jlsksr/rio.git && cd rio
+    ./install-unix.sh          # or, on Windows: install-windows.ps1
+    rio [file ...]
 
-(needs `tclsh`/Tk + `tcllib`, plus `tcltls` for the agent's HTTPS — `./rio-dev-deploy.sh`
-sets it up, or `rio-dev-deploy.ps1` on Windows; full install & deployment guide in
-[INSTALL.md](INSTALL.md).)
+The installer puts the toolchain in place (`tclsh`/Tk + `tcllib`, plus `tcltls` for
+the agent's HTTPS), checks it actually loads, and adds a `rio` command and a menu
+entry — nothing to compile, nothing outside your own account. Full install &
+deployment guide in [INSTALL.md](INSTALL.md).
 
 The list below is the feature tour. For **how to use** any of it, the user manual is
 in [docs/](docs/index.md).
@@ -209,10 +212,10 @@ in [docs/](docs/index.md).
 - **Local & remote, one transport** — the GUI always talks to a core over a
   channel. **Locally there is nothing to start**: it spawns its own private core as
   a child process automatically. To edit on **another box**, run the core there
-  (after a `git clone`: `./rio-server-deploy.sh` installs `tclsh` + `tcllib` +
+  (after a `git clone`: `./install-server.sh` installs `tclsh` + `tcllib` +
   `tcl-tls`, then `tclsh rio-core/server.tcl 7711`, loopback by default), tunnel in
   (`ssh -L 7711:127.0.0.1:7711 host`), and attach:
-  `wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server` — or, from an
+  `rio --connect 127.0.0.1:7711 /path/on/server` — or, from an
   already-open GUI, **File ▸ Connect to Remote Core…**. That tunnel is **one way in,
   not the way in**: rio speaks the protocol but never dials, so tailscale, a VPN or a
   private LAN need no support from rio — it only ever sees a `host:port`.

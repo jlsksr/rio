@@ -12,7 +12,7 @@ risky parts (editor surface, resize reflow) work.
 | Ck        | vzvca/ck8.6 @ `1a991e3e1af4137c96477b0b21375bd43a914e07` |
 | Tcl       | 8.6.16 |
 | ncursesw  | 6.5+20250216-2 (Debian) |
-| GCC       | 14.2.0 (needed the legacy-C flags in rio-dev-deploy.sh --with-ck) |
+| GCC       | 14.2.0 (needed the legacy-C flags in install-unix.sh --with-ck) |
 
 ## Criteria
 
@@ -43,7 +43,7 @@ editing, resize-reflow (`<Expose>`, width-guarded), colour and BMP/CJK/box Unico
 all work; redraw feels clean. The catch is **keyboard #4**: only `Ctrl-a` came
 through on the bare Debian terminal, so making rio's keymap actually work across
 terminals (let alone Cygwin) is non-trivial, deliberate work — not a free ride on
-Ck. Build Ck via `rio-dev-deploy.sh --with-ck`.
+Ck. Build Ck via `install-unix.sh --with-ck`.
 
 **Conclusion:** the spike did its job — it proved the *toolkit* can carry a TUI
 and surfaced the real cost (cross-terminal keyboard). Per the project decision to

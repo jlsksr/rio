@@ -26,6 +26,16 @@ The **core** needs:
 The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not**
 need `tcltls` — all of rio's HTTPS happens wherever the *core* runs.
 
+**On macOS**, `install-unix.sh` uses Homebrew (`brew install tcl-tk`, plus `tcllib`).
+Two things to know, and one caveat. Homebrew's Tcl is *keg-only*, so its `tclsh` and
+`wish` are not on your `PATH`; the script puts them ahead of the `tclsh` Apple ships,
+which is an ancient 8.5 without Tk or tcllib, and points the launcher at Homebrew's
+`wish` by full path. The caveat: **macOS is unverified** — nobody has yet run rio
+there, so those formula names are the best guess and the script's verify step is what
+actually decides. If it reports `json MISSING`, install tcllib by hand
+([source](https://core.tcl-lang.org/tcllib)) and re-run with `--launcher-only`.
+Please [report what happens](https://github.com/jlsksr/rio/issues) either way.
+
 **A missing one says so (D116).** rio checks these at start-up and stops with a
 sentence naming the Tcl package, the OS package above that carries it, and this
 section — never a stack trace. If the GUI's own **core** dies while starting, the
@@ -97,12 +107,20 @@ over a pipe.
 
 ```sh
 git clone https://github.com/jlsksr/rio.git && cd rio
-./rio-dev-deploy.sh            # installs tcl, tk, tcltls, tcllib, git (+ verifies)
-wish rio-gui/rio-gui.tcl [file-or-folder ...]
+./install-unix.sh              # toolchain, verify, then a `rio` command + menu entry
+rio [file-or-folder ...]
 ```
+
+On **Windows**, the same three steps are
+`powershell -ExecutionPolicy Bypass -File .\install-windows.ps1`, then rio from the
+Start Menu — see [WINDOWS.md](WINDOWS.md).
 
 A directory argument opens as the project folder; a file opens in a tab. With no
 argument you get an empty scratch buffer.
+
+There is **nothing to compile and nothing to move**: rio runs from this checkout, and
+the installer only adds a small launcher that points back into it. Keep the checkout
+where it is (a `git pull` updates rio in place); if you do move it, re-run the script.
 
 Out of the box the only agent provider is the offline **echo** stub. To use a real
 agent, **install a provider** from *Settings ▸ Extensions…* (e.g. **Claude** over the
@@ -115,48 +133,65 @@ server of your own usually needs only its URL.
 
 ## 3. The install scripts
 
-The two POSIX ones are `sh`, idempotent, and finish by **verifying the toolchain
-actually loads** (the real source of truth). They target Debian/Ubuntu (`apt`), Alpine
-(`apk`), and OpenBSD (`pkg_add`), picking `sudo`/`doas` only when not already root.
+Three, **one per platform** — the name says which:
 
-Shared flags: `--verify-only` (check, don't install), `--dry-run` (print the steps),
-`-h`/`--help`.
+| Script | For |
+|--------|-----|
+| `install-unix.sh` | Linux, the BSDs, macOS — rio on the machine you sit at |
+| `install-windows.ps1` | Windows 11 — the same, there |
+| `install-server.sh` | a headless box that runs **only the core**, edited remotely |
 
-There is a **third, for Windows**: `rio-dev-deploy.ps1` (§8, and
-[WINDOWS.md](WINDOWS.md) §1). Same contract — offer to install, then verify by loading
-— with `winget install Magicsplat.TclTk` standing in for `apt`/`apk`, and
-`-VerifyOnly` / `-DryRun` / `-Help` mirroring the flags above.
+All three are idempotent and finish by **verifying the toolchain actually loads**,
+which is the real source of truth: a successful package install is not the same
+claim. The POSIX two are `sh`, target Debian/Ubuntu (`apt`), Alpine (`apk`) and
+OpenBSD (`pkg_add`), and pick `sudo`/`doas` only when not already root. Shared flags:
+`--verify-only` (check, don't install), `--dry-run` (print the steps), `-h`/`--help`;
+the Windows one mirrors them as `-VerifyOnly` / `-DryRun` / `-Help`.
 
-### `rio-dev-deploy.sh` — full GUI / dev toolchain
+### `install-unix.sh` — rio on Linux, the BSDs and macOS
 
-Installs `tcl` + `tk` + `tcltls` + `tcllib` + `git`, then verifies `Tk`, `tls`, and
-`json` load.
+Three things: install `tcl` + `tk` + `tcltls` + `tcllib` + `git`; verify `Tk`, `tls`
+and `json` load; then install a **launcher** — a `rio` command in `~/.local/bin` and a
+menu entry with rio's icon in `~/.local/share/applications`. Nothing needs root and
+nothing lands outside your account.
 
 ```sh
-./rio-dev-deploy.sh                 # GUI + agent toolchain
-./rio-dev-deploy.sh --with-ck       # also build Ck (curses Tk) from source — the
-                                    # deferred TUI path (AGENTS.md O1); only if you
-                                    # mean to work on the terminal frontend
+./install-unix.sh                   # the lot: toolchain, verify, launcher
+./install-unix.sh --no-launcher     # toolchain only (what a contributor usually wants)
+./install-unix.sh --launcher-only   # the other half: you already have Tcl/Tk
+./install-unix.sh --prefix /usr/local   # install the launcher for everyone
+./install-unix.sh --uninstall       # remove the launcher, menu entry and icons
 ```
+
+The launcher is a **wrapper script, not a symlink** — deliberately: rio finds its own
+modules relative to its script path, and Tcl does not resolve symlinks, so a link
+would send it looking for its core in the wrong directory. `--uninstall` never touches
+your packages; other things on the machine need Tcl.
+
+If `~/.local/bin` isn't on your `PATH` the script says so and prints the line to add.
+There is also a well-known **terminal emulator** called rio — if one is already
+installed, the script says that too, and whichever comes first on `PATH` wins.
 
 `--with-ck` additionally pulls a C toolchain + ncurses headers and builds the
-`vzvca/ck8.6` fork (distros don't package it). On a shared-build error finding
+`vzvca/ck8.6` fork (distros don't package it) — the deferred TUI path (AGENTS.md O1),
+for contributors, not needed to run rio. On a shared-build error finding
 `libck8.6.so`, run `ldconfig` or set `LD_LIBRARY_PATH` to the install libdir.
 
-### `rio-server-deploy.sh` — slim headless core
+### `install-server.sh` — slim headless core
 
-For a box that runs **only the core** (no GUI). Installs `tcl` + `tcllib` +
-`tcl-tls` (Tk-free, but TLS is needed for server-side Claude), plus `git` unless
-`--no-git`. Verifies `json` + `tls` load and that `server.tcl` sources and binds a
-throwaway port.
+For a box that runs **only the core** (no GUI), edited from rio on your own machine —
+see mode B in §4. Installs `tcl` + `tcllib` + `tcl-tls` (Tk-free, but TLS is needed
+for a server-side agent provider), plus `git` unless `--no-git`. Verifies `json` +
+`tls` load and that `server.tcl` sources and binds a throwaway port. No launcher:
+there is no screen there to launch onto.
 
 ```sh
-./rio-server-deploy.sh              # slim runtime
-./rio-server-deploy.sh --no-git     # skip git (no git pane over the socket)
-./rio-server-deploy.sh --verify-only
+./install-server.sh                 # slim runtime
+./install-server.sh --no-git        # skip git (no git pane over the socket)
+./install-server.sh --verify-only
 ```
 
-If it reports `tls MISSING`, a Claude turn would fail later with *"can't find
+If it reports `tls MISSING`, an agent turn would fail later with *"can't find
 package tls"* — install the package (table in §1) and re-run.
 
 ---
@@ -175,7 +210,7 @@ filesystem and runs as you. Closing the GUI (or it dying) EOFs the pipe and the 
 exits with it.
 
 ```sh
-wish rio-gui/rio-gui.tcl [path ...]
+rio [path ...]                          # or: wish rio-gui/rio-gui.tcl [path ...]
 ```
 
 ### B. Remote — a core on another box, over an SSH tunnel
@@ -184,7 +219,7 @@ Run the core on the far box bound to **loopback** (the default), forward a port 
 SSH, and attach the GUI to the local end. SSH provides the auth and encryption — the
 core has none of its own (see §7).
 
-**On the server** (after `rio-server-deploy.sh`):
+**On the server** (after `install-server.sh`):
 
 ```sh
 tclsh rio-core/server.tcl 7711          # listens on 127.0.0.1:7711
@@ -194,7 +229,7 @@ tclsh rio-core/server.tcl 7711          # listens on 127.0.0.1:7711
 
 ```sh
 ssh -N -L 7711:127.0.0.1:7711 you@server    # forward the port (leave it running)
-wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server
+rio --connect 127.0.0.1:7711 /path/on/server
 ```
 
 Notes:
@@ -329,22 +364,24 @@ running on the server and the tunnel is up.
 apt/apk; OpenBSD uses `tcltls`. If a name differs on your system, fix it in the
 relevant `install_*` function — the script's verifier confirms the result.
 
-**Re-running a deploy script is safe** — installs are idempotent and it re-verifies.
+**Re-running an install script is safe** — every step is idempotent and it re-verifies.
+Re-run it after moving the checkout, too: the launcher points at an absolute path.
 
 ---
 
 ## 8. Platforms
 
-Linux (Debian, Alpine) and the BSDs are the deploy targets the POSIX scripts cover.
-**Windows 11 is automated too** — `rio-dev-deploy.ps1` is the counterpart to
-`rio-dev-deploy.sh`: it offers to `winget install` the Tcl/Tk toolchain (asking
-first), verifies it loads, and sets up persistence, so setup there is also one
-command. See [WINDOWS.md](WINDOWS.md) for the Windows 11 quick start and, at the end,
-a section on hacking on rio from Windows.
+Linux (Debian, Alpine) and the BSDs are what the POSIX scripts cover. **Windows 11 is
+one command too** — `install-windows.ps1` offers to `winget install` the Tcl/Tk
+toolchain (asking first), verifies it loads, sets up persistence and drops Start Menu
+and Desktop shortcuts. See [WINDOWS.md](WINDOWS.md) for the Windows 11 quick start
+and, at the end, a section on hacking on rio from Windows.
 
 Linux and Windows are **verified** — the full suite passes on both, including a
 Windows GUI driven against a Linux core over an SSH tunnel ([RELEASING.md](RELEASING.md)
-Gate 0). The BSDs remain a design target that nobody has yet run.
+Gate 0). The BSDs remain a design target that nobody has yet run, and **macOS** is
+newly *attempted* rather than verified: `install-unix.sh` knows Homebrew (§1), but no
+one has run rio on a Mac, so treat a first run there as a report worth filing.
 
 The TUI (Ck) frontend is **deferred** — present only behind `--with-ck` for
 development, not a supported runtime yet (AGENTS.md O1).
