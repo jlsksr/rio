@@ -39,18 +39,33 @@
 package require json
 
 namespace eval rio::openai::api {
-	# Config-as-data. `token_param` is the request key for the output cap: hosted
-	# newer OpenAI models require `max_completion_tokens`, while older models and
-	# most local OpenAI-compatible servers take `max_tokens` — switch it here for a
-	# model/server that wants the other, no code change. `messages_url` points at a
-	# local server (e.g. http://localhost:11434/v1/chat/completions for Ollama) to
-	# use a local model. The `system` prompt is not static config: the core composes
-	# it per turn and the provider merges it in (D34).
+	# The hosted endpoint, as a named constant: `base_url` still standing at this value
+	# is what "the user has not pointed rio anywhere else" means, and that is the one
+	# case where a missing key is worth saying something about rather than letting the
+	# server answer. A named constant, not a hostname test — this face has no opinion
+	# about which hosts are OpenAI's.
+	variable default_base_url https://api.openai.com/v1
+
+	# Config-as-data. `base_url` is the single source for both endpoints — this face
+	# speaks to anything that answers the OpenAI protocol, and for a self-hosted server
+	# (Ollama, llama-server, llama-swap, vLLM, LM Studio) the URL is the first thing a
+	# user has to set, so it is a declared option rather than a line in this file.
+	# `messages_url` / `models_url` stay as overrides for a server whose paths sit
+	# somewhere else; blank means "derive from base_url".
+	#
+	# `token_param` is the request key for the output cap: hosted newer OpenAI models
+	# require `max_completion_tokens`, while older models and most local servers take
+	# `max_tokens` — and a server that refuses one names the other in its 400, which is
+	# how `token_models` gets filled (D106c). The `system` prompt is not static config:
+	# the core composes it per turn and the provider merges it in (D34).
 	variable config [dict create \
-		messages_url    https://api.openai.com/v1/chat/completions \
+		base_url        https://api.openai.com/v1 \
+		messages_url    "" \
 		models_url      "" \
 		model           gpt-4o \
 		effort          default \
+		reasoning       show \
+		extra_json      "" \
 		token_param     max_tokens \
 		token_models    "" \
 		effort_models   "" \
@@ -97,16 +112,25 @@ proc rio::openai::api::cget {key} {
 proc rio::openai::api::provider {conversation tools system post} {
 	variable config
 	variable transport
+	variable default_base_url
 	set key [_api_key]
-	if {$key eq ""} {
+	set url [_messages_url]
+	# A key is OPTIONAL: most self-hosted servers want none, and inventing a placeholder
+	# to get past a check was the old advice. So the request simply goes out without an
+	# Authorization header and the server decides. The one case still worth naming is a
+	# user who has not pointed rio anywhere — then this really is hosted OpenAI, which
+	# really does need a key, and a 401 would be a worse way to learn it.
+	if {$key eq "" && $url eq "$default_base_url/chat/completions"} {
 		{*}$post error not_configured \
-			"No OpenAI API key — add one in Preferences ▸ Agent (a local OpenAI-compatible server may need none: set its URL and any placeholder key)"
+			"No OpenAI API key — add one in Preferences ▸ Agent, or set a server URL there if you are running your own (most need no key)"
 		return
 	}
-	set auth [list Authorization "Bearer $key"]
+	set auth {}
+	if {$key ne ""} { set auth [list Authorization "Bearer $key"] }
 	# The core owns the system prompt (D34); merge it into a LOCAL config copy so the
 	# persistent config dict stays clean. infer skips an empty `system`.
 	set conf $config
+	dict set conf messages_url $url
 	dict set conf system $system
 	dict set conf effort_json [_effort_json]
 	# Which token-cap parameter this model wants, and where to record the answer if
@@ -197,13 +221,45 @@ proc rio::openai::api::options {} {
 		set ehint "Reasoning effort. Provider default sends nothing — gpt-4o and most local servers refuse the field."
 		set echoices $efforts
 	}
+	# `quick` says which of these belong in the chat strip's menu as well as the
+	# settings window: the two you change between turns, and not the six you set once
+	# when you point rio at a server.
+	set tokhint "Which request field carries the output cap. Most servers want max_tokens; newer hosted OpenAI models want max_completion_tokens and say so in a 400, which rio then remembers per model — a model in that list keeps its learned answer whatever is chosen here."
 	return [list \
-		[dict create name model label Model \
-			hint "Which model answers. Refresh to list what this server offers." \
+		[dict create name model label Model group Model \
+			hint "Which model answers. Refresh to list what this server offers — after changing the base URL, refresh first." \
 			value $m free 1 refresh 1 choices $models] \
-		[dict create name effort label Effort \
+		[dict create name effort label Effort group Model \
 			hint $ehint \
-			value [dict get $config effort] free 0 refresh 0 choices $echoices]]
+			value [dict get $config effort] free 0 refresh 0 choices $echoices] \
+		[dict create name reasoning label Reasoning group Model quick 0 \
+			hint "Whether a thinking model's reasoning is shown in the chat. It is never part of the answer and is never sent back to the model." \
+			value [dict get $config reasoning] \
+			choices {{value show label "Show it"} {value hide label "Hide it"}}] \
+		[dict create name base_url label "Server URL" group Server kind text quick 0 \
+			hint "The API base, without a trailing path: https://api.openai.com/v1, or your own server (Ollama, llama-server, vLLM, LM Studio). rio adds /chat/completions and /models itself. A self-hosted server usually needs no API key." \
+			value [dict get $config base_url]] \
+		[dict create name max_tokens label "Max tokens" group Server kind number quick 0 \
+			hint "The cap on one reply's length." \
+			value [dict get $config max_tokens]] \
+		[dict create name request_timeout label "Request timeout (ms)" group Server \
+			kind number quick 0 \
+			hint "How long one whole turn may take, including the model's thinking and the wait for a server that loads a model on demand. It bounds the WHOLE exchange, not the idle time, so a long generation needs a generous value." \
+			value [dict get $config request_timeout]] \
+		[dict create name token_param label "Token cap field" group Server quick 0 \
+			hint $tokhint \
+			value [dict get $config token_param] \
+			choices {{value max_tokens label max_tokens} \
+			         {value max_completion_tokens label max_completion_tokens}}] \
+		[dict create name messages_url label "Completions URL" group Advanced kind text quick 0 \
+			hint "Blank: derived from the server URL. Set it only for a server whose completions path is somewhere else." \
+			value [dict get $config messages_url]] \
+		[dict create name models_url label "Models URL" group Advanced kind text quick 0 \
+			hint "Blank: derived from the server URL. Set it only for a server whose model list is somewhere else." \
+			value [dict get $config models_url]] \
+		[dict create name extra_json label "Extra request JSON" group Advanced kind text quick 0 \
+			hint "A JSON object merged into every request — temperature, top_p, or whatever this server understands (llama.cpp and vLLM take chat_template_kwargs). Fields rio sends itself are refused here; set those above." \
+			value [dict get $config extra_json]]]
 }
 
 proc rio::openai::api::option_set {name value} {
@@ -224,25 +280,97 @@ proc rio::openai::api::option_set {name value} {
 			}
 			dict set config effort $value
 		}
+		reasoning {
+			if {$value ni {show hide}} {
+				rio::error::raise bad_request "reasoning must be show or hide"
+			}
+			dict set config reasoning $value
+		}
+		base_url {
+			# Canonicalized so the window shows what will actually be used: a trailing
+			# slash, and the completions path a user pastes straight out of the server's
+			# own documentation, both come off.
+			set v [string trim $value]
+			if {$v eq ""} { rio::error::raise bad_request "the server URL must not be empty" }
+			if {![regexp -nocase {^https?://} $v]} {
+				rio::error::raise bad_request "the server URL must start with http:// or https://"
+			}
+			if {[string match */chat/completions $v]} { set v [string range $v 0 end-17] }
+			dict set config base_url [string trimright $v /]
+		}
+		messages_url - models_url {
+			set v [string trim $value]
+			if {$v ne "" && ![regexp -nocase {^https?://} $v]} {
+				rio::error::raise bad_request "$name must start with http:// or https://, or be empty to derive it"
+			}
+			dict set config $name $v
+		}
+		max_tokens - request_timeout {
+			if {![string is integer -strict $value] || $value <= 0} {
+				rio::error::raise bad_request "$name must be a positive whole number"
+			}
+			dict set config $name $value
+		}
+		token_param {
+			if {$value ni {max_tokens max_completion_tokens}} {
+				rio::error::raise bad_request \
+					"the token cap field must be max_tokens or max_completion_tokens"
+			}
+			dict set config token_param $value
+		}
+		extra_json { dict set config extra_json [_check_extra [string trim $value]] }
 		default { rio::error::raise bad_request "unknown option: $name" }
 	}
 	rio::agent::settings::store openai $name [dict get $config $name]
 	return
 }
 
-# The models endpoint. Derived from `messages_url` unless one is configured, so
-# pointing this face at a local server stays the ONE-line change it has always been:
-# .../v1/chat/completions -> .../v1/models, which Ollama, llama-server, LM Studio and
-# vLLM all answer.
+# Validate the user's own request fields, and return what to store.
+#
+# It is checked but never rebuilt. tcllib flattens every JSON leaf to a string, so
+# re-serialising would send "true" where the user wrote true — a type change nobody
+# asked for. The body therefore splices this text RAW, and the way to be sure that
+# cannot produce a duplicate key (which every server resolves differently, none of them
+# documented) is to refuse the keys rio emits itself. The forbidden set is COMPUTED, not
+# written out: the token-cap field is a live setting and the effort field is spelled in
+# one config-as-data fragment, so an upstream rename stays the one-line edit D106 made it.
+proc rio::openai::api::_check_extra {v} {
+	variable config
+	variable effort_json
+	if {$v eq ""} { return "" }
+	if {[catch {json::json2dict $v} d] || ![string match "\{*" $v]} {
+		rio::error::raise bad_request "extra request JSON must be a JSON object, e.g. {\"temperature\":0.2}"
+	}
+	set mine [list model messages stream tools [dict get $config token_param]]
+	if {[regexp {"([^"]+)"} $effort_json -> ekey]} { lappend mine $ekey }
+	foreach k [dict keys $d] {
+		if {$k in $mine} {
+			rio::error::raise bad_request \
+				"rio sends \"$k\" itself — set it with the option above rather than here"
+		}
+	}
+	# One line, because a settings value is one line (rio::agent::settings). Safe rather
+	# than lossy: RFC 8259 forbids a raw control character inside a JSON string, so in a
+	# document that has already parsed, every raw newline is whitespace between tokens.
+	# Normalising beats refusing a pretty-printed paste.
+	return [string map [list \n " " \r " " \t " "] $v]
+}
+
+# The two endpoints, both derived from `base_url` unless explicitly overridden. Every
+# server this face targets — hosted OpenAI, Ollama, llama-server, llama-swap, LM Studio,
+# vLLM — publishes the same two paths under one base, so a user sets one URL and both
+# follow. The override exists for the server that does not.
+proc rio::openai::api::_messages_url {} {
+	variable config
+	set u [dict get $config messages_url]
+	if {$u ne ""} { return $u }
+	return "[dict get $config base_url]/chat/completions"
+}
 proc rio::openai::api::_models_url {} {
 	variable config
 	set u [dict get $config models_url]
 	if {$u ne ""} { return $u }
-	set base [dict get $config messages_url]
-	if {[string match */chat/completions $base]} {
-		return "[string range $base 0 end-17]/models"   ;# drop "/chat/completions"
-	}
-	return $base
+	return "[dict get $config base_url]/models"
 }
 
 # Re-list what this server offers. Asynchronous (D10); a failure leaves the choices
@@ -316,8 +444,8 @@ proc rio::openai::api::_api_key {} {
 # its picker/key dialog from the declared label + signup. The key capability routes
 # agent.key.* to this face's own 0600 store — its key coexists with Claude's.
 rio::agent::register_provider openai rio::openai::api::provider \
-	-label  ChatGPT \
-	-signup platform.openai.com/api-keys \
+	-label  "OpenAI-compatible" \
+	-signup "platform.openai.com/api-keys (hosted OpenAI; a server of your own usually needs no key)" \
 	-key [dict create \
 		set    rio::openai::api::set_key \
 		clear  rio::openai::api::clear_key \
@@ -334,7 +462,9 @@ proc rio::openai::api::_adopt_settings {} {
 	variable config
 	# token_models is not a user CHOICE but something the server taught this provider
 	# (D106c) — it persists the same way, so a restart doesn't re-learn it.
-	foreach k {model effort token_models effort_models} {
+	foreach k {model effort reasoning base_url messages_url models_url \
+			max_tokens request_timeout token_param extra_json \
+			token_models effort_models} {
 		set v [rio::agent::settings::get openai $k]
 		if {$v ne ""} { dict set config $k $v }
 	}

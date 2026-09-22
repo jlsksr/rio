@@ -1749,9 +1749,9 @@ ok "provider: openai now in the picker cache" \
 	[expr {[agent_provider_entry openai] ne ""}] 1
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai
-ok "status: names ChatGPT agent"       [string match "ChatGPT*" [.chat.status.sel cget -text]] 1
+ok "status: names the provider"       [string match "OpenAI-compatible*" [.chat.status.sel cget -text]] 1
 provider_key_dialog openai
-ok "keydlg: titled for openai"         [wm title .providerkey] "ChatGPT API key"
+ok "keydlg: titled for openai"         [wm title .providerkey] "OpenAI-compatible API key"
 .providerkey.e insert end "sk-oai-smoke-123"
 provider_key_save .providerkey openai
 ok "keydlg: openai key stored"         [rio::openai::api::configured] 1

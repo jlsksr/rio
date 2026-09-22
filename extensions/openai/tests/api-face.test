@@ -47,8 +47,10 @@ test openai-api-registered {sourcing the face registers `openai` with label + si
 	set ps {}
 	foreach p [rio::agent::providers_info] { dict set ps [dict get $p name] $p }
 	set o [dict get $ps openai]
-	list [dict get $o name] [dict get $o label] [dict get $o keyed] [dict get $o signup]
-} -result {openai ChatGPT 1 platform.openai.com/api-keys}
+	list [dict get $o name] [dict get $o label] [dict get $o keyed] \
+		[string match "platform.openai.com/api-keys*" [dict get $o signup]] \
+		[dict get $o options]
+} -result {openai OpenAI-compatible 1 1 1}
 
 test openai-api-selectable {agent.provider.set openai makes this face the live provider} -setup {
 	rio::agent::use_provider echo
@@ -136,11 +138,25 @@ proc reset_openai_opts {} {
 	file delete -force $::optdir
 	rio::openai::api::configure model gpt-4o
 	rio::openai::api::configure effort default
-	rio::openai::api::configure messages_url https://api.openai.com/v1/chat/completions
+	rio::openai::api::configure reasoning show
+	rio::openai::api::configure base_url https://api.openai.com/v1
+	rio::openai::api::configure messages_url ""
 	rio::openai::api::configure models_url ""
+	rio::openai::api::configure extra_json ""
+	rio::openai::api::configure max_tokens 4096
+	rio::openai::api::configure request_timeout 600000
+	rio::openai::api::configure token_param max_tokens
 	rio::openai::api::configure token_models ""
 	rio::openai::api::configure effort_models ""
 	set ::rio::openai::api::models {{value gpt-4o label "GPT-4o"} {value gpt-4o-mini label "GPT-4o mini"}}
+}
+# One declared option by name — the face declares ten now, and asking by position would
+# mean renumbering every test each time the order changes.
+proc openai_opt {name} {
+	foreach o [rio::agent::options openai] {
+		if {[dict get $o name] eq $name} { return $o }
+	}
+	return ""
 }
 # The refresh callback is the core's announcer, so a test sees the agent.options EVENT.
 proc announce {ev} { set ::announced $ev }
@@ -149,13 +165,63 @@ proc announced_error {} {
 	return [dict get $::announced params error]
 }
 
-test openai-options-declared {the face declares model (free, refreshable) and effort (closed)} -setup {
+test openai-options-declared {model leads, free and refreshable; effort is closed} -setup {
 	reset_openai_opts
 } -body {
 	set os [rio::agent::options openai]
-	list [llength $os] [dict get [lindex $os 0] name] [dict get [lindex $os 0] free] \
-		[dict get [lindex $os 1] name] [dict get [lindex $os 1] free]
-} -result {2 model 1 effort 0}
+	list [dict get [lindex $os 0] name] [dict get [lindex $os 0] free] \
+		[dict get [lindex $os 0] refresh] \
+		[dict get [openai_opt effort] free] [dict get [openai_opt effort] refresh]
+} -result {model 1 1 0 0}
+
+# --- what the settings window will draw (provider-api 4) ---------------------
+#
+# The endpoint, the caps and the extra JSON are what a server of your own needs set, and
+# a 340px strip menu can hold none of them — so they are declared as fields, marked
+# settings-only, and grouped. Asserted by NAME: the order is a contract for the window's
+# sections, but a test that indexed into it would have to be renumbered on every change.
+
+test openai-options-kinds {each option declares the control it wants} -setup {
+	reset_openai_opts
+} -body {
+	set out {}
+	foreach n {model reasoning base_url max_tokens request_timeout extra_json} {
+		lappend out $n [dict get [openai_opt $n] kind]
+	}
+	set out
+} -result {model choice reasoning choice base_url text max_tokens number request_timeout number extra_json text}
+
+test openai-options-quick {only the two you change between turns reach the strip} -setup {
+	reset_openai_opts
+} -body {
+	set quick {}
+	foreach o [rio::agent::options openai] {
+		if {[dict get $o quick]} { lappend quick [dict get $o name] }
+	}
+	set quick
+} -result {model effort}
+
+test openai-options-grouped {every option names a section, and Model leads} -setup {
+	reset_openai_opts
+} -body {
+	set groups {}
+	foreach o [rio::agent::options openai] {
+		set g [dict get $o group]
+		if {$g eq ""} { return "ungrouped: [dict get $o name]" }
+		if {$g ni $groups} { lappend groups $g }
+	}
+	set groups
+} -result {Model Server Advanced}
+
+test openai-options-have-hints {every option explains itself — the window renders these} -setup {
+	reset_openai_opts
+} -body {
+	set bare {}
+	foreach o [rio::agent::options openai] {
+		if {[dict get $o hint] eq ""} { lappend bare [dict get $o name] }
+	}
+	set bare
+} -result {}
 
 test openai-option-set-model {choosing a model applies it and remembers it} -setup {
 	reset_openai_opts
@@ -471,15 +537,219 @@ test openai-model-reaches-the-request {the chosen model is the model asked for} 
 
 # --- refreshing the model list ----------------------------------------------
 
-test openai-models-url-derived {the listing URL follows the configured endpoint} -setup {
+test openai-models-url-derived {both endpoints follow the one base URL} -setup {
 	reset_openai_opts
 } -body {
-	set hosted [rio::openai::api::_models_url]
-	rio::openai::api::configure messages_url http://localhost:11434/v1/chat/completions
-	set local [rio::openai::api::_models_url]
-	rio::openai::api::configure models_url http://elsewhere/models
-	list $hosted $local [rio::openai::api::_models_url]
-} -cleanup { reset_openai_opts } -result {https://api.openai.com/v1/models http://localhost:11434/v1/models http://elsewhere/models}
+	set hosted [list [rio::openai::api::_messages_url] [rio::openai::api::_models_url]]
+	rio::agent::option_set base_url http://localhost:11434/v1 openai
+	list {*}$hosted [rio::openai::api::_messages_url] [rio::openai::api::_models_url]
+} -cleanup { reset_openai_opts } -result {https://api.openai.com/v1/chat/completions https://api.openai.com/v1/models http://localhost:11434/v1/chat/completions http://localhost:11434/v1/models}
+
+test openai-urls-overridable {an explicit URL wins over the derived one, each independently} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set messages_url http://odd.local/completions openai
+	set a [list [rio::openai::api::_messages_url] [rio::openai::api::_models_url]]
+	rio::agent::option_set models_url http://odd.local/list openai
+	list {*}$a [rio::openai::api::_models_url]
+} -cleanup { reset_openai_opts } -result {http://odd.local/completions https://api.openai.com/v1/models http://odd.local/list}
+
+test openai-base-url-canonicalized {a trailing slash and a pasted completions path come off} -setup {
+	reset_openai_opts
+} -body {
+	set out {}
+	foreach v {http://a.local/v1/ http://b.local/v1/chat/completions http://c.local/v1} {
+		rio::agent::option_set base_url $v openai
+		lappend out [rio::openai::api::cget base_url]
+	}
+	set out
+} -cleanup { reset_openai_opts } -result {http://a.local/v1 http://b.local/v1 http://c.local/v1}
+
+test openai-base-url-needs-a-scheme {a bare host is refused rather than silently unusable} -setup {
+	reset_openai_opts
+} -body {
+	set r [catch {rio::agent::option_set base_url localhost:11434/v1 openai} e]
+	list $r [string match "*http://*" $e] [rio::openai::api::cget base_url]
+} -cleanup { reset_openai_opts } -result {1 1 https://api.openai.com/v1}
+
+test openai-numbers-validated {a cap and a timeout must be positive whole numbers} -setup {
+	reset_openai_opts
+} -body {
+	set out {}
+	foreach v {0 -1 lots 4.5} {
+		lappend out [catch {rio::agent::option_set max_tokens $v openai}]
+	}
+	rio::agent::option_set max_tokens 8192 openai
+	lappend out [rio::openai::api::cget max_tokens]
+} -cleanup { reset_openai_opts } -result {1 1 1 1 8192}
+
+test openai-reasoning-option {reasoning is a closed choice, shown by default} -setup {
+	reset_openai_opts
+} -body {
+	set was [rio::openai::api::cget reasoning]
+	set refused [catch {rio::agent::option_set reasoning maybe openai}]
+	rio::agent::option_set reasoning hide openai
+	list $was $refused [rio::openai::api::cget reasoning]
+} -cleanup { reset_openai_opts } -result {show 1 hide}
+
+test openai-reasoning-reaches-the-turn {the setting rides into the request config} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-R
+} -body {
+	set ::seen_conf {}
+	proc capture_conf {req on_chunk on_done} { {*}$on_done 200 "" }
+	# infer is where conf lands, so intercept it rather than the transport.
+	rename rio::openai::infer _real_infer
+	proc rio::openai::infer {conf conversation tools auth transport post} {
+		set ::seen_conf $conf
+	}
+	rio::agent::option_set reasoning hide openai
+	rio::openai::api::provider {{role user text hi}} {} "" {}
+	set out [dict get $::seen_conf reasoning]
+	rename rio::openai::infer {} ; rename _real_infer rio::openai::infer
+	set out
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result hide
+
+# --- extra_json: validated, never rebuilt -----------------------------------
+
+test openai-extra-json-accepted {a JSON object is taken and stored} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set extra_json {{"temperature":0.2}} openai
+	list [rio::openai::api::cget extra_json] [rio::agent::settings::get openai extra_json]
+} -cleanup { reset_openai_opts } -result {{{"temperature":0.2}} {{"temperature":0.2}}}
+
+test openai-extra-json-must-be-an-object {an array or a scalar is refused} -setup {
+	reset_openai_opts
+} -body {
+	set out {}
+	foreach v {{[1,2]} {"hi"} {not json at all} {{"a":}} } {
+		lappend out [catch {rio::agent::option_set extra_json $v openai}]
+	}
+	set out
+} -cleanup { reset_openai_opts } -result {1 1 1 1}
+
+test openai-extra-json-refuses-rios-own-keys {a field rio sends itself is refused, not merged} -setup {
+	reset_openai_opts
+} -body {
+	set out {}
+	foreach k {model messages stream tools max_tokens} {
+		set r [catch {rio::agent::option_set extra_json "{\"$k\":1}" openai} e]
+		lappend out $r [string match "*set it with the option above*" $e]
+	}
+	set out
+} -cleanup { reset_openai_opts } -result {1 1 1 1 1 1 1 1 1 1}
+
+test openai-extra-json-forbids-the-live-token-field {the refused set follows the current setting} -setup {
+	reset_openai_opts
+} -body {
+	# max_completion_tokens is fine while the cap is spelled max_tokens...
+	set a [catch {rio::agent::option_set extra_json {{"max_completion_tokens":1}} openai}]
+	rio::agent::option_set extra_json "" openai
+	rio::agent::option_set token_param max_completion_tokens openai
+	# ...and refused once it is the field rio sends.
+	set b [catch {rio::agent::option_set extra_json {{"max_completion_tokens":1}} openai}]
+	list $a $b
+} -cleanup { reset_openai_opts } -result {0 1}
+
+test openai-extra-json-forbids-the-effort-field {the effort key is read from the wire fragment, not hardcoded} -setup {
+	reset_openai_opts
+} -body {
+	catch {rio::agent::option_set extra_json {{"reasoning_effort":"high"}} openai} e
+	string match "*reasoning_effort*" $e
+} -cleanup { reset_openai_opts } -result 1
+
+test openai-extra-json-one-line {a pretty-printed paste is flattened, not refused} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set extra_json "{\n  \"temperature\": 0.2\n}" openai
+	set v [rio::openai::api::cget extra_json]
+	list [string match "*\n*" $v] [dict get [json::json2dict $v] temperature]
+} -cleanup { reset_openai_opts } -result {0 0.2}
+
+test openai-extra-json-survives-the-conf-file {a value full of = and # and braces round-trips} -setup {
+	reset_openai_opts
+} -body {
+	# rio::conf splits on the FIRST = and only comments a line that STARTS with #, so
+	# none of this should trouble it — but a settings value is the one place to be sure.
+	set v {{"a":"b = c # d","k":{"enable_thinking":true}}}
+	rio::agent::option_set extra_json $v openai
+	set back [rio::agent::settings::get openai extra_json]
+	list [expr {$back eq $v}] [dict get [json::json2dict $back] a]
+} -cleanup { reset_openai_opts } -result {1 {b = c # d}}
+
+test openai-extra-json-clearable {emptying it puts the request back to rio's own} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set extra_json {{"temperature":0.2}} openai
+	rio::agent::option_set extra_json "" openai
+	rio::openai::api::cget extra_json
+} -cleanup { reset_openai_opts } -result {}
+
+# --- a key is optional -------------------------------------------------------
+
+test openai-keyless-local-sends-no-auth {a server of your own is called with no Authorization header} -setup {
+	reset_openai_opts
+	rio::openai::api::clear_key
+	rio::agent::option_set base_url http://127.0.0.1:1080/v1 openai
+} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set was $::rio::openai::api::transport
+	set ::rio::openai::api::transport capture_tp
+	set ::posts {}
+	rio::openai::api::provider {{role user text hi}} {} "" [list apply {{args} {lappend ::posts $args}}]
+	set ::rio::openai::api::transport $was
+	list [expr {[lsearch -exact [dict get $::seen headers] Authorization] >= 0}] \
+		[dict get $::seen url] \
+		[expr {[lsearch -glob $::posts *not_configured*] >= 0}]
+} -cleanup { reset_openai_opts } -result {0 http://127.0.0.1:1080/v1/chat/completions 0}
+
+test openai-keyless-hosted-still-says-so {no key AND no URL of your own is still worth naming} -setup {
+	reset_openai_opts
+	rio::openai::api::clear_key
+} -body {
+	set ::posts {}
+	rio::openai::api::provider {{role user text hi}} {} "" [list apply {{args} {lappend ::posts $args}}]
+	set p [lindex $::posts 0]
+	list [lindex $p 0] [lindex $p 1] [string match "*Preferences*Agent*" [lindex $p 2]]
+} -cleanup { reset_openai_opts } -result {error not_configured 1}
+
+test openai-keyed-hosted-sends-auth {a stored key still goes out as a Bearer header} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-HOSTED
+} -body {
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set was $::rio::openai::api::transport
+	set ::rio::openai::api::transport capture_tp
+	rio::openai::api::provider {{role user text hi}} {} "" [list apply {{args} {}}]
+	set ::rio::openai::api::transport $was
+	set h [dict get $::seen headers]
+	list [expr {[lsearch -exact $h Authorization] >= 0}] \
+		[expr {[lsearch -exact $h {Bearer sk-HOSTED}] >= 0}]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 1}
+
+test openai-adopts-every-new-key {a restart reads each stored setting back} -setup {
+	reset_openai_opts
+} -body {
+	foreach {k v} {base_url http://kept.local/v1 reasoning hide max_tokens 2048 \
+			request_timeout 120000 token_param max_completion_tokens \
+			extra_json {{"temperature":0.1}}} {
+		rio::agent::option_set $k $v openai
+	}
+	# Wipe the live config as a fresh process would have it, then adopt from disk.
+	foreach {k v} {base_url https://api.openai.com/v1 reasoning show max_tokens 4096 \
+			request_timeout 600000 token_param max_tokens extra_json ""} {
+		rio::openai::api::configure $k $v
+	}
+	rio::openai::api::_adopt_settings
+	set out {}
+	foreach k {base_url reasoning max_tokens request_timeout token_param extra_json} {
+		lappend out [rio::openai::api::cget $k]
+	}
+	set out
+} -cleanup { reset_openai_opts } -result {http://kept.local/v1 hide 2048 120000 max_completion_tokens {{"temperature":0.1}}}
 
 test openai-refresh-replaces-choices {a server's listing becomes the picker's choices} -setup {
 	reset_openai_opts
