@@ -489,9 +489,22 @@ Both are one-way-ish once the history is public, so they are here rather than in
       door, and its relative links (`docs/index.md`, `LICENSE`, `CODE_OF_CONDUCT.md`)
       resolve on GitHub but are worth one click each. Set the repo description and
       topics; GitHub will detect the language as Tcl on its own.
+- [ ] **Delete `PITCH.md`** before the tag. AGENTS.md §7 and D124 both already plan
+      this — its changelog moved to `CHANGELOG.md` and the rest is the landing-page
+      playground. It is `export-ignore`d from the release tarball as of `3406db4`, but
+      that only keeps it out of the *download*; a clone still gets it, and a stale
+      second changelog in every clone is the drift §7's register exists to prevent.
 - [ ] **Push the tag** when Gate 2's third box is done: `git push github --tags`, and
       the same to `origin`. The tag is what turns About's *Build* into a release name
       and the CHANGELOG's `[0.1.0] — unreleased` into a dated heading.
+- [ ] **Download the Release page's own tarball and run rio from it.** It is a
+      different artifact from the repository — `.gitattributes` `export-ignore`
+      (`3406db4`) drops `adr/`, `spike/`, `PITCH.md`, `.claude/` and every `tests/`
+      directory, taking 418 files to 160 and 3.0 MB. Verified locally against
+      `git archive` at that commit (both entry points answer `0.1.0`, icons intact),
+      but GitHub builds its own copy, so confirm theirs once: extract, run
+      `install-unix.sh`, launch. **No test can cover this** — every suite runs in a
+      repository, where the excluded paths exist either way.
 
 ### The ongoing workflow, and the one asymmetry
 
