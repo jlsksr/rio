@@ -1534,6 +1534,57 @@ rio::claude::api::clear_key   ;# the later block checks the keyless error path
 # Back to something sane for the rest of the run.
 agent_option_pick model claude-sonnet-5
 
+# --- the strip shows only what it can draw and the provider calls quick -------
+#
+# provider-api 4 lets a provider declare a field (a base URL, a timeout) alongside its
+# quick choices. A Tk menu can draw neither a field nor an option the provider marked
+# settings-only, and the strip is 340 px wide — so both stay out of it, and the "first
+# option is always shown" rule runs over what is left, not over the declaration order.
+# The fake deliberately declares the field FIRST, which is the case that would put a URL
+# in the strip.
+namespace eval stripfake {
+	variable url  http://127.0.0.1:1080/v1
+	variable mood calm
+	variable size big
+}
+proc stripfake::provider {conversation tools system post} { {*}$post done stop }
+proc stripfake::opts {} {
+	variable url ; variable mood ; variable size
+	return [list \
+		[dict create name base_url label "Base URL" value $url kind text group Server] \
+		[dict create name size label Size value $size kind choice quick 0 \
+			choices {{value big label Big} {value small label Small}}] \
+		[dict create name mood label Mood value $mood \
+			choices {{value calm label Calm} {value wild label Wild}}]]
+}
+proc stripfake::opt_set {name value} {
+	variable mood
+	if {$name ne "mood"} { rio::error::raise bad_request "unknown option: $name" }
+	set mood $value
+}
+rio::agent::register_provider stripfake ::stripfake::provider -label "Strip Fake" \
+	-options [dict create list ::stripfake::opts set ::stripfake::opt_set]
+providers_menu_fill
+set ::agent_provider stripfake ; apply_provider
+set ::strip_labels [menu_labels .chat.status.sel.m]
+ok "strip: a text option stays out of the menu" [expr {"Base URL" in $::strip_labels}] 0
+ok "strip: so does a quick-0 choice"            [expr {"Size" in $::strip_labels}] 0
+ok "strip: a quick choice is offered"           [expr {"Mood" in $::strip_labels}] 1
+ok "strip: the label names the first QUICK option, not the first declared" \
+	[string match "*Calm ▾" [.chat.status.sel cget -text]] 1
+ok "strip: and no URL reached those 340 px" \
+	[string match "*127.0.0.1*" [.chat.status.sel cget -text]] 0
+# The tooltip is the long form, and it is honest about every option, quick or not.
+ok "strip: the tooltip still names the field"   [string match "*Base URL*" $::tt_text(.chat.status.sel)] 1
+# An unrecognised kind — a provider built against a newer rio — resolves to something
+# renderable rather than to a blank: choices mean a chooser, no choices mean a field.
+ok "strip: unknown kind with choices draws as a chooser" \
+	[agent_option_kind [dict create kind slider choices {{value a label A}}]] choice
+ok "strip: unknown kind without choices draws as a field" \
+	[agent_option_kind [dict create kind slider choices {}]] text
+ok "strip: a missing kind is a chooser"         [agent_option_kind [dict create choices {}]] choice
+set ::agent_provider claude ; apply_provider
+
 # adopt_agent_status MIRRORS the core's live settings into the menus without
 # writing back — attaching to an already-configured core must not reset it (D30).
 # The core here has provider=claude (set just above); turn its auto-accept on, then

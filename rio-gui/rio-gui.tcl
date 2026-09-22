@@ -4696,6 +4696,34 @@ proc agent_option_entry {name} {
 	return ""
 }
 
+# Which control this option wants (provider-api 4). The core carries `kind` without
+# interpreting it, so an unrecognised one — a provider built against a newer rio, or a
+# typo — is resolved HERE, and always to something renderable: choices mean a chooser,
+# no choices mean a field. That fallback is what lets provider-api 5 add a kind without
+# this build drawing a blank.
+proc agent_option_kind {o} {
+	set k [expr {[dict exists $o kind] ? [dict get $o kind] : "choice"}]
+	if {$k in {choice text number}} { return $k }
+	return [expr {[llength [dict get $o choices]] ? "choice" : "text"}]
+}
+
+# Whether this option belongs in the chat strip's menu as well as the settings window.
+# Two independent tests: the provider says whether it is quick enough to want there, and
+# we say whether a Tk menu can draw it at all — which is our knowledge, not the core's,
+# which is exactly why `quick` defaults to 1 and the kind test lives on this side.
+proc agent_option_quick {o} {
+	if {[dict exists $o quick] && ![dict get $o quick]} { return 0 }
+	return [expr {[agent_option_kind $o] eq "choice"}]
+}
+
+# The options the strip may show — the filter both the label and the menu run over, so
+# the two cannot disagree about what is in there.
+proc agent_options_strip {} {
+	set out {}
+	foreach o $::agent_options { if {[agent_option_quick $o]} { lappend out $o } }
+	return $out
+}
+
 # A value's label, falling back to the value itself (a free value the list never had).
 proc agent_option_label {o value} {
 	foreach c [dict get $o choices] {
@@ -4709,17 +4737,31 @@ proc agent_option_label {o value} {
 # "which model am I talking to" is the question this strip exists to answer); the rest
 # appear only when they are not at their default, so a non-default effort is never
 # invisible and a default one never takes up room in a 340 px column.
+#
+# "First" means the first option the strip may show, not the first one declared: a
+# provider whose list opens with its base URL would otherwise put a URL in those 340 px.
 proc agent_options_sync {} {
 	if {![winfo exists .chat.status.sel]} return
-	set parts [list [agent_provider_label $::agent_provider]]
-	set full  [list "Provider: [agent_provider_label $::agent_provider]"]
-	set first 1
+	# The value array tracks EVERY option, quick or not — the settings window's menus
+	# bind it too, and a value the strip never shows is still a value something displays.
 	foreach o $::agent_options {
-		set n [dict get $o name] ; set v [dict get $o value]
-		set ::agent_option_value($n) $v
+		set ::agent_option_value([dict get $o name]) [dict get $o value]
+	}
+	set parts [list [agent_provider_label $::agent_provider]]
+	set first 1
+	foreach o [agent_options_strip] {
+		set v [dict get $o value]
 		if {$first || ![agent_option_is_default $o]} { lappend parts [agent_option_label $o $v] }
-		lappend full "[dict get $o label]: [agent_option_label $o $v] ($v)"
 		set first 0
+	}
+	# The hover text names EVERY option, including the ones this menu cannot offer.
+	# Deliberate: the strip exists to answer "what am I talking to", and with a local
+	# server that question is as much about the endpoint as about the model — a glance
+	# should tell you whether you are pointed at your own box or at a vendor.
+	set full [list "Provider: [agent_provider_label $::agent_provider]"]
+	foreach o $::agent_options {
+		set v [dict get $o value]
+		lappend full "[dict get $o label]: [agent_option_label $o $v] ($v)"
 	}
 	.chat.status.sel configure -text "[join $parts { · }] ▾"
 	tooltip .chat.status.sel [join $full "\n"]
@@ -4747,7 +4789,9 @@ proc agent_options_menu_fill {} {
 		$m add radiobutton -label "   [provider_radio_label $p]" \
 			-variable ::agent_provider -value [dict get $p name] -command apply_provider
 	}
-	foreach o $::agent_options {
+	# Only what a menu can draw and the provider calls quick — a base URL or a request
+	# timeout belongs in the settings window, not in a 340 px strip (provider-api 4).
+	foreach o [agent_options_strip] {
 		set n [dict get $o name]
 		$m add separator
 		$m add command -label [dict get $o label] -state disabled
@@ -4766,30 +4810,51 @@ proc agent_options_menu_fill {} {
 	}
 }
 
+# The one write. Returns "" on success, or the core's message — it does NOT raise a
+# dialog, because the settings window wants the refusal in its own status line rather
+# than in a modal (and a modal reached from a headless run fails the run outright).
+# `provider` empty means the active one, which is what the strip always means.
+proc agent_option_write {provider name value} {
+	set p [dict create name $name value $value]
+	if {$provider ne ""} { dict set p provider $provider }
+	set resp [rio_call agent.option.set $p]
+	if {[dict get $resp ok]} { return "" }
+	return [dict get $resp error message]
+}
+
+# Repaint whatever is showing this provider's options. The chat strip only ever shows
+# the ACTIVE provider, so a write aimed elsewhere leaves it alone.
+proc agent_options_repaint {provider} {
+	if {$provider eq "" || $provider eq $::agent_provider} { agent_options_refresh }
+}
+
 # The single writer. Push the choice to the core and then re-read: the reply carries
 # what the provider ACCEPTED (it may canonicalize), and on a refusal nothing changed,
 # so re-reading puts the menu back rather than leaving it claiming a choice the agent
 # is not running.
-proc agent_option_pick {name value} {
-	rio_result agent.option.set [dict create name $name value $value]
-	agent_options_refresh
+proc agent_option_pick {name value {provider ""}} {
+	set err [agent_option_write $provider $name $value]
+	if {$err ne ""} { report_error $err }
+	agent_options_repaint $provider
 }
 
 # A value the shipped list doesn't carry — a model released after this build, a tag
 # on a local server. Only offered for an option the provider declared `free`.
-proc agent_option_other {name} {
-	set o [agent_option_entry $name]
+proc agent_option_other {name {provider ""} {o ""}} {
+	if {$o eq ""} { set o [agent_option_entry $name] }
 	if {$o eq ""} return
 	set v [name_prompt "[dict get $o label]" "Enter a [string tolower [dict get $o label]]:" \
 		[dict get $o value]]
 	if {$v eq "" || $v eq [dict get $o value]} return
-	agent_option_pick $name $v
+	agent_option_pick $name $v $provider
 }
 
 # Ask the provider to re-enumerate (its models endpoint, a local server's own list).
 # The call only acks — the list arrives as an agent.options event, which repaints.
-proc agent_option_fetch {name} {
-	rio_result agent.options.refresh [dict create name $name]
+proc agent_option_fetch {name {provider ""}} {
+	set p [dict create name $name]
+	if {$provider ne ""} { dict set p provider $provider }
+	rio_result agent.options.refresh $p
 }
 
 # Adopt the core's LIVE agent settings into our menus instead of imposing ours.
