@@ -248,6 +248,16 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Changed
 
+- **Installing rio is one script named after your system, and leaves you a `rio` you can
+  launch** — the setup scripts are now `install-unix.sh` (Linux, the BSDs, macOS),
+  `install-windows.ps1` and `install-server.sh`, replacing two that said *dev-deploy* and
+  three whose platform was visible only in the file extension. The POSIX one no longer
+  stops at installing packages: it adds a `rio` command and an entry with rio's icon in
+  your application menu, under `~/.local`, needing no root and removable with
+  `--uninstall`. On Windows the Start Menu and Desktop shortcuts are now made by default
+  and carry rio's own icon. **macOS is newly attempted** — the script knows Homebrew, and
+  knows to use its Tcl rather than the ancient one Apple ships — but nobody has yet run
+  rio on a Mac, so it says so and asks for a report. — *D129 · `5b4fbeb` · 2026-09-22*
 - **The last three passes over a big file are gone too** — continues D126 with the work it
   left on the table. rio no longer walks a document twice to see whether it uses CRLF line
   endings (the normalisation it does next already knows, and a file with none needs no

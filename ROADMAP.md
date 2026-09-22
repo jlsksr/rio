@@ -489,8 +489,13 @@ for later:
   "needs a newer rio" instead of failing when it loads. That makes the instability
   survivable, not over: what is still ahead is the interface settling down, which is
   also what **1.0.0** is reserved for.
-- **Install / packaging path** — *planned.* A polished install and packaging story
-  beyond the dev/server deploy scripts (see [INSTALL.md](INSTALL.md)).
+- **Install / packaging path** — *half landed.* The **install** half is done (D129): one
+  script per platform, named for it — `install-unix.sh`, `install-windows.ps1`,
+  `install-server.sh` — and the POSIX one now leaves a `rio` command and an application-menu
+  entry rather than stopping at packages. What is still open is **packaging**: a `.deb`, an
+  `.apk`, a port, a Homebrew formula — anything that installs rio without a `git clone`.
+  That is a bigger claim than the one D129 makes, which is only that a checkout can feel
+  installed. See [INSTALL.md](INSTALL.md).
 - **Code of conduct** — *landed.* The Contributor Covenant 2.1, with reports going to
   jlsksr@gmail.com — see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Standard text over a
   house-written one for the same reason as the licence (D121): recognition is worth more
