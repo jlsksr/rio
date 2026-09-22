@@ -15,3 +15,33 @@
 
 # The POSIX shell scripts stay LF everywhere.
 *.sh  text eol=lf
+
+# What a RELEASE tarball leaves out. `export-ignore` is honoured by `git archive`,
+# which is what GitHub runs to build the "Source code (zip/tar.gz)" assets on a
+# Release page — so these are absent from the download while staying in the
+# repository, where they belong. It changes the artifact, NOT the project: a clone
+# still gets every one of them, and so does the Code tab. Anything that truly
+# should not be public has to be `git rm`'d instead, and even then history keeps it.
+#
+# The line is: a tarball is for someone RUNNING rio, a clone is for someone
+# WORKING on it. So the development record goes — the ADRs (AGENTS.md remains, it
+# is the log those records formalise), the O1 Ck probes, the landing-page
+# playground, the agent definitions — and so do the test suites, which are the
+# evidence a contributor needs and dead weight to everyone else.
+#
+# Checked before adding these: nothing under docs/ links into any of them, so the
+# manual's cross-references (D100 — they reach README, INSTALL, WINDOWS, CAVEATS,
+# LICENSE, CONTRIBUTING and AGENTS, all of which stay) still resolve in a tarball.
+# Note that `rio-gui/tests/docs.tcl` cannot catch a regression here: it runs in a
+# repository, where every target exists either way.
+#
+# CONTRIBUTING.md is the one document left pointing at what is gone — it tells you
+# to run `rio-core/tests/all.tcl`. That is accepted rather than fixed: CONTRIBUTING
+# addresses people who clone, and export-ignoring it too would break the manual's
+# own links to it, which is the worse trade.
+adr/           export-ignore
+spike/         export-ignore
+tests/         export-ignore
+PITCH.md       export-ignore
+.claude/       export-ignore
+.gitattributes export-ignore
