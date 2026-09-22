@@ -674,7 +674,9 @@ none for an uncaught error.)
 More focused GUI suites live beside it in `rio-gui/tests/` — for example
 `repos.tcl` drives the whole extension-repository flow (scan, consent,
 install, remove, the Extensions window) against fixture data, with no network
-involved.
+involved, and `agent_settings.tcl` drives the provider settings window against a
+fake provider whose options are deliberately not the shipped ones, so a check
+cannot pass merely because the window recognised a familiar name.
 
 ## Sending a change
 

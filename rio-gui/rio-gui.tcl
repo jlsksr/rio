@@ -3187,14 +3187,26 @@ proc chat_event {ev} {
 			# A provider's options changed — here, in another window (D3/D30), or because
 			# a refresh has just come back from the network. The event says only THAT they
 			# changed, so re-read: the list we then render is the list as it is now.
+			set who [dict get $ev params provider]
 			set err [expr {[dict exists $ev params error] ? [dict get $ev params error] : ""}]
-			if {$err ne ""} { report_error $err }
+			# A failure belongs where the user is looking. The settings window has a
+			# status line of its own; the strip has nowhere but a dialog.
+			if {$err ne ""} {
+				if {[provider_settings_showing $who]} {
+					after idle [list provider_settings_status $err 1]
+				} else {
+					report_error $err
+				}
+			}
 			# Re-read from the IDLE loop, not from here: this handler runs inside the
 			# channel reader, and an op call from there would nest one vwait inside
 			# another. The repaint is not urgent — nothing is waiting on it.
-			if {[dict get $ev params provider] eq $::agent_provider} {
-				after idle agent_options_refresh
-			}
+			#
+			# Two surfaces, guarded separately. The strip shows the ACTIVE provider, so
+			# it repaints only for that one — but the settings window can be open on any
+			# provider, and with only the first test a ⟳ Refresh there did nothing at all.
+			if {$who eq $::agent_provider} { after idle agent_options_refresh }
+			provider_settings_repaint $who
 		}
 		agent.tool_result {
 			# The outcome of a read or an applied/rejected edit (red if it failed).
@@ -4822,10 +4834,12 @@ proc agent_option_write {provider name value} {
 	return [dict get $resp error message]
 }
 
-# Repaint whatever is showing this provider's options. The chat strip only ever shows
-# the ACTIVE provider, so a write aimed elsewhere leaves it alone.
+# Repaint whatever is showing this provider's options. Two independent surfaces: the
+# chat strip, which only ever shows the ACTIVE provider, and the settings window, which
+# may be open on another one entirely.
 proc agent_options_repaint {provider} {
 	if {$provider eq "" || $provider eq $::agent_provider} { agent_options_refresh }
+	provider_settings_repaint $provider
 }
 
 # The single writer. Push the choice to the core and then re-read: the reply carries
@@ -4855,6 +4869,231 @@ proc agent_option_fetch {name {provider ""}} {
 	set p [dict create name $name]
 	if {$provider ne ""} { dict set p provider $provider }
 	rio_result agent.options.refresh $p
+}
+
+# --- the provider settings window (provider-api 4) ---------------------------
+#
+# A menubutton in a 340 px strip is the right home for "which model am I talking to";
+# it is no home at all for an endpoint, a token cap and a blob of extra request JSON.
+# So a provider's fuller configuration gets a form of its own — rendered entirely from
+# what the provider DECLARES (D106), so a provider that grows a knob needs no change
+# here, and a remote core answers for its own machine (D30).
+#
+# It lives in Preferences ▸ Agent, where the agent's durable configuration already
+# gathers (D85: a top-level menu is for fast switches, a window is the config home).
+#
+# Non-modal, like .extw and unlike the other dialogs here: it is opened FROM the
+# Preferences window and has to coexist with it, and it repaints from the agent.options
+# event, which cannot arrive while a grab holds the event loop.
+#
+# There is no OK/Cancel. Each write is a separate agent.option.set that the provider has
+# already persisted, so there is nothing to cancel — the live-apply rule D58 settled for
+# every other setting in rio.
+set ::provset_provider ""   ;# which provider .provset is showing, "" = closed
+
+# Is the settings window open on this provider? The guard every repaint path runs first.
+proc provider_settings_showing {provider} {
+	return [expr {[winfo exists .provset] && $provider ne "" \
+		&& $provider eq $::provset_provider}]
+}
+
+# Does this provider declare any options at all? Read from the cached providers list, so
+# deciding whether to offer a settings door costs no round-trip per provider. A core too
+# old to report the flag says nothing, and we offer no door rather than a window that
+# might be empty.
+proc provider_has_options {name} {
+	foreach p $::agent_providers {
+		if {[dict get $p name] eq $name} {
+			return [expr {[dict exists $p options] && [dict get $p options]}]
+		}
+	}
+	return 0
+}
+
+proc provider_settings_dialog {name} {
+	set w .provset
+	if {[winfo exists $w] && $::provset_provider eq $name} {
+		wm deiconify $w ; raise $w ; return
+	}
+	destroy $w
+	set ::provset_provider $name
+	toplevel $w
+	wm title $w "[agent_provider_label $name] settings"
+	wm transient $w [expr {[winfo exists .prefs] ? ".prefs" : "."}]
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	label $w.hint -anchor w -justify left -wraplength 460 -font RioUIFont \
+		-text "Settings this provider declares. Each is saved as you change it, on the machine the core runs on. A field takes effect when you press Return or leave it." \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	frame $w.body -background [dict get $c ui.bg]
+	label $w.status -anchor w -justify left -wraplength 460 -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
+	frame $w.btns -background [dict get $c ui.bg]
+	button $w.btns.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.btns.close -side right
+	grid $w.hint   -row 0 -column 0 -sticky we   -padx 8 -pady {8 6}
+	grid $w.body   -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.status -row 2 -column 0 -sticky we   -padx 8 -pady {6 0}
+	grid $w.btns   -row 3 -column 0 -sticky we   -padx 8 -pady {4 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+	provider_settings_fill
+	bind $w <Escape>  [list destroy $w]
+	bind $w <Destroy> [list provider_settings_closed %W]
+	focus $w.btns.close
+}
+
+# Only the toplevel's own <Destroy> counts — the binding fires for every descendant too,
+# and a rebuild destroys plenty of them.
+proc provider_settings_closed {which} {
+	if {$which eq ".provset"} { set ::provset_provider "" }
+}
+
+proc provider_settings_status {text {bad 0}} {
+	if {![winfo exists .provset.status]} return
+	set c $::theme_colors
+	.provset.status configure -text $text \
+		-foreground [dict get $c [expr {$bad ? "error" : "gutter.fg"}]]
+}
+
+# Rebuild the form from the core. Scoped to .provset.body and never the toplevel: a
+# field's own <FocusOut> can land us here, and destroying the widget whose handler is
+# running would take the callback with it.
+proc provider_settings_fill {} {
+	set w .provset
+	if {![winfo exists $w]} return
+	set name $::provset_provider
+	set resp [rio_call agent.options.list [dict create provider $name]]
+	if {![dict get $resp ok]} {
+		provider_settings_status [dict get $resp error message] 1
+		return
+	}
+	foreach child [winfo children $w.body] { destroy $child }
+	set c $::theme_colors
+	set opts [dict get $resp result options]
+	set r 0 ; set i 0 ; set group ""
+	if {![llength $opts]} {
+		grid [prefs_hint $w.body.none "This provider declares no settings."] \
+			-row [incr r] -column 0 -columnspan 2 -sticky w
+	}
+	foreach o $opts {
+		incr i
+		# A heading whenever the group changes: sections appear in the order their
+		# first member is declared, members in declaration order within them — the
+		# contract a provider orders its list against.
+		set g [dict get $o group]
+		if {$g ne $group} {
+			set group $g
+			if {$g ne ""} {
+				grid [prefs_label $w.body.g$i $g] -row [incr r] -column 0 \
+					-columnspan 2 -sticky w -pady {8 2}
+			}
+		}
+		grid [prefs_label $w.body.l$i "[dict get $o label]:"] \
+			-row [incr r] -column 0 -sticky w -padx {12 6}
+		grid [provider_settings_control $w.body.c$i $o $name] \
+			-row $r -column 1 -sticky we
+		if {[dict get $o hint] ne ""} {
+			grid [prefs_hint $w.body.h$i [dict get $o hint] 420] \
+				-row [incr r] -column 1 -sticky w -pady {0 2}
+		}
+	}
+	grid columnconfigure $w.body 1 -weight 1
+}
+
+# One option's control. A chooser for `choice`, an entry for `text`/`number` — and for
+# an unrecognised kind whatever agent_option_kind falls back to, so a provider built
+# against a newer rio still gets a usable field.
+proc provider_settings_control {path o provider} {
+	set c $::theme_colors
+	set n [dict get $o name]
+	set v [dict get $o value]
+	if {[agent_option_kind $o] eq "choice"} {
+		frame $path -background [dict get $c ui.bg]
+		menubutton $path.mb -anchor w -relief raised -borderwidth 1 -padx 6 -pady 2 \
+			-font RioUIFont -menu $path.mb.m -text "[agent_option_label $o $v] ▾" \
+			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+			-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+		menu $path.mb.m -tearoff 0
+		foreach ch [dict get $o choices] {
+			$path.mb.m add radiobutton -label [dict get $ch label] \
+				-variable ::agent_option_value($n) -value [dict get $ch value] \
+				-command [list provider_settings_write $provider $n [dict get $ch value]]
+		}
+		if {[dict get $o free]} {
+			$path.mb.m add separator
+			$path.mb.m add command -label "Other…" \
+				-command [list provider_settings_other $provider $o]
+		}
+		pack $path.mb -side left
+		# Refresh sits beside the field it refills. After changing the base URL,
+		# refresh-then-pick is the required two-step, and the control should say so.
+		if {[dict get $o refresh]} {
+			button $path.rf -text "⟳ Refresh from provider" -font RioUIFont \
+				-command [list agent_option_fetch $n $provider]
+			pack $path.rf -side left -padx {6 0}
+		}
+		return $path
+	}
+	entry $path -font RioUIFont -width 44 \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor] \
+		-highlightthickness 1 -relief solid -borderwidth 1
+	$path insert 0 $v
+	ctx_bind_input $path
+	bind $path <Return>   [list provider_settings_field $path $provider $n]
+	bind $path <FocusOut> [list provider_settings_field $path $provider $n]
+	return $path
+}
+
+# A field committing. Only when it actually differs from what the core holds: <FocusOut>
+# fires on every tab-through and on the way to Close, and a write per glance would be
+# both a round-trip and a status line claiming something was saved that never changed.
+proc provider_settings_field {path provider name} {
+	if {![winfo exists $path]} return
+	set o [provider_settings_option $name]
+	if {$o eq ""} return
+	set v [$path get]
+	if {$v eq [dict get $o value]} return
+	provider_settings_write $provider $name $v
+}
+
+# One option's live descriptor, straight from the core — the window asks by name and
+# never trusts a value it rendered earlier.
+proc provider_settings_option {name} {
+	set resp [rio_call agent.options.list [dict create provider $::provset_provider]]
+	if {![dict get $resp ok]} { return "" }
+	foreach o [dict get $resp result options] {
+		if {[dict get $o name] eq $name} { return $o }
+	}
+	return ""
+}
+
+proc provider_settings_other {provider o} {
+	agent_option_other [dict get $o name] $provider $o
+}
+
+# The one write from this window. A refusal goes to the status line, never a modal, and
+# either way the form is rebuilt from the core — so what it shows is what the provider
+# accepted, including a value it canonicalized on the way in.
+proc provider_settings_write {provider name value} {
+	set err [agent_option_write $provider $name $value]
+	if {$err ne ""} {
+		provider_settings_status $err 1
+	} else {
+		provider_settings_status "Saved."
+	}
+	provider_settings_repaint $provider
+	if {$provider eq $::agent_provider} { agent_options_refresh }
+}
+
+# Repaint from the idle loop, always. Two reasons, and either alone would be enough: a
+# field's own <FocusOut> handler must not destroy the field mid-callback, and the
+# agent.options event arrives inside the channel reader, where an op call would nest one
+# vwait in another.
+proc provider_settings_repaint {provider} {
+	if {![provider_settings_showing $provider]} return
+	after idle provider_settings_fill
 }
 
 # Adopt the core's LIVE agent settings into our menus instead of imposing ours.
@@ -11774,9 +12013,9 @@ proc prefs_label {w text} {
 proc prefs_button {w text cmd} { button $w -text $text -font RioUIFont -command $cmd ; return $w }
 # A muted, greyed-out hint line (gutter.fg) — orientation text, styled apart from the
 # interactive controls so it never reads as one (D68). Wraps within the pane width.
-proc prefs_hint {w text} {
+proc prefs_hint {w text {wrap 300}} {
 	set c $::theme_colors
-	label $w -text $text -anchor w -justify left -font RioUIFont -wraplength 300 \
+	label $w -text $text -anchor w -justify left -font RioUIFont -wraplength $wrap \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	return $w
 }
@@ -11872,6 +12111,17 @@ proc prefs_fill_agent {f} {
 		grid [prefs_button $f.key[incr i] "[dict get $p label] API Key…" \
 			[list provider_key_dialog [dict get $p name]]] \
 			-row [incr r] -column 0 -sticky w -pady {4 2}
+	}
+	# What a provider lets you configure is the PROVIDER's business (D106), so the door
+	# is offered for whoever declares anything and the window renders what they declare.
+	# For a local server that is where the endpoint lives, which is the whole reason a
+	# strip menubutton was not enough.
+	set i 0
+	foreach p $::agent_providers {
+		if {![provider_has_options [dict get $p name]]} continue
+		grid [prefs_button $f.opt[incr i] "[dict get $p label] settings…" \
+			[list provider_settings_dialog [dict get $p name]]] \
+			-row [incr r] -column 0 -sticky w -pady {2 2}
 	}
 	# The agent's instructions (system / project / per-provider prompts, D70/D79) are
 	# the third leg of its config alongside provider + key. This pane is their ONLY home
