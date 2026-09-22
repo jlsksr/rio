@@ -8,18 +8,27 @@ If rio isn't installed yet, [INSTALL.md](../INSTALL.md) covers that — on Windo
 
 ## Launching
 
-Run the GUI directly:
+If you ran one of the install scripts, rio is in your application menu (Start Menu
+and Desktop on Windows) and `rio` is a command:
 
 ```
-wish rio-gui/rio-gui.tcl
+rio
 ```
 
 You can hand it files to open, a folder to work in, or both:
 
 ```
-wish rio-gui/rio-gui.tcl notes.txt draft.md
-wish rio-gui/rio-gui.tcl ~/src/myproject
+rio notes.txt draft.md
+rio ~/src/myproject
 ```
+
+Without the launcher — a bare checkout, or `--no-launcher` — the same thing is:
+
+```
+wish rio-gui/rio-gui.tcl notes.txt draft.md
+```
+
+`rio` is only a small wrapper around exactly that, so the two are interchangeable.
 
 **There is nothing to start first.** rio's logic lives in a separate program — the
 *core* — and the window starts its own private copy automatically, as a child
@@ -144,8 +153,8 @@ machine (*File ▸ Connect to Remote Core…*) and that core is a different rele
 rio is on `0.x` on purpose. It means what it means everywhere else: early days,
 and things may still change between releases.
 
-You can also ask without opening rio — `rio-gui.tcl --version` and
-`rio-core/server.tcl --version` both print it and exit.
+You can also ask without opening rio — `rio --version` (or `rio-gui.tcl --version`)
+and `rio-core/server.tcl --version` all print it and exit.
 
 The first four rows describe the build. The last is about your copy: rio is under
 the MIT License, so you may use

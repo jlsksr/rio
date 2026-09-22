@@ -1,21 +1,24 @@
 <#
 .SYNOPSIS
-    rio-dev-deploy.ps1 - set up rio for daily use on Windows 11.
+    install-windows.ps1 - install rio on Windows 11.
 
 .DESCRIPTION
-    The Windows counterpart to rio-dev-deploy.sh. That script apt/apk-installs the
-    Tcl/Tk toolchain; Windows has no such package manager for it, so this script does
-    what CAN be automated here and is honest about the one step that can't:
+    rio is a small IDE written in Tcl/Tk. There is nothing to compile: it runs from
+    this folder. So "installing" it is three things, and this script does all three -
+    the Windows counterpart to install-unix.sh:
 
-      1. VERIFY the toolchain by actually loading it in tclsh (Tk + json required;
-         tls optional - only the Claude agent needs it). This is the real source of
-         truth, same as the shell script. If tclsh isn't found, it explains how to
-         install Tcl/Tk and stops.
-      2. PERSISTENCE - set the XDG_CONFIG_HOME / XDG_DATA_HOME user environment
-         variables (and create the folders) so rio remembers your preferences and
-         reopens your last session between launches. Without these, rio runs fine but
-         forgets everything on exit.
-      3. Optionally (-Shortcut) drop a Desktop shortcut that launches rio via wish.
+      1. INSTALL THE TOOLCHAIN if you don't have it. Windows has no apt/apk, so this
+         offers winget instead, then VERIFIES by actually loading it in tclsh (Tk +
+         json required; tls only matters for HTTPS - a hosted agent provider, or an
+         https extension repository). Loading it, not a successful install, is the
+         real answer - same as the shell script.
+      2. PERSISTENCE - relocate rio's settings and session state to a tidy place by
+         setting the XDG_CONFIG_HOME / XDG_DATA_HOME user environment variables (and
+         creating the folders). rio remembers things either way; this only decides
+         where. Skip with -NoPersist.
+      3. SHORTCUTS so you can start rio like any other application: a Start Menu
+         entry and one on the Desktop, both launching rio through wish. Skip with
+         -NoShortcut.
 
     If tclsh isn't found and winget is available, the script OFFERS to install
     Magicsplat Tcl/Tk (winget id Magicsplat.TclTk) - one package that bundles Tk +
@@ -32,8 +35,8 @@
 .PARAMETER NoPersist
     Skip the persistence env-var setup (it runs by default otherwise).
 
-.PARAMETER Shortcut
-    Also create a "rio" shortcut on the Desktop that launches the GUI.
+.PARAMETER NoShortcut
+    Skip the Start Menu and Desktop shortcuts (they are created by default).
 
 .PARAMETER Yes
     Auto-confirm the winget install prompt (non-interactive). Without it the script
@@ -46,13 +49,13 @@
     Print what would happen without changing anything.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1
+    powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1 -Shortcut
+    powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -NoShortcut
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1 -VerifyOnly
+    powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -VerifyOnly
 
 .NOTES
     Keep this file ASCII-only. Windows PowerShell 5.1 reads a BOM-less .ps1 as the
@@ -65,7 +68,7 @@
 param(
     [switch]$VerifyOnly,
     [switch]$NoPersist,
-    [switch]$Shortcut,
+    [switch]$NoShortcut,
     [switch]$Yes,
     [switch]$NoInstall,
     [switch]$DryRun,
@@ -162,7 +165,7 @@ function Install-Toolchain {
 # --- verification -----------------------------------------------------------
 #
 # The real test: does the toolchain load? Probe with tclsh itself (same logic as
-# rio-dev-deploy.sh). Tk needs no display on Windows, but withdraw its window so it
+# install-unix.sh). Tk needs no display on Windows, but withdraw its window so it
 # doesn't flash. tls is OPTIONAL here - only the agent's HTTPS needs it.
 
 # The Tcl probe, as an ARRAY of single-line strings - NOT a multi-line string literal.
@@ -243,17 +246,33 @@ function Set-Persistence {
 
 # --- optional: Desktop shortcut ---------------------------------------------
 
-function New-RioShortcut ($wish, $rioGui) {
-    $lnkPath = Join-Path ([Environment]::GetFolderPath('Desktop')) "rio.lnk"
+# One shortcut in $dir. The target is wish.exe with rio's script as its argument -
+# NOT a shortcut to the .tcl file, which would obey whatever Windows currently
+# associates with .tcl and can silently become "open in Notepad".
+function New-RioShortcut ($dir, $wish, $rioGui, $icon) {
+    $lnkPath = Join-Path $dir "rio.lnk"
     if ($DryRun) { Step "create shortcut $lnkPath -> $wish `"$rioGui`""; return }
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     $ws  = New-Object -ComObject WScript.Shell
     $lnk = $ws.CreateShortcut($lnkPath)
     $lnk.TargetPath       = $wish
     $lnk.Arguments        = "`"$rioGui`""
     $lnk.WorkingDirectory = Split-Path $rioGui
-    $lnk.Description       = "rio editor"
+    $lnk.Description      = "rio - a small IDE with git and AI-agent integration"
+    # Without this the shortcut wears wish.exe's icon (Tk's feather), which is not
+    # rio. rio ships a real multi-size .ico for exactly this; the icon on the WINDOW
+    # itself is set by rio at startup and is a separate thing.
+    if ($icon -and (Test-Path $icon)) { $lnk.IconLocation = $icon }
     $lnk.Save()
     Log "shortcut: $lnkPath"
+}
+
+# Both places Windows expects an installed application to be: the Start Menu app
+# list, and the Desktop.
+function Install-Shortcuts ($wish, $rioGui) {
+    $icon = Join-Path $PSScriptRoot "rio-gui\icons\rio.ico"
+    New-RioShortcut ([Environment]::GetFolderPath('Programs')) $wish $rioGui $icon
+    New-RioShortcut ([Environment]::GetFolderPath('Desktop'))  $wish $rioGui $icon
 }
 
 # --- main -------------------------------------------------------------------
@@ -283,15 +302,19 @@ if ($VerifyOnly) { Log "verify-only: done."; exit 0 }
 
 if (-not $NoPersist) { Set-Persistence }
 
-if ($Shortcut) {
+if (-not $NoShortcut) {
     $wish = Find-Tcl "wish"
-    if (-not $wish) { Warn "wish not found - skipping shortcut (Tk GUI stub missing?)" }
-    elseif (-not (Test-Path $rioGui)) { Warn "rio-gui.tcl not found at $rioGui - skipping shortcut" }
-    else { New-RioShortcut $wish $rioGui }
+    if (-not $wish) { Warn "wish not found - skipping shortcuts (Tk GUI stub missing?)" }
+    elseif (-not (Test-Path $rioGui)) { Warn "rio-gui.tcl not found at $rioGui - skipping shortcuts" }
+    else { Install-Shortcuts $wish $rioGui }
 }
 
 Write-Host ""
-Log "done. Launch rio with:"
+if (-not $NoShortcut -and -not $DryRun) {
+    Log "done. Start rio from the Start Menu or the Desktop shortcut, or:"
+} else {
+    Log "done. Launch rio with:"
+}
 $wishHint = (Find-Tcl "wish"); if (-not $wishHint) { $wishHint = "wish" }
-Write-Host "    $wishHint `"$rioGui`""
+Write-Host "    $wishHint `"$rioGui`" [file-or-folder ...]"
 if ($DryRun) { Warn "dry run - nothing was changed" }

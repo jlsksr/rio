@@ -1,25 +1,28 @@
 #!/bin/sh
 #
-# rio-server-deploy.sh — install rio-core's server-mode runtime on a headless box.
+# install-server.sh — install rio's core on a headless box, to edit it remotely.
 #
-# Server mode (AGENTS.md D29) runs the UI-less core behind a socket; a remote rio
-# GUI then drives it over an SSH tunnel. The core is Tk-FREE (D1) but, since the
-# agent now runs IN THE CORE (D30), the server needs TLS too: the Claude provider's
-# HTTPS happens server-side wherever the core runs. So the runtime is tclsh + tcllib
-# (JSON) + tcl-tls (HTTPS for the agent), plus git if you want the git pane. This is
-# the slim counterpart to rio-dev-deploy.sh (which sets up a full GUI/dev toolchain).
+# Use this when you want to edit files on ANOTHER machine — a VPS, a build box, a
+# NAS — from rio running on your own. That far machine needs only the core; the
+# GUI stays where you are and drives it over an SSH tunnel (AGENTS.md D29). Install
+# rio itself with install-unix.sh; this is its slim, screen-less counterpart.
+#
+# The core is Tk-FREE (D1) — no GUI, no X, nothing to display — but since the agent
+# runs IN THE CORE (D30), TLS belongs here too: a hosted agent provider's HTTPS
+# happens wherever the core runs, which is this box.
+#
 # POSIX sh; targets Alpine (apk), Debian/Ubuntu (apt), OpenBSD (pkg_add).
 #
 # What it installs:
 #   - tclsh     the Tcl interpreter the core runs on (no Tk — the server is headless)
 #   - tcllib    provides the json package the wire protocol parses with
 #               (Alpine names this package tcl-lib, in the community repo)
-#   - tcl-tls   the TLS extension the agent's Claude HTTPS transport needs (D30);
-#               without it a server-side Claude turn fails "can't find package tls"
+#   - tcl-tls   the TLS extension a hosted agent provider's HTTPS needs (D30);
+#               without it the first agent turn fails "can't find package tls"
 #   - git       recommended: the git pane shells out to it (skip with --no-git)
 #
 # Usage:
-#   ./rio-server-deploy.sh [--no-git] [--verify-only] [--dry-run] [-h|--help]
+#   ./install-server.sh [--no-git] [--verify-only] [--dry-run] [-h|--help]
 #
 # Safe to re-run: installs are idempotent, and it finishes by actually loading the
 # core (sourcing server.tcl + binding an ephemeral port) — the real proof it works.
@@ -43,7 +46,7 @@ while [ $# -gt 0 ]; do
 		--verify-only) VERIFY_ONLY=1 ;;
 		--dry-run)     DRY_RUN=1 ;;
 		-h|--help)     usage 0 ;;
-		*) echo "rio-server-deploy: unknown option: $1" >&2; usage 1 ;;
+		*) echo "install-server: unknown option: $1" >&2; usage 1 ;;
 	esac
 	shift
 done
@@ -201,8 +204,11 @@ Run the core (binds 127.0.0.1 by default — keep it behind an SSH tunnel, D29):
 
 From your workstation, tunnel in and attach the GUI:
 
-    ssh -L 7711:127.0.0.1:7711 <this-host>
-    wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server
+    ssh -N -L 7711:127.0.0.1:7711 <this-host>
+    rio --connect 127.0.0.1:7711 /path/on/server
+
+(`rio` is what install-unix.sh puts on your PATH over there; from a checkout with
+no launcher, `wish rio-gui/rio-gui.tcl --connect ...` is the same thing.)
 
 Bind all interfaces only behind a firewall:   tclsh rio-core/server.tcl 7711 --any
 EOF

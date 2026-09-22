@@ -13,14 +13,14 @@ Windows. The heavier features (git, the agent, a remote core) work here too; see
 > tree by some way — §8 is how to do one. If something does break, §6 says where to
 > look first.
 
-## 1. Get rio and run the deploy script
+## 1. Get rio and run the install script
 
 Copy or clone the repository to a folder, e.g. `C:\rio`. **There is nothing to build,
-and nothing to install first** — the deploy script handles the toolchain. From that
+and nothing to install first** — the install script handles the toolchain. From that
 folder:
 
 ```
-powershell -ExecutionPolicy Bypass -File .\rio-dev-deploy.ps1
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
 That one command:
@@ -34,12 +34,16 @@ That one command:
    Tk and json are required, tls only matters for HTTPS (a hosted agent provider, or an
    `https://` extension repository) — and
    reports each by name.
-3. **Sets up persistence** (§3) so rio remembers your preferences and last session.
-4. **Prints the launch command**, with the full path to `wish.exe`.
+3. **Sets up persistence** (§3), which decides where rio keeps your preferences and
+   last session.
+4. **Creates the shortcuts**: one in the Start Menu and one on the Desktop, both
+   carrying rio's own icon, so you can start it like any other application. It also
+   prints the launch command with the full path to `wish.exe`, for a terminal.
 
-Add `-Shortcut` to also drop a "rio" shortcut on your Desktop, or `-VerifyOnly` to
-check the toolchain and change nothing. It changes nothing it doesn't have to and is
-safe to re-run.
+Pass `-NoShortcut` to skip the shortcuts, `-NoPersist` to skip step 3, or
+`-VerifyOnly` to check the toolchain and change nothing. It changes nothing it
+doesn't have to and is safe to re-run — do re-run it if you move the folder, since
+the shortcuts point at an absolute path.
 
 > **Then open a NEW terminal.** The Tcl installer adds `wish`/`tclsh` to your *user*
 > `PATH`, but only processes started **afterwards** inherit it — including the
@@ -49,8 +53,8 @@ safe to re-run.
 > Windows and it is not a rio problem. The same applies to `git` after installing Git
 > for Windows.
 
-> The POSIX `rio-dev-deploy.sh` / `rio-server-deploy.sh` scripts are `sh` and do
-> **not** run on Windows — `rio-dev-deploy.ps1` is their Windows counterpart, and its
+> The POSIX `install-unix.sh` / `install-server.sh` scripts are `sh` and do
+> **not** run on Windows — `install-windows.ps1` is their Windows counterpart, and its
 > winget step stands in for their `apt`/`apk` toolchain install.
 
 ## 2. The toolchain, if you'd rather do it by hand
@@ -82,7 +86,7 @@ tclsh
 % exit
 ```
 
-Both lines should print a version, not an error. Then run `rio-dev-deploy.ps1` (§1)
+Both lines should print a version, not an error. Then run `install-windows.ps1` (§1)
 anyway — it will skip the install and go straight to verifying and setting up
 persistence.
 
@@ -99,7 +103,7 @@ variables below only **relocates** that state to a tidier place — it does not 
 persistence on. (An earlier version of this section claimed rio "forgets your
 preferences" without them; that was wrong on Windows.)
 
-`rio-dev-deploy.ps1` (§1) sets these up for you — this section is what it does, for
+`install-windows.ps1` (§1) sets these up for you — this section is what it does, for
 reference or if you'd rather do it by hand. It sets two **user environment variables**:
 
 | Variable | Value (example) |
@@ -118,6 +122,12 @@ setx XDG_DATA_HOME   "%USERPROFILE%\rio\data"
 
 ## 4. Launch
 
+The install script (§1) leaves a **rio** shortcut in the Start Menu and on the
+Desktop — that is the normal way in. Right-click either one to pin it to the taskbar,
+and set *Start in* to your notes folder if you'd like rio to open there.
+
+From a terminal, or to open something specific:
+
 ```
 wish C:\rio\rio-gui\rio-gui.tcl
 ```
@@ -127,9 +137,10 @@ wish C:\rio\rio-gui\rio-gui.tcl
   browsable in the side pane;
 - **a file** → `wish C:\rio\rio-gui\rio-gui.tcl D:\notes\today.md` opens it in a tab.
 
-**Pin it:** make a desktop/taskbar shortcut whose target is
-`"C:\path\to\wish.exe" "C:\rio\rio-gui\rio-gui.tcl"`, and set *Start in* to your notes
-folder. Now rio is one click away.
+If you skipped the shortcuts (`-NoShortcut`) or want another one, its target is
+`"C:\path\to\wish.exe" "C:\rio\rio-gui\rio-gui.tcl"` — a shortcut to `wish.exe` with
+rio's script as the argument, **not** to the `.tcl` file itself, which would follow
+whatever Windows currently associates with `.tcl`.
 
 ## 5. Your daily workflow, in keys
 
@@ -167,7 +178,7 @@ If it doesn't:
   If `...\Apps\Tcl86\bin` is in there, the install is fine — open a **new** terminal
   (§1/§2). Only if it's absent is the Tcl/Tk install itself the problem.
 - **A `package require` error** → the Tcl/Tk install is incomplete; re-run
-  `rio-dev-deploy.ps1 -VerifyOnly` (§1), which reports each package by name.
+  `install-windows.ps1 -VerifyOnly` (§1), which reports each package by name.
 - **The git pane does nothing** → same stale-`PATH` story for `git` (§7).
 - **A stack trace mentioning `HOME` or a config/session path** → §3, though this
   should not happen: Tcl always provides `HOME` on Windows.
@@ -187,7 +198,7 @@ because it needs the least. What each adds:
   shell), so it behaves the same as on Linux. Open a repo folder and the status/diff/
   stage/commit pane is there.
 - **The agent (Claude)** — works if your Tcl build includes **`tls`** (Magicsplat's
-  batteries-included distribution normally does; `rio-dev-deploy.ps1` reports `tls ok`
+  batteries-included distribution normally does; `install-windows.ps1` reports `tls ok`
   or `MISSING` in its verify). Then pick *Settings ▸ Agent Provider ▸ Claude (API key)*
   and enter your key under *Preferences ▸ Agent*. One Windows note: rio's `0600` lock-down
   of the key file is a POSIX no-op on NTFS, so the key file inherits your user-profile

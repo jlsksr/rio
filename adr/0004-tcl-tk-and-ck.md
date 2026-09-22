@@ -24,7 +24,7 @@ can share.
   project, including for scratch scripts or build helpers.
 
 The contributor toolchain is `tcl`, `tk`, `tcllib` (for `json`), `tcl-tls` and
-`git`. `rio-dev-deploy.sh` installs it on apt, apk and `pkg_add` systems and can
+`git`. `install-unix.sh` installs it on apt, apk and `pkg_add` systems and can
 build Ck from source.
 
 ## Alternatives considered

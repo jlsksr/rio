@@ -272,7 +272,7 @@ the Ck spike (O1) fails.
 
 **Dev toolchain (concrete).** A contributor needs `tcl`, `tk`, `tcl-tls`
 (Claude HTTPS, D8), `tcllib` (`json` for the protocol), and `git` (D7).
-[`rio-dev-deploy.sh`](rio-dev-deploy.sh) installs these across apt / apk /
+[`install-unix.sh`](install-unix.sh) installs these across apt / apk /
 `pkg_add`, and behind `--with-ck` builds Ck from source for the TUI path; it
 finishes by loading Tk, `tls`, and `json` through `tclsh` as a smoke test.
 *Lesson worth keeping (reinforces D1):* anything headless — that verify probe,
@@ -1290,7 +1290,7 @@ traffic**: they arrive on the GUI's one channel reader and `dispatch_event` rout
 **no longer hidden** (`::agent_avail` retired); the smoke exercises a full turn over a
 socket and `pipe.tcl` a full turn over the real spawned-child pipe. **Deploy
 consequence:** the agent's Claude HTTPS now runs *server-side*, so a headless core
-box needs `tcl-tls` too — `rio-server-deploy.sh` installs it and the verifier checks
+box needs `tcl-tls` too — `install-server.sh` installs it and the verifier checks
 `package require tls` (a pre-P3 server, provisioned TLS-free, fails a Claude turn with
 "can't find package tls"). *Done — connect from a running GUI:* attaching to a daemon
 is no longer launch-only — **File ▸ Connect to Remote Core…** prompts for a
@@ -1602,8 +1602,8 @@ recording: **`$( … )` / `$(( … ))` are not swallowed** — the `$` is left p
 scanned as ordinary shell, so the inner command colours too (`out=$(ls -l)` colours `ls` and
 `-l`), the same "re-enter command position" idea as Tcl's `[ … ]`. A `for`/`case` loop variable
 stays plain (not every command-position keyword implies a command follows — only `then`/`do`/
-`else`/`if`/`elif`/`while`/`until` do). Verified over rio's own `rio-dev-deploy.sh` /
-`rio-server-deploy.sh`. Tests: `syntax/tests/shell.test` (16 cases) — command vs argument, the
+`else`/`if`/`elif`/`while`/`until` do). Verified over rio's own `install-unix.sh` /
+`install-server.sh`. Tests: `syntax/tests/shell.test` (16 cases) — command vs argument, the
 `#`/`$#`/`foo#bar` guards, assignments, `$( … )` re-entry, quotes (single non-interpolating),
 and options.
 
@@ -7870,7 +7870,7 @@ Both renderings come from the **same** region model (D13) and layout policy
     legacy-C flags (`-fcommon`, demote the now-default implicit-decl/implicit-int
     *errors* back to warnings) passed via `make CFLAGS=` (its `configure` ignores
     env `CFLAGS`). Built `--enable-shared`, so run with `LD_LIBRARY_PATH` at the
-    build dir. Captured in `rio-dev-deploy.sh --with-ck`. **Pinned:** Ck `@1a991e3`, Tcl 8.6.16,
+    build dir. Captured in `install-unix.sh --with-ck`. **Pinned:** Ck `@1a991e3`, Tcl 8.6.16,
     ncursesw 6.5.
   - **Editing surface (D-risk):** Ck's `text` handles a 5000-line buffer with a
     working `scrollbar`, typed editing, and `-foreground` tags — usable. ✓
