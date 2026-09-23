@@ -45,8 +45,12 @@ by a provider's name, and stay in Preferences ▸ Agent.
 it governs where **rio's** settings gather, not an extension's.
 
 **The menu.** `Extensions` sits between Settings and Help — rio's own configuration first,
-then what has been added to it, then Help last. It leads with ***Extensions…***, the
-installer, which therefore leaves the Settings menu ([ADR-0067](0067-extensions-in-settings.md)).
+then what has been added to it, then Help last. It leads with ***Extensions ▸
+Browse…***, the installer, which therefore leaves the Settings menu
+([ADR-0067](0067-extensions-in-settings.md)). That entry was labelled *Extensions…* when
+this record was written and was renamed days later: the menu, the entry and the window it
+opens all carried the same noun, and only one of them was naming anything, so the entry
+names the act instead.
 Below a separator it carries one door per installed extension that has something to
 configure, and a disabled placeholder when none has, so the menu is never empty. Every
 entry below that separator names an *installed* extension, so the manual can teach the
