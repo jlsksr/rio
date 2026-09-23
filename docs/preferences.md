@@ -234,7 +234,8 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `agent/providers/<name>.md` | a **per-provider prompt**, applied only while that provider is live | yes — plain Markdown |
 | `agent/allow.list` | trusted commands for **all projects** — one rule per line | yes — plain text |
 | `agent/providers/<name>.allow.list` | trusted commands active only while that provider is live | yes — plain text |
-| `agent/providers/<name>.conf` | everything that provider remembers — the model and effort it was last set to, and whatever else it declares (the OpenAI-compatible one keeps its server URL, token cap, timeout and request fields here) — see [the agent](agent.md#settings-a-provider-declares) | yes — `key = value` |
+| `agent/providers/<name>.conf` | what that provider remembers — the model and effort it was last set to, and whatever else it declares. For a provider that keeps [profiles](agent.md#profiles-several-setups-one-at-a-time), only which profile is live; the settings themselves are in the folder below | yes — `key = value` |
+| `agent/providers/<name>/<profile>.conf` | one profile of such a provider: its own model, server, limits and key — see [the agent](agent.md#settings-a-provider-declares). A provider's per-profile files sit here too, like the OpenAI-compatible one's `<profile>.extra.json` | yes — `key = value` |
 | `tls.conf` | how the core's https connections are checked — today only `unchecked_hostnames`, on the **core's** host (see [above](#network-how-the-core-checks-https)) | yes — `key = value` |
 
 **Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**

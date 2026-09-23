@@ -52,6 +52,8 @@ menu, with a section for each choice:
 
 - **Provider** — the same picker as ***Settings ▸ Agent Provider***, next to the
   rest of the decision rather than two menus away.
+- **Profile** — which of that provider's saved configurations to run on, when it
+  keeps more than one. See [profiles](#profiles-several-setups-one-at-a-time).
 - **Model** — the models that provider offers. The list is short and shipped, so it
   goes stale: **Other…** takes any model id you type (a release newer than your rio,
   a tag on your own server), and **⟳ Refresh from provider** replaces the list with
@@ -66,7 +68,8 @@ menu, with a section for each choice:
 
 Whatever is *not* at its default is spelled out in the strip, so a raised effort is
 never something you have silently left on. Hover for the full state, raw model id
-included.
+included — the **profile** is named there too, since a name can be long and the strip
+is narrow.
 
 Each provider remembers its own choices, in a plain file you can read or edit
 yourself:
@@ -80,12 +83,16 @@ model = claude-opus-5
 effort = high
 ```
 
-Everything the provider *declares* in the settings window below lands in that same
-file, so which keys it holds depends on the provider — the one thing that never does
-is the API key, which lives apart from every settings file. It sits beside that
-provider's prompt layer and its allow-list, and it lives **on the core's machine** —
-with a remote core, the menu shows the models that core can reach, and the file is on
-the server.
+Everything the provider *declares* in the settings window below lands in a file like
+that one, so which keys it holds depends on the provider — the one thing that never
+does is the API key, which lives apart from every settings file. A provider that keeps
+[profiles](#profiles-several-setups-one-at-a-time) has one such file **per profile**,
+in a folder of its own, and the file named above then records only which of them is
+live.
+
+These sit beside that provider's prompt layer and its allow-list, and they live **on
+the core's machine** — with a remote core, the menu shows the models that core can
+reach, and the files are on the server.
 
 ## A provider's own settings
 
@@ -111,18 +118,80 @@ machine the core runs on as you set it — the one exception being the API key, 
 waits for its **Save** button. The window is not modal, so you can leave it open while
 you work; **Close** or `Esc` dismisses it.
 
+### Profiles: several setups, one at a time
+
+A provider may keep more than one complete configuration — the OpenAI-compatible one
+does. Each is a **profile**: its own server, its own model, its own limits, **and its
+own API key**. That last part is the point of the feature: switching to a profile that
+points at a server on your own machine never sends a hosted vendor's key to it.
+
+When a provider keeps profiles, its settings window opens with a **Profile** row,
+above the key and above everything else, because it decides what all of them show.
+
+- The drop-down beside **Profile:** switches. Everything below the row is re-read from
+  the profile you picked — including the list of models a **⟳ Refresh** last found,
+  which belongs to the server that answered it.
+- **Manage…** opens a small window listing them all, with the live one marked:
+  **Switch to**, **New…**, **Duplicate…**, **Rename…**, **Delete…**.
+
+**New…** starts from the provider's shipped defaults; **Duplicate…** copies the one
+you selected, extra-request file included, so editing the copy never changes the
+original. Both ask for a name and then switch to what they made. **Delete…** asks
+first and defaults to *No*; the settings of that profile, and any extra-request file
+of its own, go with it. **The last profile cannot be deleted** — settings have to live
+in one, so there is always exactly one left.
+
+Names are yours to choose: a profile name may use letters, digits, spaces and `.` `_`
+`-` `(` `)`, so `Qwen3.8 27B (local)` is fine. Anything that could name a different
+file is refused — path separators, `.` and `..`, a leading dot, and a leading or
+trailing space.
+
+Switching between profiles is also one click in the [strip at the bottom of the chat
+pane](#choosing-a-model-and-how-hard-it-thinks), which is where you will do it
+day to day; *making* one stays here.
+
+#### What you start with
+
+On its **first run** the OpenAI-compatible provider writes three profiles:
+
+| Profile | Points at |
+| ------- | --------- |
+| `ChatGPT` | `https://api.openai.com/v1`, model `gpt-4o` — add your key and go |
+| `Qwen3.8 27B (local)` | `http://127.0.0.1:1080/v1` — an example of a server of your own |
+| `Qwen3.8 Flash Next (local)` | the same server, a different model |
+
+The two local ones are **examples**, not a claim about your machine: that port is
+llama-swap's usual one, and the model names are the ones it was serving. Point them at
+your own server and model, or delete them. They carry no API key, a much larger token
+cap, and their thinking is configured through the [extra-request
+file](#a-setting-that-names-a-file) rather than the **Effort** setting, because
+llama.cpp and most compatible servers refuse the standard effort field. (Both name the
+same empty key store, so a key saved while either is live counts for both.)
+
+They are written **once**, and nothing ever restores them: an edited one keeps your
+edits and a deleted one stays deleted, upgrade or not.
+
+If you were already using this provider before it had profiles, your settings are
+**not** replaced by those three. They become a profile called `Current settings`, and
+it is the one that stays live.
+
 ### Your API key
 
-The window opens with **Credentials**, and that is where a hosted provider's key
-goes. The field is masked; beneath it are **Show key**, **Save** and **Clear**.
+The window opens with **Credentials** — under the Profile row, where there is one —
+and that is where a hosted provider's key goes. The field is masked; beneath it are
+**Show key**, **Save** and **Clear**.
 
+- **The key belongs to the profile**, for a provider that keeps
+  [profiles](#profiles-several-setups-one-at-a-time). Switch profiles and you are
+  looking at a different key — which is how a local profile can have none while your
+  hosted one has yours.
 - **Save is deliberate.** Unlike the settings below it, the key is *not* written when
   you move away from the field — press **Save**, or `Return` in the field. A key is
   pasted and glanced at before it is committed, so rio waits to be told.
-- The field is **blank every time the window opens.** rio keeps your key for the
-  provider but never reads it back, so what you see is not what is stored. The note
-  under the buttons is what tells you: *A key is stored*, or *No key stored yet* —
-  and where to create one, when the provider names a place.
+- The field is **blank every time the window opens.** rio keeps your key but never
+  reads it back, so what you see is not what is stored. The note under the buttons is
+  what tells you: *A key is stored*, or *No key stored yet* — and where to create one,
+  when the provider names a place.
 - **Clear** removes the stored key, and is greyed out until there is one to remove.
 - **Show key** unmasks what you have typed, for checking a paste. It reveals nothing
   that was already stored.
@@ -151,9 +220,43 @@ explanation under each come from the provider. A choice is a drop-down; anything
 is a field you type in.
 
 **Each of these is saved as you make it** — a drop-down the moment you pick from it,
-a field when you press `Return` or move away from it — into that provider's settings
-file above. A provider that declares nothing says so, and the window is then its
-credentials alone.
+a field when you press `Return` or move away from it — into the settings file of the
+profile you are on. A provider that declares nothing says so, and the window is then
+its credentials alone.
+
+#### A setting that names a file
+
+One setting can be too big for a one-line field, and then the provider makes it a
+**file name** with an **Edit…** button beside it. The OpenAI-compatible provider's
+**Extra request JSON** is the one that does this today.
+
+**Edit…** opens that file as an ordinary tab in rio — your editor, your keybindings,
+your syntax colouring — and creates it first if it isn't there yet, so the button
+never opens nothing. A new one starts as `{}`: valid, and sending nothing until you
+put something in it. Leave the name blank and rio picks one for this profile; the
+field fills in for you.
+
+Two things follow from it being a file rather than a value:
+
+- it may be **several lines**, indented and readable, which a settings value cannot be;
+- it is **read fresh at the start of every turn**, off disk, so a saved edit takes
+  effect on the next one — no restart, and nothing to re-save in the settings window.
+  An edit you have not saved yet is not in the file, so it does not count.
+
+Because it is read that late, it is also **checked** that late: if the file no longer
+parses, the turn stops and says so rather than quietly dropping what you wrote. For
+the OpenAI-compatible provider the rules are:
+
+- it must be a **JSON object** — `{"temperature": 0.2}`, not a list or a bare value;
+- it may not set a field **rio sends itself** (`model`, `messages`, `stream`, `tools`,
+  the token-cap field, and the effort field) — the refusal names the setting in the
+  window to use instead;
+- **blank, or a file that isn't there, sends nothing extra.** Deleting the file is a
+  decision, not an error.
+
+The name is a plain file name, kept next to that provider's profiles; a path with
+separators in it is refused. Symlink to somewhere else if you want the file kept
+elsewhere.
 
 ## Running a model of your own
 
@@ -165,15 +268,23 @@ needed at all.
 1. Install the **openai** extension and **restart rio**.
 2. Pick **OpenAI-compatible** in ***Settings ▸ Agent Provider***.
 3. Open ***Extensions ▸ OpenAI-compatible…***.
-4. Set **Server URL** to your server's API base, with no trailing path:
+4. Give your server a **profile** of its own, so your hosted setup stays intact: pick
+   one of the two local examples in the **Profile** row, or press **Manage…** and then
+   **New…** and name it after your box. Everything from here lands in that profile
+   alone.
+5. Set **Server URL** to your server's API base, with no trailing path:
    `http://your-box:11434/v1` for Ollama, `http://localhost:8080/v1` for
    llama-server. rio appends `/chat/completions` and `/models` itself — paste one of
    those on the end, or a trailing slash, and it trims them for you.
-5. Click **⟳ Refresh from provider** beside **Model**. The list is replaced by what
+6. Click **⟳ Refresh from provider** beside **Model**. The list is replaced by what
    *that* server actually offers. Pick one.
-6. Leave **API key** alone, at the top of the same window. With none stored rio sends
-   no authorization at all and lets the server decide, which is what a server of your
-   own normally wants.
+7. Leave the **API key** alone. With none stored rio sends no authorization at all and
+   lets the server decide, which is what a server of your own normally wants — and
+   because the key belongs to the profile, your hosted key is not the one at risk of
+   going to your own box.
+
+From then on, moving between your server and hosted ChatGPT is picking a profile in
+the strip at the bottom of the chat pane.
 
 rio refuses a turn before it starts in exactly one case: **no key and no server URL of
 your own**, because then it really is hosted OpenAI, which really does need a key.
@@ -183,10 +294,10 @@ Two settings matter more than usual for a server of your own:
 - **Request timeout (ms)** bounds the **whole** turn, not the idle time in it. A
   server that loads a model on demand, or a long generation on modest hardware, needs
   a generous value.
-- **Extra request JSON** is a JSON object merged into every request — for whatever
-  your server understands that rio has never heard of: `temperature`, `top_p`, or
-  llama.cpp's and vLLM's `chat_template_kwargs`. Any field rio sends itself is refused
-  here, with a message naming the setting to use instead.
+- **Extra request JSON** names a [file](#a-setting-that-names-a-file) holding a JSON
+  object merged into every request — for whatever your server understands that rio has
+  never heard of: `temperature`, `top_p`, or llama.cpp's and vLLM's
+  `chat_template_kwargs`. Press **Edit…** to write it.
 
 The two **Advanced** URLs stay blank unless your server keeps its completions and its
 model list somewhere other than under one base.
@@ -260,8 +371,17 @@ several steps can be read back in the order it happened.
 
 To stop seeing it, set **Reasoning** to *Hide it* — the OpenAI-compatible provider
 offers that in [its settings](#settings-a-provider-declares). Some servers can also be
-told not to produce any in the first place: on llama.cpp,
-`{"chat_template_kwargs":{"enable_thinking":false}}` in **Extra request JSON** does it.
+told not to produce any in the first place: on llama.cpp, put
+
+```
+{
+  "chat_template_kwargs": { "enable_thinking": false }
+}
+```
+
+in that profile's [extra-request file](#a-setting-that-names-a-file). The same file is
+where you ask for *more* thinking on a server that wants it there rather than through
+**Effort** — which is how the two shipped local profiles are set up.
 
 ## Changing just the selection
 
