@@ -1,28 +1,46 @@
 # Working remotely
 
-Editing files that live on another machine, with the window on yours.
+Keep the window local and edit files on a server. Install rio on your workstation
+first; use the same version on both machines. See [installation](../INSTALL.md).
 
-**This topic is still to be written.** It will cover: what actually moves (the
-*core* runs on the far box; the window stays local and is always a client);
-starting a core there and tunnelling in over SSH; attaching with `--connect` or
-from ***File ▸ Connect to Remote Core…***; what follows the core onto the remote
-disk (the file tree, the Open/Save dialogs, search, git, and the agent — key and
-all); what stays local (your preferences, themes, fonts); how a stale tunnel is
-noticed within seconds rather than minutes; and the handful of things that only
-work with a local core, such as OS file drag-and-drop.
+## Start the server
 
-For now, **§4 Deployment modes** in [INSTALL.md](../INSTALL.md) is the complete
-guide — requirements on the far box, the deploy script for a slim headless core,
-binding and exposure, and the exact commands.
+In the rio checkout on the server:
 
-Two things worth knowing before you connect:
+```sh
+./install-server.sh
+tclsh rio-core/server.tcl 7711
+```
 
-- **The agent runs where the core runs.** Over a remote core, the turn is made on
-  that machine and your API key is stored there. rio tells you so when you connect;
-  it matters if the box isn't yours. See [the agent](agent.md).
-- **rio never exposes a core to the network for you, and never dials out either.**
-  The core listens on loopback; you reach it over whatever you already trust — an
-  SSH tunnel, tailscale, a VPN, a private LAN. rio only ever sees the `host:port`
-  at your end, and has no opinion about how it got there.
+Leave it running. Keep the default `127.0.0.1` binding: the core has no
+authentication or encryption; the SSH tunnel supplies both.
 
-- [Troubleshooting](troubleshooting.md) — when a connection misbehaves.
+## Connect from your workstation
+
+Open a tunnel, replacing `you@server` with your SSH login:
+
+```sh
+ssh -N -L 127.0.0.1:7711:127.0.0.1:7711 you@server
+```
+
+Leave that terminal open. In another terminal, from your local rio checkout:
+
+```sh
+wish rio-gui/rio-gui.tcl --connect 127.0.0.1:7711 /path/on/server
+```
+
+Replace `/path/on/server` with your remote project directory. Alternatively, use
+***File ▸ Connect to Remote Core…***, enter `127.0.0.1:7711`, then open the folder.
+
+## While connected
+
+- File dialogs, saves, search, git, and the agent use the server. API keys are
+  stored there too; `localhost` in a model URL means the server.
+- Window preferences stay local. Desktop file drops do not upload files.
+- Save often: there is no autosave or crash recovery.
+- If the connection drops, check the core and tunnel, restore them, then reconnect
+  through ***File ▸ Connect to Remote Core…***. Reconnection is not automatic.
+- When finished, save and close rio, then stop the tunnel and server with
+  **Ctrl+C** in their terminals.
+
+[Deployment options](../INSTALL.md#4-deployment-modes) · [Agent setup](agent.md)
