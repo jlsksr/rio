@@ -134,21 +134,25 @@ test openai-api-provider-streams {a configured provider streams a reply via agen
 set ::optdir [file join [::tcltest::temporaryDirectory] rioopt-[clock clicks]]
 rio::agent::settings::override_dir $::optdir
 
+# A clean install: an empty settings dir, then the face's own first-run path — which
+# seeds the shipped profiles and activates ChatGPT (D131). Going through _adopt_settings
+# rather than poking `configure` means every test below starts from the state a real
+# first run produces, seeding and all.
 proc reset_openai_opts {} {
 	file delete -force $::optdir
-	rio::openai::api::configure model gpt-4o
-	rio::openai::api::configure effort default
-	rio::openai::api::configure reasoning show
-	rio::openai::api::configure base_url https://api.openai.com/v1
-	rio::openai::api::configure messages_url ""
-	rio::openai::api::configure models_url ""
-	rio::openai::api::configure extra_json ""
-	rio::openai::api::configure max_tokens 4096
-	rio::openai::api::configure request_timeout 600000
-	rio::openai::api::configure token_param max_tokens
-	rio::openai::api::configure token_models ""
-	rio::openai::api::configure effort_models ""
-	set ::rio::openai::api::models {{value gpt-4o label "GPT-4o"} {value gpt-4o-mini label "GPT-4o mini"}}
+	set ::rio::openai::api::profile ""
+	rio::openai::api::_adopt_settings
+}
+# The active profile's extra-request-JSON file, with this text in it. Returns its path.
+proc openai_extra {text} {
+	set p [dict get [rio::openai::api::option_file extra_json_file] path]
+	set fh [open $p w] ; fconfigure $fh -encoding utf-8
+	puts -nonewline $fh $text ; close $fh
+	return $p
+}
+# One setting as it is STORED for the active profile — what a restart would read back.
+proc openai_stored {key} {
+	return [rio::agent::settings::get openai $key "" $::rio::openai::api::profile]
 }
 # One declared option by name — the face declares ten now, and asking by position would
 # mean renumbering every test each time the order changes.
@@ -185,11 +189,11 @@ test openai-options-kinds {each option declares the control it wants} -setup {
 	reset_openai_opts
 } -body {
 	set out {}
-	foreach n {model reasoning base_url max_tokens request_timeout extra_json} {
+	foreach n {model reasoning base_url max_tokens request_timeout extra_json_file} {
 		lappend out $n [dict get [openai_opt $n] kind]
 	}
 	set out
-} -result {model choice reasoning choice base_url text max_tokens number request_timeout number extra_json text}
+} -result {model choice reasoning choice base_url text max_tokens number request_timeout number extra_json_file text}
 
 test openai-options-quick {only the two you change between turns reach the strip} -setup {
 	reset_openai_opts
@@ -227,7 +231,7 @@ test openai-option-set-model {choosing a model applies it and remembers it} -set
 	reset_openai_opts
 } -body {
 	rio::agent::option_set model llama3.2:3b openai
-	list [rio::openai::api::cget model] [rio::agent::settings::get openai model]
+	list [rio::openai::api::cget model] [openai_stored model]
 } -cleanup { reset_openai_opts } -result {llama3.2:3b llama3.2:3b}
 
 test openai-option-set-effort-unknown {an effort outside the declared set is refused} -setup {
@@ -237,13 +241,16 @@ test openai-option-set-effort-unknown {an effort outside the declared set is ref
 	list $e [rio::openai::api::cget effort]
 } -match glob -result {{*must be one of*} default}
 
-test openai-adopts-stored {a choice in the provider's conf file is adopted at load} -setup {
+# Hand-editing still works; since D131 the file to edit is the active PROFILE's, and the
+# flat one holds the pointer at it.
+test openai-adopts-stored {a choice in the active profile's conf file is adopted at load} -setup {
 	reset_openai_opts
 } -body {
-	rio::agent::settings::store openai model from-the-file
+	rio::agent::settings::store openai model from-the-file $::rio::openai::api::profile
 	rio::openai::api::_adopt_settings
-	rio::openai::api::cget model
-} -cleanup { reset_openai_opts } -result {from-the-file}
+	list [rio::openai::api::cget model] \
+		[rio::agent::settings::get openai profile]
+} -cleanup { reset_openai_opts } -result {from-the-file ChatGPT}
 
 # --- effort on the wire ------------------------------------------------------
 
@@ -343,7 +350,7 @@ test openai-token-learned-is-remembered {the answer is persisted, so it is learn
 	rio::openai::api::set_key sk-XYZ
 } -body {
 	token_turn o4-mini
-	list [rio::openai::api::cget token_models] [rio::agent::settings::get openai token_models]
+	list [rio::openai::api::cget token_models] [openai_stored token_models]
 } -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {o4-mini o4-mini}
 
 test openai-token-learned-skips-the-retry {a learned model sends the right name the first time} -setup {
@@ -428,7 +435,7 @@ test openai-effort-refusal-is-remembered {the second turn sends no effort at all
 	rio::agent::option_set effort high openai
 	token_turn gpt-4o effort_tp     ;# learns
 	token_turn gpt-4o effort_tp     ;# no refusal to recover from this time
-	list [llength $::sent] [sent_has_effort 0] [rio::agent::settings::get openai effort_models]
+	list [llength $::sent] [sent_has_effort 0] [openai_stored effort_models]
 } -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {1 0 gpt-4o}
 
 test openai-effort-choice-is-not-rewritten {the user's choice survives a model that can't use it} -setup {
@@ -610,21 +617,49 @@ test openai-reasoning-reaches-the-turn {the setting rides into the request confi
 	set out
 } -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result hide
 
-# --- extra_json: validated, never rebuilt -----------------------------------
+# --- the extra-request-JSON FILE: validated per turn, never rebuilt (D131) ----
+#
+# The option holds a file NAME; the JSON lives in the file, which the user may edit at
+# any moment. So the checks that used to run when the value was set now run when a turn
+# READS it — the only place the answer is authoritative — and the same _check_extra does
+# the work.
 
-test openai-extra-json-accepted {a JSON object is taken and stored} -setup {
+test openai-extra-json-file-created {Edit… resolves and creates, per profile, valid and empty} -setup {
 	reset_openai_opts
 } -body {
-	rio::agent::option_set extra_json {{"temperature":0.2}} openai
-	list [rio::openai::api::cget extra_json] [rio::agent::settings::get openai extra_json]
-} -cleanup { reset_openai_opts } -result {{{"temperature":0.2}} {{"temperature":0.2}}}
+	set r [rio::openai::api::option_file extra_json_file]
+	set p [dict get $r path]
+	set fh [open $p r] ; set t [string trim [::read $fh]] ; close $fh
+	set again [rio::openai::api::option_file extra_json_file]
+	list [dict get $r created] [dict get $again created] $t \
+		[file tail $p] [rio::openai::api::cget extra_json_file] \
+		[openai_stored extra_json_file]
+} -cleanup { reset_openai_opts } -result \
+	{1 0 {{}} ChatGPT.extra.json ChatGPT.extra.json ChatGPT.extra.json}
+
+test openai-extra-json-file-read {what the file holds is what the turn splices} -setup {
+	reset_openai_opts
+	openai_extra {{"temperature":0.2}}
+} -body {
+	rio::openai::api::_extra_text
+} -cleanup { reset_openai_opts } -result {{"temperature":0.2}}
+
+test openai-extra-json-none {naming no file, or a file that is gone, sends nothing} -setup {
+	reset_openai_opts
+} -body {
+	set a [rio::openai::api::_extra_text]
+	set p [openai_extra {{"temperature":0.2}}]
+	file delete -- $p
+	list $a [rio::openai::api::_extra_text]
+} -cleanup { reset_openai_opts } -result {{} {}}
 
 test openai-extra-json-must-be-an-object {an array or a scalar is refused} -setup {
 	reset_openai_opts
 } -body {
 	set out {}
 	foreach v {{[1,2]} {"hi"} {not json at all} {{"a":}} } {
-		lappend out [catch {rio::agent::option_set extra_json $v openai}]
+		openai_extra $v
+		lappend out [catch {rio::openai::api::_extra_text}]
 	}
 	set out
 } -cleanup { reset_openai_opts } -result {1 1 1 1}
@@ -634,7 +669,8 @@ test openai-extra-json-refuses-rios-own-keys {a field rio sends itself is refuse
 } -body {
 	set out {}
 	foreach k {model messages stream tools max_tokens} {
-		set r [catch {rio::agent::option_set extra_json "{\"$k\":1}" openai} e]
+		openai_extra "{\"$k\":1}"
+		set r [catch {rio::openai::api::_extra_text} e]
 		lappend out $r [string match "*set it with the option above*" $e]
 	}
 	set out
@@ -644,47 +680,61 @@ test openai-extra-json-forbids-the-live-token-field {the refused set follows the
 	reset_openai_opts
 } -body {
 	# max_completion_tokens is fine while the cap is spelled max_tokens...
-	set a [catch {rio::agent::option_set extra_json {{"max_completion_tokens":1}} openai}]
-	rio::agent::option_set extra_json "" openai
+	openai_extra {{"max_completion_tokens":1}}
+	set a [catch {rio::openai::api::_extra_text}]
 	rio::agent::option_set token_param max_completion_tokens openai
 	# ...and refused once it is the field rio sends.
-	set b [catch {rio::agent::option_set extra_json {{"max_completion_tokens":1}} openai}]
+	set b [catch {rio::openai::api::_extra_text}]
 	list $a $b
 } -cleanup { reset_openai_opts } -result {0 1}
 
 test openai-extra-json-forbids-the-effort-field {the effort key is read from the wire fragment, not hardcoded} -setup {
 	reset_openai_opts
+	openai_extra {{"reasoning_effort":"high"}}
 } -body {
-	catch {rio::agent::option_set extra_json {{"reasoning_effort":"high"}} openai} e
+	catch {rio::openai::api::_extra_text} e
 	string match "*reasoning_effort*" $e
 } -cleanup { reset_openai_opts } -result 1
 
-test openai-extra-json-one-line {a pretty-printed paste is flattened, not refused} -setup {
+# A file is the point: what could not be written on one line before now can be, and the
+# flattening that made it fit is applied on the way into the REQUEST instead.
+test openai-extra-json-pretty-printed {a file may be pretty-printed; the request is one line} -setup {
 	reset_openai_opts
+	openai_extra "{\n  \"temperature\": 0.2,\n  \"k\": {\n    \"enable_thinking\": true\n  }\n}"
 } -body {
-	rio::agent::option_set extra_json "{\n  \"temperature\": 0.2\n}" openai
-	set v [rio::openai::api::cget extra_json]
-	list [string match "*\n*" $v] [dict get [json::json2dict $v] temperature]
-} -cleanup { reset_openai_opts } -result {0 0.2}
+	set v [rio::openai::api::_extra_text]
+	list [string match "*\n*" $v] [dict get [json::json2dict $v] temperature] \
+		[dict get [json::json2dict $v] k enable_thinking]
+} -cleanup { reset_openai_opts } -result {0 0.2 true}
 
-test openai-extra-json-survives-the-conf-file {a value full of = and # and braces round-trips} -setup {
+test openai-extra-json-turn-refuses-a-broken-file {a turn stops and says so, rather than dropping it} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-oai-XYZ
+	openai_extra {{"model":"sneaky"}}
+} -body {
+	set ::posts {}
+	rio::openai::api::provider {{role user text hi}} {} {} collect_post
+	set p [lindex $::posts 0]
+	list [lindex $p 0] [lindex $p 1] [string match "*extra request JSON*" [lindex $p 2]]
+} -cleanup { reset_openai_opts ; rio::openai::api::clear_key } -result {error bad_request 1}
+
+test openai-extra-json-name-refused {a name that could point elsewhere is refused} -setup {
 	reset_openai_opts
 } -body {
-	# rio::conf splits on the FIRST = and only comments a line that STARTS with #, so
-	# none of this should trouble it — but a settings value is the one place to be sure.
-	set v {{"a":"b = c # d","k":{"enable_thinking":true}}}
-	rio::agent::option_set extra_json $v openai
-	set back [rio::agent::settings::get openai extra_json]
-	list [expr {$back eq $v}] [dict get [json::json2dict $back] a]
-} -cleanup { reset_openai_opts } -result {1 {b = c # d}}
+	set out {}
+	foreach n {../escape a/b .hidden ..} {
+		lappend out [catch {rio::agent::option_set extra_json_file $n openai}]
+	}
+	set out
+} -cleanup { reset_openai_opts } -result {1 1 1 1}
 
 test openai-extra-json-clearable {emptying it puts the request back to rio's own} -setup {
 	reset_openai_opts
+	openai_extra {{"temperature":0.2}}
 } -body {
-	rio::agent::option_set extra_json {{"temperature":0.2}} openai
-	rio::agent::option_set extra_json "" openai
-	rio::openai::api::cget extra_json
-} -cleanup { reset_openai_opts } -result {}
+	rio::agent::option_set extra_json_file "" openai
+	list [rio::openai::api::cget extra_json_file] [rio::openai::api::_extra_text]
+} -cleanup { reset_openai_opts } -result {{} {}}
 
 # --- a key is optional -------------------------------------------------------
 
@@ -735,21 +785,23 @@ test openai-adopts-every-new-key {a restart reads each stored setting back} -set
 } -body {
 	foreach {k v} {base_url http://kept.local/v1 reasoning hide max_tokens 2048 \
 			request_timeout 120000 token_param max_completion_tokens \
-			extra_json {{"temperature":0.1}}} {
+			extra_json_file kept.json} {
 		rio::agent::option_set $k $v openai
 	}
-	# Wipe the live config as a fresh process would have it, then adopt from disk.
+	# Wipe the live config as a fresh process would have it, then adopt from disk. The
+	# profile pointer goes too: a restart re-reads which profile was active.
 	foreach {k v} {base_url https://api.openai.com/v1 reasoning show max_tokens 4096 \
-			request_timeout 600000 token_param max_tokens extra_json ""} {
+			request_timeout 600000 token_param max_tokens extra_json_file ""} {
 		rio::openai::api::configure $k $v
 	}
+	set ::rio::openai::api::profile ""
 	rio::openai::api::_adopt_settings
-	set out {}
-	foreach k {base_url reasoning max_tokens request_timeout token_param extra_json} {
+	set out [list $::rio::openai::api::profile]
+	foreach k {base_url reasoning max_tokens request_timeout token_param extra_json_file} {
 		lappend out [rio::openai::api::cget $k]
 	}
 	set out
-} -cleanup { reset_openai_opts } -result {http://kept.local/v1 hide 2048 120000 max_completion_tokens {{"temperature":0.1}}}
+} -cleanup { reset_openai_opts } -result {ChatGPT http://kept.local/v1 hide 2048 120000 max_completion_tokens kept.json}
 
 test openai-refresh-replaces-choices {a server's listing becomes the picker's choices} -setup {
 	reset_openai_opts
@@ -782,6 +834,226 @@ test openai-refresh-network-failure {a failed fetch keeps the old choices and sa
 	rio::agent::options_refresh model announce openai
 	list [announced_error] [llength [dict get [lindex [rio::agent::options openai] 0] choices]]
 } -cleanup { set ::rio::openai::api::fetcher rio::llm::http::get } -match glob -result {{*connection refused*} 2}
+
+# --- profiles (D131) ---------------------------------------------------------
+#
+# Named configurations of everything above, one active. The core routes; this face
+# decides what a profile CONTAINS, what a switch re-adopts, and that the extra-JSON file
+# travels with the profile that owns it.
+
+test openai-profiles-seeded {a first run gets the shipped profiles, ChatGPT active} -setup {
+	reset_openai_opts
+} -body {
+	set r [rio::agent::profiles openai]
+	list [dict get $r active] [dict get $r profiles] \
+		[rio::openai::api::cget base_url] [rio::openai::api::cget model]
+} -result {ChatGPT {ChatGPT {Qwen3.8 27B (local)} {Qwen3.8 Flash Next (local)}} https://api.openai.com/v1 gpt-4o}
+
+test openai-profiles-seeded-local-example {the local examples point at a server, with no key and a bigger cap} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	set extra [rio::openai::api::_extra_text]
+	list [rio::openai::api::cget base_url] [rio::openai::api::cget model] \
+		[rio::openai::api::cget max_tokens] [rio::openai::api::cget secret_name] \
+		[dict get [json::json2dict $extra] chat_template_kwargs enable_thinking]
+} -cleanup { reset_openai_opts } -result \
+	{http://127.0.0.1:1080/v1 coder-large 32768 openai-local true}
+
+# The D39 seed rule, applied to profiles: written once, keyed on the directory not yet
+# existing — so a deleted example stays deleted and an edited one is never overwritten.
+test openai-profiles-seeded-once {a second adopt does not re-seed, and a deletion stays} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_remove "Qwen3.8 Flash Next (local)" openai
+	rio::agent::option_set model edited openai
+	rio::openai::api::_adopt_settings
+	list [dict get [rio::agent::profiles openai] profiles] [rio::openai::api::cget model]
+} -cleanup { reset_openai_opts } -result \
+	{{ChatGPT {Qwen3.8 27B (local)}} edited}
+
+test openai-profiles-settings-are-separate {a setting made in one profile does not follow you} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set model mine openai
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	set away [rio::openai::api::cget model]
+	rio::agent::profile_set ChatGPT openai
+	list $away [rio::openai::api::cget model]
+} -cleanup { reset_openai_opts } -result {coder-large mine}
+
+# The leak worth guarding: a key the new profile does not mention must go back to the
+# SHIPPED default, not keep what the old profile set.
+test openai-profiles-switch-resets-omitted {an unmentioned key returns to its default} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::option_set request_timeout 120000 openai
+	rio::agent::profile_add Fresh "" openai
+	rio::agent::profile_set Fresh openai
+	list [rio::openai::api::cget request_timeout] [rio::openai::api::cget base_url]
+} -cleanup { reset_openai_opts } -result {600000 https://api.openai.com/v1}
+
+# The security point of per-profile keys (D131): a key entered for a hosted vendor must
+# not be sent to the server on your own box.
+test openai-profiles-key-is-per-profile {switching to a local profile sends no Authorization} -setup {
+	reset_openai_opts
+	rio::openai::api::set_key sk-HOSTED
+} -body {
+	set hosted [rio::openai::api::configured]
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	set local [rio::openai::api::configured]
+	set ::seen {}
+	proc capture_tp {req on_chunk on_done} { set ::seen $req ; {*}$on_done 200 "" }
+	set was $::rio::openai::api::transport
+	set ::rio::openai::api::transport capture_tp
+	rio::openai::api::provider {{role user text hi}} {} "" collect_post
+	set ::rio::openai::api::transport $was
+	set h [dict get $::seen headers]
+	# ...and the hosted key is still there when you switch back.
+	rio::agent::profile_set ChatGPT openai
+	list $hosted $local [expr {[lsearch -exact $h Authorization] >= 0}] \
+		[rio::openai::api::configured]
+} -cleanup {
+	rio::agent::profile_set ChatGPT openai
+	rio::openai::api::clear_key ; reset_openai_opts
+} -result {1 0 0 1}
+
+test openai-profiles-duplicate-copies-the-extra-file {Duplicate gets its own file, not a share} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	rio::agent::profile_add Copy "Qwen3.8 27B (local)" openai
+	rio::agent::profile_set Copy openai
+	set mine [rio::openai::api::cget extra_json_file]
+	# Editing the copy must leave the original alone.
+	openai_extra {{"temperature":0.9}}
+	set copytext [rio::openai::api::_extra_text]
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	list $mine $copytext \
+		[dict exists [json::json2dict [rio::openai::api::_extra_text]] chat_template_kwargs]
+} -cleanup { reset_openai_opts } -result \
+	{Copy.extra.json {{"temperature":0.9}} 1}
+
+test openai-profiles-remove-takes-its-own-file {removing a profile removes the file named after it} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	set p [dict get [rio::openai::api::option_file extra_json_file] path]
+	rio::agent::profile_set ChatGPT openai
+	rio::agent::profile_remove "Qwen3.8 27B (local)" openai
+	list [file exists $p] [dict get [rio::agent::profiles openai] profiles]
+} -cleanup { reset_openai_opts } -result \
+	{0 {ChatGPT {Qwen3.8 Flash Next (local)}}}
+
+test openai-profiles-remove-active-lands-elsewhere {removing what is running activates another} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	rio::agent::profile_remove "Qwen3.8 27B (local)" openai
+	list [rio::agent::profile_name openai] [rio::openai::api::cget model]
+} -cleanup { reset_openai_opts } -result {ChatGPT gpt-4o}
+
+# Settings live IN a profile, so there has to be one. Refusing here is what lets
+# everything else assume exactly one is active.
+test openai-profiles-never-remove-the-last {the only profile cannot be deleted} -setup {
+	reset_openai_opts
+	rio::agent::profile_remove "Qwen3.8 27B (local)" openai
+	rio::agent::profile_remove "Qwen3.8 Flash Next (local)" openai
+} -body {
+	catch {rio::agent::profile_remove ChatGPT openai} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*only profile*" $e] \
+		[rio::agent::profile_name openai]
+} -cleanup { reset_openai_opts } -result {bad_request 1 ChatGPT}
+
+test openai-profiles-rename-carries-everything {rename keeps the settings, the file and the pointer} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	rio::agent::profile_rename "Qwen3.8 27B (local)" "Big local" openai
+	list [rio::agent::profile_name openai] [rio::openai::api::cget model] \
+		[rio::openai::api::cget extra_json_file] \
+		[dict exists [json::json2dict [rio::openai::api::_extra_text]] chat_template_kwargs]
+} -cleanup { reset_openai_opts } -result \
+	{{Big local} coder-large {Big local.extra.json} 1}
+
+# A refreshed model list belongs to the SERVER it came from — so it is remembered per
+# profile, and switching does not leave one server's models in the other's picker.
+test openai-profiles-models-cached {a refreshed listing is remembered per profile} -setup {
+	reset_openai_opts
+	set ::announced {}
+	set body {{"data":[{"id":"coder-large"},{"id":"flash-next"}]}}
+	set ::rio::openai::api::fetcher [list apply {{body req done} {{*}$done 200 "" $body}} $body]
+} -body {
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	rio::agent::options_refresh model announce openai
+	set local [llength [dict get [openai_opt model] choices]]
+	set localfirst [dict get [lindex [dict get [openai_opt model] choices] 0] value]
+	rio::agent::profile_set ChatGPT openai
+	set hosted [dict get [lindex [dict get [openai_opt model] choices] 0] value]
+	rio::agent::profile_set "Qwen3.8 27B (local)" openai
+	list $local $localfirst $hosted \
+		[dict get [lindex [dict get [openai_opt model] choices] 0] value]
+} -cleanup {
+	set ::rio::openai::api::fetcher rio::llm::http::get ; reset_openai_opts
+} -result {2 coder-large gpt-4o coder-large}
+
+test openai-profiles-registered {the face declares the capability, so a frontend offers the row} -body {
+	set ps {}
+	foreach p [rio::agent::providers_info] { dict set ps [dict get $p name] $p }
+	dict get [dict get $ps openai] profiles
+} -result 1
+
+# --- carrying a pre-profiles install forward ---------------------------------
+#
+# Anything in the flat file is a configuration somebody is USING, so it becomes a profile
+# and becomes the ACTIVE one — a seeded default must not silently replace a working setup.
+
+test openai-migrates-an-existing-config {old settings become a profile, and it is the live one} -setup {
+	file delete -force $::optdir
+	rio::agent::settings::store openai base_url http://127.0.0.1:1080/v1
+	rio::agent::settings::store openai model my-local-model
+	rio::agent::settings::store openai max_tokens 32768
+	set ::rio::openai::api::profile ""
+} -body {
+	rio::openai::api::_adopt_settings
+	list [rio::agent::profile_name openai] [rio::openai::api::cget base_url] \
+		[rio::openai::api::cget model] [rio::openai::api::cget max_tokens] \
+		[expr {"ChatGPT" in [dict get [rio::agent::profiles openai] profiles]}]
+} -cleanup { reset_openai_opts } -result \
+	{{Current settings} http://127.0.0.1:1080/v1 my-local-model 32768 1}
+
+# The inline extra_json could only ever be one line (the settings format has no
+# continuation). Migration gives it the file it should have had.
+test openai-migrates-inline-extra-json {an inline value becomes a file} -setup {
+	file delete -force $::optdir
+	rio::agent::settings::store openai extra_json {{"chat_template_kwargs":{"enable_thinking":false}}}
+	set ::rio::openai::api::profile ""
+} -body {
+	rio::openai::api::_adopt_settings
+	list [rio::openai::api::cget extra_json_file] \
+		[dict get [json::json2dict [rio::openai::api::_extra_text]] \
+			chat_template_kwargs enable_thinking]
+} -cleanup { reset_openai_opts } -result \
+	{{Current settings.extra.json} false}
+
+test openai-fresh-install-does-not-migrate {with nothing stored, ChatGPT is simply active} -setup {
+	file delete -force $::optdir
+	set ::rio::openai::api::profile ""
+} -body {
+	rio::openai::api::_adopt_settings
+	list [rio::agent::profile_name openai] \
+		[expr {"Current settings" in [dict get [rio::agent::profiles openai] profiles]}]
+} -cleanup { reset_openai_opts } -result {ChatGPT 0}
+
+# A pointer at a profile someone deleted by hand must cost the user nothing.
+test openai-dangling-pointer-falls-back {a pointer at a profile that is gone lands on one that is not} -setup {
+	reset_openai_opts
+} -body {
+	rio::agent::settings::store openai profile "Gone"
+	set ::rio::openai::api::profile ""
+	rio::openai::api::_adopt_settings
+	rio::agent::profile_name openai
+} -cleanup { reset_openai_opts } -result ChatGPT
 
 file delete -force $rio::secret::override_dir $::optdir
 cleanupTests

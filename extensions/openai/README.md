@@ -5,22 +5,37 @@ Adds an **OpenAI-compatible** agent provider for rio's built-in agent. Point it 
 protocol — Ollama, llama.cpp / llama-server, llama-swap, vLLM, LM Studio — by its URL.
 A server of your own usually needs no key at all.
 
-- **Kind:** provider (`provider-api = 4`)
+- **Kind:** provider (`provider-api = 5`)
 - **Needs:** an OpenAI API key (`sk-…`) for hosted ChatGPT, **or** just the URL of your
   own server.
 
 ## Install
 
-1. In rio, open **Settings ▸ Extensions…**, click **Repositories…**, and add this
+1. In rio, open **Extensions ▸ Browse…**, click **Repositories…**, and add this
    repository's base URL.
 2. Back in the Extensions window, select **openai** and install it.
 3. **Restart rio** — an installed provider becomes live on the next start.
 4. Choose **OpenAI-compatible** as the agent provider, then open
    **Extensions ▸ OpenAI-compatible…**.
 
+## Profiles
+
+Everything below is one **profile**, and you can keep as many as you like — one for
+hosted ChatGPT, one for each server of your own. The **Profile** row at the top of the
+settings window switches between them; **Manage…** makes, copies, renames and deletes
+them. Each profile keeps its own model, URL, token cap, extra request JSON *and its own
+API key*, so switching to a local server never sends a hosted vendor's key to your own
+box.
+
+A first run starts with three: **ChatGPT**, and two local examples pointing at
+`http://127.0.0.1:1080/v1` (llama-swap's usual port) to show the shape of a self-hosted
+setup — no key, a bigger token cap, and its thinking configured through the extra-JSON
+file. Edit them, or delete them; they are written once and never restored, so an upgrade
+will not undo either.
+
 ## Settings
 
-Everything is set in that window, and saved on the machine the core runs on.
+Everything is set in that window, per profile, and saved on the machine the core runs on.
 
 | | |
 |---|---|
@@ -31,7 +46,7 @@ Everything is set in that window, and saved on the machine the core runs on.
 | **Max tokens** | The cap on one reply's length. |
 | **Request timeout** | How long one whole turn may take. It bounds the whole exchange, so a long generation or a server that loads a model on demand needs a generous value. |
 | **Token cap field** | `max_tokens` for most servers; newer hosted OpenAI models want `max_completion_tokens` and say so in a 400, which rio then remembers per model. |
-| **Extra request JSON** | A JSON object merged into every request — `temperature`, `top_p`, or whatever this server understands (llama.cpp and vLLM take `chat_template_kwargs`). Fields rio sends itself are refused here. |
+| **Extra request JSON** | The name of a **file** holding a JSON object merged into every request — `temperature`, `top_p`, or whatever this server understands (llama.cpp and vLLM take `chat_template_kwargs`). **Edit…** opens it in the editor; it is read fresh every turn, so a change takes effect on the next one, and it may be pretty-printed. Fields rio sends itself are refused. Blank sends nothing extra. |
 
 The two **Advanced** URLs are for a server whose paths are not under one base; blank means
 they are derived from the Server URL.
