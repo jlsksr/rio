@@ -114,6 +114,94 @@ rio::agent::register_provider vault ::vault::provider -label "Vaulted" \
 	-key [dict create set ::vault::set_key clear ::vault::clear_key \
 		status ::vault::configured]
 
+# A fourth that keeps PROFILES and declares an option whose value names a file (D131).
+# Again deliberately unfamiliar: its option is not "model" and not "extra request JSON",
+# so nothing below can pass by recognising a shipped provider's vocabulary. The storage
+# is the core's own (rio::agent::settings), so these tests drive the real files.
+namespace eval atlas {
+	variable region north
+	variable charts ""
+	variable profile ""
+	variable defaults {region north charts ""}
+}
+proc atlas::provider {conversation tools system post} { {*}$post done stop }
+proc atlas::opts {} {
+	variable region ; variable charts
+	return [list \
+		[dict create name region label Region group Where value $region free 1 \
+			choices {{value north label North} {value south label South}}] \
+		[dict create name charts label Charts group Where kind text file 1 quick 0 \
+			hint "A file of extra charts." value $charts]]
+}
+proc atlas::opt_set {name value} {
+	variable region ; variable charts ; variable profile
+	switch -- $name {
+		region { set region $value }
+		charts { set charts $value }
+		default { rio::error::raise bad_request "unknown option: $name" }
+	}
+	rio::agent::settings::store atlas $name $value $profile
+	return
+}
+proc atlas::opt_file {name} {
+	variable charts
+	if {$name ne "charts"} { rio::error::raise bad_request "option '$name' names no file" }
+	if {$charts eq ""} { opt_set charts "$::atlas::profile.charts" }
+	set p [file join [rio::agent::settings::profile_dir atlas] $charts]
+	set created 0
+	if {![file isfile $p]} {
+		file mkdir [file dirname $p]
+		set fh [open $p w 0600] ; puts -nonewline $fh "" ; close $fh
+		set created 1
+	}
+	return [dict create path $p created $created]
+}
+proc atlas::_adopt {} {
+	variable region ; variable charts ; variable profile ; variable defaults
+	set region [rio::agent::settings::get atlas region [dict get $defaults region] $profile]
+	set charts [rio::agent::settings::get atlas charts [dict get $defaults charts] $profile]
+}
+proc atlas::prof_list {} {
+	variable profile
+	return [dict create profiles [rio::agent::settings::profiles atlas] active $profile]
+}
+proc atlas::prof_switch {name} {
+	variable profile
+	if {![rio::agent::settings::profile_exists atlas $name]} {
+		rio::error::raise bad_request "no such profile: $name"
+	}
+	set profile $name
+	_adopt
+	return $name
+}
+proc atlas::prof_add {name {from ""}} {
+	rio::agent::settings::profile_add atlas $name $from
+	return $name
+}
+proc atlas::prof_remove {name} {
+	variable profile
+	if {[llength [rio::agent::settings::profiles atlas]] <= 1} {
+		rio::error::raise bad_request "'$name' is the only profile"
+	}
+	rio::agent::settings::profile_remove atlas $name
+	if {$name eq $profile} { prof_switch [lindex [rio::agent::settings::profiles atlas] 0] }
+	return $name
+}
+proc atlas::prof_rename {name to} {
+	variable profile
+	rio::agent::settings::profile_rename atlas $name $to
+	if {$name eq $profile} { set profile $to }
+	return $to
+}
+rio::agent::register_provider atlas ::atlas::provider -label "Atlas" \
+	-options [dict create list ::atlas::opts set ::atlas::opt_set \
+		file ::atlas::opt_file] \
+	-profiles [dict create list ::atlas::prof_list switch ::atlas::prof_switch \
+		add ::atlas::prof_add remove ::atlas::prof_remove rename ::atlas::prof_rename]
+atlas::prof_add Home
+atlas::prof_add Away
+atlas::prof_switch Home
+
 agent_providers_refresh
 
 # --- the door ----------------------------------------------------------------
@@ -368,6 +456,193 @@ ok "reopen: and says there is nothing to set" \
 	[winfo exists .provset.body.none] 1
 destroy .provset
 destroy .prefs
+
+# --- profiles (D131) ---------------------------------------------------------
+#
+# The row, the manager and the strip menu — all rendered from what the provider declares
+# and what the core answers, so none of it names atlas, a region or a charts file.
+
+proc profrow {} { return .provset.body.profc }
+
+provider_settings_dialog atlas
+update idletasks
+ok "profiles: the provider declares them"     [provider_has_profiles atlas] 1
+ok "profiles: and one that doesn't, doesn't"  [provider_has_profiles vend] 0
+ok "profiles: the row is drawn"               [winfo exists [profrow]] 1
+# ...and only for a provider that keeps them. A row with nothing to put in it would be
+# worse than none: it would claim a choice that does not exist.
+provider_settings_dialog vend
+update idletasks
+ok "profiles: no row without them"            [winfo exists [profrow]] 0
+provider_settings_dialog atlas
+update idletasks
+ok "profiles: it names the active profile"    [[profrow].mb cget -text] "Home ▾"
+ok "profiles: and offers every one"           [[profrow].mb.m index end] 1
+
+# The row sits ABOVE the credentials and every declared option: it decides what they all
+# show, so it cannot be read last.
+ok "profiles: the row comes first" \
+	[expr {[lindex [grid info .provset.body.profh] [expr {[lsearch [grid info .provset.body.profh] -row]+1}]] < \
+	       [lindex [grid info .provset.body.l1]   [expr {[lsearch [grid info .provset.body.l1] -row]+1}]]}] 1
+
+# Switching from the row reaches the core and the form repaints from it.
+provider_profile_switch atlas Away
+update idletasks
+ok "profiles: switching reaches the core"     [rio::agent::profile_name atlas] Away
+ok "profiles: the row follows"                [[profrow].mb cget -text] "Away ▾"
+
+# A setting made in one profile stays there — the reason profiles exist, checked through
+# the window rather than in the core's own tests.
+provider_settings_write atlas region south
+update idletasks
+provider_profile_switch atlas Home
+update idletasks
+ok "profiles: a setting does not follow you"  [set ::atlas::region] north
+provider_profile_switch atlas Away
+update idletasks
+ok "profiles: and is there when you go back"  [set ::atlas::region] south
+provider_profile_switch atlas Home
+update idletasks
+
+# --- the manager -------------------------------------------------------------
+provider_profiles_dialog atlas
+update idletasks
+ok "manage: the dialog opens"                 [winfo exists .provprof] 1
+ok "manage: it lists every profile"           $::provprof_names {Away Home}
+ok "manage: and marks the active one"         [.provprof.body.list get 1] "● Home"
+ok "manage: with it selected"                 [.provprof.body.list curselection] 1
+
+# Switch from the manager.
+.provprof.body.list selection clear 0 end
+.provprof.body.list selection set 0
+provprof_use
+update idletasks
+ok "manage: Switch to reaches the core"       [rio::agent::profile_name atlas] Away
+ok "manage: and the list re-marks it"         [.provprof.body.list get 0] "● Away"
+
+# New — created AND switched to, because making one and not going to it is never what a
+# person meant.
+rename name_prompt _real_np
+proc name_prompt {title label prefill} { return $::np_answer }
+set ::np_answer "Field"
+provprof_new
+update idletasks
+ok "manage: New creates it"                   [expr {"Field" in $::provprof_names}] 1
+ok "manage: and switches to it"               [rio::agent::profile_name atlas] Field
+ok "manage: at the provider's defaults"       [set ::atlas::region] north
+
+# Duplicate — from the selected profile, so it starts with that one's settings.
+.provprof.body.list selection clear 0 end
+.provprof.body.list selection set [lsearch $::provprof_names Away]
+set ::np_answer "Away copy"
+provprof_dup
+update idletasks
+ok "manage: Duplicate copies the settings"    [set ::atlas::region] south
+ok "manage: under the new name"               [rio::agent::profile_name atlas] "Away copy"
+
+# Rename — the pointer follows when it is the active one.
+set ::np_answer "Far"
+.provprof.body.list selection clear 0 end
+.provprof.body.list selection set [lsearch $::provprof_names "Away copy"]
+provprof_rename
+update idletasks
+ok "manage: Rename renames"                   [expr {"Far" in $::provprof_names}] 1
+ok "manage: and the active pointer follows"   [rio::agent::profile_name atlas] Far
+rename name_prompt {} ; rename _real_np name_prompt
+
+# Delete — the one destructive verb, so the one that asks.
+rename tk_messageBox _real_mb
+proc tk_messageBox {args} { set ::mb_asked [dict get $args -message] ; return $::mb_answer }
+set ::mb_asked "" ; set ::mb_answer no
+.provprof.body.list selection clear 0 end
+.provprof.body.list selection set [lsearch $::provprof_names Field]
+provprof_delete
+update idletasks
+ok "manage: Delete asks first"                [string match "*Field*" $::mb_asked] 1
+ok "manage: and No deletes nothing"           [expr {"Field" in $::provprof_names}] 1
+set ::mb_answer yes
+.provprof.body.list selection clear 0 end
+.provprof.body.list selection set [lsearch $::provprof_names Field]
+provprof_delete
+update idletasks
+ok "manage: Yes deletes it"                   [expr {"Field" in $::provprof_names}] 0
+rename tk_messageBox {} ; rename _real_mb tk_messageBox
+
+# A refusal from the provider lands in the settings window's status line, never a modal
+# (which a headless run would fail outright — D95).
+ok "manage: still more than one left"         [expr {[llength $::provprof_names] > 1}] 1
+destroy .provprof
+update idletasks
+
+# --- an option that names a file ---------------------------------------------
+#
+# The value is a name; the button opens the file the CORE resolved — so a remote core
+# opens its own disk, which is the whole reason this is an op and not a path join here.
+provider_settings_dialog atlas
+update idletasks
+set ::charts_ctl ""
+foreach child [winfo children .provset.body] {
+	if {[string match .provset.body.c* $child] && [winfo exists $child.ed]} {
+		set ::charts_ctl $child
+	}
+}
+ok "file: the flagged option gets a field and a button" \
+	[expr {$::charts_ctl ne "" && [winfo exists $::charts_ctl.e]}] 1
+ok "file: the button says Edit…"              [$::charts_ctl.ed cget -text] "Edit…"
+ok "file: an ordinary field gets no button" \
+	[winfo exists .provset.body.c1.ed] 0
+
+$::charts_ctl.ed invoke
+update idletasks
+# Not a buffer COUNT: opening a file while the only tab is an empty scratch reuses it,
+# so the count is unchanged and the question is whether the right path is open.
+set paths {}
+foreach id [dict keys $::buffers] { lappend paths [dict get $::buffers $id path] }
+set want [dict get [rio::agent::option_file charts atlas] path]
+ok "file: it opens the core's own path as a tab" [expr {$want in $paths}] 1
+ok "file: and it is the focused tab"          [dict get $::buffers $::cur path] $want
+ok "file: the provider recorded a name for it" [expr {[set ::atlas::charts] ne ""}] 1
+# Naming none was the ordinary case, so the field it just filled in has to show it.
+ok "file: and the field shows it"             [$::charts_ctl.e get] [set ::atlas::charts]
+destroy .provset
+
+# --- the chat strip's Profile section ----------------------------------------
+#
+# Switching a profile is a fast switch, so it belongs in the menu (D85); MAKING one is
+# not, and stays in the window.
+rio_call agent.provider.set [dict create name atlas]
+set ::agent_provider atlas
+agent_options_refresh
+update idletasks
+proc strip_labels {} {
+	set out {}
+	for {set i 0} {$i <= [.chat.status.sel.m index end]} {incr i} {
+		if {[catch {.chat.status.sel.m entrycget $i -label} l]} continue
+		lappend out [string trim $l]
+	}
+	return $out
+}
+set labels [strip_labels]
+ok "strip: the menu has a Profile section"    [expr {"Profile" in $labels}] 1
+ok "strip: listing every profile"             [expr {"Far" in $labels && "Home" in $labels}] 1
+ok "strip: the tooltip names the live one" \
+	[string match "*Profile: *" $::tt_text(.chat.status.sel)] 1
+# ...but the 340 px label does not: the model already answers "what am I talking to",
+# and a profile name can be long.
+ok "strip: the label stays short"             [string match "*Profile:*" [.chat.status.sel cget -text]] 0
+set was [rio::agent::profile_name atlas]
+agent_profile_pick Home
+update idletasks
+ok "strip: picking one reaches the core"      [rio::agent::profile_name atlas] Home
+ok "strip: and it really changed"             [expr {$was ne "Home"}] 1
+
+# A provider with no profiles gets no section — the same merit test as the door.
+rio_call agent.provider.set [dict create name vend]
+set ::agent_provider vend
+agent_options_refresh
+update idletasks
+ok "strip: no section for a provider without profiles" \
+	[expr {"Profile" in [strip_labels]}] 0
 
 puts [expr {$::fails ? "$::fails CHECK(S) FAILED" : "ALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

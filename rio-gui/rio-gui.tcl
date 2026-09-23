@@ -4718,12 +4718,18 @@ proc apply_provider {} {
 # effort — a provider that grows a third option gets a third section for free.
 set ::agent_options {}           ;# the active provider's options, as the core declared them
 array set ::agent_option_value {} ;# option name -> chosen value, for the menu's radios
+set ::agent_profiles {profiles {} active ""}  ;# the active provider's profiles (D131)
+set ::agent_profile  ""          ;# the live one, for the menu's radios and the tooltip
 
 # Pull the active provider's options from the core (D30: they live where the agent
 # runs, so a remote core answers for its own machine) and repaint the control.
 proc agent_options_refresh {} {
 	set r [rio_call agent.options.list {}]
 	set ::agent_options [expr {[dict get $r ok] ? [dict get $r result options] : {}}]
+	# And which configuration those options belong to, for a provider that keeps several
+	# (D131). Asked unconditionally: the core answers softly for one that keeps none.
+	set ::agent_profiles [provider_profiles $::agent_provider]
+	set ::agent_profile  [dict get $::agent_profiles active]
 	agent_options_sync
 }
 
@@ -4796,6 +4802,10 @@ proc agent_options_sync {} {
 	# server that question is as much about the endpoint as about the model — a glance
 	# should tell you whether you are pointed at your own box or at a vendor.
 	set full [list "Provider: [agent_provider_label $::agent_provider]"]
+	# The profile is named in the hover text but not in the 340 px label: the strip is
+	# there to answer "what am I talking to", which the model already says, and a profile
+	# name can be long. Switching it is still one click away, in the menu below.
+	if {$::agent_profile ne ""} { lappend full "Profile: $::agent_profile" }
 	foreach o $::agent_options {
 		set v [dict get $o value]
 		lappend full "[dict get $o label]: [agent_option_label $o $v] ($v)"
@@ -4825,6 +4835,19 @@ proc agent_options_menu_fill {} {
 	foreach p $::agent_providers {
 		$m add radiobutton -label "   [provider_radio_label $p]" \
 			-variable ::agent_provider -value [dict get $p name] -command apply_provider
+	}
+	# The profile, when the provider keeps several (D131). Above the options because it
+	# DECIDES them — switching profile changes every value listed below it — and here at
+	# all because it is a fast switch, which is what a menu is for (D85). Making one is
+	# not: that lives in the settings window.
+	if {[llength [dict get $::agent_profiles profiles]] > 1} {
+		$m add separator
+		$m add command -label "Profile" -state disabled
+		foreach p [dict get $::agent_profiles profiles] {
+			$m add radiobutton -label "   $p" \
+				-variable ::agent_profile -value $p \
+				-command [list agent_profile_pick $p]
+		}
 	}
 	# Only what a menu can draw and the provider calls quick — a base URL or a request
 	# timeout belongs in the settings window, not in a 340 px strip (provider-api 4).
@@ -4875,6 +4898,15 @@ proc agent_option_pick {name value {provider ""}} {
 	set err [agent_option_write $provider $name $value]
 	if {$err ne ""} { report_error $err }
 	agent_options_repaint $provider
+}
+
+# Switch the active provider's profile from the strip. Same single-writer discipline as
+# agent_option_pick: push, then re-read — the core may land on a different profile than
+# the one pointed at, and on a refusal nothing changed, so re-reading puts the menu back.
+proc agent_profile_pick {to} {
+	set resp [rio_call agent.profile.set [dict create name $to]]
+	if {![dict get $resp ok]} { report_error [dict get $resp error message] }
+	agent_options_repaint $::agent_provider
 }
 
 # A value the shipped list doesn't carry — a model released after this build, a tag
@@ -4939,10 +4971,202 @@ proc provider_has_options {name} {
 # Its KEY counts, not just its declared options (D130): the key is the provider's own
 # credential, so a keyed provider that declares nothing still has one thing to set, and
 # gating the door on options alone would leave it with no home at all.
+# Does this provider keep several named configurations (D131)? Same cached read as
+# provider_has_options, and the same silence from a core too old to say — a frontend that
+# drew a profile row for a provider with no profiles would have nothing to put in it.
+proc provider_has_profiles {name} {
+	foreach p $::agent_providers {
+		if {[dict get $p name] eq $name} {
+			return [expr {[dict exists $p profiles] && [dict get $p profiles]}]
+		}
+	}
+	return 0
+}
+
 proc provider_has_settings {name} {
 	set p [agent_provider_entry $name]
 	if {$p eq ""} { return 0 }
 	return [expr {[dict get $p keyed] || [provider_has_options $name]}]
+}
+
+# --- a provider's profiles, in the settings window (D131) --------------------
+#
+# Generic, like everything else here: nothing below names a model, a URL or a provider.
+# A profile has a name, one of them is active, and four verbs act on them.
+
+# The core's answer for a provider, or an empty one — used by both the row and the
+# manager, so neither can be drawing a list the other does not have.
+proc provider_profiles {name} {
+	set r [rio_call agent.profiles.list [dict create provider $name]]
+	if {![dict get $r ok]} { return [dict create profiles {} active ""] }
+	set out {}
+	foreach p [dict get $r result profiles] { lappend out [dict get $p name] }
+	return [dict create profiles $out active [dict get $r result active]]
+}
+
+# The one write. Like provider_settings_write, a refusal goes to the window's status
+# line rather than a modal, and either way the form is rebuilt from the core — so what
+# it shows is what the provider actually did, including a landing elsewhere.
+proc provider_profile_do {op name params} {
+	set resp [rio_call $op [dict merge [dict create provider $name] $params]]
+	if {![dict get $resp ok]} {
+		provider_settings_status [dict get $resp error message] 1
+		return 0
+	}
+	provider_settings_repaint $name
+	if {$name eq $::agent_provider} { agent_options_refresh }
+	return 1
+}
+
+proc provider_profile_switch {name to} {
+	if {[provider_profile_do agent.profile.set $name [dict create name $to]]} {
+		provider_settings_status "Switched to “$to”."
+	}
+}
+
+# New starts from the provider's shipped defaults; Duplicate from the active profile.
+# Two verbs, one op — `from` is the whole difference, which is also why the manager can
+# offer both without a second code path.
+proc provider_profile_new {name {from ""}} {
+	set what [expr {$from eq "" ? "New profile" : "Duplicate profile"}]
+	set to [name_prompt $what "Name for the new profile:" \
+		[expr {$from eq "" ? "" : "$from copy"}]]
+	if {$to eq ""} return
+	set params [dict create name $to]
+	if {$from ne ""} { dict set params from $from }
+	if {[provider_profile_do agent.profile.add $name $params]} {
+		# Created, then switched to — separate acts in the protocol (a frontend may want
+		# either alone), but making one and not going to it is never what a person meant.
+		provider_profile_switch $name $to
+	}
+}
+
+proc provider_profile_rename {name old} {
+	set to [name_prompt "Rename profile" "New name for “$old”:" $old]
+	if {$to eq "" || $to eq $old} return
+	if {[provider_profile_do agent.profile.rename $name [dict create name $old to $to]]} {
+		provider_settings_status "Renamed to “$to”."
+	}
+}
+
+# The one destructive verb, so the one that asks — No by default, as every irreversible
+# action in rio has since D48.
+proc provider_profile_delete {name victim} {
+	set ans [tk_messageBox -parent .provset -icon warning -type yesno -default no \
+		-title "Delete profile" \
+		-message "Delete the profile “$victim”?" \
+		-detail "Its settings, and any extra-request file of its own, are removed. This cannot be undone."]
+	if {$ans ne "yes"} return
+	if {[provider_profile_do agent.profile.remove $name [dict create name $victim]]} {
+		provider_settings_status "Deleted “$victim”."
+	}
+}
+
+# The manager. Modal over the settings window — it is a focused edit, not a browsing
+# surface (the D39 rule that keeps the Extensions window non-modal and its Repositories
+# editor modal) — and it re-reads after every verb, because the core may have landed
+# somewhere other than where the click pointed.
+proc provider_profiles_dialog {name} {
+	set w .provprof
+	destroy $w
+	toplevel $w
+	wm title $w "Profiles — [agent_provider_label $name]"
+	wm transient $w .provset
+	set c $::theme_colors
+	$w configure -background [dict get $c ui.bg]
+	set ::provprof_provider $name
+
+	grid [prefs_hint $w.hint \
+		"Each profile keeps its own settings and its own API key. Switching between them changes what the agent runs on; nothing here is shared." 380] \
+		-row 0 -column 0 -columnspan 2 -sticky w -padx 8 -pady {8 6}
+	frame $w.body -background [dict get $c ui.bg]
+	scrollbar $w.body.sb -command {.provprof.body.list yview}
+	listbox $w.body.list -activestyle none -exportselection 0 -height 8 -width 34 \
+		-font RioUIFont -yscrollcommand {.provprof.body.sb set} \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-selectbackground [dict get $c accent] -selectforeground [dict get $c ui.bg] \
+		-highlightthickness 1 -relief solid -borderwidth 1
+	pack $w.body.sb -side right -fill y
+	pack $w.body.list -side left -fill both -expand 1
+	grid $w.body -row 1 -column 0 -sticky nsew -padx {8 4} -pady {0 6}
+
+	frame $w.btns -background [dict get $c ui.bg]
+	foreach {b label cmd} {
+		use    "Switch to"  provprof_use
+		new    "New…"       provprof_new
+		dup    "Duplicate…" provprof_dup
+		ren    "Rename…"    provprof_rename
+		del    "Delete…"    provprof_delete
+	} {
+		button $w.btns.$b -text $label -font RioUIFont -width 12 -command $cmd
+		pack $w.btns.$b -side top -pady 2 -fill x
+	}
+	grid $w.btns -row 1 -column 1 -sticky n -padx {0 8} -pady {0 6}
+
+	frame $w.foot -background [dict get $c ui.bg]
+	button $w.foot.close -text Close -font RioUIFont -command [list destroy $w]
+	pack $w.foot.close -side right
+	grid $w.foot -row 2 -column 0 -columnspan 2 -sticky we -padx 8 -pady {0 8}
+	grid rowconfigure    $w 1 -weight 1
+	grid columnconfigure $w 0 -weight 1
+
+	bind $w.body.list <Double-Button-1> provprof_use
+	bind $w <Escape> [list destroy $w]
+	provprof_fill
+	focus $w.body.list
+	grab $w
+}
+
+# Repaint the list from the core, keeping the active profile selected — the manager is a
+# view of the core's answer, never of what it last drew.
+proc provprof_fill {} {
+	if {![winfo exists .provprof]} return
+	set r [provider_profiles $::provprof_provider]
+	set active [dict get $r active]
+	.provprof.body.list delete 0 end
+	set i 0
+	foreach p [dict get $r profiles] {
+		.provprof.body.list insert end [expr {$p eq $active ? "● $p" : "   $p"}]
+		if {$p eq $active} { .provprof.body.list selection set $i }
+		incr i
+	}
+	set ::provprof_names [dict get $r profiles]
+	set ::provprof_active $active
+}
+
+# The selected profile's name, or "" — the list shows a marker on the active one, so the
+# name is taken from the parallel list rather than parsed back out of the label.
+proc provprof_selected {} {
+	if {![winfo exists .provprof]} { return "" }
+	set s [.provprof.body.list curselection]
+	if {$s eq ""} { return "" }
+	return [lindex $::provprof_names [lindex $s 0]]
+}
+
+proc provprof_use {} {
+	set n [provprof_selected]
+	if {$n eq "" || $n eq $::provprof_active} return
+	provider_profile_switch $::provprof_provider $n
+	provprof_fill
+}
+proc provprof_new    {} { provider_profile_new $::provprof_provider ; provprof_fill }
+proc provprof_dup    {} {
+	set n [provprof_selected]
+	if {$n eq ""} return
+	provider_profile_new $::provprof_provider $n
+	provprof_fill
+}
+proc provprof_rename {} {
+	set n [provprof_selected]
+	if {$n eq ""} return
+	provider_profile_rename $::provprof_provider $n
+	provprof_fill
+}
+proc provprof_delete {} {
+	set n [provprof_selected]
+	if {$n eq ""} return
+	provider_profile_delete $::provprof_provider $n
+	provprof_fill
 }
 
 proc provider_settings_dialog {name} {
@@ -5032,6 +5256,38 @@ proc provider_settings_credentials {body name r} {
 	return $r
 }
 
+# The Profile row: which configuration these fields belong to, switched here, managed
+# next door (D131). Returns the row counter it advanced, like the credentials block.
+proc provider_settings_profile_row {body name r} {
+	set c $::theme_colors
+	set pr [provider_profiles $name]
+	set active [dict get $pr active]
+	grid [prefs_label $body.profh "Profile"] -row [incr r] -column 0 \
+		-columnspan 2 -sticky w -pady {0 2}
+	grid [prefs_label $body.profl "Profile:"] -row [incr r] -column 0 -sticky w -padx {12 6}
+	frame $body.profc -background [dict get $c ui.bg]
+	menubutton $body.profc.mb -anchor w -relief raised -borderwidth 1 -padx 6 -pady 2 \
+		-font RioUIFont -menu $body.profc.mb.m -text "$active ▾" \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -activeforeground [dict get $c ui.fg]
+	menu $body.profc.mb.m -tearoff 0
+	foreach p [dict get $pr profiles] {
+		$body.profc.mb.m add radiobutton -label $p \
+			-variable ::provset_profile -value $p \
+			-command [list provider_profile_switch $name $p]
+	}
+	set ::provset_profile $active
+	button $body.profc.manage -text "Manage…" -font RioUIFont \
+		-command [list provider_profiles_dialog $name]
+	pack $body.profc.mb -side left
+	pack $body.profc.manage -side left -padx {6 0}
+	grid $body.profc -row $r -column 1 -sticky we
+	grid [prefs_hint $body.profn \
+		"Every setting below belongs to this profile, including its API key." 420] \
+		-row [incr r] -column 1 -sticky w -pady {0 2}
+	return $r
+}
+
 proc provider_key_field_reveal {} {
 	if {![winfo exists .provset.body.keye]} return
 	.provset.body.keye configure -show [expr {$::provider_key_show ? "" : "•"}]
@@ -5086,7 +5342,13 @@ proc provider_settings_fill {} {
 	set c $::theme_colors
 	set opts [dict get $resp result options]
 	set r 0 ; set i 0 ; set group ""
-	# The credential first, above whatever the provider declares (D130): it is the one
+	# The profile above everything (D131): it decides what every field below it SHOWS, so
+	# a reader who takes it in last has read the rest without knowing which configuration
+	# they were looking at.
+	if {[provider_has_profiles $name]} {
+		set r [provider_settings_profile_row $w.body $name $r]
+	}
+	# Then the credential, above whatever the provider declares (D130): it is the one
 	# setting every hosted provider has, and the one a new user comes here for.
 	set p [agent_provider_entry $name]
 	set keyed [expr {$p ne "" && [dict get $p keyed]}]
@@ -5156,6 +5418,27 @@ proc provider_settings_control {path o provider} {
 		}
 		return $path
 	}
+	# An option whose value names a FILE gets the field plus a way in (D131) — so the
+	# frame, in the same position ⟳ Refresh takes for a chooser. Read defensively, as
+	# `kind` and `quick` are: the core fills every key in, but a descriptor that reached
+	# here another way should render plainly rather than not at all.
+	if {[dict exists $o file] && [dict get $o file]} {
+		frame $path -background [dict get $c ui.bg]
+		set e $path.e
+		entry $e -font RioUIFont -width 34 \
+			-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+			-insertbackground [dict get $c editor.cursor] \
+			-highlightthickness 1 -relief solid -borderwidth 1
+		$e insert 0 $v
+		ctx_bind_input $e
+		bind $e <Return>   [list provider_settings_field $e $provider $n]
+		bind $e <FocusOut> [list provider_settings_field $e $provider $n]
+		button $path.ed -text "Edit…" -font RioUIFont \
+			-command [list provider_option_edit_file $provider $n]
+		pack $e -side left -fill x -expand 1
+		pack $path.ed -side left -padx {6 0}
+		return $path
+	}
 	entry $path -font RioUIFont -width 44 \
 		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
 		-insertbackground [dict get $c editor.cursor] \
@@ -5165,6 +5448,21 @@ proc provider_settings_control {path o provider} {
 	bind $path <Return>   [list provider_settings_field $path $provider $n]
 	bind $path <FocusOut> [list provider_settings_field $path $provider $n]
 	return $path
+}
+
+# Open the file an option names, as an ordinary tab. The CORE resolves and creates it —
+# only the provider knows where its file belongs, and over a remote core it is that
+# machine's disk that matters (D30) — so this is the shape agent_prompt_open already has.
+proc provider_option_edit_file {provider name} {
+	set resp [rio_call agent.option.file [dict create provider $provider name $name]]
+	if {![dict get $resp ok]} {
+		provider_settings_status [dict get $resp error message] 1
+		return
+	}
+	# Naming no file yet is the ordinary case, and the provider picks one — so the field
+	# may have just gained a value, and the form should say so.
+	provider_settings_repaint $provider
+	do_open [dict get $resp result path]
 }
 
 # A field committing. Only when it actually differs from what the core holds: <FocusOut>
@@ -5230,6 +5528,10 @@ proc adopt_agent_status {} {
 	if {$st eq ""} return   ;# error already surfaced; keep the current menu state
 	set ::agent_provider    [dict get $st provider]
 	set ::agent_auto_accept [dict get $st auto_accept]
+	# The active profile rides along in the status (D131), so an attach knows which
+	# configuration the core is running before anything else is asked. A core too old to
+	# report one leaves it empty, which is also what a provider without profiles means.
+	set ::agent_profile [expr {[dict exists $st profile] ? [dict get $st profile] : ""}]
 	if {[dict exists $st mode]} { set ::agent_plan_mode [expr {[dict get $st mode] eq "plan"}] }
 	providers_menu_fill    ;# refresh the cache + the provider/key menus from the core
 	agent_options_refresh   ;# what this provider lets us choose, and what it chose (D106)
