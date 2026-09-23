@@ -285,6 +285,15 @@ $env:Path += ';C:\Program Files\Git\usr\bin'
 With it, `rio-core` skips just the three `unix`-constrained permission tests. Check the
 skip count, not only the failure count.
 
+**"Test files exiting with errors" on a green run is noise here.** A core run ends by
+naming `http.test`, `sig.test` and `tls.test` that way even when every test in them
+passed. All three pull in tcllib's `sha256`, which tries to build its critcl accelerator
+on first use, finds no MSVC `cl` on a box without Visual Studio, and writes the whole
+failed compile to **stderr** — which is all tcltest needs to flag the file. The pure-Tcl
+implementation it falls back to is correct: `rio::http::_sha256` agrees with `openssl
+dgst -sha256` byte for byte. Run any of the three on its own (`tclsh rio-core\tests\all.tcl
+-file sig.test`) and you get its real tally, with no such line.
+
 Note the GUI form: CONTRIBUTING shows `RIO_GUI_HEADLESS=1 wish …`, which is POSIX
 shell syntax that PowerShell cannot parse. **No prefix is needed** — the GUI test
 scripts set `RIO_GUI_HEADLESS` themselves. To set it anyway, PowerShell wants
@@ -332,18 +341,21 @@ if {[catch {uplevel #0 [list source $t]} err]} {
 wish runtest.tcl rio-gui\tests\highlight.tcl
 ```
 
-**Where Windows stands.** At the last full Windows run — **2026-09-17, commit
-`74f0517`** (D88–D113) — everything was green, with nothing hanging and nothing skipped
+**Where Windows stands.** At the last full Windows run — **2026-09-23, commit
+`aa7afd1`** (D114–D131) — everything was green, with nothing hanging and nothing skipped
 beyond the three `unix`-constrained permission tests:
 
 | Suite | Result |
 |---|---|
-| `rio-core` | 718 passed / 0 failed (3 skipped: `unix` constraint) |
+| `rio-core` | 860 passed / 0 failed (3 skipped: `unix` constraint) |
 | `syntax` | 536 / 536 |
 | `plugins/lib` | 20 / 20 |
 | `extensions/claude` | 55 / 55 |
-| `extensions/openai` | 58 / 58 |
-| `rio-gui` | 1780 checks / 0 failed, across 26 suites |
+| `extensions/openai` | 115 / 115 |
+| `rio-gui` | 2234 checks / 0 failed, across 28 suites |
+
+`tls.test` ran its loopback half in full (55 / 55, nothing skipped) with `openssl` on the
+PATH, so D109–D111 were genuinely exercised rather than counted as green while skipped.
 
 The suites grow with the tree, so treat this as a **dated record, not today's count**:
 a fresh run should give bigger numbers, and what matters is that the failure column is
@@ -373,5 +385,12 @@ works by re-sourcing `[info script]`, which a `.test` cannot do: tcltest runs it
 child `tclsh` that has already decoded the file, and nothing the parent configures —
 `-load` included — happens early enough to change that. So any non-ASCII **value** a
 `.test` compares against, or feeds in as data, is written `\u00E9`, never `é`.
-`rio-core/tests/http.test` is the file where this bites, and it says so at the top.
-Non-ASCII in *comments* and test descriptions is fine; nothing compares those.
+`rio-core/tests/http.test` is the file where this bites hardest, and it says so at the
+top — but it is not the only one. The 2026-09-23 run caught a fresh literal there and a
+second in `rio-core/tests/fs.test`, both written on Linux, where the system encoding
+hides the mistake. A literal also survives review whenever the *same* literal sits on
+both sides of the comparison, because the mojibake cancels; it fails only once one side
+is computed independently — a hard-coded `sha256`, or output decoded from explicit byte
+escapes. Several such latent literals remain in `wire.test`, `plugins/lib/tests/json.test`
+and both extensions' tests. Non-ASCII in *comments* and test descriptions is fine;
+nothing compares those.
