@@ -374,23 +374,35 @@ but if a geometry-dependent check ever disagrees across platforms, this is the f
 thing to suspect; guard genuinely WM-dependent checks the way
 `rio-gui/tests/gutter_select.tcl` guards its pixel-mapping one.
 
-**One rule to keep it that way: every entry point sets the encoding first.** Tcl 8.6
-decodes a script with the *system* encoding, which is cp1252 on Windows, so any file
-run directly — `rio-gui.tcl`, `rio-core/server.tcl`, each `rio-gui/tests/*.tcl` — opens
-with the four-line UTF-8 guard those files carry. A new test file without it will
-compare rio's correct output against its own mojibake expectations and fail confusingly.
+**One rule to keep it that way: every script rio runs sets the encoding first.** Tcl 8.6
+decodes a script with the *system* encoding, which is cp1252 on Windows, so any file run
+directly — `rio-gui.tcl`, `rio-core/server.tcl`, each `rio-gui/tests/*.tcl`, each suite
+runner, **and each `.test`** — opens with the four-line UTF-8 guard, which re-reads the
+file as UTF-8. A file without it compares rio's correct output against its own mojibake
+and fails confusingly.
 
-**A `.test` is the exception, and there the `\u` escapes are mandatory.** That guard
-works by re-sourcing `[info script]`, which a `.test` cannot do: tcltest runs it in a
-child `tclsh` that has already decoded the file, and nothing the parent configures —
-`-load` included — happens early enough to change that. So any non-ASCII **value** a
-`.test` compares against, or feeds in as data, is written `\u00E9`, never `é`.
-`rio-core/tests/http.test` is the file where this bites hardest, and it says so at the
-top — but it is not the only one. The 2026-09-23 run caught a fresh literal there and a
-second in `rio-core/tests/fs.test`, both written on Linux, where the system encoding
-hides the mistake. A literal also survives review whenever the *same* literal sits on
-both sides of the comparison, because the mojibake cancels; it fails only once one side
-is computed independently — a hard-coded `sha256`, or output decoded from explicit byte
-escapes. Several such latent literals remain in `wire.test`, `plugins/lib/tests/json.test`
-and both extensions' tests. Non-ASCII in *comments* and test descriptions is fine;
-nothing compares those.
+**A `.test` used to be treated as the exception; it is not one.** This section said the
+guard "works by re-sourcing `[info script]`, which a `.test` cannot do", and argued it
+from what the *parent* can configure — a different question. tcltest runs each `.test` as
+a **child process's main script**, which is precisely the case D54's guard is written for,
+and the guard works there unchanged. Every `.test` carries it as of 2026-09-23, and
+`rio-core/tests/encoding.test` holds every runnable script to it — so the rule has a guard
+now rather than a reminder. The `\u` escapes in `http.test` and `fs.test` stay because
+they name a codepoint outright next to a hard-coded hash, not because a literal would
+break; the `\x` **byte** inputs in `fs.test` stay because they are bytes, which is a
+different thing entirely.
+
+**You do not need this box to catch that class.** On the Linux side, `LANG=C LC_ALL=C
+tclsh` gives `encoding system` = `iso8859-1`, which mangles a UTF-8 literal the same way
+cp1252 does — so `LANG=C LC_ALL=C tclsh rio-core/tests/all.tcl` reproduces a Windows-only
+decoding fault before it ever reaches Windows. That the 2026-09-23 run found two such
+literals, both written on Linux where the system encoding hides the mistake, is what
+prompted the guard.
+
+A literal also survives review whenever the *same* literal sits on both sides of the
+comparison, because the mojibake cancels; it fails only once one side is computed
+independently — a hard-coded `sha256`, or output decoded from explicit byte escapes.
+Several such latent comparisons live in `wire.test`, `plugins/lib/tests/json.test` and
+both extensions' tests; the guard makes them test what they claim to rather than testing
+mangled input. Non-ASCII in *comments* and test descriptions was never at risk; nothing
+compares those.

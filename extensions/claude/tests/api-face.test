@@ -2,6 +2,14 @@
 # the x-api-key header (no oauth beta, no forced system prompt), key storage, and
 # end-to-end streaming through the real agent loop. Network stays a seam (a fake
 # SSE transport), so the whole flow runs offline.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 package require json

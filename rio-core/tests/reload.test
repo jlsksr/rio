@@ -1,6 +1,14 @@
 # Tests for staleness detection and reload — a buffer noticing the file changed under
 # it (AGENTS.md D94): rio::doc::settext plus the buffers.stale / buffers.reload /
 # buffers.stamp ops, driven through the in-process core so the events are asserted too.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 

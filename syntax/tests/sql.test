@@ -1,5 +1,13 @@
 # Tests for the SQL highlighter (AGENTS.md D32). Pure Tcl — the module is Tk-free, so
 # this runs under a bare tclsh with no display.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 

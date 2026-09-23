@@ -3303,16 +3303,66 @@ makes this a 8.6-shaped problem that will age out rather than a permanent tax).
 **Why not `\u` escapes instead.** Escaping the ~21 distinct glyphs at 192 call sites
 would also work and needs no global state, but it trades a readable UI vocabulary for
 unreadable source at every use, and it would not help the next contributor who types a
-real character. The guard fixes the class, not the instances. Escapes are still the
-right answer in one place: a **test's expected value**, which is compared against a
-correctly-decoded runtime result and so must not depend on how the test file itself
-was read (see `rio-core/tests/fs.test`).
+real character. The guard fixes the class, not the instances. *(This paragraph once
+carved out an exception — a **test's expected value** — on the grounds that a `.test`
+could not carry the guard. The amendment below retires it.)*
 
 **Why setting `encoding system` globally is safe here.** rio never relies on the
 default: `rio::fs::read`/`write` open `rb`/`wb` and call `encoding convertfrom`/
 `convertto` explicitly to implement D22's detect-and-preserve, every config reader
 pins `-encoding utf-8`, and so does the wire channel on both ends. The only thing the
 setting changes is how Tcl reads *rio's own source*, which is exactly the bug.
+
+
+**Amendment (2026-09-23) — the guard reaches the test files, and the rule finally has a
+guard of its own.** D54's own rule is *every file that is run rather than sourced by
+another rio file*. A `.test` is one: tcltest spawns a child `tclsh foo.test` per file, so
+that file is a process's main script. All 69 were overlooked, and in their place stood a
+written rule — *a test's non-ASCII value is a `\u` escape* — that nothing checked and that
+was broken twice, the second time in the Windows run of 2026-09-23 (`fs.test`'s U+D7FF
+expectation and `http.test`'s `café` sha256 input, both written on Linux, where the system
+encoding hides the mistake).
+
+**The claim that stood in the way was wrong, and worth naming because it read as
+convincing.** WINDOWS.md §8 said a `.test` *cannot* re-source `[info script]`, and argued
+it from what the **parent** can configure: "nothing the parent configures — `-load`
+included — happens early enough." That is a true statement about a different question. A
+file re-reading *itself* needs nothing from its parent, and `rio-gui/tests/context_menu.tcl`
+had been proving it for weeks — guarded, run as a main script, its `“ ”` literals intact
+under a latin-1 locale.
+
+So every `.test` carries the guard, as do the five suite runners and `tls-server.tcl`, and
+**`rio-core/tests/encoding.test`** holds every runnable script to it. The check is exact —
+the four guard lines are ASCII, compared literally after comments and blanks are dropped —
+so there is no parser to tune and no false positive. Its one exemption, a `.tcl` that a
+sibling `source`s rather than runs (`rio-gui/tests/sandbox.tcl`), is **derived from the
+siblings themselves**, so a new helper needs no edit and a new suite is covered the moment
+it lands; a third check asserts the exemption still exempts something, or the other two
+would be quietly looking only at guarded files.
+
+**Escapes are no longer required, and are kept where they say something.** A literal now
+decodes correctly everywhere, so the ban is retired — and the ~25 latent literals in
+`wire.test`, `plugins/lib/tests/json.test` and both extensions' suites, which passed on
+Windows only because the same mojibake sat on *both* sides of the comparison, now test
+what they claim to rather than testing mangled input. That is the case for a guard over a
+lint: a lint would have banned them, a guard makes them honest. The escapes in `http.test`
+and `fs.test` stay, for a different reason — they name a codepoint outright beside a
+hard-coded hash. `fs.test`'s `\x` **byte** inputs stay because they are bytes, not text,
+which was never the same question.
+
+**And the class reproduces on Linux.** `LANG=C LC_ALL=C tclsh` gives `encoding system` =
+`iso8859-1` here, which mangles a UTF-8 literal exactly as cp1252 does — so the whole
+suite can be run against the fault without a Windows box, and was, in both directions:
+with the guard a reverted literal passes; with the guard removed from that one file,
+`http-sha256-of-bytes` fails by name. Being Windows-only was an accident of how the fault
+was looked for, not a property of it.
+
+**Rejected: `-singleproc 1`.** tcltest sources each file with `-encoding utf-8` in that
+mode, so one line per runner would have fixed the root as well. Measured first: `rio-core`
+drops to **842 passed / 21 failed**, all in `tls.test` — cross-file contamination in a
+shared interpreter. It also trades away per-file isolation. **Rejected: a lint** for
+non-ASCII in value positions — it needs a heuristic parser to tell a value from a test
+description, it does nothing for a sourced helper, and it bans what a guard makes work.
 
 ### D55 — The core answers questions about its own host; the frontend never guesses
 
@@ -8736,6 +8786,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the `LICENSE` file | the About box's **License** row (D121) | `smoke.tcl` — reads the file, holds the row to it |
 | the About box's facts rows | `docs/getting-started.md`'s table of them | `docs.tcl` — builds the box, reads the labels, order included |
 | this file's decisions (D124) | `CHANGELOG.md`'s entries | `changelog.test` — both directions, with a named exemption table that is itself checked |
+| D54's guard, in every script rio runs | the guard's four lines, copied into each of them | `encoding.test` — exact, with the sourced-helper exemption derived from the siblings |
 | `rio-core/version.tcl` | `CHANGELOG.md`'s release heading | `changelog.test` — reads the literal, not a copy of it |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |

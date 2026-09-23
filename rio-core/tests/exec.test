@@ -3,6 +3,14 @@
 # tclsh itself (info nameofexecutable) so the suite needs no /bin/sh or coreutils
 # and runs the same on every platform: a script is fed on the child's stdin, or
 # written to a temp file when we also need to exercise stdin passthrough.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 

@@ -18,6 +18,13 @@
 #   /down  302 to http://localhost:<http>/ok     — https → http, which rio must refuse
 #   /up    302 to https://localhost:<https-good>/ok — http → https, which rio follows
 
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tls.test
+# runs it as a child process of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tls
 lassign $argv certdir
 
