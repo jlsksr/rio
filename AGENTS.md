@@ -28,6 +28,10 @@
 >   decision when it changes and note the change; don't erase the history. When a
 >   fact must live in both the code and a doc, add it to §7's **derived-facts
 >   register** and give it a guard — a copy nothing checks always rots.
+> - **How we work** (§9): evaluate before you code — name the seam, the effort and
+>   the bloat risk, and get a go before a large change; generalize what is there
+>   rather than add a parallel copy; land a big change in phases that each leave the
+>   suite green; branch by size, commit every verified step, never push.
 
 Status: **early implementation.** A working UI-less core (`rio-core`) and a real
 Tk editor (`rio-gui`) exist: open/save with encoding and line-ending
@@ -8897,3 +8901,109 @@ status changes, rather than pretending a test could hold it.
   extension was installed from. Another repository's same-named extension is a
   **switch**, not an update, unless that extension's cross-source flag is set;
   a version that isn't semver is never compared at all (D107).
+
+---
+
+## 9. How we work
+
+§3 is what rio decided; this is the working agreement that produces those decisions
+— the process half of the log. It lives here rather than in CONTRIBUTING.md because
+that document is written for a human programmer sending a patch (§7), while this is
+how the maintainer and an agent work on rio together, session after session.
+
+Two things it deliberately does **not** restate. The documents to keep current, and
+the derived-facts register, are §7. The verification policy is ADR-0116 and
+CONTRIBUTING's *Tests*: the automated suites **are** the verification, they never
+touch the network, a test that spends money needs permission each time, and a new
+check is proven by deliberately breaking what it guards and watching it fail by name.
+
+### Evaluate before you code
+
+For anything non-trivial, read the code the request actually touches before forming
+an opinion, then say three things plainly:
+
+- **What it means for the system** — which layer and which seam it lands on, what
+  changes, and what stays frozen. rio has few seams and they *are* the design (D1/D3,
+  D30's one channel, D20's provider interface), so "where does this land" is nearly
+  always the real question. Many features cost the core nothing once that is answered
+  — D33 and D40 turned out to be pure frontend work, and saying so up front is worth
+  more than the code.
+- **Effort** — an honest size: an afternoon, or a multi-sitting refactor. Don't
+  undersell it and don't pad it.
+- **Bloat risk** — whether it adds parallel code or generalizes what is there, and
+  which lever avoids the parallel copy.
+
+Present that and get a go before a large change. Small and obvious: do it, and say
+what you did.
+
+### Change is earned
+
+Don't change for its own sake. A finding is worth acting on when it would genuinely
+matter — a defect, a seam drifting, a copy nothing guards, a control that lies about
+its own state. The rest is a conscious trade-off, and the honest move is to name it
+rather than quietly "fix" it. "Clean" is a valid conclusion, stated confidently.
+
+### Generalize; don't add a parallel copy
+
+When a second case arrives, the default is to turn the existing singleton into a
+small explicit abstraction and route both through it — not to stand a second
+implementation beside the first. This is what keeps rio small, and it is the move the
+log returns to most often: the split editor *removed* the single-editor globals into
+a group record rather than adding an `.ed2` (D33); the git pane became a second
+instance of the files pane's rich list instead of a second list (D42/D43); the
+in-buffer find and find-in-files were made to share one matcher so they cannot
+disagree (D52); the plan view renders through the manual's renderer (D101); the menu
+bar's Edit menu and the editor's context menu are built from one table, so they
+cannot drift (D108). Consistency with the surrounding idiom beats a locally nicer
+novelty.
+
+The same instinct applies to a fact as much as to code: if it must live in two
+places, it needs a guard (§7), and if a rule can be made unnecessary by construction
+— as one sourced `version.tcl` made a second copy of the version impossible (D123) —
+that beats both.
+
+### Work in phases that each leave the tree green
+
+If a change touches many call sites, split it: first introduce the abstraction and
+route everything through it with **behaviour unchanged and every suite still
+passing**, then build the new capability on top. Each phase is small, independently
+verifiable, and its own commit. D33's phase 2 is the worked example — the group
+abstraction landed with a single group instantiated, so the behaviour was
+byte-identical before phase 3 made the split visible — and D35 shipped as a, b, c1a,
+c1b, c2, c3 for the same reason.
+
+### Version control
+
+- **Branch by size, not by habit.** Non-trivial, multi-commit or multi-session work
+  gets a feature branch, merged into `main` with `--no-ff` once it is done and the
+  full sweep is green, so history carries one clean, revertable bubble. A small,
+  self-contained, single-commit fix goes straight to `main`; a branch there is pure
+  overhead. The branch earns its keep even when merged immediately: it keeps `main`
+  green and deployable while a big change is mid-flight, which is what matters when
+  deploying rio means pulling `main`.
+- **The agent commits; the maintainer pushes.** Commit whenever a coherent step is
+  done and verified. Merging a finished branch locally is fine — pushing is not.
+- One focused commit per phase, with a real message body saying *what* and *why*.
+  Never force-push or rewrite shared history. Before deleting or overwriting
+  something you did not write, read it first and surface any contradiction instead of
+  proceeding.
+
+### Report faithfully, ask rarely
+
+- **"Done" means verified done.** If a suite fails, say so with the output. If a step
+  was skipped, say which. No hedging in either direction, and no green-washing — read
+  the skip count, not only the failure count (CONTRIBUTING, *Tests*).
+- **Concise in chat, thorough in the docs.** The project's documents earn their
+  length; a reply does not. Don't shorten a document to be brief.
+- **Ask only for genuine decisions** — the ones the maintainer owns and that cannot
+  be settled from the code, the request, or a sensible default. Lead with a
+  recommendation and say why. Surface a contradiction when you find one rather than
+  ploughing on.
+- **Confirm before anything irreversible or outward-facing**, unless durably
+  authorized; approval in one context does not carry to the next.
+
+*(Merged from `AGENT-WORKFLOW.md`, a portable working-agreement template that sat at
+the repo root from 2026-07-06 until 2026-09-23. Its rio-specific substance is above;
+its kickoff questionnaire and its appendix on packaging the method as a reusable
+skill were answered long ago by §1–§3 and belong to whoever reuses the method, not to
+rio.)*
