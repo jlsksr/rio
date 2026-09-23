@@ -11,10 +11,10 @@ decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-09-23
 
-Everything below is rio's first release, built between 2026-06-24 and today. Nothing is
-tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
+Everything below is rio's first release, built between 2026-06-24 and the day it was
+tagged.
 
 ### Added
 
@@ -423,3 +423,5 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
   on tab switches, not only when the view scrolls. — *D49 · `cf424b6` · 2026-08-20*
 - **Stale-link watchdog** — a dead SSH tunnel is detected in seconds, not minutes. — *D37 ·
   `eed9bfc` · 2026-07-12*
+
+[0.1.0]: https://github.com/jlsksr/rio/releases/tag/v0.1.0

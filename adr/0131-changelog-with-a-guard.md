@@ -114,3 +114,23 @@ guard is a backlog item.
   checks still run.
 - `PITCH.md` is now governed by a test as well as by the rule against editing it, and it
   stays that way until the file is removed at the release.
+
+## Amendment, 2026-09-23: `PITCH.md` is gone, and the freeze went with it
+
+The decision above kept `PITCH.md`'s copy of the changelog frozen rather than deleting
+it, on the grounds that the original wording of a hundred entries was worth more than the
+tidiness — *until the file went away at the first release*, which it now has. PITCH.md was
+deleted ahead of the `v0.1.0` tag rather than at it: the original wording is in git, which
+is where a superseded draft belongs, and a second changelog kept alive in the tree is
+exactly the shape this decision was taken to end. What PITCH had that had landed nowhere
+else — the experiment framing, the by-the-numbers block, the icon's provenance — moved
+into README.md in the same commit.
+
+So two of the consequences above have expired. The two freeze checks
+(`changelog-pitch-copy-is-marked-historic` and `changelog-pitch-copy-does-not-grow`) are
+deleted with the file they watched, and PITCH is no longer governed by a test because
+there is nothing left to govern. The two checks that carry the weight — every decision in
+AGENTS.md cited or exempted, and every commit and date resolved against git — are
+untouched and still hold `CHANGELOG.md` both ways.
+
+AGENTS.md D124 carries the same amendment.

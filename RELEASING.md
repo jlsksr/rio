@@ -162,8 +162,8 @@ the browser offered a `../` row there that navigated back to the same directory.
 
 #### 6. The client judged the core's paths by its own rules — **fixed**
 
-Found on 2026-09-03 during the first **remote** run (Windows GUI → Linux core on
-vps01, over the SSH tunnel), and confirmed against that live core: `fs.list /`
+Found on 2026-09-03 during the first **remote** run (Windows GUI → a Linux core on a
+remote host, over the SSH tunnel), and confirmed against that live core: `fs.list /`
 returns `/` with `bin boot dev etc home lib`, so browsing works — but the GUI was
 deciding what a *core* path means using **client** rules.
 
@@ -279,12 +279,12 @@ nothing answers with the toplevel itself, not the button.
 
 #### Verified against a real remote core (2026-09-03)
 
-Windows GUI → the live `rio-core` on **vps01.jkdata.de** over an SSH tunnel, i.e. a
+Windows GUI → a live `rio-core` on a remote Linux host over an SSH tunnel, i.e. a
 genuine cross-platform pairing rather than a local daemon standing in for one. 21
 checks, all passing: the transport is marked remote and reports the endpoint; the
 core's root is POSIX `/`; the browser lists `/` with no bogus `../` row and `/home`
 with a correct one pointing at `/`; a remote seed opens in its own directory (finding
-6's fix, proven against the real core); a file created under `/tmp` on vps01 opens,
+6's fix, proven against the real core); a file created under `/tmp` on the remote host opens,
 edits, and **saves back to the core's disk byte-for-byte**; a second remote file opens
 as its own tab and an unedited save is byte-faithful; and `git.status` answers over the
 socket with a branch. Scratch files and buffers were removed afterwards.
@@ -293,7 +293,7 @@ This is the cross-platform case the in-repo `remote.tcl` cannot cover (it uses a
 daemon), so it stays a manual check — but the path is now exercised, not assumed.
 Re-run after D55 with all 22 green, including against a core older than that change.
 
-**Re-checked 2026-09-17, read-only.** The live vps01 core and this checkout agree
+**Re-checked 2026-09-17, read-only.** The live remote core and this checkout agree
 exactly: protocol 2 both sides, the same 75 ops with no difference in either direction,
 `fsroot: /`. The ops D88–D113 added are all present and answer a *Windows* client
 correctly — `tls.accepted` (empty, so no exception is stored there), `agent.providers`,
@@ -315,10 +315,10 @@ though the interactive behaviour is right.
   the GUI records it per attachment instead of guessing. Verified three ways: a local
   Windows core reports `C:/` and the browser opens there and lists it; a stubbed
   greeting without the field leaves the client on its default; and — the one that
-  matters — the **live vps01 core, which predates the field, was confirmed not to send
+  matters — the **live remote core, which predates the field, was confirmed not to send
   it** and the Windows GUI degraded to `/` and browsed correctly anyway. So the
   additive-not-a-protocol-bump claim is tested against a genuine older peer, not only
-  a mock. **Re-checked 2026-09-09, now against the updated vps01 core**, closing the
+  a mock. **Re-checked 2026-09-09, now against the updated remote core**, closing the
   other half: it *does* send `fsroot: /`, the Windows client reads that as absolute
   (its own `file pathtype /` says `volumerelative`, which is exactly the trap D55
   exists to avoid), and `fs.list /` returns the Linux root's 20 entries. Both a peer
@@ -425,7 +425,7 @@ platform work and the install path.
 ## Gate 4 — Going public (github.com/jlsksr/rio)
 
 rio's source has no public home yet. The primary repository is and stays the private
-self-hosted **Forgejo** (`ssh://forgejo@vps01.jkdata.de:443/jka/rio.git`); the public
+self-hosted **Forgejo** instance; the public
 face will be a **mirror** at **github.com/jlsksr/rio**, chosen for reach — the audience
 is there, and an alpha nobody can find gets no reports.
 
@@ -463,10 +463,13 @@ Both are one-way-ish once the history is public, so they are here rather than in
   invalidates ~130 citations at once and fails that suite until every entry is
   re-derived, on top of permanently desynchronising the mirror from Forgejo. Set
   `user.email` to a GitHub-verified address going forward and let the past be the past.
-- **`vps01.jkdata.de` appears in this file** (the *Gate 0 findings* remote-core
-  sections, and *Still open*). It is jka's own infrastructure, named in notes that were
-  written for jka. Either generalise those mentions to "the remote core" or keep them
-  deliberately — the point is that it should be a decision and not something noticed
+- **The remote-core host name is out.** This file used to name jka's own machine in the
+  *Gate 0 findings* remote sections, in *Still open*, and once as the Forgejo SSH URL —
+  infrastructure named in notes that were written for jka and nobody else. **Decided
+  2026-09-23: generalised** to "the remote core" / "a private self-hosted Forgejo". The
+  notes lose nothing, because what they record is that a real remote core on a real other
+  machine was tested, not which one; and this file is not `export-ignore`d, so it goes
+  public with the tree. The point was that it be a decision rather than something noticed
   after the fact.
 
 ### The steps
@@ -542,7 +545,9 @@ with the same result; the figures below are that run's:
   `sk-ant-smoke-123` and friends in `extensions/claude/tests/` and
   `rio-gui/tests/smoke.tcl`. Worth knowing they are there, because a secret scanner
   pointed at the public repo will flag them and they are not findings.
-- The **only** personal-infrastructure string is the `vps01.jkdata.de` one above.
+- The one personal-infrastructure string the scan found — the remote-core host name — was
+  generalised out of this file before the push (see the decision above); nothing else in
+  the tree names jka's own machines.
 
 ## Named, and deferred on purpose
 

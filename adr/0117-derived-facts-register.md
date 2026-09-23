@@ -38,7 +38,7 @@ Rules for guards:
 - Where a check needs a marker, adopt a documentation convention: menu paths are written in
   emphasis so a renamed item fails, and in the editor context-menu section bold marks a menu
   entry.
-- Design logs (AGENTS.md, ROADMAP.md, PITCH.md, CAVEATS.md, and these records) are exempt,
+- Design logs (AGENTS.md, ROADMAP.md, CAVEATS.md, RELEASING.md, and these records) are exempt,
   because they deliberately name retired and future interfaces.
 
 ## Consequences
