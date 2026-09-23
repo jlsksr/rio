@@ -6,6 +6,13 @@ Most settings are reachable from ***Settings ▸ Preferences…***, which gather
 in one window; the ones you flip often also sit on the **View** and **Settings**
 menus, as a second door to the same switch.
 
+**An extension's own settings are not here.** What an extension declares — an agent
+provider's API key, the server it talks to, the model it uses — belongs to that
+extension and is set in [a window of its own](agent.md#a-providers-own-settings),
+listed by name in the **Extensions** menu. What rio keeps *about* extensions is
+still here, in *Preferences ▸ Extensions*: update checking, your repository list,
+and the signing keys you trust.
+
 ## Two kinds of saved state
 
 rio persists two kinds of state, split by who owns it:
@@ -73,10 +80,10 @@ separate "make this the default" step and no "save settings" button.
 ## Editing modes beyond Windows
 
 The core ships the **Windows** editing mode only. **emacs** and **vi** install as
-[extensions](extensions.md): add a repository that carries them under *Settings ▸
-Extensions… ▸ Repositories…* and install from *Settings ▸ Extensions…*, or drop the
-module by hand into `~/.config/rio/modes/` — a `mode` extension installs there, so
-a hand-dropped file is exactly the same thing.
+[extensions](extensions.md): add a repository that carries them under
+*Extensions ▸ Extensions… ▸ Repositories…* and install from *Extensions ▸
+Extensions…*, or drop the module by hand into `~/.config/rio/modes/` — a `mode`
+extension installs there, so a hand-dropped file is exactly the same thing.
 
 Once installed, the mode appears in *Settings ▸ Editing Mode*. If a saved
 `editmode` names a mode that is no longer installed, rio falls back to Windows
@@ -84,7 +91,7 @@ rather than failing.
 
 ## Your repository list, by hand
 
-The URLs you add under *Settings ▸ Extensions… ▸ Repositories…* are just an
+The URLs you add under *Extensions ▸ Extensions… ▸ Repositories…* are just an
 apt-style sources file you can edit yourself: `sources.list`, **one base URL per
 line**, `http://` or `https://`, with `#` comments and blank lines allowed. Like a
 Debian source, https is an option, not an obligation: plain http is just as
@@ -114,7 +121,7 @@ everything you installed from it.
 
 Extension versions follow [semver](https://semver.org/), so rio can tell you when
 a repository offers something newer than what you have. It compares on every scan
-— opening *Settings ▸ Extensions…* rescans, as does its `⟳` button — and shows the
+— opening *Extensions ▸ Extensions…* rescans, as does its `⟳` button — and shows the
 answer on the row: `[1.1.0 → 1.2.0]`. **Update** replaces one extension;
 **Update All** takes every pending update after a single confirmation listing them.
 Nothing is ever installed on its own.

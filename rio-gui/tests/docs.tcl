@@ -282,7 +282,15 @@ menus_collect .m
 # Cascades filled at runtime from the core (providers, installed modes): their entries
 # are installed data, not facts of the code, so a path is checked down to the cascade
 # and whatever follows is taken on trust.
-set ::datamenus {.m.settings.provider .m.settings.editmode}
+#
+# .m.extensions (D130) is the same thing one level up: below its separator it carries
+# one door per INSTALLED extension that has something to configure, so "Extensions ▸
+# OpenAI-compatible…" is no more checkable here than "Settings ▸ Agent Provider ▸
+# Claude (API key)" is — and the generic form the manual has to teach, with the
+# provider's name standing in as `<provider>`, is a template rather than a path at all.
+# Its FIRST entry is not data, so exempting the menu would leave the one path in it
+# that just went stale unguarded: 6a below checks that one from the widgets instead.
+set ::datamenus {.m.settings.provider .m.settings.editmode .m.extensions}
 
 # Paths that are emphatically not rio's menus — Windows' own Settings app, quoted in
 # WINDOWS.md. Listed one by one rather than pattern-skipped, so the next such path has to
@@ -335,10 +343,21 @@ proc menu_entry {menu item} {
 # into its sentence and is reported here, which is the nudge to mark it up.
 #
 # Newlines become spaces first, so a path wrapped across two source lines is whole again.
+# An INTERIOR segment — one carrying no emphasis marker and naming a menu and nothing
+# else, i.e. sitting between two ▸ inside one path — only counts if the segment before
+# it resolved as well. Without that, a window path whose category happens to share a
+# menu's name would be read from its middle and reported against the wrong menu:
+# "Preferences ▸ Extensions ▸ Repository signing keys…" became exactly that the moment
+# Extensions was also a menubar menu (D130). Its head ("Preferences") is not a menu,
+# which is what says the whole thing is a window path. The nested menubar case
+# ("View ▸ Font & Zoom ▸ Font…") is unbroken and still asks both of its questions, and
+# a path that merely FOLLOWS prose still carries the opening marker of its own emphasis,
+# so it is never mistaken for an interior segment and is checked on its own.
 proc menu_pairs {text} {
 	set flat [string map [list * \x01 ` \x01 \n " "] $text]
 	set out {}
 	set fields [split [string map [list " ▸ " \x02] $flat] \x02]
+	set prevok 0
 	for {set i 0} {$i < [llength $fields] - 1} {incr i} {
 		# The menu is named by the END of this field; longest name first, so
 		# "Font & Zoom" wins over a bare "Zoom".
@@ -349,13 +368,16 @@ proc menu_pairs {text} {
 			set cand [join [lrange $lw end-[expr {$n - 1}] end]]
 			if {[info exists ::menus($cand)]} { set name $cand ; break }
 		}
-		if {$name eq ""} continue
+		set interior [expr {$name ne "" && [join $lw] eq $name \
+			&& [string first \x01 [lindex $fields $i]] < 0}]
+		if {$name eq "" || ($i > 0 && $interior && !$prevok)} { set prevok 0 ; continue }
 		# The item is what follows, up to the emphasis that closes it. Leading markers are
 		# the nesting in **View ▸ *Theme…*** and are skipped; a field carrying no marker at
 		# all is a whole path element ("Font & Zoom", sitting between two ▸).
 		set next [string trimleft [lindex $fields [expr {$i + 1}]] \x01]
 		lappend out [list $name $::menus($name) \
 			[string trim [lindex [split $next \x01] 0]]]
+		set prevok 1
 	}
 	return $out
 }
@@ -383,6 +405,34 @@ foreach p $::menu_docs {
 	}
 }
 ok "every menu path in the docs exists" $stale {}
+
+# --- 6a. the one entry of the Extensions menu that is not installed data --------
+#
+# .m.extensions is exempt above, for the reason every datamenu is: its doors are one
+# per installed extension. Its first entry is the installer window, which is a fact of
+# the code — and it is exactly the path that just went stale, because D130 moved it out
+# of Settings and fifteen quoted paths across six documents went with it. Exempting the
+# menu without putting that entry back under guard would trade one piece of drift for
+# the next one.
+#
+# Both halves come off the live widgets — which menubar cascade opens .m.extensions,
+# and what its first entry is labelled — so renaming either fails here until the
+# documents follow. Where a document names it is the writer's business, so this asks
+# only that some user-facing document does.
+set extmenu ""
+foreach {extname extpath} [array get ::menus] {
+	if {$extpath eq ".m.extensions"} { set extmenu $extname ; break }
+}
+ok "the installer window has a menu entry of its own" \
+	[expr {$extmenu ne "" && ![catch {.m.extensions entrycget 0 -label}]}] 1
+set extdoor "$extmenu ▸ [.m.extensions entrycget 0 -label]"
+set extnamed {}
+foreach p $::menu_docs {
+	set flat [regsub -all {\s+} [string map [list * "" ` "" \n " "] [slurp $p]] " "]
+	if {[string first $extdoor $flat] >= 0} { lappend extnamed [file tail $p] }
+}
+ok "the docs name the installer the way the menu labels it" \
+	[expr {[llength $extnamed] > 0}] 1
 
 # --- 7. every menu the docs NAME exists too -----------------------------------
 #
@@ -1240,8 +1290,11 @@ ok "the manual names it the way the chooser labels it" \
 set ::d128providers {
 	{name docsopt label "Docs Provider" keyed 1 key_set 0 signup "" options 1}
 }
+# Nothing to configure at all — no declared options AND no key (D130: the key alone
+# earns a provider its window, so an unkeyed-and-optionless one is the only provider
+# that gets no door, and it is what the door has to be derived against).
 set ::d128nobody {
-	{name docsopt label "Docs Provider" keyed 1 key_set 0 signup "" options 0}
+	{name docsopt label "Docs Provider" keyed 0 key_set 0 signup "" options 0}
 }
 # Descriptors as the core hands them over — every key present, which is what
 # rio::agent::_option_norm guarantees a frontend (D106). Two groups, a choice and a
@@ -1260,40 +1313,47 @@ proc agent_providers_refresh {} {}
 set d128saved $::agent_providers
 set ::agent_providers $::d128providers
 
-# Which button IS the door is derived rather than assumed: the pane is built twice from
-# the same provider, once declaring settings and once not, and the door is the button
-# the first build has and the second does not. So the check knows nothing about the
-# label it is about to hold the manual to — and a provider with nothing to declare is
-# held to grow no button that would open an empty window.
-proc d128_agent_buttons {providers} {
+# Which entry IS the door is derived rather than assumed: the menu is filled twice from
+# the same provider, once with something to configure and once with nothing at all, and
+# the door is the entry the first fill has and the second does not. So the check knows
+# nothing about the label it is about to hold the manual to — and a provider with
+# nothing to set is held to grow no door that would open an empty window.
+proc d128_ext_doors {providers} {
 	set ::agent_providers $providers
-	destroy .d128pane
-	frame .d128pane
-	prefs_fill_agent .d128pane
+	extensions_menu_fill
 	set out {}
-	foreach c [winfo children .d128pane] {
-		if {[winfo class $c] eq "Button"} { lappend out [$c cget -text] }
+	for {set i 0} {$i <= [.m.extensions index end]} {incr i} {
+		if {[catch {.m.extensions entrycget $i -label} l]} continue
+		lappend out $l
 	}
 	return $out
 }
-set d128with [d128_agent_buttons $::d128providers]
-set d128without [d128_agent_buttons $::d128nobody]
+set d128with [d128_ext_doors $::d128providers]
+set d128without [d128_ext_doors $::d128nobody]
 set d128doors {}
 foreach l $d128with {
 	if {[lsearch -exact $d128without $l] < 0} { lappend d128doors $l }
 }
-ok "a provider that declares settings gets one more door in the Agent pane" \
+ok "a provider with something to configure gets a door of its own" \
 	[llength $d128doors] 1
 
+# WHICH menu it lives in is derived as well — the menubar cascade whose menu is the one
+# just filled — so moving the door to another menu (as D130 moved it out of Preferences)
+# fails here until the manual follows.
+set d128menu ""
+for {set i 0} {$i <= [.m index end]} {incr i} {
+	if {[catch {.m entrycget $i -menu} sub]} continue
+	if {$sub eq ".m.extensions"} { set d128menu [.m entrycget $i -label] ; break }
+}
 # The wording the manual has to quote, derived rather than written down here: strip the
-# provider's own label off the front of the button and what is left is the part a reader
+# provider's own label off the front of the entry and what is left is the part a reader
 # looks for. The page writes `<provider>` where the label goes.
 set d128tail [string trim [string range [lindex $d128doors 0] \
 	[string length "Docs Provider"] end]]
 set d128agent [slurp [file join $::docs agent.md]]
 set d128flat [regsub -all {\s+} [string map [list * "" ` ""] $d128agent] " "]
-ok "the manual names that door the way the pane labels it" \
-	[expr {[string first "Preferences ▸ Agent ▸ <provider> $d128tail" $d128flat] >= 0}] 1
+ok "the manual names that door the way the menu labels it" \
+	[expr {[string first "$d128menu ▸ <provider>$d128tail" $d128flat] >= 0}] 1
 
 destroy .d128pane
 set ::agent_providers $d128saved
@@ -1336,10 +1396,27 @@ ok "the form heads each group the provider declares" \
 		&& [lsearch -exact $d128labels Server] >= 0}] 1
 ok "a choice renders as a drop-down" \
 	[llength [d128_widgets .provset.body Menubutton]] 1
+# The credential is a row of this window too (D130) but it is not a DECLARED option, so
+# the claims about what a provider declares are counted without it.
+proc d128_option_entries {} {
+	set out {}
+	foreach e [d128_widgets .provset.body Entry] {
+		if {$e eq ".provset.body.keye"} continue
+		lappend out $e
+	}
+	return $out
+}
 ok "anything else renders as a field you type in" \
-	[llength [d128_widgets .provset.body Entry]] 1
+	[llength [d128_option_entries]] 1
 ok "…carrying the value the provider declared" \
-	[[lindex [d128_widgets .provset.body Entry] 0] get] "http://example/v1"
+	[[lindex [d128_option_entries] 0] get] "http://example/v1"
+# And the key is in the same window as the rest of it — the whole point of D130, and the
+# thing the manual has to stop sending people to Preferences for.
+ok "a keyed provider's API key is a row in that window" \
+	[list [winfo exists .provset.body.keye] [.provset.body.keye cget -show]] {1 •}
+ok "the manual puts the key there too" \
+	[expr {[string first "$d128menu ▸ <provider>$d128tail" $d128flat] >= 0
+		&& [string first "Preferences ▸ Agent ▸ <provider> API Key" $d128flat] < 0}] 1
 ok "each setting's hint is shown" \
 	[expr {[lsearch -exact $d128labels "Docs hint for the chooser."] >= 0
 		&& [lsearch -exact $d128labels "Docs hint for the field."] >= 0}] 1

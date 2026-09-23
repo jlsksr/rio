@@ -3,9 +3,20 @@
 Adding to rio: syntax highlighters, editing modes, themes, and agent providers —
 from repositories you choose.
 
+Everything to do with them is in one menu. ***Extensions ▸ Extensions…*** opens the
+window where you browse, install, update and remove; below it the same menu lists one
+entry per installed extension that has anything to configure, named after the
+extension itself — so an installed agent provider is ***Extensions ▸ `<provider>`…***.
+Those settings belong to the extension, not to rio; what *rio* keeps about extensions
+— whether it checks for updates, your repository list, the signing keys you trust —
+is in *Preferences ▸ Extensions*. With nothing installed that offers settings, the
+menu says so rather than showing an empty space; past a dozen of them it offers a
+single *Extension settings…* entry with a picker, so the menu can never outgrow your
+screen.
+
 **Most of this topic is still to be written.** It will cover: what a repository is
 (a plain directory served over `http://` or `https://` — no marketplace, no central
-index); adding and removing repository URLs under *Settings ▸ Extensions… ▸
+index); adding and removing repository URLs under *Extensions ▸ Extensions… ▸
 Repositories…*; browsing and installing; the four kinds of extension and where each
 installs to; provenance — which repository and version an installed extension came
 from, and choosing between same-named extensions from different authors; keeping
@@ -47,7 +58,7 @@ Signing is optional, and what a publisher does to sign is in
 
 ### What you see
 
-Every version line in the detail pane of *Settings ▸ Extensions…* ends in one of
+Every version line in the detail pane of *Extensions ▸ Extensions…* ends in one of
 three words:
 
 | Mark | Means |

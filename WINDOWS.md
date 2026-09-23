@@ -200,10 +200,10 @@ because it needs the least. What each adds:
 - **The agent (Claude)** — works if your Tcl build includes **`tls`** (Magicsplat's
   batteries-included distribution normally does; `install-windows.ps1` reports `tls ok`
   or `MISSING` in its verify). Then pick *Settings ▸ Agent Provider ▸ Claude (API key)*
-  and enter your key under *Preferences ▸ Agent*. One Windows note: rio's `0600` lock-down
-  of the key file is a POSIX no-op on NTFS, so the key file inherits your user-profile
-  permissions rather than being explicitly restricted — fine for a personal machine,
-  worth knowing.
+  and enter your key in *Extensions ▸ Claude…*, the provider's own settings window.
+  One Windows note: rio's `0600` lock-down of the key file is a POSIX no-op on NTFS,
+  so the key file inherits your user-profile permissions rather than being explicitly
+  restricted — fine for a personal machine, worth knowing.
 - **HTTPS certificates (the agent, and `https://` repositories)** — rio trusts the
   **Windows certificate store** when your `tls` is **1.8 or newer on OpenSSL 3.2+**
   (`tclsh`: `package require tls` prints the version, `tls::version` the OpenSSL one).
