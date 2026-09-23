@@ -647,10 +647,20 @@ developer box has `openssl`; a minimal container often doesn't, and neither does
 by default (WINDOWS.md §8). Apart from those, only three tests should skip, under the
 `unix` constraint.
 
-Non-ASCII **values** in a `.test` — data or expected results — are written as `\u`
-escapes, never as literals. tcltest runs each file in a child `tclsh` that decodes it
-with the system encoding, so a literal is mojibake anywhere that isn't UTF-8 and no
-setting in the runner can prevent it. Comments and test descriptions are unaffected.
+**Every runnable script opens with the UTF-8 guard, and a new `.test` is one.** Tcl 8.6
+decodes a script with the *system* encoding, cp1252 on a Western Windows install, so a
+file's own non-ASCII arrives mojibake there. The four-line guard at the top of every
+`.test`, every suite runner and every `rio-gui/tests/*.tcl` re-reads the file as UTF-8;
+copy it into a new one. `rio-core/tests/encoding.test` checks that you did, and names the
+file if you didn't. Values may then be written as literals — `\u` escapes are a choice,
+worth making where you want to pin exactly which codepoint a hard-coded hash covers.
+
+**And check a change under a non-UTF-8 locale.** `LANG=C LC_ALL=C tclsh` gives
+`encoding system` = `iso8859-1` on Linux, which mangles a UTF-8 literal the same way
+Windows does — so a decoding fault that would otherwise only show up on somebody's
+Windows box shows up here:
+
+    LANG=C LC_ALL=C tclsh rio-core/tests/all.tcl
 
 The syntax highlighters are pure Tcl too, so they have their own headless suite —
 no display needed:

@@ -1,0 +1,129 @@
+# Tests that every script rio RUNS carries the D54 source guard (AGENTS.md D54).
+#
+# Tcl 8.6 decodes a script file with the SYSTEM encoding — cp1252 on a Western Windows
+# install — so a file's own non-ASCII arrives mojibake there. The guard fixes it by
+# re-reading the file as UTF-8, and it has to be IN the file: nothing a parent configures
+# happens early enough, because Tcl decodes the whole script before line 1 runs.
+#
+# A .test is a script rio runs: tcltest spawns one child `tclsh foo.test` per file. That
+# was overlooked until 2026-09-23, and the escape rule that stood in for it had been
+# broken twice — a rule with no guard, which is what this file is.
+#
+# Both halves are exact — the four guard lines are ASCII and compared literally — so
+# there is nothing here to parse and no false positive to tune. The one exclusion, a
+# file that is SOURCED by a sibling rather than run, is DERIVED from the siblings
+# themselves, so a new helper needs no edit here and a new suite is covered the moment
+# it lands.
+#
+# Reproducing the failure needs no Windows box: `LANG=C LC_ALL=C tclsh` gives
+# `encoding system` = iso8859-1 on Linux, which mangles a UTF-8 literal the same way.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
+package require tcltest
+namespace import ::tcltest::*
+
+set ::root [file normalize [file join [file dirname [info script]] .. ..]]
+
+# The guard, as its executable lines — what every runnable script must open with. Spelled
+# with explicit escapes rather than braces: a lone `}` cannot sit inside a braced literal,
+# the same Tcl parsing corner the Perl highlighter's delimiter set had to work around.
+set ::guard [list \
+	"if \{\[encoding system\] ne \"utf-8\"\} \{" \
+	"encoding system utf-8" \
+	"source -encoding utf-8 \[info script\]" \
+	"return" \
+	"\}"]
+
+# A script's first executable lines: comments and blank lines dropped, each trimmed, so
+# the check is about the statements and not about how the file is indented or commented.
+proc exec_head {path n} {
+	set f [open $path r] ; fconfigure $f -encoding utf-8
+	set text [read $f] ; close $f
+	set out {}
+	foreach line [split $text \n] {
+		set t [string trim $line]
+		if {$t eq "" || [string index $t 0] eq "#"} { continue }
+		lappend out $t
+		if {[llength $out] >= $n} break
+	}
+	return $out
+}
+
+proc is_guarded {path} {
+	expr {[exec_head $path [llength $::guard]] eq $::guard}
+}
+
+# Every .test in the tree, wherever it lives — a new suite directory is covered by
+# existing, not by being added to a list here.
+proc all_tests {dir} {
+	set out {}
+	foreach f [lsort [glob -nocomplain -directory $dir -types f *.test]] { lappend out $f }
+	foreach d [lsort [glob -nocomplain -directory $dir -types d *]] {
+		if {[file tail $d] eq ".git"} { continue }
+		lappend out {*}[all_tests $d]
+	}
+	return $out
+}
+
+# A .tcl beside other tests is RUN unless a sibling sources it. Derived from the
+# siblings' own text, so the helper set is whatever the directory actually does.
+proc run_directly {dir} {
+	set files [lsort [glob -nocomplain -directory $dir -types f *.tcl]]
+	set sourced {}
+	foreach f $files {
+		set h [open $f r] ; fconfigure $h -encoding utf-8
+		set text [read $h] ; close $h
+		foreach line [split $text \n] {
+			if {![string match {*source *} $line]} { continue }
+			foreach other $files {
+				set tail [file tail $other]
+				if {$other ne $f && [string match *$tail* $line]} { lappend sourced $tail }
+			}
+		}
+	}
+	set out {}
+	foreach f $files { if {[file tail $f] ni $sourced} { lappend out $f } }
+	return $out
+}
+
+test encoding-guard-every-test-file {every .test in the tree opens with the guard: tcltest
+		runs each one as a child process's main script, which is exactly the file D54's
+		rule is about} -body {
+	set bare {}
+	foreach f [all_tests $::root] {
+		if {![is_guarded $f]} { lappend bare [string range $f [string length $::root] end] }
+	}
+	list [expr {[llength [all_tests $::root]] > 60}] $bare
+} -result {1 {}}
+
+test encoding-guard-every-runner {the suite runners and the GUI test scripts are run
+		directly too, so they carry it as well — sourced helpers do not, and which is
+		which is read off the directory rather than listed here} -body {
+	set bare {}
+	set dirs {}
+	foreach f [all_tests $::root] { lappend dirs [file dirname $f] }
+	lappend dirs [file join $::root rio-gui tests]
+	foreach d [lsort -unique $dirs] {
+		foreach f [run_directly $d] {
+			if {![is_guarded $f]} { lappend bare [string range $f [string length $::root] end] }
+		}
+	}
+	set bare
+} -result {}
+
+test encoding-guard-helpers-are-exempt {…and the derivation really does exempt something:
+		rio-gui/tests/sandbox.tcl is sourced by its siblings, so it is not in the run set.
+		If this ever returns 1 the exemption has stopped being exercised and the check
+		above is only ever looking at guarded files} -body {
+	set run {}
+	foreach f [run_directly [file join $::root rio-gui tests]] { lappend run [file tail $f] }
+	list [expr {"sandbox.tcl" in $run}] [expr {"smoke.tcl" in $run}]
+} -result {0 1}
+
+cleanupTests
