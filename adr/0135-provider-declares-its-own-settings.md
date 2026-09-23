@@ -1,6 +1,6 @@
 # ADR-0135: A provider declares its own settings, and rio renders them
 
-- **Status:** Accepted
+- **Status:** Accepted; where the settings window lives reversed by [ADR-0137](0137-extensions-configure-themselves.md) — the option vocabulary, the `thinking` verb and `provider-api 4` stand
 - **Date:** 2026-09-22
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D128
