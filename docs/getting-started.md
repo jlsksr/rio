@@ -44,8 +44,10 @@ files you had open the next time you open that folder.
 From the top down:
 
 - **The menu bar** — *File*, *Edit*, *View*, *Find*, *Compare*, *Settings*,
-  *Help*. Everything rio can do is reachable here, with its keyboard shortcut
-  shown beside it. If you remap a shortcut, the menu relabels itself to match.
+  *Extensions*, *Help*. Everything rio can do is reachable here, with its keyboard
+  shortcut shown beside it. If you remap a shortcut, the menu relabels itself to
+  match. *Settings* holds what rio itself does; *Extensions* installs what you add
+  to it, and opens the settings window of anything you have added.
 - **The side panel** — the **Files** tree and the **Git** pane share one dockable
   column. `Ctrl+Shift+E` reveals Files, `Ctrl+Shift+G` reveals Git. You can dock
   it left or right from *View ▸ Dock Side*, or drag its edge to resize it.

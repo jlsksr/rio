@@ -4663,7 +4663,7 @@ proc help_style {t} {
 # active provider so the choice is never invisible.
 # ---------------------------------------------------------------------------
 set ::agent_provider echo   ;# echo | claude | openai | …
-set ::provider_key_show 0   ;# the key dialog's reveal toggle
+set ::provider_key_show 0   ;# the key field's reveal toggle (the provider settings window)
 # The Agent Prompts dialog's per-provider chooser (D79): which provider's prompt the
 # "Edit its prompt…" button targets, and its live button label. Set when the dialog
 # opens; seeded so the vars exist beforehand.
@@ -4935,6 +4935,16 @@ proc provider_has_options {name} {
 	return 0
 }
 
+# Is there anything to configure for this provider at all — i.e. does it earn a window?
+# Its KEY counts, not just its declared options (D130): the key is the provider's own
+# credential, so a keyed provider that declares nothing still has one thing to set, and
+# gating the door on options alone would leave it with no home at all.
+proc provider_has_settings {name} {
+	set p [agent_provider_entry $name]
+	if {$p eq ""} { return 0 }
+	return [expr {[dict get $p keyed] || [provider_has_options $name]}]
+}
+
 proc provider_settings_dialog {name} {
 	set w .provset
 	if {[winfo exists $w] && $::provset_provider eq $name} {
@@ -4948,7 +4958,7 @@ proc provider_settings_dialog {name} {
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 	label $w.hint -anchor w -justify left -wraplength 460 -font RioUIFont \
-		-text "Settings this provider declares. Each is saved as you change it, on the machine the core runs on. A field takes effect when you press Return or leave it." \
+		-text "Everything that belongs to this provider: its credentials and the settings it declares. All of it is stored on the machine the core runs on. A declared field takes effect when you press Return or leave it; the API key waits for its Save button." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	frame $w.body -background [dict get $c ui.bg]
 	label $w.status -anchor w -justify left -wraplength 460 -font RioUIFont \
@@ -4981,6 +4991,85 @@ proc provider_settings_status {text {bad 0}} {
 		-foreground [dict get $c [expr {$bad ? "error" : "gutter.fg"}]]
 }
 
+# The provider's own credential, rendered first in its window (D130). rio keeps it for
+# the provider — one 0600 secret per provider, on the core's host (D21/D26) — and never
+# reads it back, so the field is always blank and the note below says whether one is
+# stored. Unlike a declared option this does NOT write on focus-out: a key is pasted,
+# glanced at, and committed deliberately, which is why Save is explicit and the window's
+# opening line says so. Returns the row counter it advanced.
+proc provider_settings_credentials {body name r} {
+	set c $::theme_colors
+	set p [agent_provider_entry $name]
+	set stored [expr {$p ne "" && [dict get $p key_set]}]
+	grid [prefs_label $body.keyh "Credentials"] -row [incr r] -column 0 \
+		-columnspan 2 -sticky w -pady {0 2}
+	grid [prefs_label $body.keyl "API key:"] -row [incr r] -column 0 -sticky w -padx {12 6}
+	entry $body.keye -show • -font RioUIFont -width 44 \
+		-background [dict get $c editor.bg] -foreground [dict get $c editor.fg] \
+		-insertbackground [dict get $c editor.cursor] \
+		-highlightthickness 1 -relief solid -borderwidth 1
+	ctx_bind_input $body.keye   ;# masked, so Cut/Copy are left out (D115)
+	bind $body.keye <Return> [list provider_key_field_save $name]
+	grid $body.keye -row $r -column 1 -sticky we
+	frame $body.keyb -background [dict get $c ui.bg]
+	set ::provider_key_show 0
+	checkbutton $body.keyb.show -text "Show key" -font RioUIFont \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
+		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg] \
+		-variable ::provider_key_show -command provider_key_field_reveal
+	button $body.keyb.save  -text "Save"  -font RioUIFont \
+		-command [list provider_key_field_save $name]
+	# Nothing to clear until something is stored — and the note beside it says which.
+	button $body.keyb.clear -text "Clear" -font RioUIFont \
+		-command [list provider_key_field_clear $name] \
+		-state [expr {$stored ? "normal" : "disabled"}]
+	pack $body.keyb.show $body.keyb.save $body.keyb.clear -side left -padx {0 6}
+	grid $body.keyb -row [incr r] -column 1 -sticky w -pady {2 0}
+	set note [expr {$stored ? "A key is stored; saving one replaces it." : "No key stored yet."}]
+	set signup [expr {$p ne "" ? [dict get $p signup] : ""}]
+	if {$signup ne ""} { append note " Create one at $signup." }
+	grid [prefs_hint $body.keyn $note 420] -row [incr r] -column 1 -sticky w -pady {0 2}
+	return $r
+}
+
+proc provider_key_field_reveal {} {
+	if {![winfo exists .provset.body.keye]} return
+	.provset.body.keye configure -show [expr {$::provider_key_show ? "" : "•"}]
+}
+
+# Save and Clear: the only places a key is written. A refusal goes to the window's own
+# status line, never a modal — this window is non-modal and already has somewhere to
+# speak. Both refresh the provider menus (whose radio labels carry the key_set marker)
+# and then repaint, so the stored-or-not note and Clear's state follow what the core
+# actually holds rather than what we just tried to put there.
+proc provider_key_field_save {name} {
+	if {![winfo exists .provset.body.keye]} return
+	set key [string trim [.provset.body.keye get]]
+	if {$key eq ""} {
+		provider_settings_status "Enter an API key, or use Clear to remove the stored one." 1
+		return
+	}
+	set resp [rio_call agent.key.set [dict create key $key name $name]]
+	if {![dict get $resp ok]} {
+		provider_settings_status [dict get $resp error message] 1
+		return
+	}
+	providers_menu_fill
+	provider_settings_status "Key saved."
+	provider_settings_repaint $name
+}
+
+proc provider_key_field_clear {name} {
+	set resp [rio_call agent.key.clear [dict create name $name]]
+	if {![dict get $resp ok]} {
+		provider_settings_status [dict get $resp error message] 1
+		return
+	}
+	providers_menu_fill
+	provider_settings_status "Key removed."
+	provider_settings_repaint $name
+}
+
 # Rebuild the form from the core. Scoped to .provset.body and never the toplevel: a
 # field's own <FocusOut> can land us here, and destroying the widget whose handler is
 # running would take the callback with it.
@@ -4997,8 +5086,15 @@ proc provider_settings_fill {} {
 	set c $::theme_colors
 	set opts [dict get $resp result options]
 	set r 0 ; set i 0 ; set group ""
+	# The credential first, above whatever the provider declares (D130): it is the one
+	# setting every hosted provider has, and the one a new user comes here for.
+	set p [agent_provider_entry $name]
+	set keyed [expr {$p ne "" && [dict get $p keyed]}]
+	if {$keyed} { set r [provider_settings_credentials $w.body $name $r] }
 	if {![llength $opts]} {
-		grid [prefs_hint $w.body.none "This provider declares no settings."] \
+		grid [prefs_hint $w.body.none [expr {$keyed \
+			? "This provider declares no further settings." \
+			: "This provider declares no settings."}]] \
 			-row [incr r] -column 0 -columnspan 2 -sticky w
 	}
 	foreach o $opts {
@@ -5174,6 +5270,74 @@ proc providers_menu_fill {} {
 				-variable ::agent_provider -value [dict get $p name] -command apply_provider
 		}
 	}
+	extensions_menu_fill   ;# the same cache decides which extensions offer a window
+}
+
+# ---------------------------------------------------------------------------
+# The Extensions menu (D130): the installer, then one door per installed extension that
+# has something to configure. An extension's own settings are ITS business and live in
+# ITS window — rio's Preferences holds only what rio itself owns, including its settings
+# ABOUT extensions (update checking, repositories, signing keys), which stay in
+# Preferences ▸ Extensions.
+# ---------------------------------------------------------------------------
+# Extensions that are GUI-side rather than core-side register here at load time, in the
+# rio::modes::register idiom: {id label command}. Empty today — every current door comes
+# from the provider list below — but the merge is the point: the menu takes rows from
+# wherever they come from, so a mode or a theme growing settings later needs no new
+# mechanism, only a row.
+set ::ext_settings_extra {}
+
+proc ext_settings_register {id label command} {
+	dict set ::ext_settings_extra $id [list $label $command]
+}
+
+# Every extension with a settings door, as {id label command}, sorted by label. Read
+# from the cached provider list, so building the menu costs no round-trip.
+proc ext_settings_rows {} {
+	set rows {}
+	foreach p $::agent_providers {
+		set name [dict get $p name]
+		if {![provider_has_settings $name]} continue
+		lappend rows [list $name [dict get $p label] [list provider_settings_dialog $name]]
+	}
+	dict for {id v} $::ext_settings_extra {
+		lappend rows [list $id [lindex $v 0] [lindex $v 1]]
+	}
+	return [lsort -index 1 -dictionary $rows]
+}
+
+# Past this many doors the menu would be a list rather than a menu, so it becomes one:
+# D92 holds that no menu in rio is data-driven and unbounded, and this menu is
+# data-driven. Keeping that true by construction beats assuming nobody installs many.
+set ::ext_settings_menu_max 12
+
+proc extensions_menu_fill {} {
+	if {![winfo exists .m.extensions]} return
+	.m.extensions delete 0 end
+	.m.extensions add command -label "Extensions…" -command extensions_window
+	.m.extensions add separator
+	set rows [ext_settings_rows]
+	if {![llength $rows]} {
+		# Never an empty menu: say why there is nothing here rather than look broken.
+		.m.extensions add command -label "(no extension settings)" -state disabled
+	} elseif {[llength $rows] > $::ext_settings_menu_max} {
+		.m.extensions add command -label "Extension settings…" -command ext_settings_pick
+	} else {
+		foreach row $rows {
+			.m.extensions add command -label "[lindex $row 1]…" -command [lindex $row 2]
+		}
+	}
+}
+
+# The overflow door: the same bounded picker Switch to Tab… and Theme… use (D74/D92).
+proc ext_settings_pick {} {
+	set rows {}
+	foreach row [ext_settings_rows] { lappend rows [list [lindex $row 0] [lindex $row 1]] }
+	set id [pick_dialog "Extension settings" $rows]
+	if {$id eq ""} return
+	foreach row [ext_settings_rows] {
+		if {[lindex $row 0] eq $id} { eval [lindex $row 2] ; return }
+	}
 }
 
 # --- the agent "working" indicator (D82) -------------------------------------
@@ -5343,78 +5507,6 @@ proc tls_unchecked_hint {} {
 		return "This core has tcltls $::tls_version. $what"
 	}
 	return $what
-}
-
-# The provider API-key dialog (Preferences ▸ Agent ▸ <provider> API Key…). A small
-# modal that is a dumb view of one provider's key store: it never holds the key, it
-# hands what the user types to agent.key.set for THAT provider / removes it with
-# agent.key.clear. Title, prompt and signup hint come from the provider's declared
-# metadata (agent.providers), so one dialog serves Claude, ChatGPT, and any future
-# provider. Selecting a provider with no key stored isn't blocked here — the first
-# turn then surfaces the face's actionable not_configured error (D26).
-proc provider_key_dialog {name} {
-	agent_providers_refresh
-	set p [agent_provider_entry $name]
-	if {$p eq "" || ![dict get $p keyed]} return
-	set label  [dict get $p label]
-	set signup [dict get $p signup]
-	set stored [dict get $p key_set]
-	set w .providerkey
-	destroy $w
-	toplevel $w
-	wm title $w "$label API key"
-	wm transient $w .
-	wm resizable $w 0 0
-	set c $::theme_colors
-	$w configure -background [dict get $c ui.bg]
-	set prompt "$label API key"
-	if {$signup ne ""} { append prompt " — create one at $signup" }
-	append prompt "."
-	label $w.prompt -anchor w -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] -text $prompt
-	entry $w.e -show • -width 52 -font RioUIFont
-	ctx_bind_input $w.e   ;# masked, so Cut/Copy are left out (D115)
-	checkbutton $w.show -text "Show key" -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-activebackground [dict get $c ui.bg] -selectcolor [dict get $c ui.bg] \
-		-variable ::provider_key_show -command [list provider_key_reveal $w]
-	set ::provider_key_show 0
-	label $w.status -anchor w -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
-		-text [expr {$stored ? "A key is stored; saving one replaces it." : "No key stored yet."}]
-	frame $w.btns -background [dict get $c ui.bg]
-	button $w.btns.save   -text "Save"   -font RioUIFont -command [list provider_key_save $w $name]
-	button $w.btns.clear  -text "Clear"  -font RioUIFont -command [list provider_key_clear $w $name] \
-		-state [expr {$stored ? "normal" : "disabled"}]
-	button $w.btns.cancel -text "Cancel" -font RioUIFont -command [list destroy $w]
-	pack $w.btns.cancel $w.btns.clear $w.btns.save -side right -padx 3
-	grid $w.prompt -row 0 -column 0 -sticky we -padx 8 -pady {8 2}
-	grid $w.e      -row 1 -column 0 -sticky we -padx 8
-	grid $w.show   -row 2 -column 0 -sticky w  -padx 6
-	grid $w.status -row 3 -column 0 -sticky we -padx 8 -pady {2 4}
-	grid $w.btns   -row 4 -column 0 -sticky e  -padx 5 -pady {2 8}
-	bind $w.e <Return> [list $w.btns.save invoke]
-	bind $w <Escape>   [list destroy $w]
-	catch {grab $w}
-	focus $w.e
-}
-proc provider_key_reveal {w} {
-	$w.e configure -show [expr {$::provider_key_show ? "" : "•"}]
-}
-proc provider_key_save {w name} {
-	set key [string trim [$w.e get]]
-	if {$key eq ""} {
-		report_error "Enter an API key, or use Clear to remove the stored one."
-		return
-	}
-	rio_result agent.key.set [dict create key $key name $name]
-	providers_menu_fill   ;# the provider's key_set state changed
-	destroy $w
-}
-proc provider_key_clear {w name} {
-	rio_result agent.key.clear [dict create name $name]
-	providers_menu_fill
-	destroy $w
 }
 
 # ---------------------------------------------------------------------------
@@ -9706,7 +9798,8 @@ proc ext_update_all {} {
 }
 
 # ---------------------------------------------------------------------------
-# The Extensions window (AGENTS.md D39; moved to Settings in D67): Settings ▸ Extensions… — where the user
+# The Extensions window (AGENTS.md D39; Settings in D67, its own top-level menu since
+# D130): Extensions ▸ Extensions… — where the user
 # browses every configured repository, chooses BETWEEN same-name extensions
 # (different authors, different versions — each variant its own line with its
 # provenance), installs, and removes. Naming: the WINDOW is "Extensions" (what
@@ -10063,15 +10156,18 @@ proc extw_select {} {
 	set entry ""
 	if {[dict exists $::ext_installed $key]} { set entry [dict get $::ext_installed $key] }
 	set st [expr {$::repo_busy ? "disabled" : "normal"}]
-	# An installed provider: say whether it is actually running, and if it is, offer the
-	# settings it declares from here as well as from Preferences. A provider installs
+	# An installed provider: say whether it is actually running, and if it is, offer its
+	# own settings window from here as well as from the Extensions menu (D130) — the
+	# window that just installed it is the likeliest place to want it. Same predicate as
+	# the menu's, so the two can never disagree about who has a window: a keyed provider
+	# earns one on its key alone, even declaring no options. A provider installs
 	# core-side and is sourced only at the next core start (D66), so "installed" and
 	# "live" are genuinely different states — and the window that just installed it is
 	# where saying so is most use. The test is the REGISTERED list, never the ledger:
 	# asking a core about a provider it has not loaded gets nothing to show.
 	if {$entry ne "" && [dict get $row kind] eq "provider"} {
 		set pname [dict get $row name]
-		if {[provider_has_options $pname]} {
+		if {[provider_has_settings $pname]} {
 			button $det.settings -text "[agent_provider_label $pname] settings…" \
 				-font RioUIFont -state $st \
 				-command [list provider_settings_dialog $pname]
@@ -12120,8 +12216,12 @@ proc prefs_fill_editor {f} {
 
 # Agent category: the provider picker (enumerated from the core like the theme
 # radios, so an installed provider appears), a muted hint when only the echo stub is
-# present, the two agent-edit toggles, an API-key button per keyed provider, and the
-# door to the agent's instructions (Agent Prompts…, D70/D79).
+# present, the two agent-edit toggles, and the doors to the agent's instructions and its
+# command allow-list (Agent Prompts…, D70/D79; Allowed commands…, D84).
+#
+# Everything here is RIO's — the concepts rio owns, whichever provider is running. What
+# belongs to one particular provider (its key, its endpoint, its model) is that
+# provider's own window, under the Extensions menu (D130).
 proc prefs_fill_agent {f} {
 	agent_providers_refresh
 	set r 0
@@ -12158,24 +12258,13 @@ proc prefs_fill_agent {f} {
 		::agent_selection_menu prefs_save] -row [incr r] -column 0 -sticky w -pady {8 1}
 	grid [prefs_hint $f.selhint "Shown only while a provider other than Echo is selected. It asks the agent to change the selected text and nothing else."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
-	set i 0
-	foreach p $::agent_providers {
-		if {![dict get $p keyed]} continue
-		grid [prefs_button $f.key[incr i] "[dict get $p label] API Key…" \
-			[list provider_key_dialog [dict get $p name]]] \
-			-row [incr r] -column 0 -sticky w -pady {4 2}
-	}
-	# What a provider lets you configure is the PROVIDER's business (D106), so the door
-	# is offered for whoever declares anything and the window renders what they declare.
-	# For a local server that is where the endpoint lives, which is the whole reason a
-	# strip menubutton was not enough.
-	set i 0
-	foreach p $::agent_providers {
-		if {![provider_has_options [dict get $p name]]} continue
-		grid [prefs_button $f.opt[incr i] "[dict get $p label] settings…" \
-			[list provider_settings_dialog [dict get $p name]]] \
-			-row [incr r] -column 0 -sticky w -pady {2 2}
-	}
+	# What a provider lets you configure is the PROVIDER's business (D106), and since
+	# D130 it is configured in the PROVIDER's own window, reached from the Extensions
+	# menu — so this pane no longer grows a pair of buttons per installed provider, and
+	# rio's own agent settings above are no longer interleaved with somebody else's.
+	# A muted pointer rather than a second door: guidance, not a control (D68).
+	grid [prefs_hint $f.provhint "Each provider's own settings — its API key, and whatever else it declares, such as its endpoint and model — live in that provider's window, under the Extensions menu."] \
+		-row [incr r] -column 0 -sticky w -pady {8 1}
 	# The agent's instructions (system / project / per-provider prompts, D70/D79) are
 	# the third leg of its config alongside provider + key. This pane is their ONLY home
 	# now — the Settings menu keeps just the provider picker and the two quick toggles,
@@ -12272,9 +12361,9 @@ proc preferences_window {} {
 	prefs_fill_network    $w.body.network
 	prefs_fill_keyboard   $w.body.keyboard
 
-	# Extensions… mirrors the Settings menu, where it sits right under Preferences…
-	# (D67): from here you jump to the installer for the providers/modes/themes/syntax
-	# the categories above pick from. Left of Close; a spacer column keeps them apart.
+	# Extensions… mirrors the top-level Extensions menu, which it leads (D130): from here
+	# you jump to the installer for the providers/modes/themes/syntax the categories
+	# above pick from. Left of Close; a spacer column keeps them apart.
 	frame $w.btns -background [dict get $c ui.bg]
 	grid [prefs_button $w.btns.ext   "Extensions…" [list extensions_window]] -row 0 -column 0 -sticky w
 	grid [prefs_button $w.btns.close "Close"       [list destroy $w]]         -row 0 -column 2 -sticky e
@@ -12946,8 +13035,9 @@ menu .m.view.layout -tearoff 0
 # Language… (D112) picks the current buffer's highlighter by hand. Also a bounded picker:
 # the language list grows with every installed syntax extension, just like themes.
 .m.view add command -label "Language…" -command language_pick_dialog
-# Extensions… is NOT here (it moved to Settings, D67): it is a management dialog that
-# installs the providers/modes/themes the Settings choosers pick, not a pane toggle.
+# Extensions… is NOT here (it moved to Settings in D67, and to its own top-level menu in
+# D130): it is a management dialog that
+# installs the providers/modes/themes the choosers pick, not a pane toggle.
 
 # Find is its own top-level menu (D75), holding the search cluster that used to sit behind a
 # separator in Edit — in-buffer Find/Replace/Next/Previous plus project-wide Search…. Lifting
@@ -12985,11 +13075,9 @@ menu .m.settings -tearoff 0
 # below stay here too — it is a second door, not a replacement.
 .m.settings add command -label "Preferences…" -accelerator [key_accel preferences] \
 	-command preferences_window
-# Extensions… sits right under Preferences… (D67): both open a management window for
-# customizing rio — Preferences the built-in settings, Extensions the installer for
-# the providers/modes/themes/syntax the choosers below pick from. The Preferences
-# window mirrors this with its own Extensions… button.
-.m.settings add command -label "Extensions…" -command extensions_window
+# Extensions… is NOT here any more (D130, amending D67): it leads the top-level
+# Extensions menu, alongside the per-extension settings doors, so everything to do with
+# extensions is in one place. This menu keeps rio's own fast switches.
 .m.settings add separator
 # The agent provider is a cascade filled from the core (providers_menu_fill, mirroring
 # View ▸ Theme): the list scales as providers are added (D39/milestone B), and the
@@ -13022,6 +13110,17 @@ menu .m.settings.editmode -tearoff 0
 .m.settings add checkbutton -label "Column Editing (Ctrl+Shift+Drag)" \
 	-variable ::col_on -command apply_column_edit
 .m.settings add command -label "Keyboard Shortcuts…" -command keybindings_dialog
+
+# Extensions (D130) sits after Settings and before Help: rio's own configuration first,
+# then what you have added to it, then Help last. It leads with the installer and then
+# offers one door per installed extension that has something to configure — filled by
+# extensions_menu_fill from the same cache the provider cascade above uses, so an
+# extension appears here with no code change. The settings behind those doors belong to
+# the extension; rio's settings ABOUT extensions stay in Preferences ▸ Extensions.
+menu .m.extensions -tearoff 0
+.m add cascade -label Extensions -menu .m.extensions
+extensions_menu_fill
+
 # Help is the last (rightmost) menu, the Windows/VSCode convention (D76). Contents… opens the
 # manual in rio itself (D99) and About names the version and the build, so a tester can say
 # which rio they're running (D123 — the release line, and the exact commit under it).

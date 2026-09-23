@@ -123,11 +123,11 @@ the installer only adds a small launcher that points back into it. Keep the chec
 where it is (a `git pull` updates rio in place); if you do move it, re-run the script.
 
 Out of the box the only agent provider is the offline **echo** stub. To use a real
-agent, **install a provider** from *Settings ▸ Extensions…* (e.g. **Claude** over the
+agent, **install a provider** from *Extensions ▸ Extensions…* (e.g. **Claude** over the
 Anthropic API, or the **OpenAI-compatible** one for hosted ChatGPT or a server of your
-own), restart rio, then pick it under *Settings ▸ Agent Provider* and configure it under
-*Preferences ▸ Agent* — a hosted provider needs a key there (stored 0600, see §5); a
-server of your own usually needs only its URL.
+own), restart rio, then pick it under *Settings ▸ Agent Provider* and configure it in
+its own window, listed by name in the **Extensions** menu — a hosted provider needs a
+key there (stored 0600, see §5); a server of your own usually needs only its URL.
 
 ---
 
@@ -291,15 +291,15 @@ Consequences:
 - **The API key is stored by the core**, in a 0600 file under
   `$XDG_DATA_HOME/rio/secrets/` (default `~/.local/share/rio/secrets/`) **on the core's
   host** — one file per provider (Claude's is `claude-api.secret`) — never in the GUI,
-  never in synced config. In mode B the key lives on the **server**. Enter/clear it from
-  *Preferences ▸ Agent* (it crosses the channel once via `agent.key.set`; the GUI
-  never retains it).
+  never in synced config. In mode B the key lives on the **server**. Enter/clear it in
+  that provider's own window, from the **Extensions** menu (it crosses the channel once
+  via `agent.key.set`; the GUI never retains it, and never reads it back).
 - **Don't want the key on a given box?** Run the core locally (mode A) and edit
   remote files some other way — the GUI is identical. The choice of *where the agent
   runs* is just *where you point the GUI*.
 - **Provider** is chosen at runtime (*Settings ▸ Agent Provider*). The only built-in is
   `echo`, an offline stub needing no key or network; a real provider (Claude, OpenAI-compatible, …)
-  is **installed** from *Settings ▸ Extensions…* and needs `tcltls`, plus a stored key
+  is **installed** from *Extensions ▸ Extensions…* and needs `tcltls`, plus a stored key
   for a hosted service (a server of your own usually needs none).
 
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,

@@ -682,6 +682,29 @@ ok "provider: a loaded one offers its settings" \
 	[expr {[winfo exists .extw.det.settings]
 		&& [.extw.det.settings cget -text] eq "Peppy settings…"}] 1
 ok "provider: and stops telling you to restart" [winfo exists .extw.det.restart] 0
+# This row's door and the Extensions menu's door must agree about who HAS one (D130):
+# both ask provider_has_settings, so a keyed provider that declares nothing still gets
+# its window in both places. They were briefly out of step — the menu counted the key,
+# the row did not — which left exactly that provider reachable from one door and not
+# the other.
+namespace eval ppkeyed {
+	variable key ""
+}
+proc ppkeyed::provider {conversation tools system post} { {*}$post done stop }
+proc ppkeyed::set_key   {k} { variable key ; set key $k ; return }
+proc ppkeyed::clear_key {}  { variable key ; set key "" ; return }
+proc ppkeyed::configured {} { variable key ; return [expr {$key ne ""}] }
+rio::agent::register_provider pp ::ppkeyed::provider -label "Peppy" \
+	-key [dict create set ::ppkeyed::set_key clear ::ppkeyed::clear_key \
+		status ::ppkeyed::configured]
+agent_providers_refresh
+extensions_menu_fill
+pick_row provider pp
+ok "provider: a keyed one with no options still offers its window" \
+	[winfo exists .extw.det.settings] 1
+ok "provider: and the menu agrees it has one" \
+	[list [provider_has_settings pp] \
+		[expr {[catch {.m.extensions index "Peppy…"}] ? 0 : 1}]] {1 1}
 destroy .extw
 ok "provider: remove works with no ledger entry" [ext_remove provider pp] 1
 ok "provider: the core dropped it" \

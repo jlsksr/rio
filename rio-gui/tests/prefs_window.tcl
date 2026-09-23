@@ -123,13 +123,43 @@ ok "editor: mode radios built"   [winfo exists .prefs.body.editor.em1] 1
 ok "editor: windows is a mode"   [expr {"windows" in [rio::modes::names]}] 1
 
 # --- Agent pane: the prompts + allow-list doors + the echo-only hint ----------------
-# The Agent pane is now the ONLY door to the agent's heavier config: the Settings menu
-# keeps just the provider picker and the two quick toggles, so keys/prompts/allow-list
-# live here (jka, 2026-09-09). With only the echo stub registered (this test's core
-# installs no provider) a muted hint points at Extensions… for a real model.
+# This pane holds RIO's agent settings and only those (D130). Prompts and the allow-list
+# stay: they are rio's own mechanisms, merely scoped per provider. What a PROVIDER
+# declares — its key, its endpoint, its model — went to that provider's own window under
+# the Extensions menu, so this pane no longer grows a pair of buttons per installed
+# provider and points at the menu instead. With only the echo stub registered (this
+# test's core installs no provider) a muted hint also points at Extensions… for a real
+# model.
 ok "agent: prompts button present" [winfo exists .prefs.body.agent.prompts] 1
 ok "agent: allow button present"   [winfo exists .prefs.body.agent.allow]   1
 ok "agent: echo-only hint present" [winfo exists .prefs.body.agent.hint]    1
+ok "agent: points at the provider's own window" \
+	[expr {[winfo exists .prefs.body.agent.provhint]
+		&& [string match "*Extensions menu*" [.prefs.body.agent.provhint cget -text]]}] 1
+# No per-provider button may come back here, whatever a provider declares. Built with a
+# provider that is both keyed AND option-declaring — the one that used to produce two —
+# so the check fails if either loop returns.
+set ::pw_saved $::agent_providers
+rename agent_providers_refresh pw_refresh_real
+proc agent_providers_refresh {} {}
+set ::agent_providers \
+	{{name pw label "Panewise" keyed 1 key_set 0 signup "" options 1}}
+destroy .pwpane
+frame .pwpane
+prefs_fill_agent .pwpane
+set ::pw_btns {}
+foreach c [winfo children .pwpane] {
+	if {[winfo class $c] eq "Button"} { lappend ::pw_btns [$c cget -text] }
+}
+ok "agent: no per-provider buttons, however much it declares" \
+	[lsearch -glob $::pw_btns "Panewise*"] -1
+ok "agent: and rio's own doors are still there" \
+	[list [expr {"Agent Prompts…" in $::pw_btns}] \
+		[expr {"Allowed commands…" in $::pw_btns}]] {1 1}
+destroy .pwpane
+set ::agent_providers $::pw_saved
+rename agent_providers_refresh {}
+rename pw_refresh_real agent_providers_refresh
 .prefs.body.agent.prompts invoke
 ok "agent: prompts button opens it" [winfo exists .agentprompts]            1
 destroy .agentprompts

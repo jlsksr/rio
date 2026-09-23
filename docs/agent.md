@@ -24,7 +24,7 @@ Out of the box rio ships one provider: **echo**, an offline stub that needs no k
 and no network. It exists so the chat pane works and can be tested — it is not a
 model.
 
-Real providers install as **extensions** from ***Settings ▸ Extensions…***:
+Real providers install as **extensions** from ***Extensions ▸ Extensions…***:
 
 - **Claude**, over the official Anthropic API.
 - **OpenAI-compatible**, which drives hosted ChatGPT *or* any server that speaks the
@@ -37,16 +37,17 @@ starts — so **restart rio** after installing one. Until you do, that extension
 in the Extensions window says so instead of offering its settings.
 
 Pick the live one in ***Settings ▸ Agent Provider*** (a quick switch you make
-mid-session) or in ***Preferences ▸ Agent***, which is also where each provider's
-heavier configuration lives. See [extensions](extensions.md) for adding a
-repository to install from.
+mid-session) or in ***Preferences ▸ Agent***. Everything that belongs to the
+provider *itself* — its key, its server, its model — is set in
+[its own window](#a-providers-own-settings) instead, under the **Extensions** menu.
+See [extensions](extensions.md) for adding a repository to install from.
 
 ## Choosing a model, and how hard it thinks
 
 The strip along the **bottom of the agent pane** names the agent you are talking to
 — **`Claude · Sonnet 5 ▾`** — and clicking it is how you change that. It holds the
 handful of choices worth changing between turns; everything else a provider lets you
-configure is in [its settings window](#settings-a-provider-declares). It is a single
+configure is in [its settings window](#a-providers-own-settings). It is a single
 menu, with a section for each choice:
 
 - **Provider** — the same picker as ***Settings ▸ Agent Provider***, next to the
@@ -79,29 +80,80 @@ model = claude-opus-5
 effort = high
 ```
 
-Everything in the settings window below lands in that same file, so which keys it
-holds depends on the provider. It sits beside that provider's prompt layer and its
-allow-list, and it lives **on the core's machine** — with a remote core, the menu
-shows the models that core can reach, and the file is on the server.
+Everything the provider *declares* in the settings window below lands in that same
+file, so which keys it holds depends on the provider — the one thing that never does
+is the API key, which lives apart from every settings file. It sits beside that
+provider's prompt layer and its allow-list, and it lives **on the core's machine** —
+with a remote core, the menu shows the models that core can reach, and the file is on
+the server.
 
-## Settings a provider declares
+## A provider's own settings
 
-The rest of what a provider lets you set — where its server is, how big a reply may
-be, how long a turn may take — lives in a window of its own:
-***Preferences ▸ Agent ▸ `<provider>` settings…***, with one button there per
-installed provider that has any settings at all. An installed provider's row in the
+Everything that belongs to a provider — its key, and the rest of what it lets you
+set — is configured in a window of its own, opened from the **Extensions** menu:
+
+***Extensions ▸ `<provider>`…***
+
+That menu carries one entry per installed extension that has anything to configure,
+named after the extension — so with Claude and the OpenAI-compatible provider
+installed you get ***Claude…*** and ***OpenAI-compatible…***. A provider's row in the
 Extensions window opens the same window, which is the convenient door right after you
 install one.
 
-The form is built from **what that provider declares**, so rio keeps no list of its
-own to go stale: the sections, the fields and the muted explanation under each come
-from the provider. A choice is a drop-down; anything else is a field you type in.
+The split is worth knowing, because it tells you where to look for anything: what an
+**extension** declares is set in the extension's own window, and what **rio** owns
+stays in rio's *Preferences*. So the agent's mode, its prompts and its allow-lists are
+in *Preferences ▸ Agent* — those are rio's own mechanisms — while the key and the
+server belong to the provider and are set here.
 
-There is no OK and no Cancel. **Each change is saved as you make it** — a drop-down
-the moment you pick from it, a field when you press `Return` or move away from it —
-and saved on the machine the core runs on, in that provider's settings file above. The
-window is not modal, so you can leave it open while you work; **Close** or `Esc`
-dismisses it.
+There is no OK and no Cancel and nothing to apply: each setting is stored on the
+machine the core runs on as you set it — the one exception being the API key, which
+waits for its **Save** button. The window is not modal, so you can leave it open while
+you work; **Close** or `Esc` dismisses it.
+
+### Your API key
+
+The window opens with **Credentials**, and that is where a hosted provider's key
+goes. The field is masked; beneath it are **Show key**, **Save** and **Clear**.
+
+- **Save is deliberate.** Unlike the settings below it, the key is *not* written when
+  you move away from the field — press **Save**, or `Return` in the field. A key is
+  pasted and glanced at before it is committed, so rio waits to be told.
+- The field is **blank every time the window opens.** rio keeps your key for the
+  provider but never reads it back, so what you see is not what is stored. The note
+  under the buttons is what tells you: *A key is stored*, or *No key stored yet* —
+  and where to create one, when the provider names a place.
+- **Clear** removes the stored key, and is greyed out until there is one to remove.
+- **Show key** unmasks what you have typed, for checking a paste. It reveals nothing
+  that was already stored.
+- Because the field is masked, its right-click menu offers *Paste* and *Select All*
+  only: you can put a key in, but not lift one back out as plain text.
+
+The key is never written into `prefs.json` or any other settings file. It lives on
+its own, mode `0600`, in rio's data directory — see
+[preferences](preferences.md#where-everything-lives) for the exact path.
+
+*(API key)* in the provider picker means a provider **can take** one, not that it
+must have one; the offline ones are marked *(offline)*. A server of your own usually
+needs none — leave it unset and rio sends no authorization header at all.
+
+**The agent runs in the core, not in the window.** With a remote core, the turn is
+made on the server and the key is stored there — which is a real consideration if
+that machine isn't yours. rio says so plainly when you connect. See
+[working remotely](remote.md).
+
+### Settings a provider declares
+
+Below the credentials sits the rest — where its server is, how big a reply may be,
+how long a turn may take. The form is built from **what that provider declares**, so
+rio keeps no list of its own to go stale: the sections, the fields and the muted
+explanation under each come from the provider. A choice is a drop-down; anything else
+is a field you type in.
+
+**Each of these is saved as you make it** — a drop-down the moment you pick from it,
+a field when you press `Return` or move away from it — into that provider's settings
+file above. A provider that declares nothing says so, and the window is then its
+credentials alone.
 
 ## Running a model of your own
 
@@ -112,15 +164,16 @@ needed at all.
 
 1. Install the **openai** extension and **restart rio**.
 2. Pick **OpenAI-compatible** in ***Settings ▸ Agent Provider***.
-3. Open ***Preferences ▸ Agent ▸ `<provider>` settings…***.
+3. Open ***Extensions ▸ OpenAI-compatible…***.
 4. Set **Server URL** to your server's API base, with no trailing path:
    `http://your-box:11434/v1` for Ollama, `http://localhost:8080/v1` for
    llama-server. rio appends `/chat/completions` and `/models` itself — paste one of
    those on the end, or a trailing slash, and it trims them for you.
 5. Click **⟳ Refresh from provider** beside **Model**. The list is replaced by what
    *that* server actually offers. Pick one.
-6. Leave the API key unset. rio then sends no authorization at all and lets the server
-   decide, which is what a server of your own normally wants.
+6. Leave **API key** alone, at the top of the same window. With none stored rio sends
+   no authorization at all and lets the server decide, which is what a server of your
+   own normally wants.
 
 rio refuses a turn before it starts in exactly one case: **no key and no server URL of
 your own**, because then it really is hosted OpenAI, which really does need a key.
@@ -137,26 +190,6 @@ Two settings matter more than usual for a server of your own:
 
 The two **Advanced** URLs stay blank unless your server keeps its completions and its
 model list somewhere other than under one base.
-
-## Your API key
-
-***Preferences ▸ Agent ▸ `<provider>` API Key…*** stores the key for a provider.
-
-The field is masked, so its right-click menu offers *Paste* and *Select All* only:
-you can put a key in, but not lift one back out as plain text.
-
-The key is never written into `prefs.json` or any other settings file. It lives on
-its own, mode `0600`, in rio's data directory — see
-[preferences](preferences.md#where-everything-lives) for the exact path.
-
-*(API key)* in the provider picker means a provider **can take** one, not that it
-must have one; the offline ones are marked *(offline)*. A server of your own usually
-needs none — leave it unset and rio sends no authorization header at all.
-
-**The agent runs in the core, not in the window.** With a remote core, the turn is
-made on the server and the key is stored there — which is a real consideration if
-that machine isn't yours. rio says so plainly when you connect. See
-[working remotely](remote.md).
 
 ## HTTPS on an older tcltls
 

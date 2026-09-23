@@ -99,29 +99,138 @@ namespace eval mute {}
 proc mute::provider {conversation tools system post} { {*}$post done stop }
 rio::agent::register_provider mute ::mute::provider -label "Muted"
 
+# A third that declares NO options but does take a key — the case D130's door predicate
+# exists for: its key is the one thing it has to set, and gating on options alone would
+# leave it with nowhere to set it.
+namespace eval vault {
+	variable key ""
+}
+proc vault::provider {conversation tools system post} { {*}$post done stop }
+proc vault::set_key   {k} { variable key ; set key $k ; return }
+proc vault::clear_key {}  { variable key ; set key "" ; return }
+proc vault::configured {} { variable key ; return [expr {$key ne ""}] }
+rio::agent::register_provider vault ::vault::provider -label "Vaulted" \
+	-signup vault.example \
+	-key [dict create set ::vault::set_key clear ::vault::clear_key \
+		status ::vault::configured]
+
 agent_providers_refresh
 
 # --- the door ----------------------------------------------------------------
-preferences_window
-.prefs.cats selection clear 0 end
-.prefs.cats selection set 2      ;# Agent
-prefs_show_cat .prefs
-update idletasks
+#
+# A menu entry, not a button in rio's own Preferences (D130): what a provider lets you
+# configure is the provider's business, so it gets its own window and the Extensions
+# menu lists whoever has one. Rebuilt from the cache, so a provider registered above
+# appears with no code change — which is the whole claim.
+extensions_menu_fill
 
-proc prefs_buttons {} {
+proc ext_menu_labels {} {
 	set out {}
-	foreach ch [winfo children .prefs.body.agent] {
-		if {[winfo class $ch] eq "Button"} { lappend out [$ch cget -text] }
+	for {set i 0} {$i <= [.m.extensions index end]} {incr i} {
+		if {[catch {.m.extensions entrycget $i -label} l]} continue
+		lappend out $l
 	}
 	return $out
 }
-set ::btns [prefs_buttons]
-ok "door: a provider with options gets a settings button" \
-	[expr {"Vendorless settings…" in $::btns}] 1
-ok "door: one without options does not" \
-	[expr {"Muted settings…" in $::btns}] 0
-ok "door: the flag comes from the core, not a guess" \
+set ::extm [ext_menu_labels]
+ok "door: the menu leads with the installer" [lindex $::extm 0] "Extensions…"
+ok "door: a provider with options gets a door" \
+	[expr {"Vendorless…" in $::extm}] 1
+ok "door: a keyed provider with no options gets one too" \
+	[expr {"Vaulted…" in $::extm}] 1
+ok "door: one with nothing at all to set does not" \
+	[expr {"Muted…" in $::extm}] 0
+ok "door: the options flag comes from the core, not a guess" \
 	[list [provider_has_options vend] [provider_has_options mute]] {1 0}
+ok "door: and the door predicate counts the key as well" \
+	[list [provider_has_settings vend] [provider_has_settings vault] \
+		[provider_has_settings mute]] {1 1 0}
+ok "door: the entry opens that provider's window" \
+	[.m.extensions entrycget [.m.extensions index "Vaulted…"] -command] \
+	{provider_settings_dialog vault}
+
+# The rows are merged from wherever they come from, not read off the provider list: a
+# GUI-side extension (a mode, later) registers one and it lands in the same menu.
+ext_settings_register zzmode "Zed Mode" {puts zed}
+extensions_menu_fill
+ok "door: a GUI-side extension can register a door too" \
+	[expr {"Zed Mode…" in [ext_menu_labels]}] 1
+proc ext_row_labels {} {
+	set out {}
+	foreach row [ext_settings_rows] { lappend out [lindex $row 1] }
+	return $out
+}
+ok "door: rows are sorted by label" \
+	[ext_row_labels] [lsort -dictionary [ext_row_labels]]
+set ::ext_settings_extra {}
+
+# D92: no menu in rio is data-driven and unbounded. Past the cap this one becomes the
+# same bounded picker Switch to Tab… and Theme… use, rather than a list on a stick.
+#
+# Tested at the BOUNDARY, and the count is padded up to it rather than driven by it: a
+# loop that runs ::ext_settings_menu_max times always overshoots whatever that is, so it
+# would pass just as happily with the cap raised to a million or deleted outright.
+ok "cap: the bound is small enough to be a menu" \
+	[expr {$::ext_settings_menu_max > 0 && $::ext_settings_menu_max <= 20}] 1
+proc pad_rows_to {n} {
+	set ::ext_settings_extra {}
+	set have [llength [ext_settings_rows]]
+	for {set i $have} {$i < $n} {incr i} { ext_settings_register pad$i "Padding $i" {} }
+	extensions_menu_fill
+}
+pad_rows_to $::ext_settings_menu_max
+ok "cap: at the limit they are still listed one by one" \
+	[list [llength [ext_settings_rows]] [expr {"Vendorless…" in [ext_menu_labels]}] \
+		[expr {"Extension settings…" in [ext_menu_labels]}]] \
+	[list $::ext_settings_menu_max 1 0]
+pad_rows_to [expr {$::ext_settings_menu_max + 1}]
+ok "cap: one past it, the list collapses to a picker" \
+	[expr {"Extension settings…" in [ext_menu_labels]}] 1
+ok "cap: and stops listing them one by one" \
+	[expr {"Vendorless…" in [ext_menu_labels]}] 0
+set ::ext_settings_extra {}
+extensions_menu_fill
+ok "cap: under it, they are listed again" \
+	[expr {"Vendorless…" in [ext_menu_labels]}] 1
+
+# --- the credentials group ----------------------------------------------------
+#
+# The key is a row in the provider's own window now, not a modal of its own (D130), so
+# a provider's window holds everything that belongs to it. rio never reads a stored key
+# back, so the field is always blank and the note says whether one is there.
+provider_settings_dialog vault
+update idletasks
+ok "key: the field is there"     [winfo exists .provset.body.keye]        1
+ok "key: and it is masked"       [.provset.body.keye cget -show]          "•"
+ok "key: nothing to clear yet"   [.provset.body.keyb.clear cget -state]   "disabled"
+ok "key: the note says so"       [.provset.body.keyn cget -text] \
+	"No key stored yet. Create one at vault.example."
+ok "key: an empty save is refused" [list [provider_key_field_save vault] \
+	[::vault::configured]] {{} 0}
+ok "key: and says why, in the window" \
+	[expr {[string match "Enter an API key*" [.provset.status cget -text]]}] 1
+.provset.body.keye insert 0 " sk-secret "
+provider_key_field_save vault
+update idletasks
+ok "key: a save reaches the provider, trimmed" \
+	[list [::vault::configured] [set ::vault::key]] {1 sk-secret}
+ok "key: the window says so"     [.provset.status cget -text]             "Key saved."
+ok "key: the note flips"         [.provset.body.keyn cget -text] \
+	"A key is stored; saving one replaces it. Create one at vault.example."
+ok "key: and Clear comes alive"  [.provset.body.keyb.clear cget -state]   "normal"
+ok "key: the field is never filled back in" [.provset.body.keye get]      ""
+ok "key: Show key unmasks"       [list [set ::provider_key_show 1] \
+	[provider_key_field_reveal] [.provset.body.keye cget -show]] {1 {} {}}
+provider_key_field_clear vault
+update idletasks
+ok "key: Clear reaches the provider" [::vault::configured]                0
+ok "key: the window says so"     [.provset.status cget -text]             "Key removed."
+ok "key: and Clear goes back to disabled" [.provset.body.keyb.clear cget -state] "disabled"
+ok "key: a provider with no key gets no such row" \
+	[list [provider_settings_dialog vend] [update idletasks] \
+		[winfo exists .provset.body.keye]] {{} {} 0}
+ok "key: and no dialog was ever opened for any of it" $::headless_dialogs {}
+destroy .provset
 
 # --- the form ----------------------------------------------------------------
 provider_settings_dialog vend

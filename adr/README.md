@@ -128,7 +128,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0064](0064-bounded-view-menu.md) | Menus are kept within screen height by grouping | Accepted | 2026-09-04 |
 | [0065](0065-second-provider-contract.md) | A second provider, and hardening the provider contract | Accepted; distribution amended by 0066 | 2026-09-04 |
 | [0066](0066-installable-providers.md) | Providers install from repositories, behind a versioned API | Accepted; amended by 0069 | 2026-09-04 |
-| [0067](0067-extensions-in-settings.md) | The Extensions window moves to the Settings menu | Accepted | 2026-09-04 |
+| [0067](0067-extensions-in-settings.md) | The Extensions window moves to the Settings menu | Accepted; the item moved once more in 0137 | 2026-09-04 |
 | [0068](0068-help-text-vs-controls.md) | Static help must look different from controls | Accepted | 2026-09-04 |
 | [0069](0069-claude-as-extension.md) | Claude is an installable provider; echo is the only built-in | Accepted | 2026-09-04 |
 | [0070](0070-user-and-project-prompts.md) | A defined place for user and project prompts | Accepted; amended by 0079, 0105 | 2026-09-04 |
@@ -196,5 +196,6 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted; the budget was raised by 0133 | 2026-09-20 |
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
 | [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted | 2026-09-21 |
-| [0135](0135-provider-declares-its-own-settings.md) | A provider declares its own settings, and rio renders them | Accepted | 2026-09-22 |
+| [0135](0135-provider-declares-its-own-settings.md) | A provider declares its own settings, and rio renders them | Accepted; where the settings window lives reversed by 0137 — the option vocabulary, the `thinking` verb and `provider-api 4` stand | 2026-09-22 |
 | [0136](0136-install-script-per-platform.md) | One install script per platform, and a launcher that makes rio an application | Accepted | 2026-09-22 |
+| [0137](0137-extensions-configure-themselves.md) | A top-level Extensions menu; each extension configures itself | Accepted | 2026-09-23 |

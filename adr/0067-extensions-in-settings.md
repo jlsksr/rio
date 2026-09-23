@@ -1,6 +1,6 @@
 # ADR-0067: The Extensions window moves to the Settings menu
 
-- **Status:** Accepted
+- **Status:** Accepted; the item moved once more in [ADR-0137](0137-extensions-configure-themselves.md)
 - **Date:** 2026-09-04
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D67

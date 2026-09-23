@@ -108,7 +108,7 @@ proc rio::claude::api::provider {conversation tools system post} {
 	set key [_api_key]
 	if {$key eq ""} {
 		{*}$post error not_configured \
-			"No Claude API key — add one in Preferences ▸ Agent"
+			"No Claude API key — add one in Extensions ▸ Claude…"
 		return
 	}
 	set auth [list x-api-key $key]
@@ -236,7 +236,7 @@ proc rio::claude::api::option_refresh {name announce} {
 	if {$name ne "model"} { rio::error::raise bad_request "cannot refresh: $name" }
 	set key [_api_key]
 	if {$key eq ""} {
-		{*}$announce "No Claude API key — add one in Preferences ▸ Agent"
+		{*}$announce "No Claude API key — add one in Extensions ▸ Claude…"
 		return
 	}
 	{*}$fetcher [dict create \

@@ -2560,8 +2560,8 @@ of vouched repository paths — the operator confirming "these are mine") but
 consumed by no v1 code: it's the later basis for "host-validated" badges and
 official approval, costing publishers one static file today.
 
-**The UI is the Extensions window** (*Settings ▸ Extensions…* — under View until
-D67) — deliberated as a
+**The UI is the Extensions window** (*Extensions ▸ Extensions…* — under View until
+D67 and Settings until D130) — deliberated as a
 side-dock pane vs a window with the user: the dock's narrow fixed-width panes
 (files/git) can't carry a browse-and-compare surface, and VSCode's own
 answer (detail opens in an editor tab) needs D35 machinery that doesn't exist
@@ -3669,6 +3669,12 @@ the same installed extension by pointing its `messages_url` at localhost (D8/D65
 ---
 
 ### D67 — "Extensions…" moves from the View menu to Settings
+
+> **Amended by D130: it moved once more, to lead its own top-level Extensions menu.** The
+> reasoning below is unchanged and was never the reason it left Settings — *Extensions… is
+> a management modal, not a pane toggle* still holds, and is why it is not back under View.
+> What changed is that a better home appeared: a menu that gathers the installer and every
+> installed extension's own settings in one place.
 
 A small placement fix. D39 put the Extensions window under *View* as "rio's first D35-style tool
 window, to be re-hosted into a dock when D35 lands" — forward-looking, but D35 hasn't landed and
@@ -7649,7 +7655,16 @@ URL, a token cap and a blob of request JSON — the strip they render in is 340 
 the fix is two halves: a descriptor that can say *"this one is a field"*, and somewhere to
 draw it.
 
-**Where the settings live (jka's call, against his own first suggestion).** jka proposed a
+**Where the settings live (jka's call, against his own first suggestion).**
+> **Reversed by D130 — jka took his first suggestion back, and was right to.** The
+> paragraph below stands as the reasoning that produced the wrong call, because the
+> objection it leans on hardest is false: a top-level Extensions menu needs no
+> menu-contribution mechanism at all, only the enumeration rio already had. What it
+> missed is that Preferences ▸ Agent grew *two buttons per installed provider*, mixed in
+> among rio's own agent settings. Read on for the argument; see D130 for where these
+> settings actually live.
+
+jka proposed a
 top-level **Extensions** menu that extensions register settings windows under, the
 Notepad++ shape, and invited a counter-argument. There was one, and it is rio's own record:
 D85 settled that a top-level menu is for fast switches and a window is the config home, and
@@ -7878,6 +7893,116 @@ claim: the checkout now *feels* installed); and a `MimeType` association making 
 handler for `text/plain`, which competes for every text file on the machine and should be
 the user's own choice. **`install-windows.ps1` is unrun** — this box has no PowerShell, so
 its changes are reviewed but not executed until a Windows run.
+
+---
+
+### D130 — a top-level Extensions menu; each extension configures itself
+
+**Reverses D128's placement**, on jka's call, and amends **D67** (Extensions… moves again)
+and the reach of **D85**.
+
+D128 put every provider's configuration in **Preferences ▸ Agent**, over jka's own first
+suggestion of a top-level Extensions menu, and recorded that he took the counter-argument.
+He has taken it back, with two reasons that counter-argument never addressed:
+
+- **It mixes two different things.** rio's own agent settings — the mode, *Compare complex
+  edits*, *Agent Prompts…*, *Allowed commands…*, the *Change with Agent…* toggle — sat
+  interleaved with settings belonging to one specific provider.
+- **It does not scale.** `prefs_fill_agent` ended in *two* `foreach $::agent_providers`
+  loops, one emitting `"<Label> API Key…"` and one `"<Label> settings…"`. Every new
+  provider added two buttons to a pane that is rio's, not theirs — and even a single
+  provider had two separate doors to its own configuration.
+
+**D128's load-bearing objection was simply wrong**, which is worth recording because it is
+why the wrong call was made. It said such a menu "would need a menu-contribution mechanism,
+which is D17/D18 territory and still deferred." It needs nothing of the sort: the menu is
+filled from an enumeration rio already has (`::agent_providers` and its `options`/`keyed`
+flags), exactly as `providers_menu_fill` and `modes_menu_fill` already fill cascades. Its
+second objection — that settings span two homes, providers core-side and modes/syntax
+GUI-side — is answered by the menu merging two enumerations rather than caring where
+either comes from. The Notepad++ analogy it argued against was also not the claim: jka
+asked for settings windows, not command contributions.
+
+**The line everything is held to: the extension declares it → the extension's own window;
+rio owns the concept → Preferences.** That is what decides each case, and it is worth more
+than the menu itself. By it, an API key is the provider's (Claude's key is meaningless to
+OpenAI) while the *per-provider prompt layer* (D79) and the allow-list's *provider scope*
+(D84) are rio's own mechanisms merely keyed by provider, and stay in Preferences ▸ Agent.
+**D85 is unharmed and its reach is now stated**: it governs where *rio's* settings gather,
+not an extension's.
+
+**The menu.** `Extensions` sits between Settings and Help — rio's own configuration first,
+then what you have added to it, then Help last (jka's order; the first draft put it before
+Settings). It leads with **Extensions…**, the installer, which therefore leaves the Settings
+menu; D67 had moved that item out of *View* for being a management modal rather than a pane
+toggle, and its "put it beside Preferences…" conclusion is superseded only because a better
+home now exists. Below a separator sits one door per installed extension that has something
+to configure, and with none a disabled `(no extension settings)` — never an empty menu.
+
+**The seam, so this is not a provider special case.** `ext_settings_rows` merges rows
+`{id label command}` from the provider list *and* from `::ext_settings_extra`, a registry a
+GUI-side extension can add to at load time in the `rio::modes::register` idiom. Empty today;
+the merge is the point, and it is the answer to D128's two-homes objection.
+
+**D92 is kept true by construction, not by assumption.** D92 states absolutely that no menu
+in rio is data-driven and unbounded, and this menu is data-driven. Past twelve doors it
+emits a single *Extension settings…* entry opening the same bounded picker *Switch to Tab…*
+and *Theme…* use. Six lines, a tested dialog, and a headless check with fake rows — cheaper
+than betting nobody installs many.
+
+**The key moved into the window** (jka's call over a button that opens the old modal): a
+**Credentials** group rendered first, masked field, *Show key*, *Save*, *Clear*, and a note
+saying whether one is stored. `provider_key_dialog` and its three helpers are **deleted** —
+folding them in left no caller, and a second door is the drift D85 exists to end. One
+honest wrinkle: the key commits on **Save** while a declared option applies on Return or
+focus-out, so one window carries two interaction contracts. That is the right way round — a
+key is pasted and committed deliberately — and the window's opening line says so rather than
+leaving it to be discovered.
+
+**A keyed provider now earns a window on its key alone**, declaring no options at all;
+gating on options would have left it with nowhere to set the one thing it has. Both doors —
+the menu and the Extensions window's own row button — ask the same `provider_has_settings`,
+after a review found them briefly disagreeing, with the row still on `provider_has_options`:
+exactly the provider the new predicate exists for was reachable from one door and not the
+other.
+
+**One guard needed repairing, and the repair is the interesting part.** `docs.tcl` check 6
+resolves a quoted `Menu ▸ Item` by taking the *end* of the text before the `▸` as the menu's
+name. That was unambiguous until a menubar menu and a **Preferences category** came to share
+the name *Extensions*, at which point `Preferences ▸ Extensions ▸ Repository signing keys…`
+was read from its middle and reported against the wrong menu. `menu_pairs` now requires an
+**interior** segment — one carrying no emphasis marker and naming a menu and nothing else —
+to follow a segment that resolved too; the head of that chain (*Preferences*) is not a menu,
+which is what says the whole thing is a window path. A first attempt applied the rule to
+*every* segment and silently dropped 21 of the 23 real findings — a guard that passes by
+seeing less is worse than the drift it was watching for, and only counting the findings
+caught it.
+
+`.m.extensions` then joins `::datamenus`, since below its separator every entry is one per
+*installed* extension and the form the manual must teach (`Extensions ▸ <provider>…`) is a
+template rather than a path. Its **first** entry is not data, so **check 6a** puts that one
+back under guard from the widgets — which cascade opens the menu, what its first entry is
+labelled — and `smoke.tcl` asserts the menubar's order and that the item is gone from both
+Settings and View.
+
+**Ripple.** Both providers' `not_configured` and 401/403 messages named *Preferences ▸ Agent*
+and now name the provider's own door — the same correction D85 made in the other direction.
+No `provider-api` bump: nothing about the contract changed, only where a frontend draws it.
+
+**Guards** (core 828 and syntax 536 unchanged, as a GUI-only change should leave them):
+`agent_settings.tcl` 42 → 70 — the menu's doors derived from the cache, a keyed-and-optionless
+provider earning one, a GUI-side registration landing in the same menu, the cap collapsing to
+the picker and back, and the credentials row end to end (masked, blank on open, trimmed save,
+the note flipping, Clear's state following the core, an empty save refused *in the window*).
+`repos.tcl` gains the two-door agreement. `smoke.tcl` moves its key block onto the window and
+asserts the menubar. `docs.tcl` derives the door and its menu from the widgets rather than
+naming either. Injections, each failing by name: the row reverted to `provider_has_options`;
+a nested `View ▸ Font & Zoom ▸ …` path made stale (the chain rule still catches it); the cap
+removed; Extensions… left in Settings; the credentials row rendered for an unkeyed provider.
+
+**Not done:** a settings door for any kind but `provider` — the registry is there and empty,
+because no mode, theme or syntax extension has anything to configure yet, and inventing the
+need would be the speculative half of D17/D18 this deliberately does not touch.
 
 ## 4. "Simple debug/terminal" — scope decision
 
@@ -8420,6 +8545,8 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
 | the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
 | the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
+| the Extensions menu's installer entry (D130) | the path some user-facing document quotes for it | `docs.tcl` 6a — the menu is a `::datamenu`, so its one non-data entry is guarded from the widgets |
+| `provider_has_settings` (D130) | the Extensions window's own row button | `repos.tcl` — a keyed, optionless provider must get a door at both |
 | `rio::tls::bundles` (D109) | the system CA locations INSTALL.md §1 lists | `tls.test` — both directions |
 | INSTALL.md §1's OS package names | `rio::deps::provides` (D116), which rio prints when one is missing | `deps.test` — both directions, as sets |
 | the `LICENSE` file | the About box's **License** row (D121) | `smoke.tcl` — reads the file, holds the row to it |
@@ -8519,7 +8646,7 @@ status changes, rather than pretending a test could hold it.
 - **provenance ledger** — the GUI-side record of installed extensions
   (`extensions.json`): which source URL and version each `kind/name` came
   from, and its payload files (D39).
-- **Extensions window** — the non-modal *Settings ▸ Extensions…* browser: one row
+- **Extensions window** — the non-modal *Extensions ▸ Extensions…* browser: one row
   per (kind, name), every variant with its provenance in the detail section;
   rio's first D35-style tool window (D39).
 - **safe-name rule** — `^[A-Za-z0-9][A-Za-z0-9._-]*$`, required of every
