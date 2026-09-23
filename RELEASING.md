@@ -373,8 +373,8 @@ though the interactive behaviour is right.
       fifteen decisions since (https repositories and certificate exceptions, the
       language picker, *Change with Agent…*, the context-menu sweep, the dependency
       message, the icon, signing and key trust, the artwork, the licence, the version)
-      got the entries they never had. PITCH keeps its copy, frozen and marked historic,
-      until PITCH itself goes at the release. The file cannot fall behind quietly:
+      got the entries they never had. PITCH's own frozen copy, and PITCH itself, are gone
+      as of 2026-09-23 (see Gate 4). The file cannot fall behind quietly:
       `rio-core/tests/changelog.test` holds every decision in AGENTS.md against it both
       ways — an entry, or an exemption with a written reason — and looks every commit id
       and date up in git rather than proofreading them.
@@ -489,17 +489,21 @@ Both are one-way-ish once the history is public, so they are here rather than in
       door, and its relative links (`docs/index.md`, `LICENSE`, `CODE_OF_CONDUCT.md`)
       resolve on GitHub but are worth one click each. Set the repo description and
       topics; GitHub will detect the language as Tcl on its own.
-- [ ] **Delete `PITCH.md`** before the tag. AGENTS.md §7 and D124 both already plan
-      this — its changelog moved to `CHANGELOG.md` and the rest is the landing-page
-      playground. It is `export-ignore`d from the release tarball as of `3406db4`, but
-      that only keeps it out of the *download*; a clone still gets it, and a stale
-      second changelog in every clone is the drift §7's register exists to prevent.
+- [x] **Delete `PITCH.md`** before the tag. AGENTS.md §7 and D124 both already planned
+      this — its changelog had moved to `CHANGELOG.md` and the rest was the landing-page
+      playground. **Done 2026-09-23**, ahead of the tag rather than at it: it was
+      `export-ignore`d from the release tarball as of `3406db4`, but that only kept it
+      out of the *download*, and a stale second changelog in every clone is the drift
+      §7's register exists to prevent. What had landed nowhere else — the experiment
+      framing, the by-the-numbers block, the icon's provenance — moved into README.md;
+      the frozen changelog copy was dropped rather than rehomed, and its two freeze
+      checks with it.
 - [ ] **Push the tag** when Gate 2's third box is done: `git push github --tags`, and
       the same to `origin`. The tag is what turns About's *Build* into a release name
       and the CHANGELOG's `[0.1.0] — unreleased` into a dated heading.
 - [ ] **Download the Release page's own tarball and run rio from it.** It is a
       different artifact from the repository — `.gitattributes` `export-ignore`
-      (`3406db4`) drops `adr/`, `spike/`, `PITCH.md`, `.claude/` and every `tests/`
+      (`3406db4`) drops `adr/`, `spike/`, `.claude/` and every `tests/`
       directory, taking 418 files to 160 and 3.0 MB. Verified locally against
       `git archive` at that commit (both entry points answer `0.1.0`, icons intact),
       but GitHub builds its own copy, so confirm theirs once: extract, run

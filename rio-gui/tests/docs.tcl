@@ -395,7 +395,7 @@ proc menu_pairs {text} {
 	return $out
 }
 
-# The manual, plus the root documents written for a user. AGENTS.md, ROADMAP.md, PITCH.md
+# The manual, plus the root documents written for a user. AGENTS.md, ROADMAP.md
 # and CAVEATS.md are deliberately absent: a design log names retired menus (D74's Tabs
 # cascade, D92's theme dropdown) and planned ones (Help ▸ Contents…) on purpose, and
 # holding them to what exists today would make them lie about their own history.

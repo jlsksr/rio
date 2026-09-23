@@ -1,7 +1,7 @@
 # rio — a Markdown syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a linear, per-line state machine (see rio::syntax for the
 # contract). It carries scan state across lines, so fenced code blocks colour as one
-# unit. (This is the highlighter for rio's own README/AGENTS/ROADMAP/PITCH.)
+# unit. (This is the highlighter for rio's own README/AGENTS/ROADMAP/CHANGELOG.)
 #
 # Markdown is line-oriented, so the design is: recognise the LINE-level construct
 # first (heading, thematic break, blockquote, list, fenced code), then scan the rest

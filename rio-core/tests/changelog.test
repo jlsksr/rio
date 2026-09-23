@@ -3,9 +3,9 @@
 # A changelog is the classic derived fact (AGENTS.md §7): the decisions in AGENTS.md are
 # the truth, CHANGELOG.md restates the user-visible ones for a reader who will never open
 # the design log, and nothing fails when that copy falls behind. It already had: the copy
-# in PITCH.md stopped at D108 while the tree reached D123, and nobody noticed for eight
-# days. "Remember to add an entry" is the rule that failed there, so it is not the rule
-# here.
+# in PITCH.md (a landing-page draft, since deleted) stopped at D108 while the tree reached
+# D123, and nobody noticed for eight days. "Remember to add an entry" is the rule that
+# failed there, so it is not the rule here.
 #
 # So this holds the two BOTH WAYS. Every `### Dnn` in AGENTS.md is cited by an entry, or
 # it is in the exemption table below with a reason written out — and every exemption has
@@ -252,31 +252,6 @@ test changelog-dates-are-the-commits-own {the date is looked up, never proofread
 		if {$real ne [dict get $e date]} { lappend bad "$c: says [dict get $e date], is $real" }
 	}
 	set bad
-} -result {}
-
-# --- PITCH.md's copy stays frozen -----------------------------------------------------------
-
-test changelog-pitch-copy-is-marked-historic {PITCH.md keeps the old changelog for
-		reference until PITCH itself goes (D124), so it has to say that it is not the live
-		one — otherwise it is simply a second changelog, which is the drift this file
-		exists for} -body {
-	set pitch [slurp [file join $::root PITCH.md]]
-	set i [string first "\n## Changelog" $pitch]
-	set section [string range $pitch $i end]
-	list [expr {$i >= 0}] \
-		[expr {[string first "CHANGELOG.md" $section] >= 0}] \
-		[regexp -nocase {no longer maintained} $section]
-} -result {1 1 1}
-
-test changelog-pitch-copy-does-not-grow {frozen means frozen: PITCH stopped at D108, so a
-		decision newer than that appearing there is a new entry written in the old home} -body {
-	set pitch [slurp [file join $::root PITCH.md]]
-	set i [string first "\n## Changelog" $pitch]
-	set bad {}
-	foreach d [regexp -all -inline {D(\d+)} [string range $pitch $i end]] {
-		if {[string is integer -strict $d] && $d > 108} { lappend bad D$d }
-	}
-	lsort -unique $bad
 } -result {}
 
 cleanupTests

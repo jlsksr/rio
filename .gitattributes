@@ -25,9 +25,9 @@
 #
 # The line is: a tarball is for someone RUNNING rio, a clone is for someone
 # WORKING on it. So the development record goes — the ADRs (AGENTS.md remains, it
-# is the log those records formalise), the O1 Ck probes, the landing-page
-# playground, the agent definitions — and so do the test suites, which are the
-# evidence a contributor needs and dead weight to everyone else.
+# is the log those records formalise), the O1 Ck probes, the agent definitions —
+# and so do the test suites, which are the evidence a contributor needs and dead
+# weight to everyone else.
 #
 # Checked before adding these: nothing under docs/ links into any of them, so the
 # manual's cross-references (D100 — they reach README, INSTALL, WINDOWS, CAVEATS,
@@ -42,6 +42,5 @@
 adr/           export-ignore
 spike/         export-ignore
 tests/         export-ignore
-PITCH.md       export-ignore
 .claude/       export-ignore
 .gitattributes export-ignore

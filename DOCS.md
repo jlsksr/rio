@@ -161,7 +161,7 @@ human happened to read it.
 
 `docs/*.md` plus `README.md`, `INSTALL.md`, `WINDOWS.md`, `CONTRIBUTING.md`.
 
-**`AGENTS.md`, `ROADMAP.md`, `PITCH.md`, `CHANGELOG.md`, `CAVEATS.md` and this file are
+**`AGENTS.md`, `ROADMAP.md`, `CHANGELOG.md`, `CAVEATS.md` and this file are
 exempt.** They name retired menus and unbuilt ones on purpose; holding them to today's
 menubar would make them lie about their own history — a changelog entry describes the menu
 as it was the day the change landed, which is the whole point of a dated entry. Do not "fix" a menu name in a design log — if it
@@ -236,12 +236,6 @@ and a fact in the wrong document is drift waiting to happen.
 | `CONTRIBUTING.md` | Hacking on rio itself |
 | `ROADMAP.md` | Candidate next steps |
 | `CHANGELOG.md` | The user-visible history, newest first |
-| `PITCH.md` | The pitch. Its changelog is historic and frozen |
-
-**Do not edit `PITCH.md`.** It is only ever touched on an explicit request from the
-project owner. Its changelog stopped at D108 (AGENTS.md **D124**): the live one is
-`CHANGELOG.md`, and `rio-core/tests/changelog.test` fails if a newer entry appears in
-PITCH.
 
 **`CHANGELOG.md` is not the manual's, but the same rule applies**: it is
 [Keep a Changelog](https://keepachangelog.com/) form, one section per release, and every

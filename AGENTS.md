@@ -7391,6 +7391,18 @@ duplicate that is about to be deleted with its file anyway; leaving it *unmarked
 the worse failure — two changelogs, one silently stale, which is exactly the drift this
 decision exists to end. The guard holds the freeze: PITCH may cite no decision above D108.
 
+*(Amendment, 2026-09-23 — the file is gone, and with it the frozen copy.)* PITCH.md was
+deleted ahead of the tag rather than at it, on jka's word, and the "historic reference"
+half of the paragraph above went with it rather than moving somewhere else: the original
+wording is in git, which is where a superseded draft belongs, and a second changelog kept
+alive in the tree is the very shape this decision was taken to end — the argument for
+keeping it was always that the file was going anyway. Its two freeze checks
+(`changelog-pitch-copy-is-marked-historic`, `-does-not-grow`) are deleted with it; the
+two that matter — every decision cited or exempted, and every commit and date resolved —
+are untouched and still hold CHANGELOG.md both ways. What PITCH had that had landed
+nowhere else (the experiment framing, the by-the-numbers block, the icon's provenance)
+moved into README.md in the same commit.
+
 **The guard, and why it is both directions.** `rio-core/tests/changelog.test`. Every
 `### Dnn` in AGENTS.md is cited by an entry **or** named in an exemption table with its
 reason written out — so a decision cannot land without either a line in the changelog or a
@@ -8735,9 +8747,6 @@ contributors, agents):
   the two deploy scripts, local vs. remote (server mode over SSH), where the
   agent's key lives, troubleshooting. README/CONTRIBUTING only *point* here —
   keep deploy specifics out of them so they can't drift.
-- **PITCH.md** — a short landing-page pitch (food for a static-site generator):
-  what rio is and why, for someone who's never heard of it. Its changelog is
-  **historic and frozen** (D124); the live one is below.
 - **CHANGELOG.md** — the user-visible history, [Keep a Changelog](https://keepachangelog.com/)
   form, one section per release (D124). Every entry cites its decision, a commit and a
   date, and `changelog.test` holds it to this file both ways.
@@ -8792,6 +8801,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | this file's decisions (D124) | `CHANGELOG.md`'s entries | `changelog.test` — both directions, with a named exemption table that is itself checked |
 | D54's guard, in every script rio runs | the guard's four lines, copied into each of them | `encoding.test` — exact, with the sourced-helper exemption derived from the siblings |
 | `rio-core/version.tcl` | `CHANGELOG.md`'s release heading | `changelog.test` — reads the literal, not a copy of it |
+| the tree itself — line counts, suite totals, `git log` | README's *By the numbers* | **none** — a dated snapshot, and says so |
 | the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
@@ -8807,7 +8817,7 @@ would demand a page mention for every checkbutton in View. It cost two conventio
 both worth having anyway. **Menu paths are written in emphasis** (`***View ▸
 Theme…***`) — that is what bounds the label so a *renamed* entry fails, not merely a
 removed one; an unmarked path runs into its sentence and is reported. And the
-**design logs are exempt** — AGENTS, ROADMAP, PITCH, CAVEATS name retired menus
+**design logs are exempt** — AGENTS, ROADMAP, CAVEATS name retired menus
 (D74's Tabs cascade, D92's theme dropdown) and unbuilt ones (`Help ▸ Contents…`) on
 purpose, and holding them to today's menubar would make them lie about their own
 history.
@@ -8831,8 +8841,9 @@ variable half stays out — the Search entry quotes the current selection, so th
 guard builds the menu with none, and the label's *rule* is tested where it belongs,
 in `context_menu.tcl`.
 
-The last two rows are the honest backlog. Where a fact is genuinely prose —
-README's status section — accept that it has no guard and re-read it when the
+The last three rows are the honest backlog. Where a fact is genuinely prose —
+README's status section — or a snapshot of the tree that moves with every commit,
+accept that it has no guard: date it, say it is unchecked, and re-read it when the
 status changes, rather than pretending a test could hold it.
 
 ---

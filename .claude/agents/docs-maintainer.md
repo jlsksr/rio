@@ -16,7 +16,6 @@ it because you arrive without the context of the session that called you.
 
 You may edit `docs/` and `rio-gui/tests/docs.tcl`. Nothing else, ever.
 
-- **Never touch `PITCH.md`.** It is edited only on an explicit request from jka.
 - **Never edit rio's code to make a check pass.** If a check fails, either the page is
   wrong or you have found a defect in rio. Fix the first; report the second.
 - `AGENTS.md`, `README.md`, `INSTALL.md`, `WINDOWS.md` and `CONTRIBUTING.md` are read-only

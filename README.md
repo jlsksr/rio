@@ -307,6 +307,41 @@ Linux-specific, the deploy scripts cover OpenBSD's `pkg_add`, and the code is th
 portable Tcl — but nobody has yet sat down and run it there, so it is listed honestly
 as untested rather than claimed.
 
+## Why rio exists
+
+Two reasons, and both are worth saying plainly.
+
+**It is an experiment.** rio is openly a vibe-coding experiment — a test of whether
+agent-assisted development can carry something bigger than a self-contained script: a
+real, multi-part application, written in a language the mainstream mostly skips, under
+deliberately opinionated Windows 2000-era constraints, and kept honest by a test suite
+and a written decision log. All of it was built that way, end to end. Whether it worked
+is something you can check rather than take on trust: the suite runs on your machine,
+and [AGENTS.md](AGENTS.md) records the reasoning behind every decision — including the
+ones that turned out wrong and were reversed.
+
+**It is an itch.** Good editors are worth loving, and most have grown heavy. Day to day
+you reach for maybe 5% of VSCode, Emacs or Notepad++. rio is that 5%, built small on
+purpose — a tailored editor rather than a general one, and honest about being early.
+
+## By the numbers
+
+*A snapshot taken 2026-09-23. rio is early, so these move; nothing checks them.*
+
+- **~30,000 lines of Tcl**, across 89 files — core ~8,500, GUI ~13,800, the 33
+  highlighters ~4,500, providers, editing modes and the plugin runtime ~3,000. No
+  generated code, no vendored trees.
+- **~26,400 lines of tests** — **3,825 automated checks**: a core suite and a syntax
+  suite (`tcltest`), 28 headless GUI suites, and a suite per provider. The tests run
+  about seven-eighths the size of the application they cover.
+- **3 runtime dependencies** — Tcl/Tk, tcllib, tcltls. No build step, no
+  `node_modules`, no native blobs. (`tkdnd` is optional, and only for dropping a file
+  onto the window from your file manager.)
+- **131 design decisions**, each written up in [AGENTS.md](AGENTS.md) with its
+  reasoning and mirrored as an [architecture decision record](adr/README.md) — the
+  *why*, not just the *what*.
+- **Three months, 569 commits** (2026-06-24 → 2026-09-23), entirely agent-assisted.
+
 ## Learn more
 
 - **[docs/](docs/index.md)** — **the user manual**: how to actually use rio, one
@@ -352,6 +387,15 @@ Found a bug, or something that surprised you? **[Open an
 issue](https://github.com/jlsksr/rio/issues)** — including "this was confusing",
 which is a bug in the manual and worth the same report. If it is a crash, the one
 thing worth writing down is what you were doing just before it.
+
+## Credits
+
+rio's window and taskbar icon is **Christ the Redeemer** — for the name — and it is
+the project's own artwork (jka, made with ChatGPT). It lives in
+`rio-gui/icons/sources/`, and `rio-gui/icons/active` names the one rio currently
+wears. The stock icons rio wore before it were dropped rather than credited: an icon
+travels with every copy of rio anyone makes, and what their licence allowed that far
+downstream was not clear enough to ship on.
 
 ## License
 
