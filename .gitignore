@@ -1,8 +1,8 @@
 # Personal scratch / throwaway test files (not part of rio).
 /jka-test/
 
-# Per-developer agent tool settings (permissions etc.) - personal, not shared.
-/.claude/settings.local.json
+# Per-developer Claude agent configuration stays local, not in the repository.
+/.claude/
 
 # Debris from an aborted rio-gui/tests/session.tcl run: it builds its fixture
 # tree in the CURRENT directory (see RELEASING.md Gate 0), so a suite that dies
