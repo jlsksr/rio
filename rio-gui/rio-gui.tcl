@@ -5314,7 +5314,10 @@ set ::ext_settings_menu_max 12
 proc extensions_menu_fill {} {
 	if {![winfo exists .m.extensions]} return
 	.m.extensions delete 0 end
-	.m.extensions add command -label "Extensions…" -command extensions_window
+	# "Browse…", not "Extensions…": the menu is already called Extensions and the window
+	# it opens is titled Extensions, so the entry names the act instead of stuttering
+	# the noun twice on one path.
+	.m.extensions add command -label "Browse…" -command extensions_window
 	.m.extensions add separator
 	set rows [ext_settings_rows]
 	if {![llength $rows]} {
@@ -9769,7 +9772,7 @@ proc ext_update_all {} {
 		set v [dict get $u variant]
 		set line [format "  %-16s %s → %s   %s (%s)" \
 			"$name ($kind)" [dict get $u from] [dict get $u to] \
-			[host_of [dict get $v source]] \
+			[dict get $v source] \
 			[sig_mark [expr {[dict exists $v sig] ? [dict get $v sig] : "unsigned"}]]]
 		if {[dict exists $::ext_installed $key]
 				&& [source_same [dict get $v source] [dict get [dict get $::ext_installed $key] source]]} {
@@ -9823,6 +9826,11 @@ proc ext_update_all {} {
 set ::repo_busy 0     ;# a scan or install is running: action buttons disabled
 set ::extw_rows {}    ;# row dicts, index-aligned with the window's listbox
 
+# The host, for PROSE about a repository ("rio.skylm.org signs its extensions") and for
+# a columnar summary where one source is the only one on the line. Anywhere the user is
+# CHOOSING or CONSENTING between sources — a variant line, the Update All consent, the
+# start-up notice — print the whole URL instead: two sources can share a domain and
+# differ only in scheme or path, and the host alone hides exactly what tells them apart.
 proc host_of {url} {
 	if {[regexp -nocase {^https?://([^/]+)} $url -> h]} { return $h }
 	return $url
@@ -9879,16 +9887,23 @@ proc extensions_window {} {
 	frame $w.det -background [dict get $c ui.bg]
 
 	frame $w.foot -background [dict get $c ui.bg]
-	label $w.foot.status -anchor w -font RioUIFont \
-		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	button $w.foot.close -text Close -font RioUIFont -command [list destroy $w]
-	pack $w.foot.close  -side right
-	pack $w.foot.status -side left -fill x -expand 1
+	pack $w.foot.close -side right
 
-	grid $w.hdr  -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
-	grid $w.body -row 1 -column 0 -sticky nsew -padx 8
-	grid $w.det  -row 2 -column 0 -sticky we   -padx 8 -pady 4
-	grid $w.foot -row 3 -column 0 -sticky we   -padx 8 -pady {2 8}
+	# A real status bar, not a label sharing the button row: what the window last DID
+	# (scanned, installed, removed) is a report, and inline on the window's own
+	# background it read as one more line of the detail pane above it. So it takes the
+	# Win2000/VS6 form — a sunken strip across the whole bottom edge, below the buttons,
+	# always present (empty is a state, a bar that comes and goes jumps the layout).
+	label $w.status -anchor w -font RioUIFont -padx 4 -pady 1 \
+		-relief sunken -borderwidth 1 \
+		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
+
+	grid $w.hdr    -row 0 -column 0 -sticky we   -padx 8 -pady {8 4}
+	grid $w.body   -row 1 -column 0 -sticky nsew -padx 8
+	grid $w.det    -row 2 -column 0 -sticky we   -padx 8 -pady 4
+	grid $w.foot   -row 3 -column 0 -sticky we   -padx 8 -pady {2 6}
+	grid $w.status -row 4 -column 0 -sticky we
 	grid rowconfigure    $w 1 -weight 1
 	grid columnconfigure $w 0 -weight 1
 	bind $w <Escape> [list destroy $w]
@@ -9898,7 +9913,7 @@ proc extensions_window {} {
 }
 
 proc extw_status {text} {
-	if {[winfo exists .extw.foot.status]} { .extw.foot.status configure -text $text }
+	if {[winfo exists .extw.status]} { .extw.status configure -text $text }
 }
 
 # Toggle the busy guard: while a scan or install runs, every action button in
@@ -10199,7 +10214,7 @@ proc extw_select {} {
 		set f [frame $det.v$i -background [dict get $c ui.bg]]
 		set line "  [dict get $v version]"
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
-		append line " — [host_of [dict get $v source]]"
+		append line " — [dict get $v source]"
 		# Where the choice between two sources is actually made, so the thing that
 		# distinguishes them is stated here (D118). An offline row has no source to
 		# say anything about.
@@ -10244,7 +10259,7 @@ proc extw_select {} {
 	if {$entry ne "" && !$matched && ![dict exists [lindex [dict get $row variants] 0] offline]} {
 		set f [frame $det.inst -background [dict get $c ui.bg]]
 		label $f.l -anchor w -justify left -wraplength $wrapb -font RioUIFont \
-			-text "  installed: [dict get $entry version] — [host_of [dict get $entry source]] (no longer listed there)" \
+			-text "  installed: [dict get $entry version] — [dict get $entry source] (no longer listed there)" \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 		button $f.rm -text Remove -font RioUIFont -state $st \
 			-command [list extw_remove [dict get $row kind] [dict get $row name]]
@@ -10349,7 +10364,7 @@ proc ext_update_dialog {} {
 		set u [dict get $::ext_updates $key]
 		lassign [split $key /] kind name
 		lappend lines [format "    %-16s %s → %s    %s" $name \
-			[dict get $u from] [dict get $u to] [host_of [dict get [dict get $u variant] source]]]
+			[dict get $u from] [dict get $u to] [dict get [dict get $u variant] source]]
 	}
 	label $w.list -anchor w -justify left -font RioUIFont -text [join $lines "\n"] \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -12292,7 +12307,11 @@ proc prefs_fill_extensions {f} {
 		::repo_allow_unverified ext_check_pref_save] -row [incr r] -column 0 -sticky w -pady {6 1}
 	grid [prefs_hint $f.unverhint "A repository can publish a signing key, and rio checks it by running ssh-keygen on the core's host (D118). Where that isn't installed, a repository whose key rio trusts is refused rather than used unchecked. Turn this on to use it anyway: it then lists and installs marked \"unverified\", never \"signed\". A signature that fails, a key that changed, or a file that doesn't match is refused either way."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
-	grid [prefs_button $f.ext "Extensions…" extensions_window] \
+	# "Browse…" here for the same reason the menu entry says it: this button sits
+	# INSIDE the Extensions category, so "Extensions…" would name the noun twice.
+	# The window-level button beside Close is not under that heading and keeps the
+	# window's own name.
+	grid [prefs_button $f.ext "Browse…" extensions_window] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}

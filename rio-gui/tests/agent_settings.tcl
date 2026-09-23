@@ -133,7 +133,7 @@ proc ext_menu_labels {} {
 	return $out
 }
 set ::extm [ext_menu_labels]
-ok "door: the menu leads with the installer" [lindex $::extm 0] "Extensions…"
+ok "door: the menu leads with the installer" [lindex $::extm 0] "Browse…"
 ok "door: a provider with options gets a door" \
 	[expr {"Vendorless…" in $::extm}] 1
 ok "door: a keyed provider with no options gets one too" \

@@ -379,7 +379,18 @@ ok "window: exists, non-modal"     [list [winfo exists .extw] [grab current]] {1
 ok "window: scan done, not busy"   $::repo_busy 0
 ok "window: refresh is the ⟳ glyph" [.extw.hdr.refresh cget -text] "⟳"
 ok "window: status counts the scan" \
-	[string match "6 extension(s) from 2 repositories" [.extw.foot.status cget -text]] 1
+	[string match "6 extension(s) from 2 repositories" [.extw.status cget -text]] 1
+# A status BAR: its own sunken strip on the bottom edge, below the button row, not a
+# label sharing it — inline on the window background it read as one more line of the
+# detail pane above.
+set sbar {}
+if {[winfo exists .extw.status]} {
+	set srow -1 ; set frow -2
+	catch {set srow [dict get [grid info .extw.status] -row]}
+	catch {set frow [dict get [grid info .extw.foot]   -row]}
+	set sbar [list [.extw.status cget -relief] [expr {$srow > $frow}]]
+}
+ok "window: the status is a strip of its own below the buttons" $sbar {sunken 1}
 
 proc rowidx {kind name} {
 	for {set i 0} {$i < [llength $::extw_rows]} {incr i} {
@@ -400,8 +411,19 @@ ok "window: dead sources shown"    $deadrows 3
 .extw.body.list selection clear 0 end
 .extw.body.list selection set $i
 extw_select
-ok "window: variant A line"  [string match "*1.0 by alice — a.example*" [.extw.det.v0.l cget -text]] 1
-ok "window: variant B line"  [string match "*2.0 by bob — b.example*"   [.extw.det.v1.l cget -text]] 1
+# The WHOLE source URL, not just its host: two repositories can share a domain and
+# differ only in scheme or path, and a line naming the host alone hides exactly what
+# the user is choosing between here. Asserted twice over — the literal lines, so the
+# wording is pinned, and the property, derived from each variant's own source.
+ok "window: variant A line"  [string match "*1.0 by alice — $A*" [.extw.det.v0.l cget -text]] 1
+ok "window: variant B line"  [string match "*2.0 by bob — $B*"   [.extw.det.v1.l cget -text]] 1
+set fullurls 1
+set vj 0
+foreach v [dict get [lindex $::extw_rows $i] variants] {
+	if {![string match "*[dict get $v source]*" [.extw.det.v$vj.l cget -text]]} { set fullurls 0 }
+	incr vj
+}
+ok "window: every variant line carries its source URL"  $fullurls 1
 ok "window: both installable" \
 	[list [winfo exists .extw.det.v0.in] [winfo exists .extw.det.v1.in]] {1 1}
 
@@ -808,7 +830,7 @@ ok "window: the row shows the change"     \
 ok "window: an up-to-date row shows its version" \
 	[string match "*\[installed 1.3.0\]*" [.extw.body.list get [rowidx syntax up2]]] 1
 ok "window: status counts the updates"    \
-	[string match "*— 1 update(s)" [.extw.foot.status cget -text]] 1
+	[string match "*— 1 update(s)" [.extw.status cget -text]] 1
 .extw.body.list selection clear 0 end
 .extw.body.list selection set [rowidx syntax up]
 extw_select

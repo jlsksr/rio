@@ -2041,11 +2041,15 @@ ok "view: Editor Layout submenu"    [expr {[winfo exists .m.view.layout] && [.m.
 # so the openai-provider block above can use them too.)
 ok "menu: the menubar's order" [menubar_labels] \
 	{File Edit View Find Compare Settings Extensions Help}
-ok "menu: Extensions… leads its own menu" [lindex [ext_menu_labels] 0] "Extensions…"
+# "Browse…", not "Extensions…": the menu and the window it opens are both called
+# Extensions, so the entry names the act rather than stuttering the noun.
+ok "menu: Browse… leads its own menu" [lindex [ext_menu_labels] 0] "Browse…"
 ok "menu: and opens the installer" \
-	[.m.extensions entrycget [.m.extensions index "Extensions…"] -command] extensions_window
-ok "menu: Extensions… gone from Settings" [_menu_has_label .m.settings "Extensions…"] 0
-ok "menu: Extensions… gone from View"     [_menu_has_label .m.view "Extensions…"] 0
+	[.m.extensions entrycget [.m.extensions index "Browse…"] -command] extensions_window
+ok "menu: the installer is gone from Settings" \
+	[list [_menu_has_label .m.settings "Extensions…"] [_menu_has_label .m.settings "Browse…"]] {0 0}
+ok "menu: and gone from View" \
+	[list [_menu_has_label .m.view "Extensions…"] [_menu_has_label .m.view "Browse…"]] {0 0}
 # The Theme cascade was the last data-driven menu with no size bound — it grew with every
 # installed theme and could post taller than the screen (CAVEATS.md). D92 retired it into
 # the bounded picker, the way D74 retired the Tabs cascade: a command, never a cascade.
