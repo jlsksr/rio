@@ -282,6 +282,117 @@ proc rio::ops::agent_options_refresh {params emit} {
 }
 rio::dispatch::register_stream agent.options.refresh rio::ops::agent_options_refresh
 
+# agent.option.file {name ?provider?} -> {path, created} ; resolve AND create the file an
+# option's value names, so a frontend can open it in the editor (D131). The same shape
+# agent.prompt.edit has, and for the same reason: the core owns the path — a remote core
+# resolves it on its OWN disk (D30) — and an absent file is created rather than reported,
+# because a button called Edit… that opens nothing is worse than one that opens a blank.
+# An option the provider did not flag `file` is a bad_request.
+proc rio::ops::agent_option_file {params} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.option.file requires name"
+	}
+	set prov [_option_provider $params]
+	set r [rio::agent::option_file [dict get $params name] $prov]
+	return [dict create result [dict create \
+		provider $prov name [dict get $params name] \
+		path [dict get $r path] \
+		created [expr {[dict exists $r created] ? [dict get $r created] : 0}]]]
+}
+rio::dispatch::register agent.option.file rio::ops::agent_option_file
+
+# --- a provider's profiles (D131) --------------------------------------------
+#
+# Named configurations of everything the provider keeps — one for a vendor's hosted API,
+# one for the server on your own box — with one of them active. Generic in exactly the
+# way the option ops are: these carry a profile's NAME and never a meaning, so a provider
+# that grows profiles needs no core change and no GUI change.
+#
+# Each verb announces `agent.options`, because switching, removing or renaming can all
+# change what the options say — so every attached frontend repaints from one event rather
+# than each of them learning a second one (D3/D30).
+
+# agent.profiles.list {?provider?} -> {provider, active, profiles:[{name, active}]} ;
+# what this provider keeps and which one it is running. A provider with no profiles
+# answers with an empty list and an empty `active` (echo, claude) so a frontend may ask
+# unconditionally — but an unknown provider is a bad_request, the distinction D106 had to
+# learn the hard way. A two-level result: the wire layer spells it out (D25).
+proc rio::ops::agent_profiles_list {params} {
+	set name [_option_provider $params]
+	if {![rio::agent::provider_known $name]} {
+		rio::error::raise bad_request "unknown agent provider: $name"
+	}
+	set r [rio::agent::profiles $name]
+	set active [dict get $r active]
+	set out {}
+	foreach p [dict get $r profiles] {
+		lappend out [dict create name $p active [expr {$p eq $active ? 1 : 0}]]
+	}
+	return [dict create result [dict create \
+		provider $name active $active profiles $out]]
+}
+rio::dispatch::register agent.profiles.list rio::ops::agent_profiles_list
+
+# agent.profile.set {name ?provider?} -> {provider, name} ; run this profile from now on.
+# The reply carries what the provider actually ACTIVATED, which need not be what was
+# asked for — a profile deleted by hand since the frontend last listed lands on another
+# one rather than on nothing.
+proc rio::ops::agent_profile_set {params emit} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.profile.set requires name"
+	}
+	set prov [_option_provider $params]
+	set n [rio::agent::profile_set [dict get $params name] $prov]
+	rio::agent::announce_options $prov $emit
+	return [dict create result [dict create provider $prov name $n]]
+}
+rio::dispatch::register_stream agent.profile.set rio::ops::agent_profile_set
+
+# agent.profile.add {name ?from? ?provider?} -> {provider, name} ; a new profile. With
+# `from` it is a copy of that one (Duplicate); without, it starts at the provider's own
+# shipped defaults. Creating does not switch to it — two separate acts, so a frontend can
+# offer either without the other.
+proc rio::ops::agent_profile_add {params emit} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.profile.add requires name"
+	}
+	set prov [_option_provider $params]
+	set from [expr {[dict exists $params from] ? [dict get $params from] : ""}]
+	set n [rio::agent::profile_add [dict get $params name] $from $prov]
+	rio::agent::announce_options $prov $emit
+	return [dict create result [dict create provider $prov name $n]]
+}
+rio::dispatch::register_stream agent.profile.add rio::ops::agent_profile_add
+
+# agent.profile.remove {name ?provider?} -> {provider, name, active} ; delete one, and
+# say which profile is active afterwards — removing the running profile has to land
+# somewhere, and the frontend should not have to guess where.
+proc rio::ops::agent_profile_remove {params emit} {
+	if {![dict exists $params name]} {
+		rio::error::raise bad_request "agent.profile.remove requires name"
+	}
+	set prov [_option_provider $params]
+	rio::agent::profile_remove [dict get $params name] $prov
+	rio::agent::announce_options $prov $emit
+	return [dict create result [dict create provider $prov \
+		name [dict get $params name] active [rio::agent::profile_name $prov]]]
+}
+rio::dispatch::register_stream agent.profile.remove rio::ops::agent_profile_remove
+
+# agent.profile.rename {name to ?provider?} -> {provider, name} ; rename one, in place.
+proc rio::ops::agent_profile_rename {params emit} {
+	foreach k {name to} {
+		if {![dict exists $params $k]} {
+			rio::error::raise bad_request "agent.profile.rename requires $k"
+		}
+	}
+	set prov [_option_provider $params]
+	set n [rio::agent::profile_rename [dict get $params name] [dict get $params to] $prov]
+	rio::agent::announce_options $prov $emit
+	return [dict create result [dict create provider $prov name $n]]
+}
+rio::dispatch::register_stream agent.profile.rename rio::ops::agent_profile_rename
+
 # The prompt layers a frontend may name (D34/D70/D79/D101/D105), in composition order.
 # `base` and `plan` are rio's own shipped layers; the other three are the user's.
 namespace eval rio::ops { variable prompt_layers {base system provider project plan} }
@@ -406,14 +517,16 @@ proc rio::ops::agent_mode_set {params} {
 }
 rio::dispatch::register agent.mode.set rio::ops::agent_mode_set
 
-# agent.status -> {provider, auto_accept, mode, key_set, options} ; the agent's current
-# settings, so a frontend renders its menus/dialogs without holding the state itself (D3).
-# `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless one like
-# echo); per-provider key state is in agent.providers. Whether https may go ahead without
-# host-name checks is core-wide since D114 — tls.settings, not here.
+# agent.status -> {provider, profile, auto_accept, mode, key_set, options} ; the agent's
+# current settings, so a frontend renders its menus/dialogs without holding the state
+# itself (D3). `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless
+# one like echo); per-provider key state is in agent.providers. `profile` is the active
+# profile's name, "" for a provider that keeps none (D131). Whether https may go ahead
+# without host-name checks is core-wide since D114 — tls.settings, not here.
 proc rio::ops::agent_status {params} {
 	return [dict create result [dict create \
 		provider    [rio::agent::provider_name] \
+		profile     [rio::agent::profile_name] \
 		auto_accept [rio::agent::auto_accept] \
 		mode        [rio::agent::mode] \
 		key_set     [rio::agent::key_status] \

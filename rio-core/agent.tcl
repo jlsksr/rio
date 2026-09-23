@@ -95,7 +95,8 @@ proc rio::agent::set_provider {cmd} {
 # --- named-provider registry (D26/D30) ---------------------------------------
 #
 # register_provider name cmd ?-label <text>? ?-signup <text>? ?-key {set .. clear .. status ..}?
-#                             ?-options {list .. set .. ?refresh ..?}?
+#                             ?-options {list .. set .. ?refresh ..? ?file ..?}?
+#                             ?-profiles {list .. switch .. add .. remove .. rename ..}?
 #   Record a provider under `name`. `-label` is its display name (a frontend's
 #   menus/badge; defaults to the name) and `-signup` a where-to-get-a-key hint —
 #   both DATA the provider owns, so the GUI's picker and key dialog are generic
@@ -105,19 +106,23 @@ proc rio::agent::set_provider {cmd} {
 #   credential-blind and each keyed provider keeps its own store. `-options` declares
 #   the provider has runtime CHOICES a frontend may offer — its model, how much effort
 #   to ask for, anything else it names (D106) — and wires the commands agent.option.*
-#   drive. Both are capability blocks of COMMANDS, not data, because both answer
-#   questions only the provider can: whether a key is stored, what choices are valid
-#   right now.
+#   drive. `-profiles` declares the provider keeps SEVERAL named configurations and
+#   can switch between them (D131) — one for hosted ChatGPT, one for the llama-server
+#   on your own box — and wires the commands agent.profile* drive. All three are
+#   capability blocks of COMMANDS, not data, because all three answer questions only
+#   the provider can: whether a key is stored, what choices are valid right now, which
+#   profile is active and what switching to another one entails.
 proc rio::agent::register_provider {name cmd args} {
 	variable providers
 	set entry [dict create provider $cmd label $name signup ""]
 	foreach {opt val} $args {
 		switch -- $opt {
-			-key     { dict set entry key $val }
-			-options { dict set entry options $val }
-			-label   { dict set entry label $val }
-			-signup  { dict set entry signup $val }
-			default  { error "register_provider: unknown option $opt" }
+			-key      { dict set entry key $val }
+			-options  { dict set entry options $val }
+			-profiles { dict set entry profiles $val }
+			-label    { dict set entry label $val }
+			-signup   { dict set entry signup $val }
+			default   { error "register_provider: unknown option $opt" }
 		}
 	}
 	dict set providers $name $entry
@@ -150,13 +155,14 @@ proc rio::agent::provider_known {name} {
 }
 
 # A rendering of every registered provider for a frontend's picker + key UI
-# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup, options (0/1)}.
-# Sorted by name for a stable menu order. All leaves are strings (the wire's flat-object
-# encoder applies).
+# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup, options (0/1),
+# profiles (0/1)}. Sorted by name for a stable menu order. All leaves are strings (the
+# wire's flat-object encoder applies).
 #
-# `options` says only whether the provider declares any — enough for a frontend to decide
-# whether to offer a settings door, without a round-trip per provider just to find out
-# that most of them have nothing to show.
+# `options` and `profiles` say only whether the provider declares any — enough for a
+# frontend to decide whether to offer a settings door and whether to draw a profile row,
+# without a round-trip per provider just to find out that most of them have nothing to
+# show.
 proc rio::agent::providers_info {} {
 	variable providers
 	set out {}
@@ -168,8 +174,9 @@ proc rio::agent::providers_info {} {
 			label   [dict get $e label] \
 			keyed   [expr {$keyed ? 1 : 0}] \
 			key_set [expr {$keyed ? [key_status $name] : 0}] \
-			signup  [dict get $e signup] \
-			options [expr {[dict exists $e options] ? 1 : 0}]]
+			signup   [dict get $e signup] \
+			options  [expr {[dict exists $e options] ? 1 : 0}] \
+			profiles [expr {[dict exists $e profiles] ? 1 : 0}]]
 	}
 	return $out
 }
@@ -243,6 +250,13 @@ proc rio::agent::_options_caps {name} {
 #   group  a section heading, "" for none. Sections appear in the order their first
 #          member is declared, members in declaration order within them — a contract a
 #          provider relies on when it orders its list.
+#   file   1 = this option's VALUE names a file the user may edit, so a frontend offers
+#          a way in (rio's GUI: an Edit… button beside the field, which opens the file
+#          as an ordinary tab). A flag beside `free` and `refresh` rather than a `kind`,
+#          because it is the same shape as `refresh` — a flag, an op, a button next to
+#          the field — and it composes with whichever kind the option already is. The
+#          core does not resolve the path: only the provider knows where its file lives,
+#          so agent.option.file routes back to it (D131).
 #   quick  1 = a frontend MAY also offer this in a quick control (rio's GUI: the chat
 #          status strip), 0 = settings-only. It defaults to 1, a constant, rather than
 #          being derived from `kind`: that a Tk menu cannot hold an entry field is a
@@ -255,8 +269,8 @@ proc rio::agent::_options_caps {name} {
 # `choice` when the descriptor carries choices and to `text` otherwise, so an unknown
 # kind is always renderable and provider-api 5 can add one safely.
 proc rio::agent::_option_norm {o} {
-	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 choices {} \
-		kind choice group "" quick 1]
+	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 file 0 \
+		choices {} kind choice group "" quick 1]
 	set out [dict merge $out $o]
 	if {[dict get $out label] eq ""} { dict set out label [dict get $out name] }
 	if {[dict get $out kind] eq ""} { dict set out kind choice }
@@ -273,6 +287,7 @@ proc rio::agent::_option_norm {o} {
 	dict set out choices $cs
 	dict set out free    [expr {[dict get $out free]    ? 1 : 0}]
 	dict set out refresh [expr {[dict get $out refresh] ? 1 : 0}]
+	dict set out file    [expr {[dict get $out file]    ? 1 : 0}]
 	dict set out quick   [expr {[dict get $out quick]   ? 1 : 0}]
 	return $out
 }
@@ -331,6 +346,93 @@ proc rio::agent::options_refresh {option emit {name ""}} {
 	}
 	{*}[dict get $caps refresh] $option [list rio::agent::announce_options $name $emit]
 	return 1
+}
+
+# Resolve — and create — the file an option's value names (agent.option.file, D131), so
+# a frontend can open it in the editor. The provider does both: only it knows where its
+# file lives and what an empty one should contain, and only the CORE's host can answer
+# at all when the frontend is somewhere else (D30). Returns {path created}.
+proc rio::agent::option_file {option {name ""}} {
+	set name [_key_target $name]
+	set caps [_options_caps $name]
+	set o [_option_find $name $option]
+	if {![dict get $o file] || ![dict exists $caps file]} {
+		rio::error::raise bad_request "option '$option' names no file"
+	}
+	set r [{*}[dict get $caps file] $option]
+	if {![dict exists $r path] || [dict get $r path] eq ""} {
+		rio::error::raise io_error "cannot resolve the file for option '$option'"
+	}
+	return $r
+}
+
+# --- a provider's profiles (D131) --------------------------------------------
+#
+# Several named configurations, one active: hosted ChatGPT here, the llama-server on
+# your own box there. The core routes and shapes exactly as it does for options, and
+# learns just as little — what a profile CONTAINS is the provider's vocabulary, and
+# where its file lives is rio::agent::settings' business. All this layer knows is that
+# a profile has a name and one of them is active.
+
+# The profiles capability of a named provider, or raise — the sibling of _options_caps,
+# with the same two distinct refusals (no such provider / this one has no profiles).
+proc rio::agent::_profiles_caps {name} {
+	variable providers
+	if {![dict exists $providers $name]} {
+		rio::error::raise bad_request "unknown agent provider: $name"
+	}
+	if {![dict exists $providers $name profiles]} {
+		rio::error::raise bad_request "agent provider '$name' has no profiles"
+	}
+	return [dict get $providers $name profiles]
+}
+
+# {profiles {…names…} active <name>} for a provider, or empty for one without the
+# capability — the soft answer `options` gives, so a frontend may ask unconditionally.
+proc rio::agent::profiles {{name ""}} {
+	variable providers
+	set name [_key_target $name]
+	if {![dict exists $providers $name] || ![dict exists $providers $name profiles]} {
+		return [dict create profiles {} active ""]
+	}
+	set r [{*}[dict get $providers $name profiles list]]
+	set ps [expr {[dict exists $r profiles] ? [dict get $r profiles] : {}}]
+	set a  [expr {[dict exists $r active]   ? [dict get $r active]   : ""}]
+	return [dict create profiles $ps active $a]
+}
+
+# The active profile's name, "" for a provider without profiles — for agent.status, so
+# one attach call still says everything about the live agent.
+proc rio::agent::profile_name {{name ""}} {
+	return [dict get [profiles $name] active]
+}
+
+# Switch, create, remove, rename. Each returns what the PROVIDER settled on rather than
+# what was asked for: a switch may land elsewhere if the named profile has been deleted
+# under it, and a remove has to say which profile became active in place of the one that
+# is gone. Every one of them can change what the options say, so the ops announce.
+proc rio::agent::profile_set {profile {name ""}} {
+	set name [_key_target $name]
+	set caps [_profiles_caps $name]
+	return [{*}[dict get $caps switch] $profile]
+}
+
+proc rio::agent::profile_add {profile {from ""} {name ""}} {
+	set name [_key_target $name]
+	set caps [_profiles_caps $name]
+	return [{*}[dict get $caps add] $profile $from]
+}
+
+proc rio::agent::profile_remove {profile {name ""}} {
+	set name [_key_target $name]
+	set caps [_profiles_caps $name]
+	return [{*}[dict get $caps remove] $profile]
+}
+
+proc rio::agent::profile_rename {profile to {name ""}} {
+	set name [_key_target $name]
+	set caps [_profiles_caps $name]
+	return [{*}[dict get $caps rename] $profile $to]
 }
 
 # The `agent.options` event: "this provider's options changed — look again". Broadcast

@@ -287,17 +287,17 @@ test wire-roundtrip-diff-lines {the encoded diff survives json2dict} -body {
 test wire-result-agent-options {agent.options.list encodes BOTH levels — options and their choices} -body {
 	rio::wire::response [dict create id 5 ok true op agent.options.list \
 		result [dict create provider claude options [list \
-			[dict create name model label Model hint "" value m1 free 1 refresh 1 \
+			[dict create name model label Model hint "" value m1 free 1 refresh 1 file 0 \
 				kind choice group Model quick 1 \
 				choices [list [dict create value m1 label "One"] \
 				              [dict create value m2 label "Two"]]]]]]
-} -result {{"id":"5","ok":true,"result":{"provider":"claude","options":[{"name":"model","label":"Model","hint":"","value":"m1","free":"1","refresh":"1","kind":"choice","group":"Model","quick":"1","choices":[{"value":"m1","label":"One"},{"value":"m2","label":"Two"}]}]}}}
+} -result {{"id":"5","ok":true,"result":{"provider":"claude","options":[{"name":"model","label":"Model","hint":"","value":"m1","free":"1","refresh":"1","file":"0","kind":"choice","group":"Model","quick":"1","choices":[{"value":"m1","label":"One"},{"value":"m2","label":"Two"}]}]}}}
 
 test wire-roundtrip-agent-options {the encoded option list survives json2dict} -body {
 	set enc [rio::wire::response [dict create id 6 ok true op agent.options.list \
 		result [dict create provider openai options [list \
 			[dict create name effort label Effort hint "how hard" value high free 0 refresh 0 \
-				kind choice group Model quick 1 \
+				file 0 kind choice group Model quick 1 \
 				choices [list [dict create value low label Low] \
 				              [dict create value high label High]]]]]]]
 	set d [json::json2dict $enc]
@@ -306,28 +306,46 @@ test wire-roundtrip-agent-options {the encoded option list survives json2dict} -
 		[dict get [lindex [dict get $o choices] 1] label]
 } -result {effort high High}
 
-# The rendering vocabulary a frontend reads (D106/provider-api 4). A `text` option has no
-# choices at all, which is the shape the old encoder never had to carry.
-test wire-result-agent-options-kinds {kind, group and quick cross the wire, choices or not} -body {
+# The rendering vocabulary a frontend reads (D106/provider-api 4, plus `file` at 5). A
+# `text` option has no choices at all, which is the shape the old encoder never had to
+# carry.
+test wire-result-agent-options-kinds {kind, group, quick and file cross the wire, choices or not} -body {
 	set enc [rio::wire::response [dict create id 7 ok true op agent.options.list \
 		result [dict create provider openai options [list \
-			[dict create name base_url label "Base URL" hint "where" value http://x/v1 \
-				free 0 refresh 0 kind text group Server quick 0 choices {}]]]]]
+			[dict create name extra label "Extra JSON" hint "where" value extra.json \
+				free 0 refresh 0 file 1 kind text group Server quick 0 choices {}]]]]]
 	set o [lindex [dict get [json::json2dict $enc] result options] 0]
 	list [dict get $o kind] [dict get $o group] [dict get $o quick] \
-		[llength [dict get $o choices]]
-} -result {text Server 0 0}
+		[dict get $o file] [llength [dict get $o choices]]
+} -result {text Server 0 1 0}
 
 test wire-result-agent-status {agent.status nests the option summary as an object} -body {
 	rio::wire::response [dict create id 7 ok true op agent.status \
-		result [dict create provider claude auto_accept 0 mode build key_set 1 \
+		result [dict create provider claude profile "" auto_accept 0 mode build key_set 1 \
 			options [dict create model m1 effort high]]]
-} -result {{"id":"7","ok":true,"result":{"provider":"claude","auto_accept":"0","mode":"build","key_set":"1","options":{"model":"m1","effort":"high"}}}}
+} -result {{"id":"7","ok":true,"result":{"provider":"claude","profile":"","auto_accept":"0","mode":"build","key_set":"1","options":{"model":"m1","effort":"high"}}}}
 
 test wire-result-agent-status-empty {a provider with no options still shapes as an object} -body {
 	set d [json::json2dict [rio::wire::response [dict create id 8 ok true op agent.status \
-		result [dict create provider echo auto_accept 0 mode build key_set 0 options {}]]]]
+		result [dict create provider echo profile "" auto_accept 0 mode build key_set 0 \
+			options {}]]]]
 	dict get $d result options
 } -result {}
+
+# agent.profiles.list (D131): a provider's named configurations, which is a two-level
+# shape like the option list — an array of flat objects beside two scalars.
+test wire-result-agent-profiles {agent.profiles.list encodes the array and says which is active} -body {
+	rio::wire::response [dict create id 9 ok true op agent.profiles.list \
+		result [dict create provider openai active ChatGPT profiles [list \
+			[dict create name ChatGPT active 1] \
+			[dict create name "Qwen3.8 27B (local)" active 0]]]]
+} -result {{"id":"9","ok":true,"result":{"provider":"openai","active":"ChatGPT","profiles":[{"name":"ChatGPT","active":"1"},{"name":"Qwen3.8 27B (local)","active":"0"}]}}}
+
+test wire-result-agent-profiles-none {a provider with no profiles still shapes as an array} -body {
+	set d [json::json2dict [rio::wire::response [dict create id 10 ok true \
+		op agent.profiles.list \
+		result [dict create provider echo active "" profiles {}]]]]
+	list [dict get $d result active] [llength [dict get $d result profiles]]
+} -result {{} 0}
 
 cleanupTests
