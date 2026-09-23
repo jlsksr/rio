@@ -16,7 +16,7 @@ A server of your own usually needs no key at all.
 2. Back in the Extensions window, select **openai** and install it.
 3. **Restart rio** — an installed provider becomes live on the next start.
 4. Choose **OpenAI-compatible** as the agent provider, then open
-   **Preferences ▸ Agent ▸ OpenAI-compatible settings…**.
+   **Extensions ▸ OpenAI-compatible…**.
 
 ## Settings
 

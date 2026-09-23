@@ -712,7 +712,7 @@ test openai-keyless-hosted-still-says-so {no key AND no URL of your own is still
 	set ::posts {}
 	rio::openai::api::provider {{role user text hi}} {} "" [list apply {{args} {lappend ::posts $args}}]
 	set p [lindex $::posts 0]
-	list [lindex $p 0] [lindex $p 1] [string match "*Preferences*Agent*" [lindex $p 2]]
+	list [lindex $p 0] [lindex $p 1] [string match "*Extensions*OpenAI-compatible*" [lindex $p 2]]
 } -cleanup { reset_openai_opts } -result {error not_configured 1}
 
 test openai-keyed-hosted-sends-auth {a stored key still goes out as a Bearer header} -setup {

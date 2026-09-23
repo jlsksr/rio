@@ -413,7 +413,7 @@ proc rio::openai::_classify {status raw} {
 		if {[dict exists $d error message]} { set detail ": [dict get $d error message]" }
 	}
 	if {$status == 401 || $status == 403} {
-		return [list auth "The LLM rejected the credentials (HTTP $status) — check your API key (Preferences ▸ Agent), or that a local server needs none$detail"]
+		return [list auth "The LLM rejected the credentials (HTTP $status) — check your API key (Extensions ▸ OpenAI-compatible…), or that a local server needs none$detail"]
 	} elseif {$status == 429} {
 		return [list rate_limit "Rate limited by the LLM (HTTP $status) — wait a moment and retry$detail"]
 	} elseif {$status >= 500} {

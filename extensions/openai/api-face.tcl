@@ -122,7 +122,7 @@ proc rio::openai::api::provider {conversation tools system post} {
 	# really does need a key, and a 401 would be a worse way to learn it.
 	if {$key eq "" && $url eq "$default_base_url/chat/completions"} {
 		{*}$post error not_configured \
-			"No OpenAI API key — add one in Preferences ▸ Agent, or set a server URL there if you are running your own (most need no key)"
+			"No OpenAI API key — add one in Extensions ▸ OpenAI-compatible…, or set a server URL there if you are running your own (most need no key)"
 		return
 	}
 	set auth {}

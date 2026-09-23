@@ -445,6 +445,31 @@ proc menu_labels2 {m} {
 	}
 	return $out
 }
+
+# Menubar helpers, used both by the openai-provider block and by the menu-shape checks
+# far below — defined up here so the earlier of the two can reach them.
+proc _menu_has_label {m label} {
+	for {set i 0} {$i <= [$m index end]} {incr i} {
+		if {![catch {$m entrycget $i -label} l] && $l eq $label} { return 1 }
+	}
+	return 0
+}
+proc ext_menu_labels {} {
+	set out {}
+	for {set i 0} {$i <= [.m.extensions index end]} {incr i} {
+		if {[catch {.m.extensions entrycget $i -label} l]} continue
+		lappend out $l
+	}
+	return $out
+}
+proc menubar_labels {} {
+	set out {}
+	for {set i 0} {$i <= [.m index end]} {incr i} {
+		if {![catch {.m entrycget $i -label} l] && $l ne ""} { lappend out $l }
+	}
+	return $out
+}
+
 menu .fsm -tearoff 0
 nav_menu_build .fsm [list file [file join $proj zeta.txt]]
 ok "fs-menu: file row has all four verbs" [menu_labels2 .fsm] \
@@ -1660,34 +1685,38 @@ chat_clear
 chat_send
 pump_until {string match {*not_configured*} [.chat.log get 1.0 end]}
 ok "provider: claude w/o key errors actionably" \
-	[string match {*Preferences*Agent*(not_configured)*} [.chat.log get 1.0 end]] 1
+	[string match {*Extensions*Claude*(not_configured)*} [.chat.log get 1.0 end]] 1
 
-# The generic key dialog stores / clears through the agent.key.* ops (the core's
-# 0600 store), targeting the named provider. Its title/prompt come from the
-# provider's declared metadata (agent.providers), so one dialog serves every keyed
-# provider.
-provider_key_dialog claude
-ok "keydlg: opens"                    [winfo exists .providerkey] 1
-ok "keydlg: titled for the provider"  [wm title .providerkey] "Claude API key"
-ok "keydlg: clear disabled w/o key"   [.providerkey.btns.clear cget -state] disabled
-.providerkey.e insert end "sk-ant-smoke-123"
-provider_key_save .providerkey claude
-ok "keydlg: closed after save"        [winfo exists .providerkey] 0
-ok "keydlg: key now stored"           [rio::claude::api::configured] 1
+# The key is a row in the provider's OWN settings window now (D130), not a modal of
+# its own: one window per provider, holding everything that belongs to it. It stores
+# and clears through the agent.key.* ops (the core's 0600 store) for the named
+# provider, and what it shows comes from the provider's declared metadata
+# (agent.providers), so one window serves every keyed provider.
+provider_settings_dialog claude
+update idletasks
+ok "keyrow: the provider's window opens" [winfo exists .provset] 1
+ok "keyrow: titled for the provider"  [wm title .provset] "Claude settings"
+ok "keyrow: clear disabled w/o key"   [.provset.body.keyb.clear cget -state] disabled
+.provset.body.keye insert end "sk-ant-smoke-123"
+provider_key_field_save claude
+update idletasks
+ok "keyrow: the window stays open"    [winfo exists .provset] 1
+ok "keyrow: key now stored"           [rio::claude::api::configured] 1
 # POSIX-only: `file attributes -permissions` does not exist on Windows (it raises
 # "bad option -permissions"), which aborted this whole suite there rather than failing
 # one check. rio-core's secret.test/workspace.test already gate the same assertion with
 # tcltest's `unix` constraint; this suite has no constraints, so gate it by hand.
 if {$::tcl_platform(platform) eq "unix"} {
-	ok "keydlg: secret is 0600" \
+	ok "keyrow: secret is 0600" \
 		[format %04o [expr {[file attributes [file join $::secdir claude-api.secret] -permissions] & 0777}]] 0600
 }
 
-# Re-open: Clear is enabled now, and clearing removes the secret.
-provider_key_dialog claude
-ok "keydlg: clear enabled with key"   [.providerkey.btns.clear cget -state] normal
-provider_key_clear .providerkey claude
-ok "keydlg: key cleared"              [rio::claude::api::configured] 0
+# The row repaints from the core, so Clear is live now, and clearing removes the secret.
+ok "keyrow: clear enabled with key"   [.provset.body.keyb.clear cget -state] normal
+provider_key_field_clear claude
+update idletasks
+ok "keyrow: key cleared"              [rio::claude::api::configured] 0
+destroy .provset
 
 # --- installable providers (D66): openai is no longer built-in, it INSTALLS -----
 # A provider is a `kind = provider` extension the core SOURCES at startup. The
@@ -1750,15 +1779,19 @@ ok "provider: openai now in the picker cache" \
 set ::agent_provider openai ; apply_provider
 ok "provider: openai selected in core" [rio::agent::provider_name] openai
 ok "status: names the provider"       [string match "OpenAI-compatible*" [.chat.status.sel cget -text]] 1
-provider_key_dialog openai
-ok "keydlg: titled for openai"         [wm title .providerkey] "OpenAI-compatible API key"
-.providerkey.e insert end "sk-oai-smoke-123"
-provider_key_save .providerkey openai
-ok "keydlg: openai key stored"         [rio::openai::api::configured] 1
-ok "keydlg: claude key still absent"   [rio::claude::api::configured] 0
-provider_key_dialog openai
-provider_key_clear .providerkey openai
-ok "keydlg: openai key cleared"        [rio::openai::api::configured] 0
+provider_settings_dialog openai
+update idletasks
+ok "keyrow: titled for openai"         [wm title .provset] "OpenAI-compatible settings"
+ok "keyrow: openai has its own door"   [expr {"OpenAI-compatible…" in [ext_menu_labels]}] 1
+.provset.body.keye insert end "sk-oai-smoke-123"
+provider_key_field_save openai
+update idletasks
+ok "keyrow: openai key stored"         [rio::openai::api::configured] 1
+ok "keyrow: claude key still absent"   [rio::claude::api::configured] 0
+provider_key_field_clear openai
+update idletasks
+ok "keyrow: openai key cleared"        [rio::openai::api::configured] 0
+destroy .provset
 
 # --- Agent Prompts dialog (Preferences ▸ Agent ▸ Agent Prompts…, D70) ---------
 # The dialog opens the two user-editable system-prompt files in rio's editor; the core
@@ -1999,23 +2032,27 @@ ok "view: top level stays short"    [expr {[.m.view index end] <= 20}] 1
 ok "view: Dock Side submenu"        [expr {[winfo exists .m.view.dock] && [.m.view.dock index "Left"] ne ""}] 1
 ok "view: Font & Zoom submenu"      [expr {[winfo exists .m.view.zoom] && [.m.view.zoom index "Zoom In"] ne ""}] 1
 ok "view: Editor Layout submenu"    [expr {[winfo exists .m.view.layout] && [.m.view.layout index "Split Editor"] ne ""}] 1
-# Extensions… is a management dialog (installs providers/modes/themes), so it lives in
-# Settings beside Preferences… / Keyboard Shortcuts…, not under View's pane toggles (D67).
-proc _menu_has_label {m label} {
-	for {set i 0} {$i <= [$m index end]} {incr i} {
-		if {![catch {$m entrycget $i -label} l] && $l eq $label} { return 1 }
-	}
-	return 0
-}
-ok "menu: Extensions… under Settings"  [_menu_has_label .m.settings "Extensions…"] 1
-ok "menu: Extensions… gone from View"  [_menu_has_label .m.view "Extensions…"] 0
+# Extensions has its own top-level menu (D130): the installer leads it, and below the
+# separator sits one door per installed extension that has something to configure. It
+# was under View until D67 and under Settings until D130; both moves have to stay made,
+# so assert all three places. These are direct assertions rather than a docs-path check:
+# .m.extensions is data-filled (docs.tcl exempts it as a ::datamenu), so this suite is
+# where the installer's own entry is held. (The three helpers are defined near the top,
+# so the openai-provider block above can use them too.)
+ok "menu: the menubar's order" [menubar_labels] \
+	{File Edit View Find Compare Settings Extensions Help}
+ok "menu: Extensions… leads its own menu" [lindex [ext_menu_labels] 0] "Extensions…"
+ok "menu: and opens the installer" \
+	[.m.extensions entrycget [.m.extensions index "Extensions…"] -command] extensions_window
+ok "menu: Extensions… gone from Settings" [_menu_has_label .m.settings "Extensions…"] 0
+ok "menu: Extensions… gone from View"     [_menu_has_label .m.view "Extensions…"] 0
 # The Theme cascade was the last data-driven menu with no size bound — it grew with every
 # installed theme and could post taller than the screen (CAVEATS.md). D92 retired it into
 # the bounded picker, the way D74 retired the Tabs cascade: a command, never a cascade.
 ok "view: Theme… is a command"      [.m.view type "Theme…"] command
 ok "view: no Theme cascade left"    [winfo exists .m.view.theme] 0
 ok "view: Theme… opens the picker"  [.m.view entrycget "Theme…" -command] theme_pick_dialog
-# The Preferences window mirrors that with its own Extensions… button (D67).
+# The Preferences window mirrors the menu with its own Extensions… button (D67/D130).
 preferences_window
 ok "prefs: has an Extensions… button"  [expr {[winfo exists .prefs.btns.ext] \
 	&& [.prefs.btns.ext cget -text] eq "Extensions…"}] 1
