@@ -248,6 +248,16 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Changed
 
+- **Every extension configures itself, from a menu of its own** — there is a new
+  top-level ***Extensions*** menu, between Settings and Help. It leads with
+  ***Extensions ▸ Extensions…*** (the installer, which leaves the Settings menu) and then
+  lists one entry per installed extension that has anything to set. A provider's **API
+  key is now a row in that provider's own window**, beside its model and its endpoint,
+  instead of a separate dialog — so everything belonging to one provider is in one place,
+  and *Preferences ▸ Agent* keeps only rio's own agent settings instead of growing two
+  buttons per provider installed. rio's settings *about* extensions — update checking,
+  repositories, signing keys — stay in *Preferences ▸ Extensions*. Reverses where D128
+  put this. — *D130 · `67a4c6c` · 2026-09-23*
 - **Installing rio is one script named after your system, and leaves you a `rio` you can
   launch** — the setup scripts are now `install-unix.sh` (Linux, the BSDs, macOS),
   `install-windows.ps1` and `install-server.sh`, replacing two that said *dev-deploy* and

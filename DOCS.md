@@ -29,7 +29,7 @@ standing between the manual and the kind of drift that takes three months to not
 
 ## What the suite actually holds you to
 
-Seventeen groups of checks. Each exists because something drifted once.
+Eighteen groups of checks. Each exists because something drifted once.
 
 1. **`docs/` and `index.md` agree.** Every page is listed in the contents, and every
    contents entry names a page that exists. A page nobody links to is invisible; an
@@ -46,7 +46,17 @@ Seventeen groups of checks. Each exists because something drifted once.
    with `<name>` or `*` matches as a pattern. Comparing only the first folder let two
    files under `agent/` go undocumented behind a third.
 6. **Every `Menu ▸ Item` path the docs quote is a real menu entry.** The check walks
-   the live Tk menubar widgets, not the source text.
+   the live Tk menubar widgets, not the source text. Menus whose entries are *installed
+   data* rather than facts of the code — the provider and editing-mode cascades, and
+   the Extensions menu below its separator (D130) — are checked down to the menu and no
+   further: what a reader sees there depends on what they have installed, and the form
+   the manual has to teach (`Extensions ▸ <provider>…`) is a template, not a path.
+6a. **The Extensions menu's first entry is named somewhere.** That one entry — the
+   installer window — *is* a fact of the code, so exempting the menu would have left
+   unguarded the very path D130 had just moved. Both halves come off the widgets: which
+   cascade opens the menu, and what its first entry is labelled. Where it is documented
+   is the writer's business, so the check asks only that some user-facing document says
+   it.
 7. **Every menu the docs *name* exists.** A capitalised word in front of *menu*,
    *submenu* or *cascade* is treated as a name and must be one rio has.
 8. **The help viewer can reach the manual.** `help_dir` points at the real `docs/`, and
