@@ -389,11 +389,14 @@ though the interactive behaviour is right.
       both entry points answer `--version`. The same decision settled the rest of the
       scheme: the wire `protocol` and `provider-api` stay integers, `mode-api` is new,
       and an extension's semver stays its own.
-- [ ] **git-tag the release `v0.1.0`** when the other gates close. Nothing is tagged yet;
-      until then **About**'s *Build* shows the short commit, and turns into the tag on its
-      own once this is done (AGENTS.md D76 — no code change at release). The tag is also
-      what turns `CHANGELOG.md`'s `[0.1.0] — unreleased` heading into a dated one, and
-      what makes a `[0.1.0]:` link target exist to add.
+- [x] **git-tag the release `v0.1.0`** when the other gates close. **Done 2026-09-23**,
+      an annotated tag on `5d2f6d6`. Both promised effects landed with no code change
+      (AGENTS.md D76): `git describe` now answers `v0.1.0`, so **About**'s *Build* row is a
+      release name rather than a short commit, and `CHANGELOG.md`'s heading is dated with a
+      `[0.1.0]:` link target that finally has somewhere to point. Both entry points answer
+      `0.1.0`. The full sweep was green at the tagged commit and again after the release
+      edits — core 864, syntax 536, plugins/lib 20, claude 55, openai 115, all 28 GUI
+      suites exit 0, **zero skips**, so `tls.test`'s https half genuinely ran.
 
 ## Gate 3 — First run & intake
 
@@ -446,6 +449,14 @@ either (the development box has no PowerShell). So a Mac or Windows pass at the 
 commit is still owed, and the release notes should say which platforms have actually been
 run rather than which ones are supported in principle.
 
+**What 0.1.0 actually shipped on (2026-09-23).** Linux, verified at the tagged commit:
+the whole sweep green with zero skips, and the release tarball extracted, launched and
+left running. Windows: **not re-run for the release** — the last full pass was 2026-09-17,
+so D129's `install-windows.ps1` changes and the two features after it (D130, D131) are
+unexercised there. macOS: still never executed. The BSDs: still a design target. The
+release notes say exactly this rather than listing supported platforms, which is the
+honest-smaller-claim rule of Gate 0 applied to the announcement.
+
 ### The two decisions to take before the first push
 
 Both are one-way-ish once the history is public, so they are here rather than inline.
@@ -474,11 +485,16 @@ Both are one-way-ish once the history is public, so they are here rather than in
 
 ### The steps
 
-- [ ] **Create an empty repo** `jlsksr/rio` on GitHub — **no** README, licence or
+- [x] **Create an empty repo** `jlsksr/rio` on GitHub — **no** README, licence or
       `.gitignore` from GitHub's side, or the first push will conflict with a history
       that already has all three. `gh` is not installed on the dev box, so this is a
-      browser step. Add `~/.ssh/id_ed25519.pub` to the account if it isn't there.
-- [ ] **Add the remote and push `main`.** The mirror carries `main` and tags **only**;
+      browser step. **Done 2026-09-23**, both it and `jlsksr/rio-extensions`.
+      **The key needs to be an ACCOUNT key, not a deploy key** — the first attempt used a
+      deploy key, which GitHub greets as `Hi jlsksr/rio!` rather than `Hi jlsksr!` and
+      which is scoped to the one repository, so it could not push the extensions repo at
+      all. A key already registered as a deploy key is also refused from the account page
+      ("Key is already in use"), so it has to be deleted there first.
+- [x] **Add the remote and push `main`.** The mirror carries `main` and tags **only**;
       unfinished branches stay private (there are 15 local branches and 3 on origin
       today, and none of them is anyone else's business yet). Nothing is lost by
       leaving them: every one is already merged into `main`, and the `--no-ff` merges
@@ -486,7 +502,10 @@ Both are one-way-ish once the history is public, so they are here rather than in
 
           git remote add github git@github.com:jlsksr/rio.git
           git push github main
+          git push github v0.1.0
           git remote set-head github -a
+
+      **Done 2026-09-23.** One branch on the mirror, 17 local ones kept private.
 
 - [ ] **Look at the rendered landing page** once it is up: the README is the front
       door, and its relative links (`docs/index.md`, `LICENSE`, `CODE_OF_CONDUCT.md`)
@@ -501,17 +520,23 @@ Both are one-way-ish once the history is public, so they are here rather than in
       framing, the by-the-numbers block, the icon's provenance — moved into README.md;
       the frozen changelog copy was dropped rather than rehomed, and its two freeze
       checks with it.
-- [ ] **Push the tag** when Gate 2's third box is done: `git push github --tags`, and
-      the same to `origin`. The tag is what turns About's *Build* into a release name
-      and the CHANGELOG's `[0.1.0] — unreleased` into a dated heading.
+- [x] **Push the tag** when Gate 2's third box is done. **Done 2026-09-23** — named
+      explicitly (`git push <remote> v0.1.0`) rather than `--tags`, so only the release
+      tag travels. Forgejo first, then the mirror; both carry `main` at `5d2f6d6` and
+      `v0.1.0` pointing at it.
 - [ ] **Download the Release page's own tarball and run rio from it.** It is a
       different artifact from the repository — `.gitattributes` `export-ignore`
       (`3406db4`) drops `adr/`, `spike/`, `.claude/` and every `tests/`
-      directory, taking 418 files to 160 and 3.0 MB. Verified locally against
-      `git archive` at that commit (both entry points answer `0.1.0`, icons intact),
-      but GitHub builds its own copy, so confirm theirs once: extract, run
-      `install-unix.sh`, launch. **No test can cover this** — every suite runs in a
-      repository, where the excluded paths exist either way.
+      directory. **At the tag that is 414 tracked files down to 143, 1.2 MB gzipped**
+      (the earlier 418/160/3.0 MB was measured at `3406db4`, before PITCH.md and
+      AGENT-WORKFLOW.md went and before the later test files, which are excluded and so
+      raise the repository count without touching the archive). **Verified locally at
+      `v0.1.0`**: the excluded paths are absent, `docs/` is complete at 14 pages, 34
+      syntax modules and the icons are intact, `--version` answers `0.1.0` from both
+      entry points, and the GUI launches and stays up from the extracted tree. GitHub
+      builds its own copy, so confirm theirs once too: extract, run `install-unix.sh`,
+      launch. **No test can cover this** — every suite runs in a repository, where the
+      excluded paths exist either way.
 
 ### The ongoing workflow, and the one asymmetry
 
