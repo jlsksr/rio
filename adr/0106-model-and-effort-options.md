@@ -1,6 +1,6 @@
 # ADR-0106: Model and effort are provider-declared options
 
-- **Status:** Accepted; extended by [ADR-0135](0135-provider-declares-its-own-settings.md)
+- **Status:** Accepted; extended by [ADR-0135](0135-provider-declares-its-own-settings.md) and [ADR-0138](0138-provider-profiles-and-file-options.md)
 - **Date:** 2026-09-12
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D106, D106a–D106e

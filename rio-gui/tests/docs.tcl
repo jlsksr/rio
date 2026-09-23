@@ -192,6 +192,7 @@ set producers {
 	{rio::agent::allow::_global_file}            config
 	{rio::agent::allow::_provider_file claude}   config
 	{rio::agent::settings::path claude}          config
+	{rio::agent::settings::path claude Work}     config
 	{rio::tls::settings_path}                    config
 	{ledger_path}                                data
 	{rio::secret::_path claude}                  data
@@ -199,8 +200,20 @@ set producers {
 	{rio::provider::_dir}                        data
 }
 
+# A pattern matches a path SEGMENT BY SEGMENT — `*` never crosses a `/`. Plain
+# `string match` let one row stand for a whole subtree, because its `*` swallows
+# separators: `agent/providers/*.conf` matched `agent/providers/openai/ChatGPT.conf`
+# too, so the per-profile file D131 added was "documented" by the row above it and
+# deleting its own row would have changed nothing.
+proc doc_match {pat rel} {
+	set ps [split $pat /] ; set rs [split $rel /]
+	if {[llength $ps] != [llength $rs]} { return 0 }
+	foreach p $ps r $rs { if {![string match $p $r]} { return 0 } }
+	return 1
+}
+
 # The two XDG tables, sliced apart so a config path can't satisfy a data row. Each cell
-# becomes a `string match` pattern: a trailing / dropped, and `<name>` read as `*`.
+# becomes a per-segment pattern: a trailing / dropped, and `<name>` read as `*`.
 proc doc_cells {text from to} {
 	set body [string range $text [string first $from $text] \
 		[expr {[string first $to $text] - 1}]]
@@ -228,7 +241,7 @@ foreach {call root} $producers {
 	lappend produced($root) $rel
 	set found 0
 	foreach pat $doc($root) {
-		if {[string match $pat $rel]} { set found 1 ; break }
+		if {[doc_match $pat $rel]} { set found 1 ; break }
 	}
 	if {!$found} { lappend missing "$root/$rel ($call)" }
 }
@@ -239,7 +252,7 @@ foreach root {config data} {
 	foreach pat $doc($root) {
 		set built 0
 		foreach rel $produced($root) {
-			if {[string match $pat $rel]} { set built 1 ; break }
+			if {[doc_match $pat $rel]} { set built 1 ; break }
 		}
 		if {!$built} { lappend orphaned "$root/$pat" }
 	}
@@ -1486,6 +1499,140 @@ foreach s $shipped {
 	if {![string match "*`$s`*" $install_md]} { lappend unnamed $s }
 }
 ok "INSTALL.md names every install script" $unnamed {}
+
+# --- 21. the profile row, the manager, and what a profile may be called -------
+#
+# D131 let a provider keep several named configurations, and the manual walks a reader
+# through two surfaces no other check can reach. Check 19 renders the settings window
+# but for a provider that declares NO profiles, so the row above its credentials is
+# invisible to it; and the manager is a window that row opens, which is check 16's gap
+# one door along — rename a button there and the manual sends a reader after a control
+# that is not on screen, with everything else green.
+#
+# The name rule is the third half-fact: the user TYPES a profile name, so the manual
+# has to say which ones are allowed, and the sentence it says it in is a second home
+# for a rule the core enforces alone.
+#
+# Behaviour, not source text: both windows are really built, every label is read off
+# the live widget, and the name rule comes out of asking the core to refuse one.
+
+# A provider that keeps profiles, and the same one that does not — so what the row is
+# can be derived from the difference rather than assumed, and a provider without them
+# is held to grow no row at all (the injection D131 found nothing asserting).
+set ::d131with {
+	{name docsprof label "Docs Profiles" keyed 1 key_set 0 signup "" options 0 profiles 1}
+}
+set ::d131without {
+	{name docsprof label "Docs Profiles" keyed 1 key_set 0 signup "" options 0 profiles 0}
+}
+# The core answers agent.profiles.list for a provider that declares the capability;
+# this stands in for that answer, because every provider that does is an extension and
+# none is installed here. What it stands in for is data; rio's rendering is under test.
+set ::d131profiles [list Everyday "Spare (local)"]
+
+rename agent_providers_refresh d131_refresh_real
+proc agent_providers_refresh {} {}
+set d131saved $::agent_providers
+
+rename rio_call d131_call_real
+proc rio_call {op params} {
+	switch -- $op {
+		agent.options.list {
+			return [dict create ok 1 result [dict create options {}]]
+		}
+		agent.profiles.list {
+			# The op's own shape: one object per profile, saying which is active.
+			set rows {}
+			foreach p $::d131profiles {
+				lappend rows [dict create name $p \
+					active [expr {$p eq [lindex $::d131profiles 0]}]]
+			}
+			return [dict create ok 1 result [dict create \
+				active [lindex $::d131profiles 0] profiles $rows]]
+		}
+	}
+	return [d131_call_real $op $params]
+}
+
+# What the settings window says, for a provider with profiles and for one without. The
+# row is the difference, so the check knows none of its words in advance.
+#
+# Captions and buttons only: a hint is rio explaining itself in a sentence, and holding
+# the manual to a paragraph's exact wording would make rephrasing either of them a test
+# failure. They are told apart by the thing that already tells them apart on screen —
+# static help wraps, a caption does not (D68).
+proc d131_face {providers} {
+	set ::agent_providers $providers
+	destroy .provset
+	provider_settings_dialog docsprof
+	update idletasks
+	set out {}
+	foreach l [d128_widgets .provset.body Label] {
+		if {[$l cget -wraplength] == 0} { lappend out [$l cget -text] }
+	}
+	foreach b [d128_widgets .provset.body Button] { lappend out [$b cget -text] }
+	return $out
+}
+set d131a [d131_face $::d131with]
+set d131b [d131_face $::d131without]
+set d131row {}
+foreach l $d131a {
+	if {[lsearch -exact $d131b $l] < 0} { lappend d131row $l }
+}
+ok "a provider that keeps profiles grows a row the others have not" \
+	[expr {[llength $d131row] > 0}] 1
+
+# The row back on screen: the switch is a drop-down naming the live profile, and one
+# button sits beside it — the manager's door, whose label is in $d131row above.
+d131_face $::d131with
+set d131mb [d128_widgets .provset.body Menubutton]
+ok "the row switches with a drop-down naming the live profile" \
+	[list [llength $d131mb] [string match "[lindex $::d131profiles 0]*" \
+		[[lindex $d131mb 0] cget -text]]] {1 1}
+
+# The manager the button opens. It grabs but does not block, so unlike check 16 it
+# needs no driving; its verbs are read off the live buttons in declaration order.
+provider_profiles_dialog docsprof
+update idletasks
+set d131verbs {}
+foreach b [winfo children .provprof.btns] { lappend d131verbs [$b cget -text] }
+ok "the manager offers a verb per profile action" [llength $d131verbs] 5
+ok "…and lists what the core says this provider has" $::provprof_names $::d131profiles
+destroy .provprof
+destroy .provset
+
+set ::agent_providers $d131saved
+rename rio_call {}
+rename d131_call_real rio_call
+rename agent_providers_refresh {}
+rename d131_refresh_real agent_providers_refresh
+
+# What a profile may be CALLED, taken from the core's own refusal rather than written
+# down here — so relaxing or tightening the rule fails this until the manual follows.
+# The message names the allowed set and then the name it rejected; only the rule half
+# is a fact about every profile.
+catch {rio::agent::settings::_writable docsprof "bad/name"} d131msg
+set d131rule [string trim [lindex [split $d131msg —] 0]]
+ok "the core refuses an unusable profile name, and says what is allowed" \
+	[expr {[string first "may use" $d131rule] >= 0}] 1
+
+# Emphasis and inline code dropped, whitespace collapsed, as in checks 15 and 16: a
+# label wrapped across two source lines, or a rule with its punctuation in backticks,
+# is still the words a reader sees.
+set d131flat {}
+foreach p $pages {
+	lappend d131flat [regsub -all {\s+} \
+		[string map [list * "" ` ""] [slurp [file join $::docs $p]]] " "]
+}
+proc d131_said {s} {
+	foreach t $::d131flat { if {[string first $s $t] >= 0} { return 1 } }
+	return 0
+}
+set d131unsaid {}
+foreach s [concat $d131row $d131verbs [list $d131rule]] {
+	if {![d131_said [regsub -all {\s+} $s " "]]} { lappend d131unsaid $s }
+}
+ok "every word those two surfaces say is in the manual" $d131unsaid {}
 
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

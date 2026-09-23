@@ -312,7 +312,7 @@ proc rio::wire::_option {o} {
 	set cs {}
 	foreach c [dict get $o choices] { lappend cs [obj $c] }
 	set parts {}
-	foreach k {name label hint value free refresh kind group quick} {
+	foreach k {name label hint value free refresh file kind group quick} {
 		lappend parts "[str $k]:[str [dict get $o $k]]"
 	}
 	lappend parts "\"choices\":[arr $cs]"
@@ -325,11 +325,23 @@ proc rio::wire::_result_agent_options_list {result} {
 }
 rio::wire::result_encoder agent.options.list rio::wire::_result_agent_options_list
 
+# agent.profiles.list: `profiles` is an array of flat {name, active} objects — a
+# provider's named configurations and which one is running (D131).
+proc rio::wire::_result_agent_profiles_list {result} {
+	set items {}
+	foreach p [dict get $result profiles] { lappend items [obj $p] }
+	set parts {}
+	foreach k {provider active} { lappend parts "[str $k]:[str [dict get $result $k]]" }
+	lappend parts "\"profiles\":[arr $items]"
+	return "{[join $parts ,]}"
+}
+rio::wire::result_encoder agent.profiles.list rio::wire::_result_agent_profiles_list
+
 # agent.status: flat except `options`, the live {name value …} summary of whatever the
 # provider declares (D106) — an object of string leaves, declared rather than inferred.
 proc rio::wire::_result_agent_status {result} {
 	set parts {}
-	foreach k {provider auto_accept mode key_set} {
+	foreach k {provider profile auto_accept mode key_set} {
 		lappend parts "[str $k]:[str [dict get $result $k]]"
 	}
 	lappend parts "\"options\":[obj [dict get $result options]]"

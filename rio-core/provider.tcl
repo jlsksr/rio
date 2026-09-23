@@ -31,6 +31,15 @@
 #       setting that is a FIELD rather than a menu of choices, and say where it belongs,
 #       - the `post thinking <text>` verb: reasoning that is shown but never recorded in
 #         the conversation, so it is not re-sent or re-billed on a later step.
+#   5 - register_provider's -profiles capability {list switch add remove rename} and the
+#       agent.profile* ops behind it: SEVERAL named configurations of everything the
+#       provider keeps, one active (D131),
+#     - rio::agent::settings' profile-scoped storage — `path` / `get` / `store` take a
+#       profile, and profiles / profile_dir / profile_add / profile_rename /
+#       profile_remove manage the files,
+#     - an option descriptor's `file` flag and the agent.option.file op behind it: the
+#       value names a file the provider resolves and creates, which a frontend opens in
+#       the editor.
 # A provider declaring an OLDER api still loads: the surface only grows. Every level
 # belongs HERE, beside the ceiling it raises — a level documented only in CONTRIBUTING
 # is one the file that owns the number does not admit to implementing.
@@ -42,7 +51,7 @@
 
 namespace eval rio::provider {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path
-	variable api_version 4     ;# the highest provider-api this core implements
+	variable api_version 5     ;# the highest provider-api this core implements
 }
 
 # The highest provider-api this core implements — a frontend compares a repo

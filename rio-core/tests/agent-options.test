@@ -19,17 +19,21 @@ namespace eval fake {
 	variable choices {{value vanilla label Vanilla} {value pistachio label Pistachio}}
 	variable refreshed 0
 	variable fail ""     ;# non-empty: the refresh reports this instead of succeeding
+	variable recipe  ""  ;# a `file` option's value: the name of a file (D131)
+	variable profile ""  ;# the active profile, "" until one is switched to
 }
 proc fake::provider {conversation tools system post} { {*}$post done stop }
 proc fake::opts_list {} {
-	variable flavour ; variable heat ; variable choices
+	variable flavour ; variable heat ; variable choices ; variable recipe
 	return [list \
 		[dict create name flavour label Flavour hint "which one" \
 			value $flavour free 1 refresh 1 choices $choices] \
-		[dict create name heat value $heat choices {mild hot}]]
+		[dict create name heat value $heat choices {mild hot}] \
+		[dict create name recipe label Recipe kind text file 1 value $recipe]]
 }
 proc fake::opts_set {name value} {
-	variable flavour ; variable heat ; variable choices
+	variable flavour ; variable heat ; variable choices ; variable recipe
+	variable profile
 	switch -- $name {
 		flavour { set flavour [string tolower $value] }
 		heat {
@@ -38,10 +42,29 @@ proc fake::opts_set {name value} {
 			}
 			set heat $value
 		}
+		recipe { set recipe $value }
 		default { rio::error::raise bad_request "no such option: $name" }
 	}
-	rio::agent::settings::store fake $name $value
+	# Into the ACTIVE profile, as a provider with profiles must (D131) — and into the
+	# flat file when there is none, which is what every pre-D131 provider still does.
+	rio::agent::settings::store fake $name $value $profile
 	return
+}
+
+# The `file` capability: resolve and create, and say which it did. The provider owns
+# both — only it knows where its file belongs (here: beside its profiles).
+proc fake::opts_file {name} {
+	variable recipe
+	if {$name ne "recipe"} { rio::error::raise bad_request "no file for $name" }
+	if {$recipe eq ""} { set recipe recipe.txt ; opts_set recipe $recipe }
+	set p [file join [rio::agent::settings::profile_dir fake] $recipe]
+	set created 0
+	if {![file isfile $p]} {
+		file mkdir [file dirname $p]
+		set fh [open $p w 0600] ; puts -nonewline $fh "" ; close $fh
+		set created 1
+	}
+	return [dict create path $p created $created]
 }
 proc fake::opts_refresh {name announce} {
 	variable choices ; variable refreshed ; variable fail
@@ -50,6 +73,56 @@ proc fake::opts_refresh {name announce} {
 	lappend choices [dict create value fetched label Fetched]
 	{*}$announce
 	return
+}
+
+# --- the same fake, with profiles (D131) -------------------------------------
+#
+# A faithful miniature of what a real provider does: the storage primitives do the file
+# work, the provider owns which profile is active and what a switch RE-ADOPTS. Written
+# out rather than stubbed, because the point of these tests is that the core routes to
+# a provider and learns nothing — a stub that returned canned names would prove less.
+proc fake::prof_list {} {
+	variable profile
+	return [dict create profiles [rio::agent::settings::profiles fake] active $profile]
+}
+proc fake::prof_switch {name} {
+	variable profile
+	if {![rio::agent::settings::profile_exists fake $name]} {
+		rio::error::raise bad_request "no such profile: $name"
+	}
+	set profile $name
+	_adopt
+	return $name
+}
+proc fake::prof_add {name {from ""}} {
+	rio::agent::settings::profile_add fake $name $from
+	return $name
+}
+proc fake::prof_remove {name} {
+	variable profile
+	rio::agent::settings::profile_remove fake $name
+	# Removing the RUNNING profile has to land somewhere — the provider decides where,
+	# and the op reports it, so a frontend never has to guess.
+	if {$name eq $profile} {
+		set rest [rio::agent::settings::profiles fake]
+		set profile [expr {[llength $rest] ? [lindex $rest 0] : ""}]
+		_adopt
+	}
+	return $name
+}
+proc fake::prof_rename {name to} {
+	variable profile
+	rio::agent::settings::profile_rename fake $name $to
+	if {$name eq $profile} { set profile $to }
+	return $to
+}
+# Re-read every setting from the active profile, falling back to the SHIPPED default —
+# so a key the new profile does not carry cannot leak across from the old one.
+proc fake::_adopt {} {
+	variable profile ; variable flavour ; variable heat ; variable recipe
+	set flavour [rio::agent::settings::get fake flavour vanilla $profile]
+	set heat    [rio::agent::settings::get fake heat    mild    $profile]
+	set recipe  [rio::agent::settings::get fake recipe  ""      $profile]
 }
 
 # A dir per test, and a clean fake provider + settings dir before each.
@@ -68,11 +141,16 @@ proc reset_opts {} {
 	set fake::choices {{value vanilla label Vanilla} {value pistachio label Pistachio}}
 	set fake::refreshed 0
 	set fake::fail ""
+	set fake::recipe ""
+	set fake::profile ""
 	if {[info exists ::optdir]} { file delete -force $::optdir }
 	set ::optdir [mkdir]
 	rio::agent::settings::override_dir $::optdir
 	rio::agent::register_provider fake fake::provider -label "Fake" \
-		-options {list fake::opts_list set fake::opts_set refresh fake::opts_refresh}
+		-options {list fake::opts_list set fake::opts_set refresh fake::opts_refresh \
+			file fake::opts_file} \
+		-profiles {list fake::prof_list switch fake::prof_switch add fake::prof_add \
+			remove fake::prof_remove rename fake::prof_rename}
 	rio::agent::use_provider echo
 }
 # Collect announced events instead of sending them anywhere.
@@ -157,14 +235,14 @@ test options-summary {the flat summary is name -> current value} -setup {
 	reset_opts
 } -body {
 	rio::agent::options_summary fake
-} -result {flavour vanilla heat mild}
+} -result {flavour vanilla heat mild recipe {}}
 
 test options-default-provider {with no name given, the ACTIVE provider answers} -setup {
 	reset_opts
 	rio::agent::use_provider fake
 } -body {
 	rio::agent::options_summary
-} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild}
+} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild recipe {}}
 
 # --- choosing a value --------------------------------------------------------
 
@@ -256,7 +334,7 @@ test op-list {agent.options.list names the provider and carries every option} -s
 	set r [dict get [rio::ops::agent_options_list {provider fake}] result]
 	list [dict get $r provider] [llength [dict get $r options]] \
 		[dict get [lindex [dict get $r options] 0] name]
-} -result {fake 2 flavour}
+} -result {fake 3 flavour}
 
 test op-list-active {agent.options.list with no provider answers for the active one} -setup {
 	reset_opts
@@ -309,7 +387,7 @@ test op-status-options {agent.status carries the live option summary} -setup {
 	rio::agent::use_provider fake
 } -body {
 	dict get [dict get [rio::ops::agent_status {}] result] options
-} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild}
+} -cleanup { rio::agent::use_provider echo } -result {flavour vanilla heat mild recipe {}}
 
 test op-status-echo {agent.status for an optionless provider carries an empty summary} -setup {
 	reset_opts
@@ -442,6 +520,321 @@ test op-list-wire-keeps-every-descriptor-key {every key a descriptor carries cro
 	set wire [lindex [dict get $j result options] 0]
 	expr {[lsort [dict keys $core]] eq [lsort [dict keys $wire]]}
 } -result 1
+
+# --- profiles (D131) ---------------------------------------------------------
+#
+# Named configurations, one active. The core routes and shapes; what a profile CONTAINS
+# is the provider's vocabulary and where it lives is rio::agent::settings' business —
+# so nothing below asserts on a key name the core could be said to know.
+
+test profiles-none-is-soft {a provider that declares none answers empty, not an error} -setup {
+	reset_opts
+} -body {
+	rio::agent::profiles echo
+} -result {profiles {} active {}}
+
+test profiles-verb-on-a-provider-without-them {but ACTING on them is a bad_request} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::profile_set anything echo} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*no profiles*" $e]
+} -result {bad_request 1}
+
+test profiles-unknown-provider {and an unknown provider is a different refusal} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::profile_set anything nosuch} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*unknown agent provider*" $e]
+} -result {bad_request 1}
+
+test profiles-add-and-list {a new profile appears, sorted, and does not switch to itself} -setup {
+	reset_opts
+} -body {
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_add Home "" fake
+	rio::agent::profiles fake
+} -result {profiles {Home Work} active {}}
+
+test profiles-switch-activates {switching says what was activated and the list agrees} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+} -body {
+	list [rio::agent::profile_set Work fake] [rio::agent::profile_name fake]
+} -result {Work Work}
+
+test profiles-switch-unknown {switching to one that is not there is refused} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::profile_set ghost fake} e o
+	lindex [dict get $o -errorcode] 1
+} -result bad_request
+
+test profiles-settings-are-per-profile {a choice made in one profile does not follow you} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_add Home "" fake
+} -body {
+	rio::agent::profile_set Work fake
+	rio::agent::option_set flavour pistachio fake
+	rio::agent::profile_set Home fake
+	set away [dict get [rio::agent::_option_find fake flavour] value]
+	rio::agent::profile_set Work fake
+	list $away [dict get [rio::agent::_option_find fake flavour] value]
+} -result {vanilla pistachio}
+
+# The leak this is really guarding: an omitted key must fall back to the SHIPPED
+# default, not keep the value the previous profile happened to have.
+test profiles-switch-resets-omitted-keys {a key the new profile omits goes back to its default} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_add Bare "" fake
+} -body {
+	rio::agent::profile_set Work fake
+	rio::agent::option_set heat hot fake
+	rio::agent::profile_set Bare fake
+	dict get [rio::agent::_option_find fake heat] value
+} -result mild
+
+test profiles-duplicate-copies-settings {Duplicate starts from the profile it names} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+} -body {
+	rio::agent::profile_set Work fake
+	rio::agent::option_set flavour pistachio fake
+	rio::agent::profile_add Copy Work fake
+	rio::agent::profile_set Copy fake
+	dict get [rio::agent::_option_find fake flavour] value
+} -result pistachio
+
+test profiles-add-existing {a name already in use is refused} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+} -body {
+	catch {rio::agent::profile_add Work "" fake} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*already exists*" $e]
+} -result {bad_request 1}
+
+test profiles-rename {renaming carries the settings and follows the active pointer} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+} -body {
+	rio::agent::profile_set Work fake
+	rio::agent::option_set flavour pistachio fake
+	rio::agent::profile_rename Work Office fake
+	list [rio::agent::profile_name fake] [dict get [rio::agent::profiles fake] profiles] \
+		[dict get [rio::agent::_option_find fake flavour] value]
+} -result {Office Office pistachio}
+
+test profiles-rename-onto-existing {onto a name already in use is refused} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_add Home "" fake
+} -body {
+	catch {rio::agent::profile_rename Work Home fake} e o
+	list [lindex [dict get $o -errorcode] 1] [llength [dict get [rio::agent::profiles fake] profiles]]
+} -result {bad_request 2}
+
+test profiles-remove-the-active-one-lands-somewhere {removing what is running activates another} -setup {
+	reset_opts
+	rio::agent::profile_add Home "" fake
+	rio::agent::profile_add Work "" fake
+} -body {
+	rio::agent::profile_set Work fake
+	rio::agent::profile_remove Work fake
+	list [rio::agent::profile_name fake] [dict get [rio::agent::profiles fake] profiles]
+} -result {Home Home}
+
+test profiles-remove-unknown {removing one that is not there is refused} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::profile_remove ghost fake} e o
+	lindex [dict get $o -errorcode] 1
+} -result bad_request
+
+# --- profile names -----------------------------------------------------------
+#
+# Wider than a provider name on purpose (D131): this one is a label the user types and
+# reads back in a menu. What stays refused is anything that could name a different FILE.
+
+test profiles-name-rule {what a profile may and may not be called} -body {
+	set out {}
+	foreach n [list "ChatGPT" "Qwen3.8 27B (local)" "a_b-c.d" \
+			"" "." ".." ".hidden" " lead" "trail " "a/b" "a\\b" "a*b" "a\nb"] {
+		lappend out [rio::agent::settings::_safe_profile $n]
+	}
+	set out
+} -result {1 1 1 0 0 0 0 0 0 0 0 0 0}
+
+test profiles-bad-name-refused {and creating one says so in words a user can act on} -setup {
+	reset_opts
+} -body {
+	catch {rio::agent::profile_add "a/b" "" fake} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*profile name*" $e]
+} -result {bad_request 1}
+
+# --- the storage primitives --------------------------------------------------
+
+test profiles-storage-layout {a profile is a file beside the provider's flat one} -setup {
+	reset_opts
+} -body {
+	set flat [rio::agent::settings::path fake]
+	set one  [rio::agent::settings::path fake Work]
+	list [file tail $flat] [file tail $one] \
+		[expr {[file dirname $one] eq [rio::agent::settings::profile_dir fake]}] \
+		[expr {[file dirname $flat] eq [file dirname [file dirname $one]]}]
+} -result {fake.conf Work.conf 1 1}
+
+# The compatibility that matters most: claude and echo call get/store with no profile
+# and must keep writing exactly the file they always did.
+test profiles-flat-file-untouched {a provider with no profile still uses the flat file} -setup {
+	reset_opts
+} -body {
+	rio::agent::settings::store fake colour blue
+	list [rio::agent::settings::get fake colour] \
+		[file isfile [rio::agent::settings::path fake]] \
+		[file isdirectory [rio::agent::settings::profile_dir fake]]
+} -result {blue 1 0}
+
+test profiles-storage-unsafe-name {an unsafe profile name resolves to no path at all} -setup {
+	reset_opts
+} -body {
+	list [rio::agent::settings::path fake "../escape"] \
+		[rio::agent::settings::profile_exists fake "../escape"]
+} -result {{} 0}
+
+test profiles-storage-ignores-strays {a non-.conf file in the profile dir is not a profile} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+} -body {
+	writefile [file join [rio::agent::settings::profile_dir fake] notes.txt] hello
+	rio::agent::settings::profiles fake
+} -result Work
+
+# --- the ops -----------------------------------------------------------------
+
+test op-profiles-list {agent.profiles.list marks the active one} -setup {
+	reset_opts
+	rio::agent::profile_add Home "" fake
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_set Work fake
+} -body {
+	set r [dict get [rio::ops::agent_profiles_list {provider fake}] result]
+	list [dict get $r provider] [dict get $r active] \
+		[dict get [lindex [dict get $r profiles] 0] name] \
+		[dict get [lindex [dict get $r profiles] 0] active] \
+		[dict get [lindex [dict get $r profiles] 1] active]
+} -result {fake Work Home 0 1}
+
+test op-profiles-list-unknown-provider {and an unknown provider is a bad_request, not an empty list} -setup {
+	reset_opts
+} -body {
+	catch {rio::ops::agent_profiles_list {provider nosuch}} e o
+	lindex [dict get $o -errorcode] 1
+} -result bad_request
+
+test op-profile-set-announces {switching announces agent.options so every frontend repaints} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	set ::events {}
+} -body {
+	set r [dict get [rio::ops::agent_profile_set {name Work provider fake} collect] result]
+	list [dict get $r name] [llength $::events] \
+		[dict get [lindex $::events 0] event] \
+		[dict get [lindex $::events 0] params provider]
+} -result {Work 1 agent.options fake}
+
+test op-profile-add-then-remove {add, duplicate and remove all report and announce} -setup {
+	reset_opts
+	set ::events {}
+} -body {
+	rio::ops::agent_profile_add {name Work provider fake} collect
+	rio::ops::agent_profile_add {name Copy from Work provider fake} collect
+	rio::ops::agent_profile_set {name Copy provider fake} collect
+	set r [dict get [rio::ops::agent_profile_remove {name Copy provider fake} collect] result]
+	list [dict get $r name] [dict get $r active] [llength $::events]
+} -result {Copy Work 4}
+
+test op-profile-rename {rename requires both names} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	set ::events {}
+} -body {
+	set r [dict get [rio::ops::agent_profile_rename {name Work to Office provider fake} collect] result]
+	catch {rio::ops::agent_profile_rename {name Office provider fake} collect} e
+	list [dict get $r name] [string match "*requires to*" $e]
+} -result {Office 1}
+
+test op-profile-defaults-to-the-active-provider {the ops target the live provider when none is named} -setup {
+	reset_opts
+	rio::agent::use_provider fake
+	rio::agent::profile_add Work "" fake
+} -body {
+	rio::ops::agent_profile_set {name Work} collect
+	dict get [dict get [rio::ops::agent_profiles_list {}] result] active
+} -result Work
+
+# --- an option that names a file (D131) --------------------------------------
+
+test option-file-flag {the flag is off unless declared, and crosses as declared} -setup {
+	reset_opts
+} -body {
+	set os [rio::agent::options fake]
+	list [dict get [lindex $os 0] file] [dict get [lindex $os 2] file]
+} -result {0 1}
+
+test op-option-file-creates {agent.option.file resolves AND creates, and says which} -setup {
+	reset_opts
+} -body {
+	set r [dict get [rio::ops::agent_option_file {name recipe provider fake}] result]
+	set again [dict get [rio::ops::agent_option_file {name recipe provider fake}] result]
+	list [file isfile [dict get $r path]] [dict get $r created] [dict get $again created]
+} -result {1 1 0}
+
+test op-option-file-not-a-file-option {an option that names no file is refused} -setup {
+	reset_opts
+} -body {
+	catch {rio::ops::agent_option_file {name flavour provider fake}} e o
+	list [lindex [dict get $o -errorcode] 1] [string match "*names no file*" $e]
+} -result {bad_request 1}
+
+test op-option-file-unknown-option {and an option that does not exist is the usual refusal} -setup {
+	reset_opts
+} -body {
+	catch {rio::ops::agent_option_file {name nosuch provider fake}} e o
+	lindex [dict get $o -errorcode] 1
+} -result bad_request
+
+# --- the wire (the D110 lesson, twice over) ----------------------------------
+
+test op-profiles-list-wire {what agent.profiles.list returns is exactly what crosses} -setup {
+	reset_opts
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_set Work fake
+} -body {
+	set r [rio::ops::agent_profiles_list {provider fake}]
+	set j [json::json2dict [rio::wire::response \
+		[dict merge {id 1 ok true op agent.profiles.list} $r]]]
+	list [expr {[lsort [dict keys [dict get $r result]]] eq \
+			[lsort [dict keys [dict get $j result]]]}] \
+		[dict get $j result active] \
+		[dict get [lindex [dict get $j result profiles] 0] name]
+} -result {1 Work Work}
+
+test op-status-carries-the-profile {agent.status says which profile is running} -setup {
+	reset_opts
+	rio::agent::use_provider fake
+	rio::agent::profile_add Work "" fake
+	rio::agent::profile_set Work fake
+} -body {
+	set r [dict get [rio::ops::agent_status {}] result]
+	list [dict get $r profile] [dict get $r provider]
+} -result {Work fake}
+
+test op-status-profile-empty-for-a-provider-without-them {and "" for one that keeps none} -setup {
+	reset_opts
+} -body {
+	dict get [dict get [rio::ops::agent_status {}] result] profile
+} -result {}
 
 file delete -force $::optdir
 cleanupTests
