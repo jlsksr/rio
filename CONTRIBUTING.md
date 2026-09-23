@@ -164,7 +164,7 @@ config dir — they can be **shared**. rio's distribution model is deliberately
 the apt-sources one: there is **no central index, no account, no platform**. A
 repository is nothing but a **plain `http://`-reachable directory** with a
 couple of text files in it; every rio user who adds your URL under
-*Extensions ▸ Extensions… ▸ Repositories…* can browse and install what you put
+*Extensions ▸ Browse… ▸ Repositories…* can browse and install what you put
 there. Copying files into a webdir is the whole publishing story — and it will
 still work in thirty years, the way OpenBSD's plain-http mirrors do.
 
@@ -440,7 +440,7 @@ Two guarantees make a repository you publish today durable:
 
 ### Testing your repository
 
-Add your own URL in *Extensions ▸ Extensions… ▸ Repositories…* and watch the scan:
+Add your own URL in *Extensions ▸ Browse… ▸ Repositories…* and watch the scan:
 everything you published should list, and installing your own extension is the
 honest end-to-end test. Without rio at hand, two curl one-liners tell you most
 of it:

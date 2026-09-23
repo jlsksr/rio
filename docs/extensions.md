@@ -3,7 +3,7 @@
 Adding to rio: syntax highlighters, editing modes, themes, and agent providers —
 from repositories you choose.
 
-Everything to do with them is in one menu. ***Extensions ▸ Extensions…*** opens the
+Everything to do with them is in one menu. ***Extensions ▸ Browse…*** opens the
 window where you browse, install, update and remove; below it the same menu lists one
 entry per installed extension that has anything to configure, named after the
 extension itself — so an installed agent provider is ***Extensions ▸ `<provider>`…***.
@@ -16,7 +16,7 @@ screen.
 
 **Most of this topic is still to be written.** It will cover: what a repository is
 (a plain directory served over `http://` or `https://` — no marketplace, no central
-index); adding and removing repository URLs under *Extensions ▸ Extensions… ▸
+index); adding and removing repository URLs under *Extensions ▸ Browse… ▸
 Repositories…*; browsing and installing; the four kinds of extension and where each
 installs to; provenance — which repository and version an installed extension came
 from, and choosing between same-named extensions from different authors; keeping
@@ -58,7 +58,7 @@ Signing is optional, and what a publisher does to sign is in
 
 ### What you see
 
-Every version line in the detail pane of *Extensions ▸ Extensions…* ends in one of
+Every version line in the detail pane of *Extensions ▸ Browse…* ends in one of
 three words:
 
 | Mark | Means |
@@ -68,12 +68,15 @@ three words:
 | `unverified` | it is signed, but this core couldn't check it (see [below](#repositories-rio-cant-check)) |
 
 That word is on the version line because that is where you choose between two
-repositories offering the same extension. The install confirmation says the same
-thing at more length: on a signed repository it names the **fingerprint** that
-vouched for the files; on an unsigned one it says plainly that nothing does. The
-list *Update All* shows before it starts marks every row the same way, since that
-one confirmation stands in for all of them. The provenance ledger `extensions.json`
-records the fingerprint as `signed_by`.
+repositories offering the same extension. The line names its repository by its
+**whole URL** for the same reason: two repositories can share a domain and differ
+only in scheme or path, and the host on its own would hide what you are choosing
+between. The install confirmation says the same thing at more length: on a signed
+repository it names the **fingerprint** that vouched for the files; on an unsigned
+one it says plainly that nothing does. The list *Update All* shows before it
+starts marks every row the same way, since that one confirmation stands in for all
+of them. The provenance ledger `extensions.json` records the fingerprint as
+`signed_by`.
 
 ### Confirming a repository's key
 

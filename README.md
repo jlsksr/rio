@@ -114,7 +114,7 @@ in [docs/](docs/index.md).
   the active buffer against any file from the View menu.
 - **Agent chat** — a right-hand chat column wired to pluggable providers: a
   built-in offline **echo** provider ships in the box, and real agents install from a
-  repository as agent-provider extensions (*Extensions ▸ Extensions…*) — **Claude** over
+  repository as agent-provider extensions (*Extensions ▸ Browse…*) — **Claude** over
   the official Anthropic API, and an **OpenAI-compatible** one for hosted ChatGPT or for
   **a server of your own**: Ollama, llama.cpp, vLLM, LM Studio. Each provider
   configures itself in a window of its own, listed by name in the **Extensions** menu —
@@ -189,7 +189,7 @@ in [docs/](docs/index.md).
   apt-sources style, no marketplace and no central index (see below). rio ships with
   the project's own repo (`http://rio.skylm.org/extensions`) pre-filled so there's something
   to browse on first run — remove it in *Repositories…* if you'd rather not. Browse,
-  install, and remove in *Extensions ▸ Extensions…*; every installed extension shows
+  install, and remove in *Extensions ▸ Browse…*; every installed extension shows
   which repository it came from, same-name extensions from different authors
   coexist and you pick, and it all works over a remote core too. A repository can
   be **signed**, and rio checks the signature and every file against it.
@@ -245,7 +245,7 @@ the way Debian distributes packages and OpenBSD serves its mirrors — you keep
 a short list of **repositories**, and a repository is nothing more than a
 **plain http-served directory** anyone can host with a couple of text files in
 it — `https://` if you like, `http://` just as well: like a Debian source, https is
-an option, not an obligation. Add a URL under *Extensions ▸ Extensions… ▸ Repositories…* and everything it
+an option, not an obligation. Add a URL under *Extensions ▸ Browse… ▸ Repositories…* and everything it
 carries is yours to browse and install; publishing means copying files into
 your webdir, and it will still work when today's hosting fashions are gone.
 
@@ -276,7 +276,7 @@ start-up. **Nothing is ever installed on its own**, and an update comes only
 from the repository that extension was installed from: a same-named extension
 elsewhere is a different thing you may switch to, not a newer version of yours.
 
-*Installing:* *Extensions ▸ Extensions…*. *Publishing your own repository:* the
+*Installing:* *Extensions ▸ Browse…*. *Publishing your own repository:* the
 complete spec — three small text files — is in
 [CONTRIBUTING.md](CONTRIBUTING.md#extension-repositories).
 

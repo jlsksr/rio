@@ -24,7 +24,7 @@ Out of the box rio ships one provider: **echo**, an offline stub that needs no k
 and no network. It exists so the chat pane works and can be tested — it is not a
 model.
 
-Real providers install as **extensions** from ***Extensions ▸ Extensions…***:
+Real providers install as **extensions** from ***Extensions ▸ Browse…***:
 
 - **Claude**, over the official Anthropic API.
 - **OpenAI-compatible**, which drives hosted ChatGPT *or* any server that speaks the

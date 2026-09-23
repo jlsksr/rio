@@ -123,7 +123,7 @@ the installer only adds a small launcher that points back into it. Keep the chec
 where it is (a `git pull` updates rio in place); if you do move it, re-run the script.
 
 Out of the box the only agent provider is the offline **echo** stub. To use a real
-agent, **install a provider** from *Extensions ▸ Extensions…* (e.g. **Claude** over the
+agent, **install a provider** from *Extensions ▸ Browse…* (e.g. **Claude** over the
 Anthropic API, or the **OpenAI-compatible** one for hosted ChatGPT or a server of your
 own), restart rio, then pick it under *Settings ▸ Agent Provider* and configure it in
 its own window, listed by name in the **Extensions** menu — a hosted provider needs a
@@ -299,7 +299,7 @@ Consequences:
   runs* is just *where you point the GUI*.
 - **Provider** is chosen at runtime (*Settings ▸ Agent Provider*). The only built-in is
   `echo`, an offline stub needing no key or network; a real provider (Claude, OpenAI-compatible, …)
-  is **installed** from *Extensions ▸ Extensions…* and needs `tcltls`, plus a stored key
+  is **installed** from *Extensions ▸ Browse…* and needs `tcltls`, plus a stored key
   for a hosted service (a server of your own usually needs none).
 
 The provider, key, mode and model choices are all core ops (`agent.provider.set`,

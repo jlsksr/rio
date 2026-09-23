@@ -81,8 +81,8 @@ separate "make this the default" step and no "save settings" button.
 
 The core ships the **Windows** editing mode only. **emacs** and **vi** install as
 [extensions](extensions.md): add a repository that carries them under
-*Extensions ▸ Extensions… ▸ Repositories…* and install from *Extensions ▸
-Extensions…*, or drop the module by hand into `~/.config/rio/modes/` — a `mode`
+*Extensions ▸ Browse… ▸ Repositories…* and install from *Extensions ▸
+Browse…*, or drop the module by hand into `~/.config/rio/modes/` — a `mode`
 extension installs there, so a hand-dropped file is exactly the same thing.
 
 Once installed, the mode appears in *Settings ▸ Editing Mode*. If a saved
@@ -91,7 +91,7 @@ rather than failing.
 
 ## Your repository list, by hand
 
-The URLs you add under *Extensions ▸ Extensions… ▸ Repositories…* are just an
+The URLs you add under *Extensions ▸ Browse… ▸ Repositories…* are just an
 apt-style sources file you can edit yourself: `sources.list`, **one base URL per
 line**, `http://` or `https://`, with `#` comments and blank lines allowed. Like a
 Debian source, https is an option, not an obligation: plain http is just as
@@ -121,7 +121,7 @@ everything you installed from it.
 
 Extension versions follow [semver](https://semver.org/), so rio can tell you when
 a repository offers something newer than what you have. It compares on every scan
-— opening *Extensions ▸ Extensions…* rescans, as does its `⟳` button — and shows the
+— opening *Extensions ▸ Browse…* rescans, as does its `⟳` button — and shows the
 answer on the row: `[1.1.0 → 1.2.0]`. **Update** replaces one extension;
 **Update All** takes every pending update after a single confirmation listing them.
 Nothing is ever installed on its own.
