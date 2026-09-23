@@ -1055,5 +1055,52 @@ test openai-dangling-pointer-falls-back {a pointer at a profile that is gone lan
 	rio::agent::profile_name openai
 } -cleanup { reset_openai_opts } -result ChatGPT
 
+# --- what the manual promises about this file (AGENTS.md §7's register) ------
+#
+# docs/agent.md states the extra-request file's rules — which fields are refused, how a
+# name is picked, what a fresh one contains. Those are the EXTENSION's, and the GUI's own
+# docs guard cannot reach them: it routes agent.option.file back to a provider, and no
+# openai extension is installed in its sandbox. So the guard lives here, where the face
+# is. Derived, never quoted: each fact is produced by running the code and then looked for
+# in the page, so rewording the page is free and changing the BEHAVIOUR is not.
+set ::manual [file join [file dirname [info script]] .. .. .. docs agent.md]
+
+test openai-manual-names-every-refused-field {the manual lists the fields rio sends itself} -setup {
+	reset_openai_opts
+} -body {
+	if {![file isfile $::manual]} { return SKIP }
+	set fh [open $::manual r] ; fconfigure $fh -encoding utf-8
+	set page [::read $fh] ; close $fh
+	# Ask the face which fields it refuses, by offering each and keeping the ones it
+	# turns down — so the list is its answer, not a copy of its source.
+	#
+	# Only the fields whose NAME is fixed. The other two the face refuses are the
+	# token-cap field (itself a setting: max_tokens or max_completion_tokens) and the
+	# effort field (spelled in one config-as-data fragment, so an upstream rename is a
+	# one-line edit) — the manual names those by their role, deliberately, because a
+	# literal there would be wrong for half the users and stale after a rename.
+	set missing {}
+	foreach k {model messages stream tools} {
+		openai_extra "{\"$k\":1}"
+		if {[catch {rio::openai::api::_extra_text}]} {
+			if {![string match "*$k*" $page]} { lappend missing $k }
+		}
+	}
+	set missing
+} -cleanup { reset_openai_opts } -result {}
+
+test openai-manual-names-the-fresh-file {…and what a newly created one contains} -setup {
+	reset_openai_opts
+} -body {
+	if {![file isfile $::manual]} { return SKIP }
+	set fh [open $::manual r] ; fconfigure $fh -encoding utf-8
+	set page [::read $fh] ; close $fh
+	set p [dict get [rio::openai::api::option_file extra_json_file] path]
+	set fh [open $p r] ; set fresh [string trim [::read $fh]] ; close $fh
+	# The page says a new one starts as `{}` and that the name is picked per profile.
+	list [string match "*`$fresh`*" $page] \
+		[string match "*[file extension $p]*" $page]
+} -cleanup { reset_openai_opts } -result {1 1}
+
 file delete -force $rio::secret::override_dir $::optdir
 cleanupTests

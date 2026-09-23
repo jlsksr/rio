@@ -18,6 +18,18 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Added
 
+- **Named profiles for an agent provider** — keep one configuration for hosted ChatGPT
+  and another for the server on your own box, and switch between them in a click. The
+  **Profile** row at the top of a provider's settings window switches; **Manage…** makes,
+  copies, renames and deletes; the agent strip's menu switches too. Each profile keeps its
+  own model, URL, caps **and its own API key**, so moving to a local server never sends a
+  hosted vendor's key to your own machine. A first run starts with three — ChatGPT and two
+  local examples — written once, so deleting or editing one sticks. An existing setup is
+  carried forward as a profile of its own, not replaced. The **extra request JSON** is now
+  a file you edit in rio (**Edit…**), read fresh every turn, so it can be pretty-printed
+  instead of squeezed onto one line; a file that no longer parses stops the turn and says
+  which field, rather than dropping settings you wrote. Profiles are a core capability, so
+  any provider can offer them. — *D131 · `de313d6` · 2026-09-23*
 - **Run a model of your own** — the OpenAI-compatible provider is configured from the
   GUI: ***Preferences ▸ Agent*** gains a settings window per provider, and for this one it
   takes the server's URL (Ollama, llama.cpp, llama-swap, vLLM, LM Studio), lists what that

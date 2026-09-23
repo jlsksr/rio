@@ -8050,6 +8050,140 @@ precisely the work check 6a exists to force: it failed until they did, and so di
 incidentally by those paths — the in-category button's own stutter had never been noticed
 because the string happened to appear in the file for another reason.
 
+---
+
+### D131 — a provider keeps several named configurations; and an option may name a file
+
+**The gap.** D128 made every one of the OpenAI-compatible face's volatile details a declared
+option — endpoint, model, token cap, extra request JSON — so they could be set from the GUI
+instead of by editing Tcl on the core's disk. But there was still exactly **one** of each. A
+user who works with both hosted ChatGPT and a local llama-swap had to retype five fields to
+move between them, and nothing remembered the set they left. Three consequences, each of
+which this fixes:
+
+- **Switching was manual and lossy.** `base_url`, `model`, `max_tokens`, `token_param` and
+  `extra_json` all move together, and nothing kept the previous set.
+- **The API key followed the provider, not the server.** `secret_name` was fixed, so
+  switching to `http://127.0.0.1:1080` still sent `Authorization: Bearer sk-proj-…` to
+  localhost.
+- **`extra_json` had to be one line.** A settings value is one line (the format has no
+  continuation), so a pretty-printed paste was flattened — and the extras actually worth
+  setting, llama.cpp's and vLLM's `chat_template_kwargs`, are a nested object.
+
+**The mechanism is generic and lives in the CORE, and that was forced rather than chosen.**
+jka asked for a GUI window to manage presets. Profile files live on the core's host (D30),
+and rio's GUI must never learn provider vocabulary (D106/D128: nothing in `rio-gui.tcl`
+names a model or an endpoint) — so a *manager UI* cannot be built for one extension without
+either putting that extension's words in the GUI or putting the mechanism in the core. The
+alternative was real and was weighed: `profile` as one more declared `choice` option, which
+needs **no core change at all** and gives switching for free (the strip menu and the settings
+window already render it, and `free 1`'s "Other…" would even create one) — but rename and
+delete then have no door but a text editor, which is not a manager. So: the core grows a
+capability, and Claude and any third-party provider get profiles later for nothing.
+
+The core still learns nothing about what a profile *contains*. It owns **location and
+format**, the provider owns **the keys** — the same split `rio::secret` (D21) already has
+with the same providers' API keys, and `rio::agent::settings` (D106) with their choices.
+
+```
+rio::agent::settings   profile-scoped paths, and the file work behind list / add /
+  (core, generic)      duplicate / rename / remove. Opt-in and ADDITIVE: a provider
+                       that passes no profile keeps writing the flat <provider>.conf
+                       it always did, which is why claude's suite is untouched.
+rio::agent  -profiles  {list switch add remove rename}, routed exactly like -options;
+  (core, generic)      providers_info says whether a provider declares any.
+ops                    agent.profiles.list + agent.profile.{set,add,remove,rename},
+                       each announcing agent.options so every attached frontend
+                       repaints from ONE event (D3/D30).
+rio-gui                a Profile row, a Manage… dialog, and an Edit… button beside
+  (renders, names none) any option flagged `file`.
+```
+
+**Four decisions, settled with jka before any of it was built.**
+
+1. **Generic in the core** (above), at the price of `provider-api 5`.
+2. **A Profile row plus a Manage… dialog**, over all-buttons-inline and over a separate
+   profiles window. The row sits at the very **top of the settings window, above the
+   credentials and every declared option** — it decides what all of them show, so a reader
+   who takes it in last has read the rest without knowing which configuration they were
+   looking at. Switching is one click; the four rarer verbs get a surface of their own
+   rather than five controls competing for one row's width.
+3. **The API key is per profile**, which needed **no new mechanism**: `secret_name` is an
+   ordinary setting and therefore per profile, and the key dialog already routed through it
+   (D65's per-provider key work, one level down). The shipped local examples name a store of
+   their own, which is simply empty — so no key is ever sent to your own box.
+4. **The extra request JSON becomes a file**, replacing the inline field rather than joining
+   it. One way to do it, and the file is the shape that value should always have had.
+
+**A profile name is deliberately wider than a provider name.** `_safe` is `[A-Za-z0-9_-]+`
+and stays that way — it guards provider names and settings keys, where an identifier is
+right. A profile name is a **label the user types and reads back in a menu**, so
+`Qwen3.8 27B (local)` has to be allowed; `_safe_profile` adds spaces, dots and parentheses
+and refuses only what could name a different FILE — a separator, `.`/`..`, a leading dot,
+and a leading or trailing space (invisible, so two profiles would look identically named).
+
+**`file` is a flag, not a `kind`.** The option's value names a file the user may edit. That
+is the same shape `refresh` already has — a flag on the descriptor, an op behind it, a button
+beside the field — and unlike a kind it *composes* with whichever kind the option already is.
+The core does **not** resolve the path: only the provider knows where its file belongs, so
+`agent.option.file` routes back to it, and it **creates** the file as well as resolving it,
+because a button called Edit… that opens nothing is worse than one that opens a blank. This
+is `agent.prompt.edit`'s shape (D70/D105) reached from the option side.
+
+**What the extension does with it.** A switch **resets to the shipped defaults and then reads
+the new profile over them** — without that, a key the new profile happens to omit would keep
+whatever the old one set, which is the one way profiles leak into each other. A refreshed
+model list is remembered **per profile**, because the list belongs to the *server* it came
+from. The extra-JSON file is read and checked **per turn**, which is the only place the answer
+is authoritative (the file goes on being editable), and a file that no longer parses, or that
+sets a field rio sends itself, **stops the turn and says which** — silently dropping request
+fields someone deliberately wrote is the worse failure (D26's classified errors). A Duplicate
+copies the source's extra file under the new profile's own name, because sharing one file
+would make editing "the copy" change the original. **The last profile cannot be deleted**:
+settings live *in* a profile, so there has to be one, and refusing here is what lets
+everything else assume exactly one is active.
+
+**A first run seeds three** — `ChatGPT` and two local examples from jka's own llama-swap
+setup (`coder-large` and `flash-next` on `127.0.0.1:1080`, their thinking configured through
+the extra-JSON file because llama.cpp refuses the top-level `reasoning_effort`). Seeded
+**once**, keyed on the profile directory not yet existing: the D39 `sources_seed_default`
+rule, so a deleted example stays deleted and an edited one is never overwritten by an
+upgrade. And a **pre-profiles install is not replaced by them**: whatever is in the flat file
+is a configuration somebody is *using*, so it becomes a profile named `Current settings` and
+becomes the **active** one, with its inline `extra_json` written out as the file it should
+have been. A pointer at a profile deleted by hand falls back to one that exists.
+
+**In the GUI, the strip names the profile in its hover text but not in its 340 px label.**
+The strip exists to answer *what am I talking to*, which the model already says, and a
+profile name can be long. Switching it is still one click away in that menu — a fast switch,
+which is what a menu is for (D85) — while *making* one is not, and stays in the window.
+
+**Rejected:** a new `kind` for the file flag (above); an openai-only `profile` choice option
+with no manager (above); one key per provider (it is the leak the feature would otherwise
+introduce); putting the profile in the strip's visible label; and letting `remove` empty the
+list.
+
+**Guards.** Core 828 → 863, openai 93 → 113, `agent_settings.tcl` 70 → 113 — and **claude
+unchanged at 55**, which is the proof the mechanism is generic rather than a second openai
+feature. The fakes are deliberately unfamiliar at both layers: the core's declares `flavour`
+/ `heat` / `recipe`, the GUI's a `region` and a `charts` file, so no check can pass by
+recognising a shipped provider's vocabulary. Sixteen injections, each failing by name —
+among them `wire::_option` dropping the `file` flag, the status encoder dropping `profile`,
+`_safe_profile` relaxed to a provider name's rule, a switch not resetting first, Duplicate
+sharing the source's file, `secret_name` not per profile, the seed re-running on every adopt,
+a broken extra file dropped instead of refused, migration ignoring the old config, Delete not
+asking, and New not switching to what it made. One injection **passed** and found a real gap:
+nothing asserted the Profile row is *absent* for a provider without profiles, which is now a
+check.
+
+**Honest limits.** Every check is headless. That a four-button manager and a Profile row sit
+well in the settings window is something only a person at a display can judge, and the three
+seeded profiles have not been driven against a live server since the change. Deliberately not
+built: a per-profile *project* binding (a profile that follows the folder you open), profiles
+for `claude` (the capability is there; nothing asked for it), and pointing the extra-JSON
+option at a file outside the provider's own directory — a bare name cannot point somewhere
+rio did not mean, and a symlink covers the rest.
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
@@ -8585,6 +8719,8 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | `::keymap_default` (D23) | `docs/keyboard.md`'s chord table | `docs.tcl` — both directions |
 | the `docs/*.md` on disk | `docs/index.md`'s contents | `docs.tcl` — no orphans, no dead entries |
 | the provider settings door + window | what `docs/agent.md` promises of it | `docs.tcl` — derives the door from a provider that declares options vs one that does not |
+| the Profile row + its manager (D131) | what `docs/agent.md` says they offer | `docs.tcl` 21 — derives the row from a provider that declares profiles vs one that does not, reads the five verbs off the live buttons, and takes the name rule from the core's own refusal |
+| the openai face's extra-JSON rules (D131) | what `docs/agent.md` promises of that file | `api-face.test` — the refused fields are the ones the face actually turns down, and a fresh file's contents are read back off disk. It lives in the EXTENSION's suite because `docs.tcl` cannot reach it: `agent.option.file` routes to a provider, and no openai extension is installed in that sandbox |
 | `rio::agent::_option_norm`'s keys | `rio::wire::_option`'s allow-list | `agent-options.test` — both directions, through the real op and encoder |
 | what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
