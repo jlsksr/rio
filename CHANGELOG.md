@@ -248,9 +248,18 @@ tagged yet; the heading takes a date when `v0.1.0` is (RELEASING.md, Gate 2).
 
 ### Changed
 
+- **The Extensions window says which repository it means** — a source is now named by
+  its whole URL wherever you are choosing between sources: the version lines in the
+  detail pane, the *Update All* confirmation and the start-up update notice. It used to
+  print only the host, so `http://host/rio` and `https://host/rio` — which rio keeps as
+  two sources in the list and one repository for updates — looked identical on the line
+  where you pick between them. Prose about a repository still names its host. The window's
+  status line is now a proper **status bar**, a strip along the bottom edge below the
+  buttons, instead of a label sharing the button row where what the window had just done
+  read as one more line of the pane above it. — *D39/D130 · `26b12ea` · 2026-09-23*
 - **Every extension configures itself, from a menu of its own** — there is a new
   top-level ***Extensions*** menu, between Settings and Help. It leads with
-  ***Extensions ▸ Extensions…*** (the installer, which leaves the Settings menu) and then
+  ***Extensions ▸ Browse…*** (the installer, which leaves the Settings menu) and then
   lists one entry per installed extension that has anything to set. A provider's **API
   key is now a row in that provider's own window**, beside its model and its endpoint,
   instead of a separate dialog — so everything belonging to one provider is in one place,

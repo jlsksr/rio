@@ -2627,6 +2627,41 @@ published from a working tree rather than copied into place, and it carries its 
 `SIGNING.md` for the publish procedure. It is a separate repository from the in-tree
 [extensions/](extensions/) sample (D41's built-in modes), which is unaffected.
 
+**Addendum (2026-09-23, from a screenshot) — two things the window was not saying.** jka,
+looking at his own Extensions window: *"I cannot distinguish two sources with the same domain
+name, as the protocol (http, https) is not printed"*, and the last line *"seems something for
+that window's statusbar — currently the string is visually mixed with the rest"*. Both were
+true, and both are about the window telling the truth about itself rather than about any
+mechanism underneath it.
+
+**The source is printed as its whole URL wherever the user is choosing between sources.**
+Every provenance line ran through `host_of`, so `http://host/rio` and `https://host/rio` —
+which D109 deliberately keeps as two sources in the list and one repository for updates
+(`source_same`) — rendered as the same eight characters. The host was never the fact; it was a
+convenient abbreviation of it, and it abbreviated away the only difference. The rule is now
+stated at `host_of` itself so the next caller picks the right one: **the host for PROSE about a
+repository** (*"rio.skylm.org signs its extensions"*, *"getting the certificate of…"*) and for
+the columnar list row, where one source is the only one on the line; **the whole URL wherever
+the user CHOOSES or CONSENTS between sources** — the variant lines, the "no longer listed
+there" line, the Update All consent, and the start-up update notice. That last pair matters as
+much as the detail pane: D107's whole consent design turns on same-repository versus a
+different one, and naming both by their host hid exactly the distinction the dialog is asking
+about.
+
+**The status line became a status BAR.** It was already at the bottom, but as a label packed
+into the button row on the window's own background — so what the window last *did* ("installed
+night 1.0.0") read as one more line of the detail pane above it, only quieter. It now takes the
+Win2000/VS6 form: its own sunken strip across the whole bottom edge, below the buttons, always
+present (empty is a state; a bar that comes and goes jumps the layout). Nothing about what it
+*says* changed — the separation is the whole fix, which is D68's rule (static text and controls
+must not share a look) reaching one category further, to a *report*, which is neither.
+
+Guards: `repos.tcl` pins both literal variant lines and, derived from each variant's own
+`source`, that every line carries its URL — so a regression to the host fails whatever the
+fixture URLs are; and the bar is checked for its relief and for being gridded in a row *below*
+the button frame. Both proven by injection (the line back to `host_of`; the bar packed back
+into `.foot`), each failing by name.
+
 ### D40 — Column / block editing: a vertical multi-line cursor, GUI-only
 
 Notepad++'s **column mode**: a rectangular (vertical) selection whose zero-width
@@ -8003,6 +8038,17 @@ removed; Extensions… left in Settings; the credentials row rendered for an unk
 **Not done:** a settings door for any kind but `provider` — the registry is there and empty,
 because no mode, theme or syntax extension has anything to configure yet, and inventing the
 need would be the speculative half of D17/D18 this deliberately does not touch.
+
+*(Amendment, 2026-09-23 — the entry is **Browse…**.)* *Extensions ▸ Extensions…* stutters: the
+menu, the entry and the window it opens all carry the same noun and only one of them is naming
+anything. The entry names the **act** instead. The window keeps its own name, and so does the
+Preferences button beside Close — it is not under an Extensions heading, so there it names a
+destination rather than repeating one. The button *inside* Preferences ▸ Extensions had the
+same stutter and followed. Sixteen quoted paths across six documents moved with it, which is
+precisely the work check 6a exists to force: it failed until they did, and so did the
+"every Preferences button is named in the docs" check, which had been satisfied only
+incidentally by those paths — the in-category button's own stutter had never been noticed
+because the string happened to appear in the file for another reason.
 
 ## 4. "Simple debug/terminal" — scope decision
 
