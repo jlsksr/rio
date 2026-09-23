@@ -89,7 +89,7 @@ test fs-read-ed-is-not-a-surrogate {0xED below the surrogate range is still UTF-
 	set p [tmpbytes "a\xED\x9F\xBFb\n"]
 	set d [rio::fs::read $p]
 	list [dict get $d encoding] [dict get $d text]
-} -result "utf-8 {a퟿b\n}"
+} -result "utf-8 {a\uD7FFb\n}"
 
 test fs-read-truncated-utf8 {a truncated multibyte sequence is not UTF-8} -body {
 	# \xE6\x97 is the first two bytes of a three-byte character.

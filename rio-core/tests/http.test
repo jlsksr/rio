@@ -141,7 +141,7 @@ test http-decode-keeps-crlf {line endings are NOT translated (D118): a signature
 test http-sha256-of-bytes {the hash is over BYTES, and is the one sha256sum prints
 		for the same input — checked against `printf abc | sha256sum`} -body {
 	list [rio::http::_sha256 "abc"] \
-		[rio::http::_sha256 [encoding convertto utf-8 "café"]]
+		[rio::http::_sha256 [encoding convertto utf-8 "caf\u00E9"]]
 } -result {ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad 850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e}
 
 test http-sha256-is-not-the-hash-of-the-decoded-text {the distinction the whole
