@@ -1,6 +1,14 @@
 # Tests for XML highlighting (AGENTS.md D32). XML reuses the (X)HTML scanner
 # (rio::syntax::html::scan); this checks the XML registration resolves and that the shared
 # scanner colours the XML constructs. Pure Tcl — Tk-free, runs under a bare tclsh.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 

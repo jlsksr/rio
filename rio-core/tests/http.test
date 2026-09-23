@@ -5,6 +5,14 @@
 # cap, timeouts) is exercised against a real webdir at release verification
 # (D39); https over a real loopback connection is tls.test's; the GUI suite
 # stubs repo.fetch entirely.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 
@@ -75,12 +83,11 @@ test http-scheme {the scheme, case-folded; "" for anything else} -body {
 
 # The three bytes of an em-dash, as a byte string.
 #
-# Every non-ASCII value below is a \u escape, not a literal, and must stay that way:
-# tcltest runs each .test in a CHILD tclsh, which decodes the file with the SYSTEM
-# encoding — cp1252 on Windows — before any -load script can run. A literal here
-# would arrive mojibake on Windows and be compared against a correctly-decoded
-# result, failing for a reason that has nothing to do with the decoder. This is the
-# only .test whose non-ASCII is data rather than commentary. See WINDOWS.md §8.
+# The non-ASCII values below are \u escapes. They no longer HAVE to be — the D54 guard at
+# the top of this file re-reads it as UTF-8, so a literal is decoded correctly on a cp1252
+# host too — but an escape names the codepoint outright, which earns its keep where the
+# expected value is a hash of exactly those bytes and the mangling would otherwise be
+# invisible in the source. See AGENTS.md D54 and WINDOWS.md §8.
 set mangled "a\u00E2\u0080\u0094b"
 
 test http-decode-undeclared-charset-is-utf8 {no charset means UTF-8, not latin-1} -body {

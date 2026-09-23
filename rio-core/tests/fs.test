@@ -1,5 +1,13 @@
 # Tests for file I/O — encoding / BOM / line-ending detection and preservation
 # (rio::fs, AGENTS.md D22), plus the fs.* ops driven through the in-process core.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
 package require tcltest
 namespace import ::tcltest::*
 
@@ -46,10 +54,11 @@ test fs-read-multibyte {valid multibyte UTF-8 is decoded, not byte-fallback} -bo
 	set p [tmpbytes "caf\xC3\xA9 \xE6\x97\xA5\n"]
 	set d [rio::fs::read $p]
 	list [dict get $d encoding] [dict get $d text]
-# Expected is written as \u escapes for the same reason the input above is written as
-# \x bytes: Tcl 8.6 decodes this .test file with the SYSTEM encoding, so a literal
-# "e-acute + CJK" here is itself mojibake on a cp1252 host (Windows) and would fail
-# against a correctly-decoded result (\u00e9 = e-acute, \u65e5 = the CJK char).
+# The input above must be \x escapes \u2014 it is a BYTE string, not text, which is the whole
+# point of the test. The expected value need not be: the D54 guard at the top re-reads
+# this file as UTF-8, so a literal would decode correctly on a cp1252 host too. It is
+# written as \u anyway, to say which codepoints the bytes above are meant to become
+# (\u00e9 = e-acute, \u65e5 = the CJK char).
 } -result "utf-8 {caf\u00e9 \u65e5\n}"
 
 test fs-read-bom {a UTF-8 BOM is detected, stripped from text, and recorded} -body {
