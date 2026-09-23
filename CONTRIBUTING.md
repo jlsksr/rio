@@ -300,15 +300,20 @@ understanding before you publish one:
   manifest and your `.tcl` payloads (no subdirectories, v1); the core sources the
   file named by `entry`, which should register the provider.
 - **Write against `provider-api`.** Declare the contract version you built for
-  (`provider-api = 4` today). The core loads the API surface — `rio::agent::register_provider`
-  (with `-label`, `-signup`, a `-key` capability, and since **2** an `-options`
+  (`provider-api = 5` today). The core loads the API surface — `rio::agent::register_provider`
+  (with `-label`, `-signup`, a `-key` capability, since **2** an `-options`
   capability whose descriptors since **4** carry `kind` / `group` / `quick`, so a
-  setting can be a field rather than a menu), the provider proc contract
-  `{conversation tools system post}` with its `delta` / `tool` / `done` / `error`
-  callbacks (and since **4** `thinking`, for reasoning that is shown but never recorded
-  in the conversation), and the runtime helpers `rio::llm::http::stream` (and `::get`),
-  `rio::llm::jstr` / `rio::llm::obj_json` (and since **3** `rio::llm::jascii`),
-  `rio::secret::*` and `rio::agent::settings::*` — *before* your code,
+  setting can be a field rather than a menu, and since **5** a `-profiles` capability
+  `{list switch add remove rename}`, so you can keep several named configurations with
+  one active — plus an option descriptor's `file` flag, whose value names a file your
+  `file` capability resolves and creates for the editor to open), the provider proc
+  contract `{conversation tools system post}` with its `delta` / `tool` / `done` /
+  `error` callbacks (and since **4** `thinking`, for reasoning that is shown but never
+  recorded in the conversation), and the runtime helpers `rio::llm::http::stream` (and
+  `::get`), `rio::llm::jstr` / `rio::llm::obj_json` (and since **3** `rio::llm::jascii`),
+  `rio::secret::*` and `rio::agent::settings::*` (whose `path` / `get` / `store` take an
+  optional profile since **5**, with `profiles` / `profile_dir` / `profile_add` /
+  `profile_rename` / `profile_remove` beside them) — *before* your code,
   so you ship no copy of it. A rio that implements an older `provider-api` than you
   declare lists your provider greyed ("needs a newer rio") and won't install it;
   declaring `1` still works on a newer core, since the surface only grows. That
