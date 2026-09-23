@@ -8156,7 +8156,9 @@ have been. A pointer at a profile deleted by hand falls back to one that exists.
 **In the GUI, the strip names the profile in its hover text but not in its 340 px label.**
 The strip exists to answer *what am I talking to*, which the model already says, and a
 profile name can be long. Switching it is still one click away in that menu — a fast switch,
-which is what a menu is for (D85) — while *making* one is not, and stays in the window.
+which is what a menu is for (D85) — while *making* one is not, and stays in the window. The
+section appears only past **one** profile, on the same merit rule as the row and the door: a
+menu offering the single thing already in use is a control that cannot do anything.
 
 **Rejected:** a new `kind` for the file flag (above); an openai-only `profile` choice option
 with no manager (above); one key per provider (it is the leak the feature would otherwise

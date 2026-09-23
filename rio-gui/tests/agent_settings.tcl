@@ -644,5 +644,24 @@ update idletasks
 ok "strip: no section for a provider without profiles" \
 	[expr {"Profile" in [strip_labels]}] 0
 
+# ...and neither does one with exactly ONE: a menu offering the single thing already in
+# use is a control that cannot do anything. The row and the door still appear — those
+# say which configuration you are looking at, which is worth saying with one.
+rio_call agent.provider.set [dict create name atlas]
+set ::agent_provider atlas
+foreach p [dict get [provider_profiles atlas] profiles] {
+	if {$p ne [rio::agent::profile_name atlas]} { rio::agent::profile_remove $p atlas }
+}
+agent_options_refresh
+update idletasks
+ok "strip: one profile is nothing to switch between" \
+	[expr {"Profile" in [strip_labels]}] 0
+ok "strip: but there really is one" \
+	[llength [dict get [provider_profiles atlas] profiles]] 1
+provider_settings_dialog atlas
+update idletasks
+ok "…and the window still says which"         [winfo exists [profrow]] 1
+destroy .provset
+
 puts [expr {$::fails ? "$::fails CHECK(S) FAILED" : "ALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]
