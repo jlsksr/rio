@@ -194,7 +194,9 @@ set producers {
 	{rio::agent::settings::path claude}          config
 	{rio::agent::settings::path claude Work}     config
 	{rio::tls::settings_path}                    config
+	{rio::autosave::settings_path}               config
 	{ledger_path}                                data
+	{rio::autosave::root}                        data
 	{rio::secret::_path claude}                  data
 	{rio::workspace::_dir}                       data
 	{rio::provider::_dir}                        data

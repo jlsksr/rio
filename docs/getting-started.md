@@ -113,6 +113,12 @@ endings a file arrived with and writes them back unchanged, so opening a CRLF fi
 on Linux and saving it does not turn it into an LF file, and a UTF-8 file stays
 UTF-8. The status bar shows both, so you can always see what will be written.
 
+Nor does it save for you. Nothing reaches your file until you ask — but rio does
+keep a **separate copy** of what you have typed, every 30 seconds, and offers it
+back the next time you open that file. So a crash costs you half a minute rather
+than an afternoon, and your file is still what you last saved. See
+[unsaved changes](editor.md#unsaved-changes-and-the-copies-rio-keeps).
+
 ## Getting your bearings
 
 A few things worth knowing early:

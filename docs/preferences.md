@@ -30,6 +30,11 @@ rio persists two kinds of state, split by who owns it:
 
 Neither ever holds your API key — that lives on its own, described below.
 
+A few settings belong to neither, because they belong to the **core** rather than to
+the window: how its https connections are checked, and whether it keeps recovery
+copies of your unsaved changes. Those are kept in files of their own, on the core's
+host, and every window attached to that core shares them. Both are described below.
+
 ## Setting a default is just setting the value
 
 **The last value *is* the default**, saved the moment you change it. There is no
@@ -184,6 +189,42 @@ line is a withdrawal — it trusts no key for that repository, not even one rio 
 with. See [extensions](extensions.md#confirming-a-repositorys-key) for what
 confirming a key protects and what it cannot.
 
+## Recovery files for unsaved changes
+
+rio keeps a **separate copy** of every changed file so that a crash costs you at
+most half a minute of typing — and it never writes the file you are editing without
+a save. [The editor](editor.md#unsaved-changes-and-the-copies-rio-keeps) describes
+what that means and how you get the changes back; this is where the setting lives.
+
+***Preferences ▸ Editor ▸ Keep recovery files for unsaved changes*** turns it on
+and off. It is **on** by default, and that is the only door to it: a menu is for
+switches you flip while working, and this is a policy you set once.
+
+The setting belongs to the **core**, not to this window, because the copies land on
+the core's disk — so every window attached to a core shares it, and over a
+[remote core](remote.md) it is the server's. It is kept in `autosave.conf` in the
+core's config directory, in rio's usual `key = value` format, **parsed and never
+executed**:
+
+```
+autosave    = on
+interval_ms = 30000
+```
+
+- `autosave` stops new copies for any plain way of writing no — `off`, `0`, `no` or
+  `false`, in any case. **Anything else leaves it on**: another value, a typo, a
+  malformed file, no file at all. That is the opposite of how `tls.conf` reads a
+  value it does not understand, and deliberately so — there the safe side is
+  refusing a connection, here it is protecting work you have not saved.
+- `interval_ms` is how often a changed file is copied, in milliseconds. The default
+  is 30000. Below 1000 rio uses 1000, so a hand edit cannot turn copying into a busy
+  loop. Nothing in the UI sets this — the file is the only way, and turning the
+  setting off and on again leaves a hand-tuned interval alone.
+
+Both are re-read before every copy, so a hand edit counts without restarting the
+core. The copies themselves live under `autosave/` in the core's **data** directory,
+listed [below](#where-everything-lives).
+
 ## Network: how the core checks https
 
 *Preferences ▸ Network* holds the settings for every https connection the **core**
@@ -237,12 +278,14 @@ bookkeeping, machine-written, not meant for hand-editing).
 | `agent/providers/<name>.conf` | what that provider remembers — the model and effort it was last set to, and whatever else it declares. For a provider that keeps [profiles](agent.md#profiles-several-setups-one-at-a-time), only which profile is live; the settings themselves are in the folder below | yes — `key = value` |
 | `agent/providers/<name>/<profile>.conf` | one profile of such a provider: its own model, server, limits and key — see [the agent](agent.md#settings-a-provider-declares). A provider's per-profile files sit here too, like the OpenAI-compatible one's `<profile>.extra.json` | yes — `key = value` |
 | `tls.conf` | how the core's https connections are checked — today only `unchecked_hostnames`, on the **core's** host (see [above](#network-how-the-core-checks-https)) | yes — `key = value` |
+| `autosave.conf` | whether the core keeps recovery copies of changed files, and how often — on the **core's** host (see [above](#recovery-files-for-unsaved-changes)) | yes — `key = value` |
 
 **Data — `$XDG_DATA_HOME/rio/` (default `~/.local/share/rio/`), rio-written:**
 
 | Path | Holds |
 | ---- | ----- |
 | `sessions/` | per-project open files + active tab, keyed by project root |
+| `autosave/` | recovery copies of changed files, each under a mirror of its own path as `#name#` — see [the editor](editor.md#unsaved-changes-and-the-copies-rio-keeps) |
 | `providers/` | installed agent providers — the extension kind that ships executable code, so it lives with the data, not the hand-edited config |
 | `extensions.json` | the provenance ledger — what's installed, from which repository, at which version, and which key signed it |
 | `secrets/*.secret` | API keys, mode `0600` — never in `prefs.json` |
