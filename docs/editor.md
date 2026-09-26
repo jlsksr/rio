@@ -256,9 +256,10 @@ saving.
 **rio never writes the file you are editing without a save.** "Autosave" means the
 opposite in some editors — there it writes your real file for you. Here it means
 what it means in emacs: what rio writes on its own is a **separate recovery copy**,
-so that losing the process — a crash, a power cut, a dropped connection to a remote
-core — costs you at most one copy's worth of typing rather than everything since
-your last `Ctrl+S`. Your file itself is still exactly what you last put there.
+so that losing the process — a crash, a power cut, or rio going down and taking its
+own core with it — costs you at most one copy's worth of typing rather than
+everything since your last `Ctrl+S`. Your file itself is still exactly what you last
+put there.
 
 Every 30 seconds, each open file you have changed since rio last copied it gets a
 copy. A copy is dropped the moment it is spent: when you **save** that file, when
