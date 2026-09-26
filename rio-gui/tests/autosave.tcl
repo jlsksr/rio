@@ -116,6 +116,11 @@ ok "unticked: the mirror agrees"      $::autosave_on                            
 ok "unticked: autosave.conf written"  [file exists [rio::autosave::settings_path]]   1
 set ::autosave_on 1 ; autosave_set
 ok "re-ticked: the core agrees"       [dict get [rio_call autosave.settings {}] result enabled] 1
+# The control shows what the core READS BACK, not the value that was clicked — which is why
+# the applier assigns from the reply and not from the variable. A spelling the core
+# normalises is what tells the two apart.
+set ::autosave_on true ; autosave_set
+ok "it mirrors the core's answer"     $::autosave_on                                1
 
 # A change made core-side — by another frontend, or by hand in autosave.conf — is picked up
 # at the next attach and never pushed over.
