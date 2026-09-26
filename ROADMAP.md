@@ -34,6 +34,23 @@ Each entry notes its state:
   a later Save recreates it. `git.discard` / `git.discard_all` emit `fs.changed` now too.
   Still missing: **live** watching — the triggers remain `fs.changed` and focus return, so
   this rides on the watcher above when it lands.
+- **Autosave: what it deliberately does not cover** — *landed* (AGENTS.md D132). rio keeps a
+  recovery copy of every changed buffer under `$XDG_DATA_HOME/rio/autosave/`, drops it on save
+  / close / reload / rename, and offers it back on the next open. Four things were left out on
+  purpose, each with a reason rather than by omission:
+  - **Untitled buffers get no copy.** A buffer id is per-process, so there is no identity to
+    recover one under, and the door back would have to be a "restore unsaved buffers" list at
+    startup — VSCode's hot exit, a feature of its own rather than a corner of this one.
+  - **No sweep for copies whose file is never reopened.** The normal lifecycle drops a copy
+    four ways; what lingers is one belonging to a file rio never saw again, a few kilobytes in
+    one place outside the project (CAVEATS). A core-side sweep by age is the obvious answer.
+  - **No visible sign that a sweep happened.** The status bar is one label, and a flash would
+    want an event — which D132 deliberately does not emit, because an `fs.changed` every
+    interval would spam pane repaints and D94 stale checks for a file no pane shows.
+  - **No size cap.** A very large buffer is written in full on each sweep; D126's numbers put
+    that near 20 ms per megabyte, so a megabyte is imperceptible and sixty are not. The
+    hand-editable `interval_ms` is the escape hatch until someone measures a case that
+    warrants a cap, which would otherwise silently drop protection for the biggest files.
 - **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
   New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
   Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45

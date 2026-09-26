@@ -8252,6 +8252,175 @@ for `claude` (the capability is there; nothing asked for it), and pointing the e
 option at a file outside the provider's own directory — a bare name cannot point somewhere
 rio did not mean, and a symlink covers the rest.
 
+
+---
+
+### D132 — autosave: a separate recovery copy, never the file you are editing
+
+rio could lose work. A buffer's edits lived only in the core's memory until someone saved:
+kill the process, lose the tunnel, pull the plug, and everything typed since the last
+Ctrl+S was gone. Every editor rio measures itself against protects against that, and rio
+had no protection at all — not a preference, not an op, not even a line in ROADMAP. jka
+asked for **emacs-style autosave**: on by default, toggleable.
+
+**The word does the most work here, so state it first.** "Autosave" in VSCode means *write
+my real file for me*. rio's is emacs's model instead: **the file you are editing is never
+written without an explicit save.** What autosave writes is a separate **recovery copy**,
+dropped the moment the buffer is really saved and offered back the next time that file is
+opened. A save is still a save; until you make one, the bytes on disk are the ones you last
+put there. That distinction is why the preference is worded *"Keep recovery files for
+unsaved changes"* rather than with the word that would promise the opposite.
+
+**Where it lives: the core.** Three facts force it, all of them already in the log.
+- The file is the **core's** (D30). A GUI-side autosave would write on the *client's* disk,
+  beside a path that may not exist there — D55's rule exactly.
+- A **persistent daemon holds buffers with no frontend attached**. Autosave has to work for
+  them, so the core cannot wait to be told the policy when a client arrives.
+- Detecting a copy means stat'ing two files on the core's host, which only the core can do.
+  So the core is in this regardless, and splitting the work would only give the same
+  question two homes.
+
+The frontend keeps what a frontend keeps: a mirror of the setting, and the question. That
+is **D125's split verbatim** — the core states the fact, the frontend owns the question —
+the same shape `file.open`'s `too_large` already uses.
+
+**The one thing the core was missing, and why it is not a dirty flag.** The core has no
+notion of dirty, and `document.tcl` says so outright: *view-local state (cursor, selection,
+tab order, modified) belongs to the frontend (D22)*. But autosave does not want a view's
+notion of dirty — "does this differ from disk", which each frontend answers for itself and
+which two frontends may answer differently. It wants "has this document's text changed since
+*I* last wrote it", which is a fact about the document.
+
+So `rio::doc::revision` — a monotonic per-buffer counter, `incr`ed in **`rio::doc::replace`**,
+the single mutation choke point (`edit`, `settext`, `replace_all`, `undo` and `redo` all route
+through it, so one line catches every one of them and nothing else). Autosave records the
+revision at its last write, and *changed* is one comparison. Undoing back to that state still
+reads as changed, because the counter is monotonic: that costs one identical rewrite and can
+never wrongly *skip* one, which is the direction the error has to fall.
+
+**Where the copies go — out of the tree, which was the one question put to jka.** He chose
+out-of-tree over emacs's own placement, and the reasoning is **D31's**, applied to the same
+kind of state: a session lives under the data dir rather than in a `.rio/` *"so it never
+shows in `git status`, needs no `.gitignore`, and can't be committed by accident."* Every
+word of that is true of a recovery copy. The name is kept and only the place moves:
+
+```
+/home/jka/Projekte/rio/rio-gui/rio-gui.tcl
+    -> ~/.local/share/rio/autosave/home/jka/Projekte/rio/rio-gui/#rio-gui.tcl#
+```
+
+The costed alternative — emacs's `#rio-gui.tcl#` beside the file — is worse here for reasons
+that only show up when the whole of rio is in view. It is untracked, so it appears in the git
+pane **while you type**, which would also make D93's destructive *Discard all* button
+permanently visible and put the copy in `git clean -fd`'s path. It would be found by
+`project.search`, so every match in an edited file would be reported twice. And it would have
+to be hidden from the files pane, from project search, from the agent's fs tools and from
+git's own porcelain — **four copies of one rule**, which §7 then owes four guards. Out of tree
+costs none of that. The mirrored path is readable on purpose: `ls -R` over the autosave root
+is a plain report of what is unsaved and where it belongs, which a hash of the path (D31's own
+key) would not give.
+
+**The path is built from `file split`, never string surgery**, and that is worth recording
+because the failure mode is silent and destructive: `file join /a /b` is `/b`, so an absolute
+remainder — a Windows drive, a UNC share — would escape the autosave root and write over
+something real. Every head a split can produce becomes exactly one readable segment
+(`C:/` → `C`), the result is checked to sit under the root before it is returned, and the head
+mapping is **its own proc** so the volume branch is testable on a host whose `file split`
+never produces one.
+
+**The setting fails OPEN, which is the inverse of the neighbouring rule.** `autosave.conf`
+sits beside `tls.conf` in the same D21 flat format, parsed never executed, with `autosave` and
+`interval_ms`. Absent, unreadable, malformed, or any value that is not a plain `off` leaves
+autosave **on**. `tls.conf` fails closed for the opposite reason, and stating both together is
+the point: there the safe side is refusing a connection, here it is protecting work the user
+has not saved. A typo must not silently switch off the thing standing between someone and a
+lost afternoon. Both keys are re-read on **every tick**, so a hand edit counts with no
+restart — `tls.conf`'s habit, for the same reason.
+
+**Silent on the wire, by decision.** An autosave emits nothing. `fs.changed` exists for files
+a view cares about; firing it every thirty seconds would spam pane repaints and D94 stale
+checks for a file no pane shows. Two tests pin the absence rather than trusting it to stay
+that way. It is also rio's **first recurring timer in the core** — every other `after` there is
+one-shot — and it needs none of the guards the frontend's deferred work carries (`::pending`,
+`fs_changed_settle`): a sweep dispatches no op, emits no event and touches no channel, so it is
+safe wherever the event loop reaches it, a nested `vwait` in `rio::http` included. It is started
+on `server.tcl`'s direct-execution path only, so a test that *sources* the core gets no timer
+behind it and drives `sweep` itself.
+
+**Ops.** `autosave.settings` / `autosave.settings.set` (flat, so the default encoder carries
+them; the setter answers with what the setting now **reads back as**, not with what it was
+handed, so a frontend's control can only ever show what the core holds). `buffers.recover`
+sits in `ops-buffer.tcl` **beside `buffers.reload`**, which it is shaped after: the whole text
+through `settext`, so it is **one undo step** and a recovery can be taken back like any other
+edit, and one `buffer.changed` so every attached view repaints through the path it already has.
+Two things it does not do: it does not touch the file (so the buffer's disk stamp still
+describes the file correctly and must not be re-stamped — a recovered buffer is *not* stale),
+and unlike a reload it leaves the buffer's encoding facts alone, because those describe the
+real file and not the copy. `file.open` reports any waiting copy as three **flat, additive**
+keys — no protocol bump (D55/D19), and a client too old simply ignores them.
+
+**The frontend: one door, and one question.** The toggle is *Preferences ▸ Editor* and
+nothing else — **no menu twin**, because D85 keeps the menubar for *fast* switches and this is
+set-once policy, the way a provider's settings earn no checkbutton either (D130/D131). It is
+**not a `prefs.json` key**: the control adopts from the core at every attach, beside
+`adopt_tls_settings`, and writes only on a click, then shows what the core **accepted** so a
+refusal snaps it back rather than claiming a state the core is not in.
+
+The question is asked in `do_open`. Recovering marks the buffer **modified** — nothing reaches
+disk until the user saves. Declining leaves the copy alone: it is not ours to delete on a
+shrug, and the next save of that buffer drops it anyway. **A boot restore asks once**, not
+twelve times: while `::rio_started` is 0 a copy is only noted, and the whole set is asked about
+after startup — `stale_conflict`'s own rule (*"twelve modals in a row is not an answer to
+anything"*) reached from the other direction. The flush is its own proc, so the suite drives
+the very call the boot sequence makes rather than a copy of it.
+
+**Which button is the default** follows D94: the choice that loses nothing. Recovering loses
+nothing either way — the file is untouched and the recovery is undoable — but nodding through
+text **older** than the file would be an odd thing to default to, so an older copy defaults to
+No and the prompt says which way round it is. An older copy is still **offered**, not hidden:
+it can hold work the file never had, if a `git checkout` or another editor landed on top of it,
+so treating it as spent would be the lie.
+
+**Guards.** `rio-core/tests/autosave.test` (55 cases, core 864 → 919): the mirrored path and
+every head shape including the volume branch, the containment belt, the setting's fail-open
+rule in five spellings plus a malformed file, the interval's floor and fallback, that ticking
+the box keeps a hand-tuned interval, the revision counter across all five mutation paths and
+its indifference to reads, that a sweep writes only changed buffers that have a file and
+writes once per change, BOM + CRLF reproduced byte for byte, a buffer whose copy cannot be
+written not taking the others down with it, each of save / save-as / close / reload / setpath
+dropping the copy, the two absent-event cases, recovery reported as none / newer / older /
+file-gone, and `buffers.recover` end to end (the crash-and-reopen flow, one undo step, the
+event, the untouched file, the *not stale* consequence, CRLF round trip, three refusals).
+`rio-gui/tests/autosave.tcl` (new, 42 checks): the control's variable, applier, label, muted
+hint and the **absence** of a menu twin; that it reaches the core and mirrors back; a refusal
+snapping it back; the prompt in both answers with the file untouched and the undo available;
+the default button both ways; and a boot restore producing **one** dialog for two files. Its
+fixtures **plant** a copy for a file nothing has open, which is what a crash leaves behind — a
+closed tab cannot stand in for a dead core, because `buffer.close` correctly drops the copy.
+
+Fifteen injections, each failing by name. **One passed and was acted on**: replacing *mirror
+what the core accepted* with *keep the clicked value* broke nothing, because every check until
+then asked the core for a value it accepted verbatim. The wedge is a spelling the core
+**normalises** — `true` is stored as `on` and reads back as `1` — and the check now clicks with
+`true` and requires the control to end up showing `1`. A second injection *looked* like it
+passed and did not: it had broken `adopt_autosave_settings` as well as the applier, so the run
+died before reaching the check. Both are the reason to read *which* names fail, not just the
+count.
+
+**Deliberately out of scope**, each for a reason rather than by omission: an **untitled**
+buffer gets no copy — buffer ids are per-process, so there is no identity to recover one
+under, and a "recover unsaved buffers" list at startup is VSCode's hot exit, a feature of its
+own; **no sweep** for copies whose file is never reopened (the normal lifecycle drops them on
+save, close, reload and rename, so what lingers is a file rio never saw again); **no visible
+sign** that a sweep happened, since the status bar is one label and a flash would want an
+event this deliberately does not emit; and **no per-project or per-file opt-out**.
+
+**Honest limits.** Every check is headless. A deep project path on Windows can push the
+mirrored copy past `MAX_PATH`, where the write is caught and that buffer is skipped — noted in
+CAVEATS, and untested on Windows. And a very large buffer is written in full on each sweep:
+D126's numbers put that near 20 ms per megabyte, so a 1 MB file is imperceptible and a 64 MB
+one is not, which is what the hand-editable `interval_ms` is there for until someone measures
+a case that warrants a size cap.
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a
