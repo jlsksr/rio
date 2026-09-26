@@ -10,7 +10,206 @@ The feature set is already past an alpha bar. The risk in going live is not
 missing features — it's distribution, first-run, legal, and honest platform
 scoping. That's what this list covers.
 
-## Gate 0 — Platform reality (do this first)
+The file has two halves. **The runbook** directly below is the live part — the procedure
+for every release, and how the mirror, the version and the two download channels fit
+together. **The gates** after it record what had to be true before 0.1.0 could be handed
+to a stranger; they are kept because the reasoning still binds.
+
+## The runbook — every release after the first
+
+Gates 0–4 below are the record of how **0.1.0** got out, and are history. This section is
+the repeatable part: how the public mirror stays synced, how the version is raised, and
+what a stranger downloading rio gets. Terse on purpose.
+
+### Remotes
+
+| remote | host | carries | moves |
+|---|---|---|---|
+| `origin` | the private self-hosted Forgejo | every branch, every tag | as you work |
+| `github` | github.com/jlsksr/rio | `main` and release tags, nothing else | when you mean to publish |
+
+```sh
+git push origin main                 # routine
+git push github main                 # publishing — a deliberate act, no hook, no CI
+```
+
+- Unfinished branches stay on `origin`. Every one is already merged into `main` with
+  `--no-ff`, so the mirror loses no topology by not carrying them.
+- Never `git push github --tags`; name the tag (below). Only release tags go public.
+- No rewriting published history: `CHANGELOG.md` cites commit ids and
+  `rio-core/tests/changelog.test` resolves each one in git (Gate 4's author-identity
+  decision).
+- **Issues exist only on GitHub.** Code flows Forgejo → GitHub, reports flow back by hand.
+
+### Passwordless push
+
+Both of jka's own SSH keys (`~/.ssh/id_ed25519` for GitHub, `~/.ssh/jkdata2511` for
+Forgejo) are passphrase-protected and the agent holds no identities, so every push
+prompted. Two **dedicated, passphrase-less** keys now carry the push, one per host —
+separable and revocable without touching jka's personal keys.
+
+| key | goes to | as | fingerprint |
+|---|---|---|---|
+| `~/.ssh/rio_forgejo.pub` | the private Forgejo | **user** SSH key | `SHA256:Mj22tA2LeubDddGdRIacrrc+6a6TUKib21VZjB73R18` |
+| `~/.ssh/rio_github.pub` | github.com/jlsksr | **account** SSH key | `SHA256:XDcpG88wjL9whemfMbI5FCEkV1LoRQGNgzW6cDqrxe8` |
+
+**Account keys, not deploy keys — both times.** Each host holds two rio repositories
+(`rio` and `rio-extensions`), and a deploy key is scoped to one. Gate 4 learned this the
+hard way on GitHub: a deploy key greets as `Hi jlsksr/rio!` instead of `Hi jlsksr!` and
+cannot push the extensions repo at all — and once a key has been used as a deploy key the
+account page refuses it (*"Key is already in use"*) until it is deleted there first.
+
+Where to paste them:
+
+- **Forgejo** → avatar → *Settings* → *SSH / GPG Keys* → *Add Key*. Title `rio agent
+  (xon1)`. Leave *Verify* alone; this is an auth key, not a signing key.
+- **GitHub** → *Settings* → *SSH and GPG keys* → *New SSH key*, type **Authentication
+  Key**. Title `rio agent (xon1)`. Not the repository's *Deploy keys* page.
+
+`~/.ssh/config` gained two aliases rather than extra `IdentityFile` lines on the real
+hosts, so jka's own keys and fallbacks are untouched and the agent's path is
+deterministic (`IdentitiesOnly yes` keeps any loaded agent identity out of it):
+
+```
+Host forgejo-rio                      Host github-rio
+    HostName vps01.jkdata.de              HostName github.com
+    Port 443                              User git
+    User forgejo                          IdentityFile ~/.ssh/rio_github
+    IdentityFile ~/.ssh/rio_forgejo       IdentitiesOnly yes
+    IdentitiesOnly yes
+```
+
+Both repositories' remotes point at the aliases, so **every command in this runbook is
+unchanged** — `git push origin main` and `git push github main` mean what they always did:
+
+    rio             origin  forgejo-rio:jka/rio.git
+                    github  github-rio:jlsksr/rio.git
+    rio-extensions  origin  forgejo-rio:jka/rio-extensions.git
+                    github  github-rio:jlsksr/rio-extensions.git
+
+Reversible in one command per remote — the originals were
+`ssh://forgejo@vps01.jkdata.de:443/jka/<repo>` and `git@github.com:jlsksr/<repo>.git`; the
+previous `~/.ssh/config` is at `~/.ssh/config.bak-<date>`.
+
+Check it (before deployment both say `Permission denied (publickey)`, which is the plumbing
+working and only the paste missing — note it **fails fast** rather than hanging on a
+passphrase prompt):
+
+```sh
+ssh -T github-rio      # want: Hi jlsksr! You've successfully authenticated…
+ssh -T forgejo-rio     # want: Hi there, jka! …  (Forgejo's greeting)
+```
+
+Two things deliberately left alone. `~/.ssh/rio-repo` is the **repository signing** key
+(extensions `SHA256SUMS`, SIGNING.md) and has nothing to do with push — different job,
+different key, and it stays passphrase-capable. And commits are already authored
+`jka <jlsksr@gmail.com>`, the GitHub-verified address Gate 4's author-identity decision
+asked for, so nothing about authorship changes here.
+
+### What a user chooses between
+
+| they want | they do | they update with |
+|---|---|---|
+| bleeding edge | `git clone https://github.com/jlsksr/rio.git` — lands on `main` | `git pull` |
+| the last release, in git | `git clone --branch vX.Y.Z https://github.com/jlsksr/rio.git` | `git fetch --tags && git checkout vX.Y.Z` |
+| the last release, without git | the tarball on the [Releases](https://github.com/jlsksr/rio/releases) page | download the next one |
+
+- Both git paths **run from the checkout** (D129), so `git pull` / `git checkout` *is* the
+  update — nothing is copied anywhere.
+- **No `stable` branch.** The tag is already that ref; a second one is a second thing to
+  keep correct.
+- Between releases `main` names the version being accumulated, so *Help ▸ About rio* can
+  read `Version 0.3.0` with no `v0.3.0` in existence. *Build* (`git describe`) is the
+  precise one — that is what it is for (D76/D123).
+
+### Cut a release
+
+1. **`CHANGELOG.md`** — the top section is `## [X.Y.Z] — unreleased`, one entry per
+   notable change, newest first, each citing *Dnn · commit · date*. **MINOR** for anything
+   added or changed, **PATCH** for fixes only; on `0.x` a break is still MINOR.
+2. **`rio-core/version.tcl`** — the literal equals that heading. One home, no second
+   (`changelog.test` holds the two together).
+3. **Full sweep green**, and read the *skip* counts, not only the failures:
+
+       tclsh rio-core/tests/all.tcl
+       LANG=C LC_ALL=C tclsh rio-core/tests/all.tcl
+       tclsh syntax/tests/all.tcl
+       tclsh plugins/lib/tests/all.tcl
+       tclsh extensions/claude/tests/all.tcl
+       tclsh extensions/openai/tests/all.tcl
+       for t in rio-gui/tests/*.tcl; do
+           case $t in */sandbox.tcl) continue;; esac
+           RIO_GUI_HEADLESS=1 wish "$t" >/dev/null || echo "FAIL $t"
+       done
+
+   `openssl` must be on `PATH` or `tls.test`'s 19 https tests skip and say so only in the
+   tally. A GUI suite's **exit code** is the verdict, not its `ALL CHECKS PASSED` line.
+4. **Platform pass**, or record in the notes which platforms actually ran — Gate 0's
+   honest-smaller-claim rule. Linux is the development box; Windows and macOS are not.
+5. **`CHANGELOG.md`** — the heading takes the date, and a link ref joins the foot:
+
+       [X.Y.Z]: https://github.com/jlsksr/rio/releases/tag/vX.Y.Z
+
+6. **`README.md`** — the *Status* section names the release and its date.
+7. **Commit**, then `tclsh rio-core/tests/changelog.test` once more: it looks every cited
+   commit and date up in git, including the entries added since step 3.
+8. **Tag**, annotated: `git tag -a vX.Y.Z -m 'rio X.Y.Z'`
+9. **Push** — Forgejo first, mirror second, each tag named:
+
+       git push origin main && git push origin vX.Y.Z
+       git push github main && git push github vX.Y.Z
+
+10. **Make the Release** on GitHub from the tag: title `X.Y.Z`, body the CHANGELOG
+    section. A browser step — `gh` is not installed on the dev box (`gh release create
+    vX.Y.Z --notes-file …` if it ever is). This is what gives the link ref of step 5
+    something to point at and the tarball a page to sit on.
+11. **Download GitHub's own tarball**, extract it outside the repository, run
+    `./install-unix.sh`, launch. It is a *different artifact* from a clone — `.gitattributes`
+    `export-ignore` drops `adr/`, `spike/` and every `tests/` directory — and
+    **no test can cover it**, because every suite runs in a repository where those paths
+    exist either way.
+12. **Outside this repository:** if rio.skylm.org names the current version or links a
+    download, it is a third home for the same fact.
+
+### Between releases
+
+- `main` goes to the mirror whenever you mean it to. Nothing waits for a tag; bleeding edge
+  *is* `main`.
+- After a tag, `version.tcl` keeps the released number. The bump to the next one lands **in
+  the same commit as the first entry of the new CHANGELOG section**, so no version ever
+  names a release with nothing in it. `dd4f0a3` is the worked example.
+
+### What the release notes have to call out
+
+| if the release … | then, because … |
+|---|---|
+| adds a dependency | the installer has to be re-run; `git pull` installs nothing |
+| changes the launcher, icons or menu entry (D129) | `git pull` does not re-install them — `./install-unix.sh` does |
+| bumps the wire `protocol` (now **2**) | a GUI and a `--connect` core of different versions stop talking |
+| bumps `provider-api` (now **5**) or `mode-api` (now **1**) | an extension built for the new one is greyed with a reason on an older rio, and a stale one on this rio |
+| needs a newer extension | rio never auto-updates one (D39/D107) — the user goes to *Extensions ▸ Browse…* |
+| ships without a platform pass | that is the claim being made, and Gate 0 says to make the smaller honest one |
+
+### Extensions are on their own clock
+
+`extensions/` in this tree is the **source**. The **published** repository is a separate
+git repo (mirrored to github.com/jlsksr/rio-extensions, served at
+`http://rio.skylm.org/extensions`), and an extension's version is independent semver
+(D107) — never tied to rio's.
+
+A release that changes a payload or manifest:
+
+1. copy it across and bump that extension's `version =`;
+2. re-hash, re-sign and verify — its [SIGNING.md](https://github.com/jlsksr/rio-extensions/blob/main/SIGNING.md) §2, **every
+   publish, whole repository**, not per extension;
+3. upload payloads first and `SHA256SUMS` + `.sig` **last** — a client scanning mid-upload
+   refuses the entire repository, for everyone, not just the file being replaced;
+4. check the **served** bytes, not the working tree.
+
+Keep the in-tree manifest version equal to the published one; `a8507fe` fixed that drift
+once already.
+
+## Gate 0 — Platform reality
 
 rio claims Linux, the BSDs, and **Windows** ([README](README.md)). You cannot honestly
 ship a cross-platform claim you haven't run — so this gate was about running it.
