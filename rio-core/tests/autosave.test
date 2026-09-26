@@ -12,6 +12,7 @@ if {[encoding system] ne "utf-8"} {
 }
 package require tcltest
 namespace import ::tcltest::*
+package require json
 
 source [file join [file dirname [info script]] .. core.tcl]
 
@@ -22,6 +23,30 @@ set ::asroot "$_asbase.autosave"
 set ::asconf "$_asbase.conf"
 set rio::autosave::dir_override $::asroot
 set rio::autosave::settings_override $::asconf
+
+# A real child core over a pipe, for the one case that needs the timer to actually run.
+# stdio.test carries the same two helpers for its own cases: the duplication is deliberate,
+# because the alternative is a second copy of the recovery-path RULE, and that is the copy
+# which must not exist (rio::autosave::path_for answers it here).
+set ::serverTcl [file normalize [file join [file dirname [info script]] .. server.tcl]]
+proc spawn_core {} {
+	set cmd [list [info nameofexecutable] $::serverTcl --stdio]
+	set nul [expr {$::tcl_platform(platform) eq "windows" ? "NUL" : "/dev/null"}]
+	set c [open "| $cmd 2>$nul" r+]
+	fconfigure $c -buffering line -translation lf -encoding utf-8
+	return $c
+}
+# One request, and the reply carrying its id — skipping the events that precede it (D11).
+proc core_send {c id op params} {
+	puts $c "{\"id\":\"$id\",\"op\":\"$op\",\"params\":$params}"
+	flush $c
+	while {[gets $c line] >= 0} {
+		if {[string trim $line] eq ""} continue
+		set d [json::json2dict $line]
+		if {[dict exists $d id] && [dict get $d id] eq $id} { return $d }
+	}
+	return {}
+}
 
 proc mkfile {text} {
 	set f [file tempfile path]
@@ -550,6 +575,55 @@ test autosave-settings-set-refuses-a-non-boolean {} -body {
 	set r [callr autosave.settings.set [dict create enabled sometimes]]
 	list [dict get $r ok] [dict get $r error code]
 } -result {false bad_request}
+
+
+# --- the timer itself, in a real child core ---------------------------------------------
+
+test autosave-a-spawned-core-runs-the-timer {a sweep is only as good as the timer that calls
+		it, and nothing else here proves server.tcl starts one: every other case drives `sweep`
+		directly, so rio::autosave::start could be missing entirely and they would all still
+		pass. So spawn a REAL child core over a pipe, give it a one-second interval, edit a
+		file through it, and wait for the copy to appear on disk — and check the file the child
+		was told to keep its hands off is still exactly as it was.} -setup {
+	# A child inherits the ENVIRONMENT, not the parent's test overrides, so point both XDG
+	# roots at throwaway dirs and stand the overrides down for the duration — that way the
+	# parent computes the very path the child writes.
+	set ::keep_dir  $rio::autosave::dir_override
+	set ::keep_conf $rio::autosave::settings_override
+	set rio::autosave::dir_override ""
+	set rio::autosave::settings_override ""
+	set ::keep_env {}
+	foreach v {XDG_DATA_HOME XDG_CONFIG_HOME} {
+		dict set ::keep_env $v [expr {[info exists ::env($v)] ? $::env($v) : ""}]
+	}
+	set ::env(XDG_DATA_HOME)   "$::_asbase.data"
+	set ::env(XDG_CONFIG_HOME) "$::_asbase.cfg"
+	file mkdir [file join $::env(XDG_CONFIG_HOME) rio]
+	set fh [open [file join $::env(XDG_CONFIG_HOME) rio autosave.conf] w]
+	puts $fh "autosave = on"
+	puts $fh "interval_ms = 1000"
+	close $fh
+} -body {
+	set p [mkfile "hello\n"]
+	set c [spawn_core]
+	set r [core_send $c 1 file.open "{\"path\":\"$p\"}"]
+	set b [dict get $r result buffer]
+	core_send $c 2 buffer.replace \
+		"{\"buffer\":\"$b\",\"start\":\"1.5\",\"end\":\"1.5\",\"text\":\"!\"}"
+	set ap [rio::autosave::path_for $p]
+	set deadline [expr {[clock milliseconds] + 10000}]
+	while {![file exists $ap] && [clock milliseconds] < $deadline} { after 100 }
+	set got [expr {[file exists $ap] ? [dict get [rio::fs::read $ap] text] : "<no copy appeared>"}]
+	close $c                        ;# EOF on its stdin: the child exits (D30)
+	list $got [rawbytes $p]
+} -cleanup {
+	set rio::autosave::dir_override  $::keep_dir
+	set rio::autosave::settings_override $::keep_conf
+	dict for {v old} $::keep_env {
+		if {$old eq ""} { unset -nocomplain ::env($v) } else { set ::env($v) $old }
+	}
+	file delete -force "$::_asbase.data" "$::_asbase.cfg"
+} -result [list "hello!\n" "hello\n"]
 
 file delete -force $::asroot
 file delete -force $::asconf
