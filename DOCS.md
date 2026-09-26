@@ -214,9 +214,26 @@ text window — so anything fancier is a promise the viewer cannot keep. If you 
 page needs a construct outside this list, raise it rather than adopting it: it is a
 change to the viewer's requirements, not a formatting preference.
 
-**Plain voice.** What the reader does, and what rio does in return. Where a rule is
-easier to remember with its reason attached, give the reason in one sentence. The
-essays belong in `AGENTS.md`.
+**Help-file voice, not prose.** These pages are written the way a Windows 2000-era
+help file was: the reader has a job to do and wants the answer, not an essay. The
+house rules:
+
+- **Say what the reader does, and what rio does in return.** Nothing else.
+- **A task is a numbered procedure.** A set of options is a table. A rule is one
+  sentence.
+- **Do not explain the world.** No background on why a design is good, no
+  restating the obvious, no summing up what the section just said. Give a reason
+  only where it changes what the reader will do, and give it in one clause.
+- **Assume no deep technical knowledge.** Plain words, short sentences. A term the
+  reader needs is explained once, where it first matters.
+- **No rhetorical shapes.** No "not X, but Y" flourishes, no "that is the whole
+  point", no "deliberately", no sentence whose job is to admire the design. Em
+  dashes are for a genuine aside, and rarely: a colon or a full stop is usually
+  better.
+- **The essays belong in `AGENTS.md`**, which is where a reader who wants the
+  reasoning is sent.
+
+If a paragraph would not survive being read aloud to someone in a hurry, cut it.
 
 ---
 

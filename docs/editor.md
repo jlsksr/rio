@@ -1,355 +1,315 @@
 # The editor
 
-The text area and everything around it: tabs, undo, the split view, line wrap,
-line numbers, syntax highlighting, column editing, the side-by-side compare view,
-and what happens to changes you have not saved yet.
+The text area and what surrounds it: tabs, undo, the split view, wrap, line
+numbers, syntax highlighting, column editing, the compare view, and what happens
+to changes you have not saved.
 
 ## Tabs
 
-Each open buffer is a tab. `Ctrl+N` makes an empty one, `Ctrl+O` opens a file,
-`Ctrl+W` closes the current tab, and `Ctrl+Tab` / `Ctrl+Shift+Tab` step through
-them. A tab whose buffer has unsaved changes carries a `●` after its name.
+Each open file is a tab.
 
-**Drag a tab** to reorder it, or drag it onto the other editor group to move it
-there. Its right-click menu does the same things without the dragging.
+| Key | Does |
+| --- | ---- |
+| `Ctrl+N` | New empty tab |
+| `Ctrl+O` | Open a file |
+| `Ctrl+W` | Close the current tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 
-When the window is too narrow to show every tab, rio does not shrink them into
-illegibility. You get two ways out:
+A tab with unsaved changes carries a `●` after its name.
 
-- **◂ ▸ arrows** page through the strip one screenful at a time — the default.
-- ***View ▸ Multi-Line Tabs*** wraps the strip onto several rows instead, so
-  every tab is visible at once.
+Drag a tab sideways to reorder it, or onto the other editor group to move it
+there. Its right-click menu does the same without dragging.
 
-And when you know the name but not the position, ***View ▸ Switch to Tab…***
-(also on the `Compare` menu) lists every open buffer in one picker, with a path
-hint so two files of the same name are easy to tell apart.
+**When there are more tabs than fit:**
+
+- The `◂ ▸` arrows page through the strip, one screenful at a time. This is the
+  default.
+- ***View ▸ Multi-Line Tabs*** wraps the strip onto as many rows as it needs, so
+  every tab is visible.
+- ***View ▸ Switch to Tab…*** lists every open file in one picker, with a path
+  hint so two files of the same name can be told apart. It is also on the
+  *Compare* menu.
 
 ## Splitting the editor
 
-`Ctrl+\` splits the editor into **two groups side by side**, each with its own
-tabs and its own caret. Drag the divider to resize them. `Ctrl+]` moves the
-current tab across to the other group; closing a group's last tab unsplits
-automatically.
+`Ctrl+\` splits the editor into two groups side by side, each with its own tabs
+and its own caret. Drag the divider to resize them. `Ctrl+]` moves the current
+tab to the other group. Closing a group's last tab unsplits.
 
-The split is for *editing* two things at once. To *compare* two things, use the
-compare view below — it is a different tool.
+Use the split to *edit* two files at once. To *compare* two files, use
+[the compare view](#comparing-two-documents) instead.
 
 ## Undo and redo
 
-`Ctrl+Z` undoes, `Ctrl+Shift+Z` or `Ctrl+Y` redoes.
+`Ctrl+Z` undoes. `Ctrl+Shift+Z` or `Ctrl+Y` redoes.
 
-**Undo works a word at a time, not a keystroke at a time.** Typing `hello world`
-and pressing `Ctrl+Z` takes back `world`, not just the `d`. This is the behaviour
-VSCode and most modern editors have, and it is what makes undo usable: a
-keystroke-at-a-time history would need thirty presses to take back a sentence.
+**Undo works a word at a time, not a keystroke at a time.** Type `hello world`,
+press `Ctrl+Z`, and `world` goes, not just the `d`.
 
-A run of typing keeps growing into one undo step until something ends it. A step
-ends when:
+A run of typing keeps growing into one undo step until one of these ends it:
 
-- **you type a space** — the space joins the word you just typed, and the next
-  character starts a fresh step;
-- **you press Enter** — a newline is always its own step, so undo never eats a
-  line break you meant to keep;
-- **you move the caret** — click elsewhere, or use an arrow key, and the next
-  character is no longer adjacent to the last one, so it starts a new step;
-- **you switch between typing and deleting** — a run of Backspace merges with
-  other deletions, never with the typing before it;
-- **anything that isn't a single character happens** — a paste, a Replace All, an
-  agent edit, a vi operator. These are each **one step already**, and they neither
-  join a run nor let one continue through them.
+| What you do | Effect on the step |
+| ----------- | ------------------ |
+| Type a space | The space joins the word; the next character starts a new step. |
+| Press Enter | A newline is always its own step. |
+| Move the caret | Clicking or arrowing away starts a new step. |
+| Switch between typing and deleting | Deletions merge with deletions, never with the typing before them. |
+| Paste, Replace All, an agent edit, a vi operator | Each is one step already. It neither joins a run nor lets one continue. |
 
-Backspace and Delete coalesce the same way, each in its own direction: holding
-Backspace through a word takes the whole word back with one `Ctrl+Z`, and holding
-Delete does the same forwards.
+Backspace and Delete coalesce the same way, each in its own direction: hold
+Backspace through a word and one `Ctrl+Z` brings the word back.
 
-Undo history belongs to the **buffer**, not to the view — so it survives switching
-tabs, moving a tab to the other group, and (with a project open) is per-document
-exactly as you would expect. Undoing past the point where you last saved is
-allowed; the `●` marker tells you whether what's on screen matches the disk.
+Undo history belongs to the file, not to the view, so it survives switching tabs
+and moving a tab to the other group. You can undo past your last save; the `●`
+marker tells you whether what is on screen matches the disk.
 
-> **In vi mode** the granularity is vi's, not this one. Pressing `x` three times
-> gives you three separate undos, because in vi each command is a unit; but a
-> whole insert session — `i`, type a word, `Esc` — comes back in one `u`, which is
-> also what vi does. See [editing modes](editing-modes.md).
+> **In vi mode** the granularity is vi's. Pressing `x` three times gives three
+> separate undos, but a whole insert session (`i`, type a word, `Esc`) comes
+> back with one `u`. See [editing modes](editing-modes.md).
 
 ## The right-click menu
 
-Right-click in the text and you get the actions you reach for most, without going
-to the menu bar: **Undo** and **Redo**, then **Cut**, **Copy** and **Paste**, then
-**Select All**, then **Find…**, **Replace…** and **Search…**.
+Right-clicking the text offers **Undo** and **Redo**, then **Cut**, **Copy** and
+**Paste**, then **Select All**, then **Find…**, **Replace…** and **Search…**.
 
-While a real agent provider is selected — any provider but Echo — one more entry
-comes last, on its own: **Change with Agent…**, which asks the agent to change the
-selected text and nothing else (see [the agent](agent.md#changing-just-the-selection)).
-It is not there at all with Echo, and you can hide it for good with *Preferences ▸
-Agent ▸ "Show “Change with Agent…” in the editor's context menu"*.
+With a real agent provider selected (any provider but Echo), one more entry
+comes last: **Change with Agent…**, which asks the agent to change the selected
+text and nothing else. See
+[changing just the selection](agent.md#changing-just-the-selection). It is
+absent with Echo, and *Preferences ▸ Agent ▸ "Show “Change with Agent…” in
+the editor's context menu"* hides it for good.
 
-The click itself follows the usual convention, and it matters for what the menu
-then does:
+Where you click decides what the menu acts on:
 
-- right-click *inside* a selection and the selection stays exactly as it is — so
-  Cut, Copy, the search entries and Change with Agent… act on the text you can
-  see is highlighted;
-- right-click anywhere else and the selection is dropped and the caret moves to
-  where you pointed — so Paste lands there.
+- *Inside a selection* — the selection stays, so Cut, Copy, the search entries
+  and Change with Agent… act on the highlighted text.
+- *Anywhere else* — the selection is dropped and the caret moves to where you
+  pointed, so Paste lands there.
 
-With a word or phrase selected, the Search entry names it (*Search for “needle”*)
-and opens the [project-wide search](find-and-replace.md) already filled in; Find
-and Replace seed themselves from the selection the same way. A selection that
-spans several lines seeds nothing, and the entry says so by going back to its
-plain name.
+With a word or phrase selected, the Search entry names it (*Search for
+“needle”*) and opens the [project-wide search](find-and-replace.md) already
+filled in. Find and Replace seed themselves from the selection too. A selection
+spanning several lines seeds nothing, and the entry goes back to its plain name.
 
-Entries you cannot use right now are greyed — Cut and Copy without a selection,
-Select All in an empty buffer, Change with Agent… without a selection or while an
-agent turn is still working or waiting for your approval. Undo and Redo are always offered: the undo history
-lives in the core, and rio does not claim to know whether there is anything left
-to undo until it asks.
+Entries you cannot use are greyed out: Cut and Copy with nothing selected,
+Select All in an empty file, Change with Agent… with nothing selected or while
+an agent turn is working or waiting for you. Undo and Redo are always offered,
+whether or not there is anything left to undo.
 
-The keyboard opens the same menu at the caret, with the `Menu` key (the one next
-to the right `Ctrl` on most keyboards) or `Shift+F10`. The menu works the same in
-every [editing mode](editing-modes.md) — in vi mode too, in any of its modes.
-
-This is the longest of rio's right-click menus, because the editor is where the
-most can be done. Every other text surface in the window has one too, shorter and
-following the same conventions — see
+The `Menu` key and `Shift+F10` open the same menu at the caret. It works the
+same in every [editing mode](editing-modes.md), vi included. The other text
+surfaces have shorter menus: see
 [right-click menus](getting-started.md#right-click-menus).
 
 ## Line wrap
 
 ***View ▸ Wrap Lines*** (`Ctrl+Shift+W`) wraps long lines to the window width
-instead of scrolling sideways. Wrapping is a *view* setting: it changes nothing in
-the file, and never inserts a line break.
+instead of scrolling sideways. Nothing in the file changes and no line break is
+inserted.
 
-***View ▸ Indent Wrapped Lines*** decides where the continuation rows of a wrapped
-line begin — under the line's own indentation (easier to read in code), or hard
-against the left margin. It only matters while wrap is on.
+***View ▸ Indent Wrapped Lines*** puts the continuation rows of a wrapped line
+under that line's own indentation instead of hard against the left margin. It
+only matters while wrap is on.
 
 ## Line numbers and the current line
 
-***View ▸ Line Numbers*** (`Ctrl+L`) shows the gutter, on by default.
-**Click a number to select its whole line.**
-
-***View ▸ Relative Line Numbers*** switches the gutter to vim's hybrid style: the
-current line shows its real number, and every other line shows its distance from
-it — which is exactly the count a vi motion like `12k` wants.
-
-***View ▸ Highlight Current Line*** bands the line the caret is on, per editor
-group, so a split doesn't leave you guessing which side has focus.
+| Menu item | Does |
+| --------- | ---- |
+| ***View ▸ Line Numbers*** (`Ctrl+L`) | Shows the gutter. On by default. Click a number to select the whole line. |
+| ***View ▸ Relative Line Numbers*** | Numbers every other line by its distance from the caret, which is the count a vi motion such as `12k` wants. The caret's own line keeps its real number. |
+| ***View ▸ Highlight Current Line*** | Tints the line the caret is on, per editor group, so a split shows which side has focus. |
 
 ## Font and zoom
 
-***View ▸ Font & Zoom ▸ Font…*** picks the document font family and size.
-`Ctrl+scroll`, `Ctrl++` and `Ctrl+-` zoom on the fly, and `Ctrl+0` resets. Your
-choice persists and overrides whatever the active theme would have used.
+***View ▸ Font & Zoom ▸ Font…*** sets the document font family and size.
+`Ctrl+scroll`, `Ctrl++` and `Ctrl+-` zoom; `Ctrl+0` resets. Your choice is kept,
+and overrides whatever the theme would have used.
 
-This is the *document* font only — the menus and dialogs keep the system UI font,
-so zooming in on code doesn't reflow the whole application.
+This is the document font only. Menus and dialogs keep the system font, so
+zooming in on code does not reflow the whole window.
 
 ## Syntax highlighting
 
-rio picks a buffer's highlighter from its **file name**, and from nothing else:
+rio chooses a highlighter from the **file name**, in this order:
 
-1. the whole name, for build files that carry no extension — `Makefile`,
-   `Dockerfile`;
-2. otherwise the extension — `.tcl`, `.py`, `.json`;
-3. otherwise the name without its last extension, so `Dockerfile.prod` and
-   `Makefile.inc` still count as build files.
+1. The whole name, for build files that carry no extension — `Makefile`,
+   `Dockerfile`.
+2. The extension — `.tcl`, `.py`, `.json`.
+3. The name without its last extension, so `Dockerfile.prod` and `Makefile.inc`
+   still count.
 
-Matching ignores case. rio never looks inside the file — a `#!` line or an editor
-modeline does not change the language. A name that matches nothing, and a new tab
-that has no name yet, stay plain text. Saving under a new name with
-***File ▸ Save As…***, or renaming the file in the Files pane, picks again straight
-away. The status bar shows the language in use.
+Case is ignored. rio never looks inside the file: a `#!` line or an editor
+modeline changes nothing. A name that matches nothing, and a new tab with no
+name, stay plain text. Saving under a new name, or renaming the file in the
+Files pane, picks again at once. The status bar shows the language in use.
 
-When the name gets it wrong — code pasted into a new tab, a script with no
-extension — ***View ▸ Language…*** sets the language by hand. It lists:
+**To set the language yourself**, for code pasted into a new tab or a script
+with no extension, use ***View ▸ Language…***. It lists:
 
-- **Auto-detect**, with what the file name would give in brackets — go back to
-  choosing by name;
-- **Plain Text** — no highlighting at all;
+- **Auto-detect**, with what the file name would give in brackets;
+- **Plain Text**, no highlighting;
 - every language rio has, including highlighters you have
   [installed](extensions.md).
 
-The list opens on the current choice. It applies to the **current buffer only**,
-and it sticks: saving under another name or renaming the file keeps it until you
-choose Auto-detect again. It is not remembered when rio restarts — the reopened
-file is detected by name again. If you remove the extension that provided the
-chosen language, the buffer quietly goes back to detection.
+The list opens on the current choice. It applies to that one file, and it sticks
+through a save under another name or a rename until you choose Auto-detect
+again. It is not remembered when rio restarts. If you remove the extension that
+provided the language, the file goes back to detection.
 
 ## Column (block) editing
 
-Off by default; turn it on in ***Settings ▸ Column Editing***. Then
-**`Ctrl+Shift`+drag** a vertical cursor down through several lines. Typing,
-Backspace, Delete and Tab all act at that column on **every** line at once, and
-the whole thing is a single undo step. Drag a *width* as well as a height and
-typing overwrites the rectangular block you selected.
+Off by default. Turn it on in ***Settings ▸ Column Editing***.
 
-This is the Notepad++ behaviour, and it is off by default because `Ctrl+Shift`+drag
-is a normal selection gesture for people who don't use it.
+Then hold `Ctrl+Shift` and drag a vertical cursor down through several lines.
+Typing, Backspace, Delete and Tab act at that column on every line at once, and
+the whole thing is one undo step. Drag a *width* as well as a height and typing
+overwrites the rectangle you selected.
+
+This is Notepad++'s behaviour. It is off by default because `Ctrl+Shift`+drag is
+an ordinary selection gesture for anyone who does not use it.
 
 ## Comparing two documents
 
-The **Compare** menu swaps the editor surface for a **side-by-side diff**:
-original on the left, proposed on the right, added and removed lines coloured and
-kept aligned.
+The *Compare* menu replaces the editor with a side-by-side diff: original left,
+other version right, added and removed lines coloured and kept aligned.
 
-- ***Compare With Another Tab…*** — against another open buffer, the common case.
-- ***Compare With A File…*** — against any file on disk.
-- `Esc` (or ***Close Compare***) returns you to editing.
+| Menu item | Compares the current file with |
+| --------- | ------------------------------ |
+| ***Compare ▸ Compare With Another Tab…*** | another open file |
+| ***Compare ▸ Compare With A File…*** | any file on disk |
 
-The panes are read-only: compare is for *looking*, and rio would rather you edit
-in the editor than in a diff. You can still select in either pane and copy out of
-it, from the keyboard or with a [right-click](getting-started.md#right-click-menus).
-The [agent](agent.md) opens complex proposed edits in this same view.
+`Esc`, or ***Compare ▸ Close Compare***, returns you to editing.
+
+Both panes are read-only. You can select in either and copy out of it, from the
+keyboard or by [right-click](getting-started.md#right-click-menus). The
+[agent](agent.md) opens complex proposed edits in this same view.
 
 ## Opening a very large or binary file
 
-Most files just open. Two kinds get a question first, because reading them is a
-decision rather than a reflex:
+Most files just open. Two kinds are confirmed first.
 
-- **Too large** — bigger than 64 MB (67,108,864 bytes):
+**Too large** — bigger than 64 MB (67,108,864 bytes):
 
-  > core.dump is 1.2 GB — large enough that opening it may make rio slow to
-  > respond. Open it anyway?
+> core.dump is 1.2 GB — large enough that opening it may make rio slow to
+> respond. Open it anyway?
 
-- **Not text** — a core dump, a database, a compiled program:
+**Not text** — a core dump, a database, a compiled program:
 
-  > a.out looks like a binary file rather than text (10.4 MB). Open it anyway?
+> a.out looks like a binary file rather than text (10.4 MB). Open it anyway?
 
-Answer **no** and nothing opens at all: no tab, no buffer, and rio is as
-responsive as it was a moment ago. Answer **yes** and the file opens — and it may
-genuinely be slow, to appear and then to edit. That is what you were being warned
-about, not a fault.
+Answer **no** and nothing opens: no tab, no file loaded. Answer **yes** and the
+file opens, and it may genuinely be slow to appear and to edit.
 
-A file you open anyway starts as **Plain Text**. Highlighting only ever colours the
-part of the file you are looking at, so it is no longer what makes a huge buffer
-slow — but it does have to read down from the top of the file to know what it is
-looking at, and on a file this size that reading is the slow part. rio leaves it
-off; if the file turns out to be fine, ***View ▸ Language…*** turns it back on —
-see [syntax highlighting](#syntax-highlighting) above.
+A file you open anyway starts as **Plain Text**. Highlighting colours only what
+is on screen, but it has to read the file from the top to know how to colour
+it, and on a file this size that read is slow. If the file turns out to be
+fine, ***View ▸ Language…*** turns highlighting back on: see
+[syntax highlighting](#syntax-highlighting).
 
-**Every way of opening a file into a tab asks**: the Files pane,
-***File ▸ Open…***, a path on the command line, a file dragged in from your
-desktop's file manager, and the files a session reopens when you come back to a
-project. So a file you opened anyway is asked about again the next time rio
-starts — rio does not remember the answer, which is what keeps a saved session
-from reloading yesterday's core dump on every launch.
+Every way of opening a file asks: the Files pane, ***File ▸ Open…***, a path on
+the command line, a file dragged in from your file manager, and the files a
+session reopens. The answer is not remembered, so a saved session does not
+reload yesterday's core dump at every launch.
 
-Whether a file "looks binary" is judged from its **first 8 KB**: a NUL byte in
-there and rio calls it binary. The check runs before every single open, so it has
-to be cheap — a file that only turns binary further in opens without a question.
+"Looks binary" is judged from the first 8 KB: a NUL byte in there and rio calls
+it binary. The check runs before every open, so it has to be cheap. A file that
+only turns binary further in opens without a question.
 
 ## Encoding and line endings
 
-rio reads a file's text encoding and its line endings and writes back exactly what
-it found — an LF file stays LF on Windows, a CRLF file stays CRLF on Linux, and a
-UTF-8 file is not quietly re-encoded. Both are shown in the status bar, so what
-will be written is never a surprise.
+rio reads a file's text encoding and line endings and writes back exactly what
+it found. An LF file stays LF on Windows, a CRLF file stays CRLF on Linux, and a
+UTF-8 file is not re-encoded. Both are shown in the status bar.
 
-There is no "convert line endings" command yet. This is deliberate for now: silent
-whole-file rewrites are the thing this behaviour exists to prevent, so the
-conversion will arrive as an explicit action rather than as a side effect of
-saving.
+There is no "convert line endings" command yet. When it arrives it will be an
+explicit action, not a side effect of saving.
 
 ## Keeping your unsaved changes
 
-**rio never writes the file you are editing without a save.** "Autosave" means the
-opposite in some editors — there it writes your real file for you. Here it means
-what it means in emacs: what rio writes on its own is a **separate recovery copy**,
-so that losing the process — a crash, a power cut, or rio going down and taking its
-own core with it — costs you at most one copy's worth of typing rather than
-everything since your last `Ctrl+S`. Your file itself is still exactly what you last
-put there.
+**rio never writes the file you are editing without a save.** What it writes on
+its own is a *separate recovery copy*, so that losing the process to a crash or
+a power cut costs you at most one copy's worth of typing. Your file is still
+exactly what you last saved.
 
-Every 30 seconds, each open file you have changed since rio last copied it gets a
-copy. A copy is dropped the moment it is spent: when you **save** that file, when
-you **close** its tab, when you **reload** it from disk, and when you **rename** it
-or save it under another name. A buffer that has never been saved — a `Ctrl+N` tab
-with no name — gets no copy at all: there is no file to offer it back against.
+Every 30 seconds, each open file you have changed since the last copy gets one.
+A copy is deleted as soon as it is spent: when you **save** that file, **close**
+its tab, **reload** it from disk, or **rename** it or save it under another
+name. A file that has never been saved (a `Ctrl+N` tab with no name) gets no
+copy, because there is nothing to offer it back against.
 
-**Getting the changes back.** The next time you open a file that has a copy
-waiting, rio asks:
+### Getting the changes back
+
+The next time you open a file that has a copy waiting, rio asks:
 
 > “notes.md” has unsaved changes that rio kept when it last stopped — newer than
 > what is on disk.
 >
 > Take them back? The file itself is not touched, and this can be undone.
 
-Answer **yes** and the tab's text becomes the copy's, marked unsaved — nothing has
-reached disk, and `Ctrl+S` is still what commits it. It arrives as a **single undo
-step**, so `Ctrl+Z` puts the file's own text back if you would rather look at that
-after all.
+| Answer | What happens |
+| ------ | ------------ |
+| Yes | The tab's text becomes the copy's, marked unsaved. Nothing has reached disk; `Ctrl+S` still commits it. It arrives as a single undo step, so `Ctrl+Z` puts the file's own text back. |
+| No | The copy is left alone, not deleted. Closing that tab does delete it. |
 
-Answer **no** and rio leaves the copy alone rather than deleting it on a shrug.
-Closing the tab does delete it, though, so declining and then closing that tab
-means the copy is gone.
+Reopening a project asks about all its files in one question, not one per file.
 
-Reopening a project reopens several files at once, and rio asks about all of them
-in **one** question rather than one per file.
+**A copy can be older than the file**, and rio says so in capitals. That means
+something wrote the file after rio kept your copy: a `git pull`, a
+`git checkout`, another editor. The copy may hold work the file never had.
+That question defaults to **no**; a newer copy defaults to **yes**.
 
-**A copy can be older than the file**, and rio says so in capitals when it is. That
-is not a stale leftover to wave away: it means something wrote the file *after* rio
-kept your copy — a `git pull`, a `git checkout`, another editor — so the copy may
-hold work the file never had. Since taking it back is the less obvious choice
-there, that question defaults to **no**, where a newer copy defaults to **yes**.
+### Where the copies are kept
 
-**Where the copies live.** Out of your project, in rio's own data directory, on the
-machine running the **core** — so over a [remote core](remote.md) they are on the
-server, the same machine as the files themselves. Your file's own path is mirrored
-underneath, keeping emacs's `#name#` spelling:
+Outside your project, in rio's own data directory, on the machine running the
+**core**. Over a [remote core](remote.md) that is the server, beside the files
+themselves. Your file's path is mirrored underneath, with emacs's `#name#`
+spelling:
 
 ```
 /home/you/notes/todo.md
   → ~/.local/share/rio/autosave/home/you/notes/#todo.md#
 ```
 
-Out of the tree rather than beside the file, for the same reason session state is:
-it never shows up in `git status`, needs no `.gitignore` entry, and cannot be
-committed by accident. One side effect is worth knowing — `ls -R` over that
-directory is a plain report of what you have left unsaved and where it belongs.
+Keeping them out of your project means they never show up in `git status`, need
+no `.gitignore` entry, and cannot be committed by accident. `ls -R` over that
+directory lists what you have left unsaved and where it belongs.
 
-A copy carries the file's own encoding, byte-order mark and line endings, so what
-you get back is what a save would have written, not a CRLF file quietly turned into
-an LF one.
+A copy carries the file's own encoding, byte-order mark and line endings, so
+what you get back is what a save would have written.
 
-rio never tidies these up by itself. A copy for a file you never open again stays
-until you delete it.
+rio never tidies these up. A copy for a file you never open again stays until
+you delete it.
 
-**Turning it off.** ***Preferences ▸ Editor ▸ Keep recovery files for unsaved
-changes*** — on by default, and the only door to it: this is a policy you set once
-rather than something you flip while working, so it deliberately has no menu entry.
-It belongs to the **core**, kept in a file of its own rather than in `prefs.json`,
-because the copies land on the core's disk; see
-[preferences](preferences.md#recovery-files-for-unsaved-changes) for that file and
-the one thing in it you can only change by hand.
+### Turning it off
 
-Turning it off stops new copies. It does not delete the ones already written: rio
-still offers those back when you open the file, and still drops one when you save.
+***Preferences ▸ Editor ▸ Keep recovery files for unsaved changes*** — on by
+default, and the only place to change it. It belongs to the **core**, not to the
+window, because the copies land on the core's disk; see
+[preferences](preferences.md#recovery-files-for-unsaved-changes) for its file
+and the one setting in it you can only change by hand.
+
+Turning it off stops new copies. Copies already written are still offered back
+when you open the file, and are still deleted when you save.
 
 ## When a file changes underneath you
 
-Files move under an editor all the time — a `git pull`, a build, a discard from the
-[git pane](git.md), another window. rio checks its open tabs when one of its own
-writes lands and again when you switch back to the rio window, and then does the
-least surprising thing:
+Files move under an editor all the time: a `git pull`, a build, a discard from
+the [git pane](git.md), another window. rio checks its open tabs when one of its
+own writes lands, and again when you switch back to the rio window.
 
-- **You had no unsaved edits.** The tab reloads from disk, quietly. Nothing was
-  yours to lose. It is a single undo step, so `Ctrl+Z` puts back what you were
-  looking at.
-- **You had unsaved edits.** rio asks before touching them, and the default answer
-  is *no* — keep what you typed. Answer no and rio stops asking about that
-  version; if the file changes again afterwards, it asks again.
-- **The file was deleted.** rio asks whether to keep it open in the editor. Keep it
-  and the tab stays, marked unsaved, because your copy is now the only one — saving
-  it recreates the file. Decline and the tab closes.
+| Your tab | What rio does |
+| -------- | ------------- |
+| No unsaved edits | Reloads from disk, quietly. It is one undo step, so `Ctrl+Z` puts back what you were looking at. |
+| Unsaved edits | Asks first, defaulting to *no* — keep what you typed. Answer no and rio stops asking about that version; a later change asks again. |
+| File deleted | Asks whether to keep it open. Keep it and the tab stays, marked unsaved, because your copy is the only one left — saving recreates the file. Decline and the tab closes. |
 
-rio does not watch the filesystem continuously, so a change made while you are
-sitting in rio is noticed the next time rio writes something itself or you leave
-and come back — not the instant it happens.
+rio does not watch the filesystem continuously. A change made while you sit in
+rio is noticed the next time rio writes something itself, or when you leave and
+come back.
 
 ## Further reading
 
-- [Keyboard shortcuts](keyboard.md) — the full default chord list, and remapping.
-- [Editing modes](editing-modes.md) — vi and emacs keys inside the text area.
-- [Find & replace](find-and-replace.md) — searching this buffer or the project.
+- [Keyboard shortcuts](keyboard.md) — the default chords, and remapping.
+- [Editing modes](editing-modes.md) — vi and emacs keys in the text area.
+- [Find & replace](find-and-replace.md) — searching this file or the project.
 - [Panels & layout](panels-and-layout.md) — themes, docking, and the tool panes.

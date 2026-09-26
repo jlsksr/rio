@@ -3,23 +3,30 @@
 What the keys do *inside* the text area: Windows by default, or vi or emacs once
 installed.
 
-**This topic is still to be written.** It will cover: the shipped **Windows** mode
-(Notepad/VSCode keys — `Ctrl+A` selects all, `Ctrl+V` pastes); **emacs/readline**
-(`Ctrl+A`/`Ctrl+E` line motion, `Ctrl+K` kill, `Ctrl+V` scrolls); **vi** (modal
-editing — motions, counts, the `d`/`c`/`y` operators, visual mode, a block cursor
-in normal mode, and its own undo granularity); choosing one in *Settings ▸ Editing
-Mode*; the mode indicator in the status bar; and writing or dropping in a mode of
-your own.
+Pick one in ***Settings ▸ Editing Mode***.
 
-Until then, the *Editing modes* entry in [README.md](../README.md) summarises all
-three, and [preferences](preferences.md#editing-modes-beyond-windows) explains how
-vi and emacs are installed and where they live.
+| Mode | Keys |
+| ---- | ---- |
+| Windows | Notepad and VS Code keys: `Ctrl+A` selects all, `Ctrl+V` pastes. Ships with rio. |
+| emacs | readline motions: `Ctrl+A` and `Ctrl+E` for start and end of line, `Ctrl+K` kills, `Ctrl+V` scrolls. An [extension](extensions.md). |
+| vi | Modal editing: motions, counts, the `d`, `c` and `y` operators, visual mode, a block cursor in normal mode, and vi's own undo granularity. An [extension](extensions.md). |
 
-Two rules hold in every mode, and are worth knowing now:
+**This topic is still to be written.** It will cover each mode's keys in full,
+the mode indicator in the status bar, and writing or dropping in a mode of your
+own.
+
+Until then, the *Editing modes* entry in [README.md](../README.md) summarises
+all three, and [preferences](preferences.md#editing-modes-beyond-windows)
+explains how vi and emacs are installed and where they live.
+
+## Two rules that hold in every mode
 
 - **App shortcuts always win.** `Ctrl+S` saves even in vi's insert mode.
 - **The mode owns the clipboard keys**, which is why the *Edit* menu shows no
-  accelerators beside Cut, Copy and Paste — the menu commands work regardless.
+  accelerators beside Cut, Copy and Paste. The menu commands work regardless.
 
-- [Keyboard shortcuts](keyboard.md) — the app chords, which are separate from this.
-- [The editor](editor.md#undo-and-redo) — undo granularity, including vi's.
+## Further reading
+
+- [Keyboard shortcuts](keyboard.md) — the app chords, which are separate from
+  the mode's keys.
+- [The editor](editor.md#undo-and-redo) — undo granularity, vi's included.

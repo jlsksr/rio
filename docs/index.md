@@ -1,90 +1,71 @@
 # The rio manual
 
-This is rio's user manual: how to use the editor, what each part of the window
-does, and where your settings live. It is written for someone using rio, not
-building it — no Tcl required.
+How to use rio: what each part of the window does, how to do the everyday jobs,
+and where your settings are kept. No Tcl required.
 
-The manual is a set of **topics**, one per file. Read it in order for a tour, or
-jump to the topic you need.
+Inside rio, press `F1` or choose ***Help ▸ Contents…*** to read these pages.
 
 ## Contents
 
 ### Start here
 
-- [Getting started](getting-started.md) — launching rio, the window explained,
+- [Getting started](getting-started.md) — starting rio, the parts of the window,
   your first edit and save.
-- [The editor](editor.md) — typing, selecting, undo, tabs, the split view,
-  line wrap, syntax highlighting, columns, unsaved changes.
+- [The editor](editor.md) — tabs, undo, the split view, wrap, line numbers,
+  syntax highlighting, column editing, compare, unsaved changes.
 - [Files & projects](files-and-projects.md) — the file tree, opening a folder,
   creating and renaming files, sessions.
 
 ### Doing the work
 
-- [Find & replace](find-and-replace.md) — the find bar, the Search panel, and
-  the scopes each one covers.
-- [Git](git.md) — the git pane: status, diffs, staging, committing, discarding.
-- [The agent](agent.md) — providers and keys, what the agent may do on its own,
-  and what waits for your approval.
+- [Find & replace](find-and-replace.md) — the find bar, and the Search panel for
+  a whole project.
+- [Git](git.md) — status, diffs, staging, committing, discarding.
+- [The agent](agent.md) — providers and keys, and what the agent needs your
+  approval for.
 
 ### Making it yours
 
-- [Preferences](preferences.md) — every setting, what it does, and where rio
-  keeps it on disk.
-- [Keyboard shortcuts](keyboard.md) — the default chords and how to remap them.
+- [Preferences](preferences.md) — every setting, and the file it is kept in.
+- [Keyboard shortcuts](keyboard.md) — the defaults, and two ways to change them.
 - [Panels & layout](panels-and-layout.md) — moving panes, themes, fonts, zoom.
-- [Editing modes](editing-modes.md) — Windows, vi, or emacs keys in the text area.
-- [Extensions](extensions.md) — repositories, signatures, installing themes,
-  highlighters, modes and agent providers.
+- [Editing modes](editing-modes.md) — Windows, vi or emacs keys in the text
+  area.
+- [Extensions](extensions.md) — repositories, and installing themes,
+  highlighters, editing modes and agent providers.
 
 ### Beyond one machine
 
-- [Working remotely](remote.md) — editing files on another box over an SSH tunnel.
+- [Working remotely](remote.md) — editing files on another machine.
 - [Troubleshooting](troubleshooting.md) — what to check when rio misbehaves.
 
-## Where else to look
+## Reading the manual inside rio
 
-The manual is one of several documents, each with its own job. It owns **how to
-use rio**; the others own what they say on the tin, and the manual links to them
-rather than repeating them:
+***Help ▸ Contents…*** (`F1`) opens these pages in rio, formatted, from disk. No
+network connection is needed.
+
+| In the help window | What it does |
+| ------------------ | ------------ |
+| The contents list on the left | Click a topic to open it. |
+| A link in the text | Click it to jump to that topic, or to that heading. |
+| `Alt+←` / `Alt+→` | Back and forward through the topics you have read. |
+| The Find box, top left | Type a word. The list becomes the sections that mention it; pick one to go there with the word highlighted. |
+| Right-click the page | Copy. The pages are read-only, but you can select and copy from them. |
+| `Esc` | Clears the Find box; pressing it again closes the window. |
+
+## Other documents
 
 | Document | Answers |
 | -------- | ------- |
-| [INSTALL.md](../INSTALL.md) | How do I install, deploy, and run rio? |
+| [INSTALL.md](../INSTALL.md) | How do I install, deploy and run rio? |
 | [CAVEATS.md](../CAVEATS.md) | Known rough edges and platform differences |
 | [README.md](../README.md) | What is rio, and what works today? |
 | [WINDOWS.md](../WINDOWS.md) | Running rio on Windows 11 |
-| [AGENTS.md](../AGENTS.md) | The design log — *why* rio works the way it does |
+| [AGENTS.md](../AGENTS.md) | The design log — why rio works the way it does |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Hacking on rio itself |
 | [LICENSE](../LICENSE) | May I use, change and pass rio on? |
 
-## About these pages
+## Unfinished topics
 
-The manual is plain Markdown, kept in the source tree alongside the code it
-describes — so a feature and its page land together, and so rio can show these
-pages itself, from disk, with no network. It does: ***Help ▸ Contents…***, or
-`F1`, opens this contents page and every topic in it, formatted rather than as
-source. Links are live in there — click one to jump to the topic (or the heading)
-it names, and `Alt+←` / `Alt+→` walk back and forward through where you have
-been. The **Find** box searches the whole manual: type a word and the contents
-list becomes the sections that mention it, so picking one takes you straight to
-that heading with the word highlighted. The page itself is read-only, but you can
-select in it and right-click for *Copy* — a command in a code block is meant to be
-lifted out. That intent shapes how they are written:
-
-- **One topic per file, and the filename is the topic's name.** Filenames are
-  stable: they are how a page is linked to, and how rio finds a topic to show you.
-- **The first heading is the topic title**, matching its line in this contents
-  page, and the first sentence says what the topic covers.
-- **Links between topics are relative** — `[the editor](editor.md)` — so they
-  keep working whether you read the files, browse them on the web, or open them
-  inside rio.
-- **A restrained slice of Markdown:** headings, paragraphs, lists, links, bold
-  and italic, inline code, fenced code blocks, simple tables, and blockquotes for
-  the occasional aside. No HTML, no images, no footnotes, no nested tables — only
-  what a plain text window can render.
-- **Plain voice.** What you do, and what rio does in return. Where a rule is
-  easier to remember with its reason attached, the reason is one sentence, not a
-  design essay; the essays live in [AGENTS.md](../AGENTS.md).
-
-Some topics are still stubs. A stub says so, says what it will cover, and points
-at the document that has the facts today — it never leaves you with nothing.
+Some topics are placeholders. Each one says so, lists what it will cover, and
+points at the document that has the facts today.
