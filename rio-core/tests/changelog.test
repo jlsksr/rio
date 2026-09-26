@@ -176,14 +176,22 @@ test changelog-cites-only-decisions-that-exist {the other direction: an entry ci
 
 test changelog-release-heading-carries-rios-version {the heading is a fact with a second
 		home — rio-core/version.tcl. Read from the file, not typed here, so a bump that
-		forgets the changelog fails} -body {
+		forgets the changelog fails. Every heading's SHAPE is held too; the COUNT is not,
+		or the check would be false from rio's second release onward} -body {
 	set headings {}
 	foreach line [split $::changelog \n] {
 		if {[regexp {^## (.+)$} $line -> h]} { lappend headings [string trim $h] }
 	}
+	set bad {}
+	foreach h $headings {
+		if {![regexp {^\[\d+\.\d+\.\d+\] — (unreleased|\d{4}-\d{2}-\d{2})$} $h]} {
+			lappend bad $h
+		}
+	}
 	set top [lindex $headings 0]
-	list [llength $headings] [regexp "^\\\[[string map {. \\.} $::rio::version]\\\]" $top]
-} -result {1 1}
+	list $bad [expr {[llength $headings] > 0}] \
+		[regexp "^\\\[[string map {. \\.} $::rio::version]\\\]" $top]
+} -result {{} 1 1}
 
 test changelog-sections-are-keep-a-changelog {the vocabulary is the format's, and the
 		order is the format's order — an invented section name means an entry lands
@@ -191,10 +199,12 @@ test changelog-sections-are-keep-a-changelog {the vocabulary is the format's, an
 	set canon {Added Changed Deprecated Removed Fixed Security}
 	set seen {}
 	foreach line [split $::changelog \n] {
+		if {[regexp {^## [^#]} $line]} { lappend seen "|release|" }
 		if {[regexp {^### (.+)$} $line -> h]} { lappend seen [string trim $h] }
 	}
 	set bad {} ; set last -1
 	foreach s $seen {
+		if {$s eq "|release|"} { set last -1 ; continue }
 		set i [lsearch -exact $canon $s]
 		if {$i < 0} { lappend bad "$s: not a Keep a Changelog section" ; continue }
 		if {$i <= $last} { lappend bad "$s: out of order" }

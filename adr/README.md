@@ -200,3 +200,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0136](0136-install-script-per-platform.md) | One install script per platform, and a launcher that makes rio an application | Accepted | 2026-09-22 |
 | [0137](0137-extensions-configure-themselves.md) | A top-level Extensions menu; each extension configures itself | Accepted | 2026-09-23 |
 | [0138](0138-provider-profiles-and-file-options.md) | A provider keeps several named configurations, and an option may name a file | Accepted | 2026-09-23 |
+| [0139](0139-autosave-recovery-copies.md) | Autosave writes a separate recovery copy, never the file you are editing | Accepted | 2026-09-26 |

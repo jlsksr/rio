@@ -17,6 +17,12 @@ or one that looks like a binary rather than text, is confirmed with a yes/no
 question first — including the files a session reopens for you. That half is
 documented in [the editor](editor.md#opening-a-very-large-or-binary-file).
 
+Reopening a project can also raise one other question. If rio stopped while some of
+those files had unsaved changes, it kept a copy of each — and offers the whole set
+back in a single question once everything is open.
+[The editor](editor.md#keeping-your-unsaved-changes) covers that, along with where
+the copies are kept and how to turn them off.
+
 Rows in a git repository also carry their **git status**, and their row menu the
 git verbs that go with it — including *Discard Changes…*, so undoing your edits to
 a file is reachable from wherever you happen to be looking at it. That half is

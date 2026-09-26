@@ -70,8 +70,18 @@ proc rio::ops::file_open {params} {
 		if {[dict exists $info $k]} { dict set meta $k [dict get $info $k] }
 	}
 	set id [rio::doc::new [dict get $info text] $name $meta]
+	# The fresh buffer IS the file, so autosave has nothing to write for it yet (D132).
+	# A recovery copy left by a previous session is reported as a FACT and never acted on
+	# here: whether to take it is the frontend's question (D125). `recovery` is "" when
+	# there is none. Flat string keys, so they ride the default encoder and adding them
+	# owes no protocol bump (D55/D19) — a client too old simply ignores them.
+	rio::autosave::note_saved $id
+	set rec [rio::autosave::recovery_for $path]
 	return [dict create result [dict create \
 		buffer    $id \
+		recovery       [expr {[dict exists $rec path]  ? [dict get $rec path]  : ""}] \
+		recovery_mtime [expr {[dict exists $rec mtime] ? [dict get $rec mtime] : ""}] \
+		recovery_newer [expr {[dict exists $rec newer] ? [dict get $rec newer] : 0}] \
 		name      $name \
 		encoding  [dict get $info encoding] \
 		eol       [dict get $info eol] \
@@ -101,6 +111,13 @@ proc rio::ops::file_save {params} {
 	# seen. Without it every save would leave the buffer looking stale against its own
 	# write, and the next check would ask about a change the user made themselves (D94).
 	_restamp $id $path
+	# The file now holds what the buffer holds, so the recovery copy is spent. Dropped
+	# whether or not autosave is enabled, so one left by an earlier session is cleaned up
+	# too; on a save-as the OLD name's copy goes as well, since nothing points at it any
+	# more and it could never be offered back (D132).
+	rio::autosave::note_saved $id
+	rio::autosave::discard_path $path
+	if {$stored ne $path && $stored ne ""} { rio::autosave::discard_path $stored }
 	return [dict create result [dict create path $path]]
 }
 

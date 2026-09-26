@@ -11,6 +11,26 @@ decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
+## [0.2.0] — unreleased
+
+### Added
+
+- **Autosave, so a crash costs you half a minute at most** — rio now keeps a **recovery
+  copy** of every file you have changed and offers it back the next time you open that file.
+  It is emacs's kind of autosave, not VSCode's: **the file you are editing is never written
+  without an explicit save**, so a save still means what it meant. The copies live outside
+  your project, with the core, at `$XDG_DATA_HOME/rio/autosave/` — so they never show up in
+  `git status`, never need a `.gitignore` and can never be committed by accident — and each
+  one reproduces the file's encoding, BOM and line endings, so taking one back gives you what
+  a save would have written. Taking it back marks the buffer modified rather than touching the
+  file, and is a single undo step, so Ctrl+Z puts the file's own text back. A copy older than
+  the file on disk is still offered, because it can hold work the file never had, and the
+  prompt says which way round it is. Reopening a whole session's worth of such files asks
+  once, not once per file. On by default; ***Preferences ▸ Editor*** turns it off, and
+  `autosave.conf` holds the interval for anyone who wants it tighter or looser. An untitled
+  buffer gets no copy — there is no name to offer it back under. — *D132 · `cd00b19` ·
+  2026-09-26*
+
 ## [0.1.0] — 2026-09-23
 
 Everything below is rio's first release, built between 2026-06-24 and the day it was

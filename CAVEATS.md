@@ -290,3 +290,27 @@ design limit that surprises, append it to the matching section.
 - **Planned.** Comparing a **content hash** instead of the mtime/size pair closes it
   completely; named as the upgrade path in **D94**, deliberately not paid for up front since
   it costs a full re-read of every open file on every check.
+
+### A recovery copy can be skipped on Windows, and one can outlive its file
+
+- **Symptom.** Two small gaps in autosave (AGENTS.md **D132**, and *Keeping your unsaved
+  changes* in [docs/editor.md](docs/editor.md)). On **Windows**, a file deep inside a deeply
+  nested project may get no recovery copy at all. And on every platform, a copy belonging to
+  a file you never open in rio again stays on disk.
+- **Cause.** A copy's path mirrors the file's own directory below
+  `$XDG_DATA_HOME/rio/autosave/`, so its length is the file's path plus that root. Windows
+  caps a path at `MAX_PATH` (260 characters) for most APIs, and past it the write simply
+  fails. And a copy is dropped when the buffer it belongs to is saved, closed, reloaded or
+  renamed — all of which need rio to still have that buffer. Nothing collects one left behind
+  by a core that died.
+- **Where it's fine.** A failed write is caught and skips that one buffer: the sweep goes on,
+  the timer survives, and every other open file is still protected. Nothing is lost that was
+  not already only in memory. The leftovers are a few kilobytes each, in one place, outside
+  your project — so they never reach `git status` and never touch a build.
+- **Mitigation.** Keep projects nearer the drive root on Windows, or set `XDG_DATA_HOME` to a
+  short path. To clear leftovers, delete anything under the autosave root you do not recognise
+  — `ls -R` there is a readable list of what rio thinks is unsaved, and a copy whose file you
+  have since saved elsewhere is of no use to anyone. Nothing there is needed by a running rio.
+- **Planned.** A core-side sweep for copies whose file has not been opened for some time is on
+  ROADMAP. The Windows limit has no fix short of hashing the directory instead of mirroring
+  it, which would trade away exactly the readability that makes the leftovers manageable.

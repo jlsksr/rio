@@ -1,8 +1,8 @@
 # The editor
 
 The text area and everything around it: tabs, undo, the split view, line wrap,
-line numbers, syntax highlighting, column editing, and the side-by-side compare
-view.
+line numbers, syntax highlighting, column editing, the side-by-side compare view,
+and what happens to changes you have not saved yet.
 
 ## Tabs
 
@@ -250,6 +250,81 @@ There is no "convert line endings" command yet. This is deliberate for now: sile
 whole-file rewrites are the thing this behaviour exists to prevent, so the
 conversion will arrive as an explicit action rather than as a side effect of
 saving.
+
+## Keeping your unsaved changes
+
+**rio never writes the file you are editing without a save.** "Autosave" means the
+opposite in some editors — there it writes your real file for you. Here it means
+what it means in emacs: what rio writes on its own is a **separate recovery copy**,
+so that losing the process — a crash, a power cut, or rio going down and taking its
+own core with it — costs you at most one copy's worth of typing rather than
+everything since your last `Ctrl+S`. Your file itself is still exactly what you last
+put there.
+
+Every 30 seconds, each open file you have changed since rio last copied it gets a
+copy. A copy is dropped the moment it is spent: when you **save** that file, when
+you **close** its tab, when you **reload** it from disk, and when you **rename** it
+or save it under another name. A buffer that has never been saved — a `Ctrl+N` tab
+with no name — gets no copy at all: there is no file to offer it back against.
+
+**Getting the changes back.** The next time you open a file that has a copy
+waiting, rio asks:
+
+> “notes.md” has unsaved changes that rio kept when it last stopped — newer than
+> what is on disk.
+>
+> Take them back? The file itself is not touched, and this can be undone.
+
+Answer **yes** and the tab's text becomes the copy's, marked unsaved — nothing has
+reached disk, and `Ctrl+S` is still what commits it. It arrives as a **single undo
+step**, so `Ctrl+Z` puts the file's own text back if you would rather look at that
+after all.
+
+Answer **no** and rio leaves the copy alone rather than deleting it on a shrug.
+Closing the tab does delete it, though, so declining and then closing that tab
+means the copy is gone.
+
+Reopening a project reopens several files at once, and rio asks about all of them
+in **one** question rather than one per file.
+
+**A copy can be older than the file**, and rio says so in capitals when it is. That
+is not a stale leftover to wave away: it means something wrote the file *after* rio
+kept your copy — a `git pull`, a `git checkout`, another editor — so the copy may
+hold work the file never had. Since taking it back is the less obvious choice
+there, that question defaults to **no**, where a newer copy defaults to **yes**.
+
+**Where the copies live.** Out of your project, in rio's own data directory, on the
+machine running the **core** — so over a [remote core](remote.md) they are on the
+server, the same machine as the files themselves. Your file's own path is mirrored
+underneath, keeping emacs's `#name#` spelling:
+
+```
+/home/you/notes/todo.md
+  → ~/.local/share/rio/autosave/home/you/notes/#todo.md#
+```
+
+Out of the tree rather than beside the file, for the same reason session state is:
+it never shows up in `git status`, needs no `.gitignore` entry, and cannot be
+committed by accident. One side effect is worth knowing — `ls -R` over that
+directory is a plain report of what you have left unsaved and where it belongs.
+
+A copy carries the file's own encoding, byte-order mark and line endings, so what
+you get back is what a save would have written, not a CRLF file quietly turned into
+an LF one.
+
+rio never tidies these up by itself. A copy for a file you never open again stays
+until you delete it.
+
+**Turning it off.** ***Preferences ▸ Editor ▸ Keep recovery files for unsaved
+changes*** — on by default, and the only door to it: this is a policy you set once
+rather than something you flip while working, so it deliberately has no menu entry.
+It belongs to the **core**, kept in a file of its own rather than in `prefs.json`,
+because the copies land on the core's disk; see
+[preferences](preferences.md#recovery-files-for-unsaved-changes) for that file and
+the one thing in it you can only change by hand.
+
+Turning it off stops new copies. It does not delete the ones already written: rio
+still offers those back when you open the file, and still drops one when you save.
 
 ## When a file changes underneath you
 

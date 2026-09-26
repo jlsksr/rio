@@ -1,0 +1,669 @@
+# Tests for automatic recovery files (AGENTS.md D132): rio::autosave — where a copy goes,
+# when one is written, when it is dropped, and what a file has waiting for it — plus the
+# autosave.* settings ops and buffers.recover, driven through the in-process core so the
+# events (and the deliberate ABSENCE of events) are asserted too.
+
+# The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
+# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+if {[encoding system] ne "utf-8"} {
+	encoding system utf-8
+	source -encoding utf-8 [info script]
+	return
+}
+package require tcltest
+namespace import ::tcltest::*
+package require json
+
+source [file join [file dirname [info script]] .. core.tcl]
+
+# One throwaway autosave root and one throwaway autosave.conf for the whole run, so nothing
+# here can touch (or be touched by) the real ones under $XDG_DATA_HOME / $XDG_CONFIG_HOME.
+set _ch [file tempfile _asbase] ; close $_ch ; file delete $_asbase
+set ::asroot "$_asbase.autosave"
+set ::asconf "$_asbase.conf"
+set rio::autosave::dir_override $::asroot
+set rio::autosave::settings_override $::asconf
+
+# A real child core over a pipe, for the one case that needs the timer to actually run.
+# stdio.test carries the same two helpers for its own cases: the duplication is deliberate,
+# because the alternative is a second copy of the recovery-path RULE, and that is the copy
+# which must not exist (rio::autosave::path_for answers it here).
+set ::serverTcl [file normalize [file join [file dirname [info script]] .. server.tcl]]
+proc spawn_core {} {
+	set cmd [list [info nameofexecutable] $::serverTcl --stdio]
+	set nul [expr {$::tcl_platform(platform) eq "windows" ? "NUL" : "/dev/null"}]
+	set c [open "| $cmd 2>$nul" r+]
+	fconfigure $c -buffering line -translation lf -encoding utf-8
+	return $c
+}
+# One request, and the reply carrying its id — skipping the events that precede it (D11).
+proc core_send {c id op params} {
+	puts $c "{\"id\":\"$id\",\"op\":\"$op\",\"params\":$params}"
+	flush $c
+	while {[gets $c line] >= 0} {
+		if {[string trim $line] eq ""} continue
+		set d [json::json2dict $line]
+		if {[dict exists $d id] && [dict get $d id] eq $id} { return $d }
+	}
+	return {}
+}
+
+proc mkfile {text} {
+	set f [file tempfile path]
+	fconfigure $f -translation binary
+	puts -nonewline $f $text
+	close $f
+	return $path
+}
+proc rawbytes {path} {
+	set f [open $path rb] ; set s [read $f] ; close $f ; return $s
+}
+proc callr {op params} { return [dict get [rio::core::call $op $params] response] }
+proc calle {op params} { return [dict get [rio::core::call $op $params] events] }
+proc openres {path} { return [dict get [callr file.open [dict create path $path]] result] }
+proc openbuf {path} { return [dict get [openres $path] buffer] }
+# The recovery copy's path, and its text.
+proc ascopy {path} { return [rio::autosave::path_for $path] }
+proc asread {path} { return [dict get [rio::fs::read [ascopy $path]] text] }
+# sweep asks about EVERY open buffer, so a test that counts what it wrote starts from an
+# empty set — otherwise it would answer about fixtures an earlier test left behind.
+proc reset_bufs {} {
+	foreach b [rio::doc::inventory] { rio::doc::close [dict get $b buffer] }
+}
+proc spitconf {s} {
+	file mkdir [file dirname $::asconf]
+	set f [open $::asconf w] ; fconfigure $f -encoding utf-8 ; puts -nonewline $f $s ; close $f
+}
+proc noconf {} { file delete -force $::asconf }
+# Make `path` unambiguously OLDER than its recovery copy: mtime is whole seconds on some
+# filesystems, so a fixture built inside one second would otherwise be a coin toss.
+proc age {path {secs 5}} { file mtime $path [expr {[file mtime $path] - $secs}] }
+
+# --- where a copy goes ------------------------------------------------------------------
+
+test autosave-path-mirrors-the-directory {a copy sits under the autosave root with the file's
+		own directory mirrored below it, keeping emacs's #name# spelling} -body {
+	rio::autosave::path_for /home/jka/Projekte/rio/README.md
+} -result [file join $::asroot home jka Projekte rio "#README.md#"]
+
+test autosave-path-of-a-file-in-the-filesystem-root {nothing to mirror, so the copy sits at
+		the root of the autosave tree} -body {
+	rio::autosave::path_for /x.txt
+} -result [file join $::asroot "#x.txt#"]
+
+test autosave-path-is-empty-without-a-file {no path, no copy — an untitled buffer is out of
+		scope (D132)} -body {
+	rio::autosave::path_for ""
+} -result {}
+
+test autosave-mirror-posix-head {an absolute POSIX path loses its leading slash, so the
+		segments stay RELATIVE: `file join /a /b` is "/b", and an absolute remainder would
+		escape the autosave root and write over something real} -body {
+	rio::autosave::_mirror_parts [list / home jka]
+} -result {home jka}
+
+test autosave-mirror-windows-volume {a volume becomes one readable segment. This is the
+		branch a `file split` on Linux never produces, which is exactly why the mapping is
+		its own proc and is tested here directly rather than through a path} -body {
+	rio::autosave::_mirror_parts [list C:/ Users jka x]
+} -result {C Users jka x}
+
+test autosave-mirror-unc-head {a UNC head is flattened into ONE segment rather than trusted
+		to stay relative} -body {
+	rio::autosave::_mirror_parts [list //server/share dir]
+} -result {__server_share dir}
+
+test autosave-path-stays-under-the-root {whatever the path's shape, the copy is inside the
+		autosave root — checked in path_for, not assumed} -body {
+	set r [rio::autosave::root]
+	set out {}
+	foreach f {/a/b.txt /b.txt /x/../y/z.txt ../up/one.txt} {
+		set p [rio::autosave::path_for $f]
+		lappend out [expr {$p ne "" && [string first "$r/" "$p/"] == 0}]
+	}
+	set out
+} -result {1 1 1 1}
+
+# --- the setting: autosave.conf ---------------------------------------------------------
+
+test autosave-on-with-no-conf-file {no file at all means ON. The safe side here is protecting
+		work, which is the OPPOSITE of tls.conf's fail-closed rule and deliberate} -setup {
+	noconf
+} -body {
+	rio::autosave::enabled
+} -result 1
+
+test autosave-off-when-said-so {an explicit off disables it, and on re-enables} -body {
+	spitconf "autosave = off\n"
+	set a [rio::autosave::enabled]
+	spitconf "autosave = on\n"
+	list $a [rio::autosave::enabled]
+} -cleanup {noconf} -result {0 1}
+
+test autosave-off-spellings {the plain ways of writing no} -body {
+	set out {}
+	foreach v {off OFF 0 no false} {
+		spitconf "autosave = $v\n"
+		lappend out [rio::autosave::enabled]
+	}
+	set out
+} -cleanup {noconf} -result {0 0 0 0 0}
+
+test autosave-a-value-it-does-not-understand-leaves-it-on {a typo must not silently switch
+		off the thing standing between the user and a lost afternoon} -body {
+	spitconf "autosave = of\n"
+	rio::autosave::enabled
+} -cleanup {noconf} -result 1
+
+test autosave-malformed-conf-leaves-it-on {an unparseable file is not an instruction} -body {
+	spitconf "@@ this is not a conf file @@\n\[unterminated\n"
+	rio::autosave::enabled
+} -cleanup {noconf} -result 1
+
+test autosave-interval-default {with nothing said, half a minute} -setup {noconf} -body {
+	rio::autosave::interval
+} -result 30000
+
+test autosave-interval-from-the-conf {a hand-set interval is honoured} -body {
+	spitconf "interval_ms = 5000\n"
+	rio::autosave::interval
+} -cleanup {noconf} -result 5000
+
+test autosave-interval-has-a-floor {a sub-second interval is floored, so a hand edit cannot
+		turn the timer into a busy loop} -body {
+	spitconf "interval_ms = 10\n"
+	rio::autosave::interval
+} -cleanup {noconf} -result 1000
+
+test autosave-interval-nonsense-falls-back {not a number is not an interval} -body {
+	spitconf "interval_ms = soon\n"
+	rio::autosave::interval
+} -cleanup {noconf} -result 30000
+
+test autosave-set-keeps-a-hand-tuned-interval {ticking the box off and on must not silently
+		discard an interval someone set by hand, so it is read back before the rewrite} -body {
+	spitconf "autosave = on\ninterval_ms = 4000\n"
+	rio::autosave::set_enabled 0
+	list [rio::autosave::enabled] [rio::autosave::interval]
+} -cleanup {noconf} -result {0 4000}
+
+test autosave-set-writes-a-file-its-own-reader-understands {round trip through rio::conf} -setup {
+	noconf
+} -body {
+	rio::autosave::set_enabled 0
+	set off [rio::autosave::enabled]
+	rio::autosave::set_enabled 1
+	list $off [rio::autosave::enabled] [regexp {D132} [rawbytes $::asconf]]
+} -cleanup {noconf} -result {0 1 1}
+
+# --- the document's change counter ------------------------------------------------------
+
+test autosave-revision-counts-every-mutation {edit, undo, redo, settext and replace_all all
+		route through rio::doc::replace, so one counter in that one place catches them all
+		— which is why the counter lives there} -body {
+	set b [rio::doc::new "a\n"]
+	set out [list [rio::doc::revision $b]]
+	rio::doc::edit $b 1.1 1.1 "b" ; lappend out [rio::doc::revision $b]
+	rio::doc::undo $b             ; lappend out [rio::doc::revision $b]
+	rio::doc::redo $b             ; lappend out [rio::doc::revision $b]
+	rio::doc::settext $b "z\n"    ; lappend out [rio::doc::revision $b]
+	rio::doc::replace_all $b z y  ; lappend out [rio::doc::revision $b]
+	set out
+} -result {0 1 2 3 4 5}
+
+test autosave-revision-ignores-reads {looking at a buffer is not changing it} -body {
+	set b [rio::doc::new "alpha\n"]
+	rio::doc::text $b
+	rio::doc::lines $b
+	rio::doc::linecount $b
+	rio::doc::find $b alpha 1.0
+	rio::doc::revision $b
+} -result 0
+
+test autosave-revision-needs-a-buffer {} -body {
+	rio::doc::revision 999999
+} -returnCodes error -result {no such buffer: 999999}
+
+test autosave-dirty-until-someone-has-written-it {a buffer nobody has noted counts as
+		changed: better one needless copy than none} -body {
+	set b [rio::doc::new "x\n" x {path /tmp/nowhere/x.txt}]
+	set a [rio::autosave::dirty $b]
+	rio::autosave::note_saved $b
+	set c [rio::autosave::dirty $b]
+	rio::doc::edit $b 1.1 1.1 "y"
+	set d [rio::autosave::dirty $b]
+	rio::doc::undo $b
+	list $a $c $d [rio::autosave::dirty $b]
+} -result {1 0 1 1}
+
+# --- writing --------------------------------------------------------------------------
+
+test autosave-sweep-writes-a-changed-buffer {} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	list [rio::autosave::sweep] [file exists [ascopy $p]] [asread $p]
+} -result [list 1 1 "hello!\n"]
+
+test autosave-sweep-skips-a-buffer-that-has-not-changed {a freshly opened buffer IS the file,
+		so there is nothing to write} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	openbuf $p
+	list [rio::autosave::sweep] [file exists [ascopy $p]]
+} -result {0 0}
+
+test autosave-sweep-skips-a-buffer-with-no-file {an untitled buffer has nowhere to put a
+		copy; recovering one would need an identity it does not have (D132)} -setup {
+	reset_bufs
+} -body {
+	set b [rio::doc::new "notes\n"]
+	rio::doc::edit $b 1.0 1.0 "x"
+	rio::autosave::sweep
+} -result 0
+
+test autosave-sweep-writes-once-per-change {a second sweep with nothing new to say writes
+		nothing} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	list [rio::autosave::sweep] [rio::autosave::sweep]
+} -result {1 0}
+
+test autosave-copy-keeps-the-encoding-bom-and-line-endings {the copy reproduces what a save
+		would have written (D22), so a recovery hands back the same bytes and not a file
+		silently converted to LF} -setup {reset_bufs} -body {
+	set p [mkfile "\xEF\xBB\xBFone\r\ntwo\r\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.3 1.3 "X"
+	rio::autosave::sweep
+	rawbytes [ascopy $p]
+} -result "\xEF\xBB\xBFoneX\r\ntwo\r\n"
+
+test autosave-a-buffer-it-cannot-write-does-not-stop-the-others {a read-only directory or a
+		path the host will not take skips that buffer and nothing more: a sweep must never
+		raise into the event loop or take the timer down with it} -setup {reset_bufs} -body {
+	# A file in a directory of its own, so blocking its copy cannot block the other's.
+	set d [file join [file dirname [mkfile x]] "asblock[pid]"]
+	file mkdir $d
+	set blocked [file join $d two.txt]
+	set fh [open $blocked w] ; puts $fh "two" ; close $fh
+	set b2 [openbuf $blocked]
+	rio::doc::edit $b2 1.3 1.3 "!"
+	# Now make the copy's own parent directory impossible: a plain file already sits there.
+	set parent [file dirname [ascopy $blocked]]
+	file mkdir [file dirname $parent]
+	set fh [open $parent w] ; close $fh
+	# The blocked buffer is the OLDER one, so the sweep meets it first.
+	set p1 [mkfile "one\n"]
+	set b1 [openbuf $p1]
+	rio::doc::edit $b1 1.3 1.3 "!"
+	list [rio::autosave::sweep] [file exists [ascopy $p1]] [file exists [ascopy $blocked]]
+} -result {1 1 0}
+
+# --- dropping it again -------------------------------------------------------------------
+
+test autosave-save-drops-the-copy {the file now holds what the buffer holds, so the copy is
+		spent} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	set before [file exists [ascopy $p]]
+	callr file.save [dict create buffer $b]
+	list $before [file exists [ascopy $p]]
+} -result {1 0}
+
+test autosave-save-drops-a-copy-left-by-an-earlier-session {the discard is not conditional on
+		autosave being enabled, so switching it off and saving still cleans up} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	spitconf "autosave = off\n"
+	callr file.save [dict create buffer $b]
+	file exists [ascopy $p]
+} -cleanup {noconf} -result 0
+
+test autosave-save-as-drops-both-copies {on a save-as the OLD name's copy goes too: nothing
+		points at it any more, so it could never be offered back} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	set p2 "$p.other"
+	callr file.save [dict create buffer $b path $p2]
+	list [file exists [ascopy $p]] [file exists [ascopy $p2]]
+} -result {0 0}
+
+test autosave-close-drops-the-copy {a buffer going away takes its copy with it: the user
+		either saved it or chose to discard it} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	set before [file exists [ascopy $p]]
+	callr buffer.close [dict create buffer $b]
+	list $before [file exists [ascopy $p]]
+} -result {1 0}
+
+test autosave-reload-drops-the-copy {a reload means "take the disk version", so the copy is
+		spent — and the reloaded buffer is not left looking changed} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	callr buffers.reload [dict create buffers [list $b]]
+	list [file exists [ascopy $p]] [rio::autosave::dirty $b]
+} -result {0 0}
+
+test autosave-setpath-drops-the-old-names-copy {a copy is keyed by the path, so the old
+		name's is orphaned the moment the buffer points elsewhere} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	callr buffer.setpath [dict create buffer $b path "$p.renamed"]
+	file exists [ascopy $p]
+} -result 0
+
+# --- silent on the wire -----------------------------------------------------------------
+
+test autosave-save-emits-nothing-extra {autosave bookkeeping is invisible to a frontend:
+		file.save has never emitted an event and still does not, so no pane repaint and no
+		stale check is triggered by a copy being dropped (D132)} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	calle file.save [dict create buffer $b]
+} -result {}
+
+test autosave-close-emits-nothing-extra {same for the copy a close drops} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	calle buffer.close [dict create buffer $b]
+} -result {}
+
+# --- what a file has waiting for it -----------------------------------------------------
+
+test autosave-open-reports-no-recovery-when-there-is-none {} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set res [openres $p]
+	list [dict get $res recovery] [dict get $res recovery_newer]
+} -result {{} 0}
+
+test autosave-open-reports-a-newer-copy {the fact, not the question: file.open says a copy is
+		there and how it compares, and the frontend decides what to ask (D125)} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b            ;# as a crash would leave it: the copy survives
+	age $p                        ;# the file was last saved a while before the copy
+	set res [openres $p]
+	list [expr {[dict get $res recovery] eq [ascopy $p]}] [dict get $res recovery_newer]
+} -result {1 1}
+
+test autosave-a-copy-older-than-the-file-is-still-reported {it can hold work the file never
+		had — a git checkout or another editor landed on top — so hiding it, or deleting it
+		as spent, would be the lie. It is reported, and flagged as not newer} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	age [ascopy $p]               ;# now the FILE is the newer of the two
+	set rec [rio::autosave::recovery_for $p]
+	list [expr {[dict get $rec path] eq [ascopy $p]}] [dict get $rec newer]
+} -result {1 0}
+
+test autosave-a-copy-for-a-file-that-has-gone-is-the-only-text-there-is {so: newer} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	file delete $p
+	dict get [rio::autosave::recovery_for $p] newer
+} -result 1
+
+# --- taking it back ---------------------------------------------------------------------
+
+test autosave-recover-brings-the-copy-back {the whole flow: edit, autosave, crash, reopen,
+		recover} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	set asopened [rio::doc::text $b2]
+	callr buffers.recover [dict create buffer $b2]
+	list $asopened [rio::doc::text $b2] [rawbytes $p]
+} -result [list "hello\n" "hello!\n" "hello\n"]
+
+test autosave-recover-does-not-touch-the-file {nothing reaches disk until the user saves —
+		the last element above is the file, unchanged; here the buffer's disk stamp is too,
+		so the recovered buffer does not then read as stale (D94)} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	callr buffers.recover [dict create buffer $b2]
+	dict get [callr buffers.stale {}] result stale
+} -result {}
+
+test autosave-recover-is-one-undo-step {a recovery is an edit you can take back, like a
+		reload (D94)} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	callr buffers.recover [dict create buffer $b2]
+	callr edit.undo [dict create buffer $b2]
+	rio::doc::text $b2
+} -result "hello\n"
+
+test autosave-recover-emits-buffer-changed {so every attached view repaints through the path
+		it already has} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	set evs [calle buffers.recover [dict create buffer $b2]]
+	list [llength $evs] [dict get [lindex $evs 0] event] \
+		[expr {[dict get [lindex $evs 0] params buffer] eq $b2}]
+} -result {1 buffer.changed 1}
+
+test autosave-recover-round-trips-crlf {the copy carries the file's line endings, so what
+		comes back is the buffer as it was, not a version converted to LF} -setup {
+	reset_bufs
+} -body {
+	set p [mkfile "one\r\ntwo\r\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.3 1.3 "X"
+	rio::autosave::sweep
+	set was [rio::doc::text $b]
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	callr buffers.recover [dict create buffer $b2]
+	list $was [rio::doc::text $b2] [dict get [rio::doc::meta $b2] eol]
+} -result [list "oneX\ntwo\n" "oneX\ntwo\n" crlf]
+
+test autosave-recover-leaves-the-copy-in-place {the buffer still differs from the file, so
+		the copy is still what a crash would need — and the next sweep has nothing to do,
+		because copy and buffer now agree} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	rio::doc::edit $b 1.5 1.5 "!"
+	rio::autosave::sweep
+	rio::doc::close $b
+	set b2 [openbuf $p]
+	callr buffers.recover [dict create buffer $b2]
+	list [file exists [ascopy $p]] [rio::autosave::dirty $b2]
+} -result {1 0}
+
+test autosave-recover-needs-a-buffer {} -body {
+	set r [callr buffers.recover [dict create buffer 999999]]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false no_buffer}
+
+test autosave-recover-needs-a-file {an untitled buffer has no copy to take back} -body {
+	set b [rio::doc::new "notes\n"]
+	set r [callr buffers.recover [dict create buffer $b]]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test autosave-recover-needs-a-copy {} -setup {reset_bufs} -body {
+	set p [mkfile "hello\n"]
+	set b [openbuf $p]
+	set r [callr buffers.recover [dict create buffer $b]]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false io_error}
+
+# --- abandoning ------------------------------------------------------------------------
+
+test autosave-discard-drops-the-copies-it-is-given {what a frontend calls when the user has
+		declined to save and the core is about to go (D132)} -setup {reset_bufs} -body {
+	set p1 [mkfile "one\n"] ; set b1 [openbuf $p1]
+	set p2 [mkfile "two\n"] ; set b2 [openbuf $p2]
+	rio::doc::edit $b1 1.3 1.3 "!"
+	rio::doc::edit $b2 1.3 1.3 "!"
+	rio::autosave::sweep
+	set before [list [file exists [ascopy $p1]] [file exists [ascopy $p2]]]
+	set n [dict get [callr autosave.discard [dict create buffers [list $b1 $b2]]] result discarded]
+	list $before $n [file exists [ascopy $p1]] [file exists [ascopy $p2]]
+} -result {{1 1} 2 0 0}
+
+test autosave-discard-skips-what-has-no-copy {a frontend naming its whole open set must not
+		have to sort them first, so a scratch buffer, a buffer with no copy and an id that is
+		gone are all skipped rather than refused} -setup {reset_bufs} -body {
+	set p [mkfile "one\n"] ; set b [openbuf $p]        ;# unchanged: no copy
+	set scratch [rio::doc::new "notes\n"]              ;# no file at all
+	set r [callr autosave.discard [dict create buffers [list $b $scratch 999999]]]
+	list [dict get $r ok] [dict get $r result discarded]
+} -result {true 0}
+
+test autosave-discard-does-not-mark-them-written {a frontend that discards and then keeps
+		running still has unsaved changes, so the next sweep must protect them again. The op
+		means "delete the copy now", nothing more} -setup {reset_bufs} -body {
+	set p [mkfile "one\n"] ; set b [openbuf $p]
+	rio::doc::edit $b 1.3 1.3 "!"
+	rio::autosave::sweep
+	callr autosave.discard [dict create buffers [list $b]]
+	set gone [expr {![file exists [ascopy $p]]}]
+	list $gone [rio::autosave::sweep] [file exists [ascopy $p]]
+} -result {1 1 1}
+
+test autosave-discard-requires-buffers {} -body {
+	set r [callr autosave.discard {}]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+# --- the settings ops -------------------------------------------------------------------
+
+test autosave-ops-are-registered {} -body {
+	expr {"autosave.settings" in [rio::dispatch::opnames] \
+		&& "autosave.settings.set" in [rio::dispatch::opnames] \
+		&& "buffers.recover" in [rio::dispatch::opnames]}
+} -result 1
+
+test autosave-settings-op-reports-the-file {} -setup {noconf} -body {
+	spitconf "autosave = off\ninterval_ms = 9000\n"
+	dict get [callr autosave.settings {}] result
+} -cleanup {noconf} -result {enabled 0 interval 9000}
+
+test autosave-settings-set-persists-both-ways {} -setup {noconf} -body {
+	set off [dict get [callr autosave.settings.set [dict create enabled 0]] result enabled]
+	set a [rio::autosave::enabled]
+	set on [dict get [callr autosave.settings.set [dict create enabled 1]] result enabled]
+	list $off $a $on [rio::autosave::enabled]
+} -cleanup {noconf} -result {0 0 1 1}
+
+test autosave-settings-set-answers-with-what-the-setting-now-reads-as {not with what it was
+		handed, so a frontend's control can only ever show what the core actually holds} -setup {
+	noconf
+} -body {
+	dict get [callr autosave.settings.set [dict create enabled true]] result
+} -cleanup {noconf} -result {enabled 1 interval 30000}
+
+test autosave-settings-set-requires-enabled {} -body {
+	set r [callr autosave.settings.set {}]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+test autosave-settings-set-refuses-a-non-boolean {} -body {
+	set r [callr autosave.settings.set [dict create enabled sometimes]]
+	list [dict get $r ok] [dict get $r error code]
+} -result {false bad_request}
+
+
+# --- the timer itself, in a real child core ---------------------------------------------
+
+test autosave-a-spawned-core-runs-the-timer {a sweep is only as good as the timer that calls
+		it, and nothing else here proves server.tcl starts one: every other case drives `sweep`
+		directly, so rio::autosave::start could be missing entirely and they would all still
+		pass. So spawn a REAL child core over a pipe, give it a one-second interval, edit a
+		file through it, and wait for the copy to appear on disk — and check the file the child
+		was told to keep its hands off is still exactly as it was.} -setup {
+	# A child inherits the ENVIRONMENT, not the parent's test overrides, so point both XDG
+	# roots at throwaway dirs and stand the overrides down for the duration — that way the
+	# parent computes the very path the child writes.
+	set ::keep_dir  $rio::autosave::dir_override
+	set ::keep_conf $rio::autosave::settings_override
+	set rio::autosave::dir_override ""
+	set rio::autosave::settings_override ""
+	set ::keep_env {}
+	foreach v {XDG_DATA_HOME XDG_CONFIG_HOME} {
+		dict set ::keep_env $v [expr {[info exists ::env($v)] ? $::env($v) : ""}]
+	}
+	set ::env(XDG_DATA_HOME)   "$::_asbase.data"
+	set ::env(XDG_CONFIG_HOME) "$::_asbase.cfg"
+	file mkdir [file join $::env(XDG_CONFIG_HOME) rio]
+	set fh [open [file join $::env(XDG_CONFIG_HOME) rio autosave.conf] w]
+	puts $fh "autosave = on"
+	puts $fh "interval_ms = 1000"
+	close $fh
+} -body {
+	set p [mkfile "hello\n"]
+	set c [spawn_core]
+	set r [core_send $c 1 file.open "{\"path\":\"$p\"}"]
+	set b [dict get $r result buffer]
+	core_send $c 2 buffer.replace \
+		"{\"buffer\":\"$b\",\"start\":\"1.5\",\"end\":\"1.5\",\"text\":\"!\"}"
+	set ap [rio::autosave::path_for $p]
+	set deadline [expr {[clock milliseconds] + 10000}]
+	while {![file exists $ap] && [clock milliseconds] < $deadline} { after 100 }
+	set got [expr {[file exists $ap] ? [dict get [rio::fs::read $ap] text] : "<no copy appeared>"}]
+	close $c                        ;# EOF on its stdin: the child exits (D30)
+	list $got [rawbytes $p]
+} -cleanup {
+	set rio::autosave::dir_override  $::keep_dir
+	set rio::autosave::settings_override $::keep_conf
+	dict for {v old} $::keep_env {
+		if {$old eq ""} { unset -nocomplain ::env($v) } else { set ::env($v) $old }
+	}
+	file delete -force "$::_asbase.data" "$::_asbase.cfg"
+} -result [list "hello!\n" "hello\n"]
+
+file delete -force $::asroot
+file delete -force $::asconf
+cleanupTests

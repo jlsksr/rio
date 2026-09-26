@@ -151,6 +151,11 @@ if {[info exists ::argv0] && [file normalize $::argv0] eq [file normalize [info 
 		puts "rio $rio::version"
 		exit 0
 	}
+	# Recovery copies of changed buffers (D132). Started HERE, on the direct-execution
+	# path, and not when this file is sourced: a test that sources server.tcl gets a core
+	# with no timer running behind it and drives rio::autosave::sweep itself. Both
+	# transports get it — the policy is the core's wherever the core is.
+	rio::autosave::start
 	# --stdio: serve over the pipe (the default frontend transport, D30). Banner to
 	# stderr only — stdout IS the protocol stream.
 	if {[lsearch -exact $::argv --stdio] >= 0} {
