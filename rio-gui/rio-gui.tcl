@@ -237,6 +237,8 @@ set ::agent_compare_complex 1 ;# open complex agent edits in the compare view (S
 set ::tls_unchecked 0     ;# the core's choice: https on a tcltls without host-name checks (D114)
 set ::tls_checks_hostname 1 ;# does the core's tcltls check names? (tls.settings; picks the hint)
 set ::tls_version ""      ;# the core's tcltls version, "" when it has none
+set ::autosave_on 1       ;# the core's choice: keep recovery copies of changed buffers (D132)
+set ::recover_pending {}  ;# {id path} per file opened during boot with a recovery copy waiting
 set ::agent_selection_menu 1 ;# offer "Change with Agent…" in the editor's context menu (prefs.json; D113)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
 set ::cmp_syncing 0       ;# guard against re-entrant scroll sync between the compare panes
@@ -1025,7 +1027,71 @@ proc do_open {path {force 0}} {
 			-message "Mixed line endings; the file will be saved as [dict get $res eol]."
 	}
 	session_save   ;# the open-file set changed — record it for resume (D31)
+	# A recovery copy is waiting for this file (D132). The core reported the fact; the
+	# question is ours (D125). During boot it is only NOTED: a session restore can reopen a
+	# dozen files, and a dozen modals in a row is not an answer to anything — the same
+	# reasoning stale_conflict already carries — so they are asked about together once
+	# startup is done.
+	if {[dict exists $res recovery] && [dict get $res recovery] ne ""} {
+		if {$::rio_started} {
+			recover_offer [list $id] [dict get $res recovery_newer]
+		} else {
+			lappend ::recover_pending [list $id $path [dict get $res recovery_newer]]
+		}
+	}
 	return 1
+}
+
+# Offer to take back what autosave kept for these buffers (D132). ONE dialog for the whole
+# set, like stale_conflict.
+#
+# `newer` picks the default button, and the rule is D94's: default to the choice that loses
+# nothing. Recovering loses nothing either way — the file on disk is not touched and the
+# recovery is one undo step — but when the copy is OLDER than the file, defaulting to "show
+# me the older text" would be an odd thing to nod through, so that case defaults to No.
+#
+# Declining leaves the copy alone: it is not ours to delete on a shrug, and a save of that
+# buffer will drop it anyway.
+proc recover_offer {ids newer} {
+	if {![llength $ids]} return
+	set names {}
+	foreach id $ids { lappend names "    [tab_name $id]" }
+	set when [expr {$newer ? "newer than what is on disk" : "OLDER than what is on disk"}]
+	if {[llength $ids] == 1} {
+		set q "“[tab_name [lindex $ids 0]]” has unsaved changes that rio kept when it last stopped — $when.\n\nTake them back? The file itself is not touched, and this can be undone."
+	} else {
+		set q "[llength $ids] of the files just opened have unsaved changes that rio kept when it last stopped:\n\n[join $names \n]\n\nTake them back? The files themselves are not touched, and this can be undone."
+	}
+	if {[recover_ask $q $newer] ne "yes"} return
+	foreach id $ids {
+		set r [rio_call buffers.recover [dict create buffer $id]]
+		if {![dict get $r ok]} continue
+		# The buffer now differs from the file, and only a save may change that — so it is
+		# modified, exactly as after any other edit.
+		mark_buffer_modified $id 1
+	}
+	refresh_all
+}
+
+# Ask about everything boot queued, as one set. Split out from the boot sequence so the
+# suite drives the same code a launch does, rather than a copy of it.
+proc recover_flush {} {
+	if {![llength $::recover_pending]} return
+	set ids {}
+	set newer 0
+	foreach e $::recover_pending {
+		lappend ids [lindex $e 0]
+		if {[lindex $e 2]} { set newer 1 }
+	}
+	set ::recover_pending {}
+	recover_offer $ids $newer
+}
+
+# Its own one-line proc so a headless test can stub it (the stale_ask idiom).
+proc recover_ask {q newer} {
+	return [tk_messageBox -icon warning -type yesno \
+		-default [expr {$newer ? "yes" : "no"}] \
+		-title "rio — unsaved changes were kept" -message $q]
 }
 
 # A file (or several, or a folder) dropped onto the window from the OS file manager (D86).
@@ -5537,6 +5603,32 @@ proc adopt_agent_status {} {
 	agent_options_refresh   ;# what this provider lets us choose, and what it chose (D106)
 	agent_mode_sync         ;# and the mode control, which repaints the strip
 	adopt_tls_settings      ;# the core-wide https switch sits beside it at every attach (D114)
+	adopt_autosave_settings ;# and whether the core keeps recovery copies (D132)
+}
+
+# Mirror whether the core keeps recovery copies of changed buffers (D132). Read at attach,
+# never written then — the same rule as the agent's settings and the https switch, and for
+# the same reason: the policy is the core's, because the copies land on ITS disk and a
+# daemon autosaves buffers with no frontend attached at all. Quiet on failure, so a core
+# that predates autosave.settings just leaves the checkbox showing its default.
+proc adopt_autosave_settings {} {
+	set r [rio_call autosave.settings {}]
+	if {![dict get $r ok]} return
+	set ::autosave_on [dict get $r result enabled]
+}
+
+# The applier behind the Preferences checkbox. Writes, then shows what the core ACCEPTED,
+# so a refusal leaves the control honest rather than claiming a state the core is not in
+# (tls_unchecked_set's shape).
+proc autosave_set {} {
+	set want $::autosave_on
+	set ::autosave_on [expr {!$want}]
+	set r [rio_call autosave.settings.set [dict create enabled $want]]
+	if {![dict get $r ok]} {
+		report_error [dict get $r error message] [dict get $r error code]
+		return
+	}
+	set ::autosave_on [dict get $r result enabled]
 }
 
 # Mirror the core's https switch (D114) and what its tcltls can check. Same rule as the
@@ -12529,6 +12621,13 @@ proc prefs_fill_editor {f} {
 	}
 	grid [prefs_check $f.col "Column Editing (Ctrl+Shift+Drag)" ::col_on apply_column_edit] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
+	# The core's setting, not a pref of ours (D132) — adopted, then written only here. One
+	# door on purpose: a menu is for fast switches (D85) and this is set-once policy.
+	adopt_autosave_settings
+	grid [prefs_check $f.as "Keep recovery files for unsaved changes" ::autosave_on autosave_set] \
+		-row [incr r] -column 0 -sticky w -pady {8 1}
+	grid [prefs_hint $f.ashint "Every half minute rio writes a copy of each changed file,\nso a crash or a power cut costs you at most that much. Your\nown file is never written until you save it; the copies live\nwith the core, outside your project, and rio offers them back\nthe next time you open the file."] \
+		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 }
 
 # Agent category: the provider picker (enumerated from the core like the theme
@@ -13596,6 +13695,11 @@ pack propagate . 0
 
 # Startup is done: from here, view-state and workspace changes persist (D31).
 set ::rio_started 1
+
+# Now ask about anything autosave kept for the files just reopened (D132) — once for the
+# whole set, after startup rather than during it, so a restored session raises one dialog
+# instead of one per file.
+recover_flush
 
 # Look for new versions of the installed extensions, if the user asked for that
 # (D107) — off by default, deferred on a timer, and silent about everything but a
