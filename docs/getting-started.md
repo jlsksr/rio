@@ -115,9 +115,9 @@ UTF-8. The status bar shows both, so you can always see what will be written.
 
 Nor does it save for you. Nothing reaches your file until you ask — but rio does
 keep a **separate copy** of what you have typed, every 30 seconds, and offers it
-back the next time you open that file. So a crash costs you half a minute rather
-than an afternoon, and your file is still what you last saved. See
-[unsaved changes](editor.md#unsaved-changes-and-the-copies-rio-keeps).
+back the next time you open that file. So a crash costs you that much at worst
+rather than an afternoon, and your file is still what you last saved. See
+[unsaved changes](editor.md#keeping-your-unsaved-changes).
 
 ## Getting your bearings
 

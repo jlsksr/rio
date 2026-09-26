@@ -192,8 +192,8 @@ confirming a key protects and what it cannot.
 ## Recovery files for unsaved changes
 
 rio keeps a **separate copy** of every changed file so that a crash costs you at
-most half a minute of typing — and it never writes the file you are editing without
-a save. [The editor](editor.md#unsaved-changes-and-the-copies-rio-keeps) describes
+most one copy's worth of typing — and it never writes the file you are editing
+without a save. [The editor](editor.md#keeping-your-unsaved-changes) describes
 what that means and how you get the changes back; this is where the setting lives.
 
 ***Preferences ▸ Editor ▸ Keep recovery files for unsaved changes*** turns it on
@@ -285,7 +285,7 @@ bookkeeping, machine-written, not meant for hand-editing).
 | Path | Holds |
 | ---- | ----- |
 | `sessions/` | per-project open files + active tab, keyed by project root |
-| `autosave/` | recovery copies of changed files, each under a mirror of its own path as `#name#` — see [the editor](editor.md#unsaved-changes-and-the-copies-rio-keeps) |
+| `autosave/` | recovery copies of changed files, each under a mirror of its own path as `#name#` — see [the editor](editor.md#keeping-your-unsaved-changes) |
 | `providers/` | installed agent providers — the extension kind that ships executable code, so it lives with the data, not the hand-edited config |
 | `extensions.json` | the provenance ledger — what's installed, from which repository, at which version, and which key signed it |
 | `secrets/*.secret` | API keys, mode `0600` — never in `prefs.json` |

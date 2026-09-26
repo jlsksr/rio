@@ -261,6 +261,29 @@ foreach root {config data} {
 }
 ok "no documented path the code never builds" $orphaned {}
 
+# --- 5a. how often a recovery copy is written, as the code says it -------------
+#
+# D132's interval is a fact with three homes now: rio-core/autosave.tcl owns it, the
+# Preferences hint DERIVES its wording from the core rather than repeating the number
+# (that was the point of the hint's own commit), and the manual states it in prose on
+# two pages. The manual's copy is the one with no guard, so here it is.
+#
+# Behaviour, not source text, and not a number quoted here either: `autosave_every`
+# is the very proc the hint uses to put the interval in words, so raising the default
+# to a minute makes this demand the manual say "minute" without the check itself
+# needing to know. `interval` with no conf file in the sandbox is the default.
+set ::autosave_interval [rio::autosave::interval]
+set every [autosave_every]
+set ed [slurp [file join $::docs editor.md]]
+ok "editor.md states the copy interval in the core's own words" \
+	[expr {[string first "Every $every" $ed] >= 0}] 1
+ok "getting-started.md agrees with it" \
+	[expr {[string first "every $every" [slurp [file join $::docs getting-started.md]]] >= 0}] 1
+# And preferences.md documents the raw milliseconds, since that is what a hand edit
+# of autosave.conf has to write.
+ok "preferences.md documents the default interval_ms" \
+	[expr {[string first $::autosave_interval $prefs] >= 0}] 1
+
 # --- 6. every "Menu ▸ Item" path the docs quote is a real menu entry -----------
 #
 # Fourth register row, which was the honest backlog until now. A menu path is the most
