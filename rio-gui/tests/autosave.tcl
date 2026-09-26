@@ -97,6 +97,8 @@ ok "prefs: its label says what it is" [.prefs.body.editor.as cget -text] \
 ok "prefs: a muted hint sits under it" \
 	[expr {[winfo exists .prefs.body.editor.ashint] &&
 		[.prefs.body.editor.ashint cget -foreground] eq [dict get $::theme_colors gutter.fg]}] 1
+ok "prefs: the hint names the interval" \
+	[regexp {Every 30 seconds} [.prefs.body.editor.ashint cget -text]]                 1
 # One door on purpose (D85): a set-once policy earns no menu twin.
 set ::menu_twin 0
 foreach m {.m.view .m.settings} {
@@ -131,6 +133,24 @@ ok "attach mirrors the core"          $::autosave_on                            
 rio_call autosave.settings.set [dict create enabled 1]
 adopt_autosave_settings
 ok "attach mirrors it back"           $::autosave_on                                1
+
+# The hint names the core's OWN interval rather than carrying a second copy of the number,
+# which would then be the one that goes stale (§7 — say it once and derive the rest).
+set ::fiveconf [file join $::sandbox_dir five.conf]
+set rio::autosave::settings_override $::fiveconf
+spit $::fiveconf "autosave = on\ninterval_ms = 5000\n"
+adopt_autosave_settings
+ok "hint: follows a hand edit"        [autosave_every]                              "5 seconds"
+spit $::fiveconf "autosave = on\ninterval_ms = 120000\n"
+adopt_autosave_settings
+ok "hint: says minutes when it can"   [autosave_every]                              "2 minutes"
+spit $::fiveconf "autosave = on\ninterval_ms = 60000\n"
+adopt_autosave_settings
+ok "hint: and the singular"           [autosave_every]                              minute
+ok "hint: the sentence uses it"       [regexp {Every minute rio writes} [autosave_hint]] 1
+set rio::autosave::settings_override ""
+adopt_autosave_settings
+ok "hint: back to the core's own"     [autosave_every]                              "30 seconds"
 
 # A refusal must leave the control showing what the core actually holds, not what was
 # clicked. Point the core's conf at a path it cannot write (its parent is a plain file).

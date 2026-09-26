@@ -238,6 +238,7 @@ set ::tls_unchecked 0     ;# the core's choice: https on a tcltls without host-n
 set ::tls_checks_hostname 1 ;# does the core's tcltls check names? (tls.settings; picks the hint)
 set ::tls_version ""      ;# the core's tcltls version, "" when it has none
 set ::autosave_on 1       ;# the core's choice: keep recovery copies of changed buffers (D132)
+set ::autosave_interval 30000 ;# and how often it writes one — the core's number, not ours
 set ::recover_pending {}  ;# {id path} per file opened during boot with a recovery copy waiting
 set ::agent_selection_menu 1 ;# offer "Change with Agent…" in the editor's context menu (prefs.json; D113)
 set ::compare_threshold 8 ;# diff lines above which an agent edit counts as "complex"
@@ -5615,6 +5616,23 @@ proc adopt_autosave_settings {} {
 	set r [rio_call autosave.settings {}]
 	if {![dict get $r ok]} return
 	set ::autosave_on [dict get $r result enabled]
+	set ::autosave_interval [dict get $r result interval]
+}
+
+# How often the core writes a copy, in words. The interval is hand-editable in autosave.conf
+# (D132), so the hint READS it rather than carrying a second copy of the number — which would
+# then be the one that goes stale (§7). Say it once and derive the rest.
+proc autosave_every {} {
+	set secs [expr {$::autosave_interval / 1000}]
+	if {$secs >= 60 && $secs % 60 == 0} {
+		set mins [expr {$secs / 60}]
+		return [expr {$mins == 1 ? "minute" : "$mins minutes"}]
+	}
+	return "$secs seconds"
+}
+
+proc autosave_hint {} {
+	return "Every [autosave_every] rio writes a copy of each file you have\nchanged, so a crash or a power cut costs you at most that much.\nYour own file is never written until you save it: the copies live\nwith the core, outside your project, and rio offers them back the\nnext time you open the file."
 }
 
 # The applier behind the Preferences checkbox. Writes, then shows what the core ACCEPTED,
@@ -5629,6 +5647,7 @@ proc autosave_set {} {
 		return
 	}
 	set ::autosave_on [dict get $r result enabled]
+	set ::autosave_interval [dict get $r result interval]
 }
 
 # Mirror the core's https switch (D114) and what its tcltls can check. Same rule as the
@@ -12626,7 +12645,7 @@ proc prefs_fill_editor {f} {
 	adopt_autosave_settings
 	grid [prefs_check $f.as "Keep recovery files for unsaved changes" ::autosave_on autosave_set] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
-	grid [prefs_hint $f.ashint "Every half minute rio writes a copy of each changed file,\nso a crash or a power cut costs you at most that much. Your\nown file is never written until you save it; the copies live\nwith the core, outside your project, and rio offers them back\nthe next time you open the file."] \
+	grid [prefs_hint $f.ashint [autosave_hint]] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 }
 
