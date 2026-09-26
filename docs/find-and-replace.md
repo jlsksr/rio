@@ -20,8 +20,8 @@ usefully show. Those files are skipped silently, so a word that lives only insid
 a very large log will not be found. The other two scopes search documents you
 already have open, whatever their size.
 
-For now, the *Find & Replace* and *Search* entries under **What works now** in
-[README.md](../README.md) describe both tools in full.
+Until then, the *Find and replace* and *Project search* entries in
+[README.md](../README.md) summarise both tools.
 
 - [The editor](editor.md) — including why Replace All is one undo step.
 - [Keyboard shortcuts](keyboard.md) — the find and search chords.

@@ -28,8 +28,8 @@ git verbs that go with it — including *Discard Changes…*, so undoing your ed
 a file is reachable from wherever you happen to be looking at it. That half is
 documented in [git](git.md).
 
-For now, the *Files & git* and *Sessions* entries under **What works now** in
-[README.md](../README.md) describe the rest, and
+Until then, the *Files and git* and *Sessions* entries in
+[README.md](../README.md) summarise the rest, and
 [preferences](preferences.md#where-everything-lives) says where session state is
 kept on disk.
 

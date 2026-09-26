@@ -114,6 +114,27 @@ Guiding qualities:
 - **Two faces, one brain** — a GUI and a TUI, like `emacs` and `emacs-nox`,
   sharing all logic.
 
+**Why rio exists — two answers, and the log owes both.** *(Moved here from README
+2026-09-26, when that file was cut back to a gateway page in the website's register.
+It is the project's own why, which §7 says lives here.)*
+
+**It is an experiment.** rio is openly a vibe-coding experiment — a test of whether
+agent-assisted development can carry something bigger than a self-contained script: a
+real, multi-part application, written in a language the mainstream mostly skips, under
+deliberately opinionated Windows 2000-era constraints, and kept honest by a test suite
+and a written decision log. All of it was built that way, end to end. That is a claim
+anybody can check rather than take on trust — the suite runs on their machine, and this
+file records the reasoning behind every decision, the ones that turned out wrong and
+were reversed included. It is also why §9 exists at all: the working agreement is part
+of the experiment, not scaffolding around it.
+
+**It is an itch.** Good editors are worth loving, and most have grown heavy. Day to day
+you reach for maybe 5% of VSCode, Emacs or Notepad++. rio is that 5%, built small on
+purpose — a tailored editor rather than a general one, and honest about being early.
+This is the same instinct as the guiding qualities above, stated as a motive rather than
+as a rule: when a feature is weighed, "would the 5% miss it?" is the question underneath
+*Simple — only what the workflow needs*.
+
 ---
 
 ## 2. Scope
@@ -9007,7 +9028,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | D54's guard, in every script rio runs | the guard's four lines, copied into each of them | `encoding.test` — exact, with the sourced-helper exemption derived from the siblings |
 | `rio-core/version.tcl` | `CHANGELOG.md`'s release heading | `changelog.test` — reads the literal, not a copy of it |
 | the tree itself — line counts, suite totals, `git log` | README's *By the numbers* | **none** — a dated snapshot, and says so |
-| the shipped features | README's *What works now* | **none**, and likely unguardable — prose |
+| the shipped features | README's *What it does* | **none**, and likely unguardable — prose |
 | `extensions/` | the deploy-test mirror repo | **none** — a manual step by construction |
 
 Two lessons are baked into the guards above and belong in any new row. **Assert

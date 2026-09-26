@@ -10,10 +10,9 @@ arrangement is remembered; how the window rearranges itself when it gets narrow;
 live-switchable colour themes from *View ▸ Theme…*, including ones you install; and
 the document font and zoom under *View ▸ Font & Zoom*.
 
-For now, the *Theming* and *Editor font & zoom* entries under **What works now**
-in [README.md](../README.md) cover themes and fonts, and
-[preferences](preferences.md) explains the `layout` object where the whole
-arrangement is stored.
+Until then, the *Themes, fonts and keys* entry in [README.md](../README.md) covers
+themes and fonts in brief, and [preferences](preferences.md) explains the `layout`
+object where the whole arrangement is stored.
 
 - [Preferences](preferences.md) — every setting and where it is saved.
 - [Extensions](extensions.md) — installing more themes.

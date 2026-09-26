@@ -11,10 +11,9 @@ in normal mode, and its own undo granularity); choosing one in *Settings ▸ Edi
 Mode*; the mode indicator in the status bar; and writing or dropping in a mode of
 your own.
 
-For now, the *Editing modes* entry under **What works now** in
-[README.md](../README.md) describes all three, and
-[preferences](preferences.md#editing-modes-beyond-windows) explains how vi and
-emacs are installed and where they live.
+Until then, the *Editing modes* entry in [README.md](../README.md) summarises all
+three, and [preferences](preferences.md#editing-modes-beyond-windows) explains how
+vi and emacs are installed and where they live.
 
 Two rules hold in every mode, and are worth knowing now:
 

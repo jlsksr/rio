@@ -37,7 +37,9 @@ Replace `/path/on/server` with your remote project directory. Alternatively, use
 - File dialogs, saves, search, git, and the agent use the server. API keys are
   stored there too; `localhost` in a model URL means the server.
 - Window preferences stay local. Desktop file drops do not upload files.
-- Save often: there is no autosave or crash recovery.
+- Recovery copies of your unsaved changes are kept by the core, so they land on
+  the server beside the files themselves — see
+  [keeping your unsaved changes](editor.md#keeping-your-unsaved-changes).
 - If the connection drops, check the core and tunnel, restore them, then reconnect
   through ***File ▸ Connect to Remote Core…***. Reconnection is not automatic.
 - When finished, save and close rio, then stop the tunnel and server with
