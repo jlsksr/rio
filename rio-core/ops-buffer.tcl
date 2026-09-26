@@ -26,6 +26,11 @@ rio::dispatch::register buffer.new rio::ops::buffer_new
 proc rio::ops::buffer_close {params} {
 	set id [_bufid $params]
 	if {![rio::doc::exists $id]} { rio::error::raise no_buffer "no such buffer: $id" }
+	# Its recovery copy is spent — the buffer it belonged to is going away, and the user
+	# either saved it or chose to discard it (D132). Discard BEFORE the close, while the
+	# meta that names the file still exists.
+	rio::autosave::discard $id
+	rio::autosave::forget $id
 	rio::doc::close $id
 	return [dict create result {}]
 }
@@ -41,6 +46,11 @@ proc rio::ops::buffer_setpath {params} {
 	if {![dict exists $params path]} {
 		rio::error::raise bad_request "buffer.setpath requires a path"
 	}
+	# A recovery copy is keyed by the path, so the old name's is orphaned the moment the
+	# buffer points elsewhere: nothing would ever offer it back (D132). The new name gets
+	# its own at the next sweep.
+	set was [rio::doc::meta $id]
+	if {[dict exists $was path]} { rio::autosave::discard_path [dict get $was path] }
 	rio::doc::setmeta $id path [dict get $params path]
 	return [dict create result {}]
 }
@@ -301,6 +311,9 @@ proc rio::ops::buffers_reload {params} {
 		set ch [rio::doc::settext $id [dict get $info text]]
 		foreach k {encoding eol bom} { rio::doc::setmeta $id $k [dict get $info $k] }
 		rio::ops::_restamp $id $path
+		# A reload means "take the disk version", so the recovery copy is spent (D132).
+		rio::autosave::discard $id
+		rio::autosave::note_saved $id
 		lappend evs [dict create event buffer.changed params [dict create buffer $id \
 			start [dict get $ch start] end [dict get $ch end] \
 			text [dict get $ch text] removed [dict get $ch removed]]]
@@ -311,6 +324,46 @@ proc rio::ops::buffers_reload {params} {
 	return [dict create result [dict create reloaded $done failed $failed] events $evs]
 }
 rio::dispatch::register buffers.reload rio::ops::buffers_reload
+
+# buffers.recover {buffer} -> {buffer path linecount}
+# Take the recovery copy autosave left for this buffer's file (D132) — the answer to a
+# `recovery` that file.open reported, once the user has said yes.
+#
+# Deliberately the same shape as the reload above: the whole text through settext, so it is
+# ONE undo step and a recovery can be taken back like any other edit, and one buffer.changed
+# so every attached view repaints through the path it already has.
+#
+# Two things it does NOT do. It does not touch the file — the frontend marks the buffer
+# modified and the text reaches disk only when the user saves — so the buffer's disk stamp
+# still describes the file correctly and must not be re-stamped. And unlike a reload it
+# leaves the buffer's encoding facts alone: they describe the real file, not the copy.
+# The copy stays where it is (the buffer still differs from the file, so it is still what a
+# crash would need), and note_saved records that copy and buffer now agree, so the next
+# sweep has nothing to write.
+proc rio::ops::buffers_recover {params} {
+	set id [_bufid $params]
+	if {![rio::doc::exists $id]} { rio::error::raise no_buffer "no such buffer: $id" }
+	set meta [rio::doc::meta $id]
+	set path [expr {[dict exists $meta path] ? [dict get $meta path] : ""}]
+	if {$path eq ""} {
+		rio::error::raise bad_request "buffers.recover: buffer $id has no associated file"
+	}
+	set rec [rio::autosave::recovery_for $path]
+	if {![dict exists $rec path]} {
+		rio::error::raise io_error "nothing to recover for $path"
+	}
+	if {[catch {rio::fs::read [dict get $rec path]} info]} {
+		rio::error::raise io_error $info
+	}
+	set ch [rio::doc::settext $id [dict get $info text]]
+	rio::autosave::note_saved $id
+	return [dict create \
+		result [dict create buffer $id path $path linecount [rio::doc::linecount $id]] \
+		events [list [dict create event buffer.changed params [dict create buffer $id \
+			start [dict get $ch start] end [dict get $ch end] \
+			text [dict get $ch text] removed [dict get $ch removed]]]]]
+}
+rio::dispatch::register buffers.recover rio::ops::buffers_recover
 
 # buffers.stamp {buffers:[id ...]} -> {stamped N}
 # "I have seen this version" — record what is on disk now WITHOUT touching the text.

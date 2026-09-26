@@ -23,7 +23,7 @@ proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	if {$lines eq ""} { set lines [list ""] }
 	set id [incr nextid]
 	dict set buffers $id \
-		[dict create lines $lines name $name meta $meta undo {} redo {} run 0]
+		[dict create lines $lines name $name meta $meta undo {} redo {} run 0 seq 0]
 	return $id
 }
 
@@ -65,6 +65,20 @@ proc rio::doc::lines {id} {
 
 proc rio::doc::linecount {id} {
 	return [llength [lines $id]]
+}
+
+# How many times this buffer's text has changed, ever. A monotonic counter bumped by
+# `replace` — the one mutation choke point, so every edit, undo, redo, whole-text
+# settext and replace_all is counted and nothing else is. It answers "has this document
+# changed since I last wrote it" WITHOUT a dirty flag: `modified` is a view's word for
+# whether it differs from disk (D22, above), which each frontend answers for itself,
+# while this is a fact about the document and belongs here. Autosave (D132) compares it
+# against the revision at its last write; undoing back to that state still reads as
+# changed, which costs one identical rewrite and can never wrongly skip one.
+proc rio::doc::revision {id} {
+	variable buffers
+	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
+	return [dict get $buffers $id seq]
 }
 
 # The text spanning [start, end). STRICT, unlike `replace`: an index past its line's
@@ -121,6 +135,7 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 	variable buffers
 	lassign [_splice [lines $id] $start $end $text] newlines removed cstart cend
 	dict set buffers $id lines $newlines
+	dict update buffers $id b { dict incr b seq }   ;# the change counter (`revision`, D132)
 	if {$clampedVar ne ""} {
 		upvar 1 $clampedVar clamped
 		set clamped [list $cstart $cend]
