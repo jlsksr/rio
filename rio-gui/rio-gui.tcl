@@ -7232,6 +7232,27 @@ proc maybe_discard {} {
 		cancel { return 0 }
 	}
 }
+# The user has just declined to save these, and the core holding them is about to go: their
+# recovery copies are spent, so drop them before the channel closes (D132).
+#
+# Without this, "don't save" would not stick. Quitting does NOT close the buffers — it asks
+# about each one and goes — so the copies would survive, and the next launch would restore
+# those files (D31) and offer back the very edits just declined. Answering a question twice,
+# the second time a day later, is not what No means.
+#
+# Only with a core of OUR OWN. A daemon KEEPS those modified buffers for the next frontend
+# (D30), so there nothing has been abandoned and the copy is still exactly what a crash would
+# need — dropping it would take away protection from work that is still live.
+proc autosave_abandon {} {
+	if {$::core_remote} return
+	set ids {}
+	foreach id [dict keys $::buffers] {
+		if {[bufget $id modified]} { lappend ids $id }
+	}
+	if {![llength $ids]} return
+	catch {rio_call autosave.discard [dict create buffers $ids]}
+}
+
 proc do_quit {} {
 	prefs_save      ;# persist view state + the workspace before we go (D31)
 	session_save
@@ -7241,6 +7262,7 @@ proc do_quit {} {
 			if {![maybe_discard]} return
 		}
 	}
+	autosave_abandon   ;# a "don't save" above was a decision; make it stick (D132)
 	# Close the channel so a spawned child core sees EOF on stdin and exits with us
 	# (a daemon socket just drops the connection); then go.
 	catch {close $::core_chan}
@@ -7434,6 +7456,7 @@ proc reconnect_remote {hp} {
 			if {![maybe_discard]} { catch {close $newchan} ; return }
 		}
 	}
+	autosave_abandon   ;# same as at quit: the outgoing core is about to go (D132)
 	# 3. Commit: drop the old channel (a spawned child core sees EOF and exits), swap.
 	catch {fileevent $::core_chan readable {}}
 	catch {close $::core_chan}

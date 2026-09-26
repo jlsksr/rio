@@ -8330,7 +8330,8 @@ never produces one.
 
 **The setting fails OPEN, which is the inverse of the neighbouring rule.** `autosave.conf`
 sits beside `tls.conf` in the same D21 flat format, parsed never executed, with `autosave` and
-`interval_ms`. Absent, unreadable, malformed, or any value that is not a plain `off` leaves
+`interval_ms`. Absent, unreadable, malformed, or any value that is not a plain no — `off`,
+`0`, `no`, `false`, in any case — leaves
 autosave **on**. `tls.conf` fails closed for the opposite reason, and stating both together is
 the point: there the safe side is refusing a connection, here it is protecting work the user
 has not saved. A typo must not silently switch off the thing standing between someone and a
@@ -8349,7 +8350,9 @@ behind it and drives `sweep` itself.
 
 **Ops.** `autosave.settings` / `autosave.settings.set` (flat, so the default encoder carries
 them; the setter answers with what the setting now **reads back as**, not with what it was
-handed, so a frontend's control can only ever show what the core holds). `buffers.recover`
+handed, so a frontend's control can only ever show what the core holds). Its parameter is
+`enabled`, not the file's `autosave`: the file speaks conf and the op speaks the protocol,
+and a client written from the conf keys alone would guess wrong. `buffers.recover`
 sits in `ops-buffer.tcl` **beside `buffers.reload`**, which it is shaped after: the whole text
 through `settext`, so it is **one undo step** and a recovery can be taken back like any other
 edit, and one `buffer.changed` so every attached view repaints through the path it already has.
@@ -8381,7 +8384,29 @@ No and the prompt says which way round it is. An older copy is still **offered**
 it can hold work the file never had, if a `git checkout` or another editor landed on top of it,
 so treating it as spent would be the lie.
 
-**Guards.** `rio-core/tests/autosave.test` (55 cases, core 864 → 919): the mirrored path and
+**Amendment, found while writing the tests — "don't save" has to stick.** Quitting does NOT
+close the buffers: `do_quit` asks whether to save each modified one and then goes. So a *no*
+there left the recovery copy sitting on disk, and because rio restores the session (D31) the
+next launch would reopen that file and offer back the very edits the user had just declined —
+the same question a day later, which is not what No means. emacs has the same gap and gets
+away with it by not restoring your session; rio does restore it, so the re-ask was
+guaranteed rather than unlikely.
+
+The fix is one narrow op, **`autosave.discard {buffers}`**, because this is the one moment a
+frontend cannot express any other way: `buffer.close` already drops a copy, but quitting
+closes nothing. The frontend decides when abandonment has happened, since `modified` is its
+state (D22), and the core only does as it is told. Two details are load-bearing. It runs
+**only with a core of our own**: a daemon KEEPS those modified buffers for the next frontend
+(D30), so there nothing has been abandoned and the copy is still exactly what a crash would
+need — dropping it would take protection away from live work. And it **forgets** each buffer
+rather than marking it written, which is the opposite move: deleting the file alone would
+leave the sweep that wrote it still believing the buffer was written, so a frontend that
+discarded and kept running would sit unprotected until its next edit. That second one was
+found by a test written for the first, which is the whole reason to write the obvious check.
+The same call guards the in-place reconnect (D30), which save-checks and then drops the
+outgoing core exactly as quitting does.
+
+**Guards.** `rio-core/tests/autosave.test` (60 cases, core 864 → 924): the mirrored path and
 every head shape including the volume branch, the containment belt, the setting's fail-open
 rule in five spellings plus a malformed file, the interval's floor and fallback, that ticking
 the box keeps a hand-tuned interval, the revision counter across all five mutation paths and
@@ -8391,14 +8416,21 @@ written not taking the others down with it, each of save / save-as / close / rel
 dropping the copy, the two absent-event cases, recovery reported as none / newer / older /
 file-gone, and `buffers.recover` end to end (the crash-and-reopen flow, one undo step, the
 event, the untouched file, the *not stale* consequence, CRLF round trip, three refusals).
-`rio-gui/tests/autosave.tcl` (new, 42 checks): the control's variable, applier, label, muted
+`rio-gui/tests/autosave.tcl` (new, 61 checks): the control's variable, applier, label, muted
 hint and the **absence** of a menu twin; that it reaches the core and mirrors back; a refusal
 snapping it back; the prompt in both answers with the file untouched and the undo available;
-the default button both ways; and a boot restore producing **one** dialog for two files. Its
+the default button both ways; a boot restore producing **one** dialog for two files; and — last in the file, because it
+closes the channel on its way out — a real `do_quit` that declines to save and leaves no copy
+behind. Its
 fixtures **plant** a copy for a file nothing has open, which is what a crash leaves behind — a
 closed tab cannot stand in for a dead core, because `buffer.close` correctly drops the copy.
 
-Fifteen injections, each failing by name. **One passed and was acted on**: replacing *mirror
+A separate case spawns a real child core over a pipe and waits for a copy to appear, because
+nothing else here proves `server.tcl` starts a timer at all: every other case drives `sweep`
+directly, so `rio::autosave::start` could have been missing entirely and all of them would
+still have passed.
+
+Eighteen injections, each failing by name. **One passed and was acted on**: replacing *mirror
 what the core accepted* with *keep the clicked value* broke nothing, because every check until
 then asked the core for a value it accepted verbatim. The wedge is a spelling the core
 **normalises** — `true` is stored as `on` and reads back as `1` — and the check now clicks with
@@ -8421,6 +8453,9 @@ CAVEATS, and untested on Windows. And a very large buffer is written in full on 
 D126's numbers put that near 20 ms per megabyte, so a 1 MB file is imperceptible and a 64 MB
 one is not, which is what the hand-editable `interval_ms` is there for until someone measures
 a case that warrants a size cap.
+
+---
+
 ## 4. "Simple debug/terminal" — scope decision
 
 rio ships **no terminal pane and no terminal emulator** (see D15). It does keep a

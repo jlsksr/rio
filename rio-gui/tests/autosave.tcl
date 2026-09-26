@@ -249,9 +249,52 @@ set ::asked {}
 recover_flush
 ok "boot: an empty queue asks nothing" $::asked                                     {}
 
+# --- abandoning what the user declined to save -------------------------------------------
+
+set ::asked {}
+set p7 [fixture a7.txt]
+do_open $p7
+.ed.t insert insert "CHANGED"          ;# through the proxy, so the core has it too
+rio::autosave::sweep
+ok "abandon: a copy exists to abandon"  [file exists [ascopy $p7]]                      1
+ok "abandon: the buffer is modified"    [bufget $::cur modified]                        1
+set ::core_remote 1
+autosave_abandon
+ok "abandon: a daemon's copy is left"   [file exists [ascopy $p7]]                      1
+set ::core_remote 0
+autosave_abandon
+ok "abandon: our own core's is dropped" [file exists [ascopy $p7]]                      0
+# Nothing was saved, so a session that keeps running must protect it again at the next sweep.
+rio::autosave::sweep
+ok "abandon: a live session re-protects" [file exists [ascopy $p7]]                     1
+
 # --- 6. nothing reached a real dialog ---------------------------------------------------
 
 ok "no stray dialog"                  $::headless_dialogs                           {}
+
+
+# --- and quitting makes "don't save" stick -----------------------------------------------
+#
+# LAST, because do_quit closes the channel on its way out: nothing after this can reach the
+# core. Answering "don't save" is a decision, and without autosave_abandon the next launch
+# would restore the file (D31) and offer back the very edits just declined.
+
+set p8 [fixture a8.txt]
+do_open $p8
+.ed.t insert insert "DECLINED"
+rio::autosave::sweep
+ok "quit: a copy exists beforehand"     [file exists [ascopy $p8]]                      1
+rename exit _autosave_real_exit
+proc exit {{code 0}} { set ::quit_code $code }
+rename tk_messageBox _autosave_mb_guard
+proc tk_messageBox {args} { return no }          ;# "don't save"
+set ::quit_code ""
+do_quit
+rename tk_messageBox {} ; rename _autosave_mb_guard tk_messageBox
+rename exit {} ; rename _autosave_real_exit exit
+ok "quit: it was on its way out"        $::quit_code                                    0
+ok "quit: the declined copy is gone"    [file exists [ascopy $p8]]                      0
+ok "quit: every declined one, not just one" [file exists [ascopy $p7]]                  0
 
 puts [expr {$::fails ? "\n$::fails CHECK(S) FAILED" : "\nALL CHECKS PASSED"}]
 exit [expr {$::fails ? 1 : 0}]

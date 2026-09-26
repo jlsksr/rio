@@ -104,7 +104,8 @@ proc rio::autosave::path_for {file} {
 # $XDG_CONFIG_HOME/rio/autosave.conf, beside tls.conf, top-level keys:
 #     autosave    = on|off        (default ON)
 #     interval_ms = 30000         (minimum 1000)
-# Absent, unreadable, malformed, or any value but a plain "off" leaves autosave ON. That is
+# Absent, unreadable, malformed, or any value but a plain no — "off", "0", "no", "false",
+# whatever the case — leaves autosave ON. That is
 # the opposite of tls.conf's fail-closed rule and deliberately so: there the safe side is
 # refusing a connection, here it is protecting work the user has not saved.
 proc rio::autosave::settings_path {} {
