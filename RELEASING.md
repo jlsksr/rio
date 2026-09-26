@@ -656,6 +656,15 @@ unexercised there. macOS: still never executed. The BSDs: still a design target.
 release notes say exactly this rather than listing supported platforms, which is the
 honest-smaller-claim rule of Gate 0 applied to the announcement.
 
+**What 0.2.0 shipped on (2026-09-26).** Linux only, verified at the tagged commit: the
+whole sweep green with **zero skips** — core 924, syntax 536, plugins/lib 20, claude 55,
+openai 115, and all **29** GUI suites exit 0 (28 at 0.1.0, plus `autosave.tcl`) — under
+both a UTF-8 and a `LANG=C` locale. Windows: **still not re-run**; the last full pass
+remains 2026-09-17, so D129's `install-windows.ps1` changes and everything from D130 on,
+autosave included, are unexercised there. macOS: still never executed. The BSDs: still a
+design target. Same rule as 0.1.0 — the release notes say this rather than listing
+platforms that are supported only in principle.
+
 ### The two decisions to take before the first push
 
 Both are one-way-ish once the history is public, so they are here rather than inline.

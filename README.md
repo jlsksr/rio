@@ -11,8 +11,8 @@ supports local and remote workflows.
 
 ## Status
 
-Alpha. **0.1.0** was the first release, 23 September 2026; `main` has moved on
-since. rio is written and used daily by its author, and is a long way from a
+Alpha. The current release is **0.2.0**, 26 September 2026; `main` moves on between
+releases. rio is written and used daily by its author, and is a long way from a
 full IDE.
 
 - **Linux and Windows 11 are tested, not assumed.** The suite passes on both, and

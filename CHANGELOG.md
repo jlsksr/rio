@@ -11,7 +11,7 @@ decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
-## [0.2.0] — unreleased
+## [0.2.0] — 2026-09-26
 
 ### Added
 
@@ -30,6 +30,16 @@ gets its own entry and says so, rather than editing the history it changed.
   `autosave.conf` holds the interval for anyone who wants it tighter or looser. An untitled
   buffer gets no copy — there is no name to offer it back under. — *D132 · `cd00b19` ·
   2026-09-26*
+
+### Changed
+
+- **The manual reads like a manual** — every topic in ***Help ▸ Contents…*** was written as
+  an essay, with asides, design commentary and paragraphs restating the one before. It is
+  now help-file voice throughout: a task is a numbered procedure, a set of options is a
+  table, a rule is one sentence, and a reason appears only where it changes what you do.
+  Same facts, about 500 lines fewer, nothing dropped but the commentary — and the
+  *Working on a remote machine* topic, which had been a stub, now carries the actual SSH
+  steps. — *`cff4627` · 2026-09-26*
 
 ## [0.1.0] — 2026-09-23
 
@@ -444,4 +454,5 @@ tagged.
 - **Stale-link watchdog** — a dead SSH tunnel is detected in seconds, not minutes. — *D37 ·
   `eed9bfc` · 2026-07-12*
 
+[0.2.0]: https://github.com/jlsksr/rio/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jlsksr/rio/releases/tag/v0.1.0
