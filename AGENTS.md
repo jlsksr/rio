@@ -8993,6 +8993,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | `rio::agent::_option_norm`'s keys | `rio::wire::_option`'s allow-list | `agent-options.test` — both directions, through the real op and encoder |
 | what `prefs_save` writes | `docs/preferences.md`'s key table | `docs.tcl` — runs it, reads the keys back |
 | the config/data path procs | `docs/preferences.md` *Where everything lives* | `docs.tcl` — both directions |
+| `rio::autosave`'s copy interval (D132) | the figure `docs/editor.md` and `docs/preferences.md` quote | `docs.tcl` 5a — derives the wording from `autosave_every`, the proc the Preferences hint uses, so no check names a number |
 | the dispatch registry | `session.hello`'s `ops` | none needed — read live, never copied |
 | the menubar widgets | every menu the docs in `docs/` + README/INSTALL/WINDOWS/CONTRIBUTING **name** — as a `Menu ▸ Item` path, or as prose | `docs.tcl` — walks the real menus |
 | the editor's context menu (D108) | the entries `docs/editor.md` lists | `docs.tcl` — builds the real menu, both directions |
