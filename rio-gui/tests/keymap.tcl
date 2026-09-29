@@ -123,10 +123,10 @@ set wk2 {}
 dict for {cmd spec} $::keymap_default { dict set wk2 $cmd [lindex $spec 0] }
 ok "overrides: none at default" [keymap_overrides $wk2] ""
 dict set wk2 close-tab Control-k
-dict set wk2 quit ""
+dict set wk2 open ""    ;# not quit: on a Mac that is unbound by default (D136)
 set ov [keymap_overrides $wk2]
 ok "overrides: remap present"   [dict get $ov close-tab] Control-k
-ok "overrides: unbind present"  [dict get $ov quit]      ""
+ok "overrides: unbind present"  [dict get $ov open]      ""
 ok "overrides: only the diffs"  [dict size $ov]          2
 
 # --- keys_default: restore one command to its shipped default (per-row button) ---

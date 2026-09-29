@@ -307,14 +307,14 @@ ok "emacs: C-v never pastes"    [buf_text $::cur] $before
 ok "emacs: C-v moved the view"  [expr {[lindex [rio_real_t yview] 0] > 0}] 1
 ok "emacs: C-v moved the caret" [expr {[rio_real_t compare insert > 1.0]}] 1
 
-# and in windows mode Ctrl-V is an explicit paste (what those users expect)
+# and in windows mode the platform's paste chord pastes (Ctrl-V; Cmd-V on a Mac, D136)
 set ::edit_mode windows
 apply_editmode
 clear_buf
 .ed.t insert insert "ab"
 .ed.t mark set insert "1.0 lineend"
 set_clip "XYZ"
-fire <Control-v>
+fire <$::primary_mod-v>
 ok "win: C-v pastes"            [buf_text $::cur] "abXYZ"
 
 # --- a split inherits the mode layer -------------------------------------------
