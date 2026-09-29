@@ -85,7 +85,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0021](0021-plain-text-config-xdg.md) | Plain-text configuration in XDG locations, never executed | Accepted; session storage amended by 0031 | 2026-06-25 |
 | [0022](0022-encoding-line-endings-cursor.md) | Preserve encoding and line endings; cursors are frontend-local | Accepted | 2026-06-25 |
 | [0023](0023-keybindings-as-data.md) | Keybindings are data | Accepted | 2026-06-25 |
-| [0024](0024-themes-as-role-data.md) | Themes are semantic-role data files | Accepted | 2026-06-25 |
+| [0024](0024-themes-as-role-data.md) | Themes are semantic-role data files | Accepted; amended by 0142 | 2026-06-25 |
 | [0025](0025-shape-aware-json-encoding.md) | JSON encoding is shape-aware, never value-sniffed | Accepted | 2026-06-25 |
 | [0026](0026-agent-first-slice-api-key.md) | The agent's first slice, on the official API key only | Accepted; amended by 0034, 0069, 0083, 0104 | 2026-06-27 |
 | [0027](0027-monochrome-unicode-icons.md) | Icons are monochrome Unicode glyphs | Accepted | 2026-06-29 |
@@ -203,3 +203,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0139](0139-autosave-recovery-copies.md) | Autosave writes a separate recovery copy, never the file you are editing | Accepted | 2026-09-26 |
 | [0140](0140-macos-platform-facts-from-tk.md) | On macOS, platform facts are asked of Tk, not assumed | Accepted; amended by 0141 | 2026-09-29 |
 | [0141](0141-macos-installer-and-rio-app.md) | macOS gets its own installer, and rio.app is a copy of wish | Accepted | 2026-09-29 |
+| [0142](0142-aqua-theme-appearance-and-font-floor.md) | On Aqua, the theme reaches the native controls, and chrome text has a floor | Accepted | 2026-09-29 |

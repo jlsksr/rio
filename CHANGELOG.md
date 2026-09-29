@@ -30,6 +30,14 @@ gets its own entry and says so, rather than editing the history it changed.
 
 ### Fixed
 
+- **Buttons follow a dark theme on macOS** — on a Mac, buttons, menu buttons and checkboxes
+  stayed light in a dark theme such as Solarized Dark, because macOS draws them itself and
+  ignores the theme's colours. rio now tells macOS whether the theme is dark or light, so
+  they are drawn to match. — *D135 · `299da3a` · 2026-09-29*
+- **Readable interface text on macOS** — on a Mac, the file tree, tabs, status bar and the
+  rest of the interface were drawn about a quarter smaller than on Linux, because macOS
+  counts a point as one pixel. Interface and chat text now have a floor of 11 points there.
+  The editor keeps the size the theme or you chose. — *D135 · `299da3a` · 2026-09-29*
 - **Cmd-Q no longer quits without asking about unsaved work** — on a Mac, Quit from the
   keyboard or the application menu went straight past rio's "save changes?" question and
   exited, losing any unsaved edits. It now asks, exactly like closing the window. —

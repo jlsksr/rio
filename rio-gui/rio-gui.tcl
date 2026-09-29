@@ -221,6 +221,53 @@ proc mono_family {fam} {
 	return $::mono_resolved
 }
 set ::mono [mono_family monospace] ;# the chrome's fixed-width family, resolved once
+# Aqua sizes and appearance (D135). Tk converts a font's points with `tk scaling`, which is
+# 1 px/pt on Aqua against 1.33 on X11, so the theme's UI 9 is 9 px on a Mac: below the
+# platform's own floor for interface text. Rather than rescale everything (which would also
+# grow the editor past a Mac editor's usual size), chrome and chat fonts get a floor there,
+# applied where D24 puts every Tk-specific mapping: in the GUI, never in the theme data.
+# The editor font (RioEditorFont) is exempt, so the theme's size and D56's override stand.
+set ::ui_font_floor [expr {[tk windowingsystem] eq "aqua" ? 11 : 0}]
+proc ui_size {sz} {
+	return [expr {$sz < $::ui_font_floor ? $::ui_font_floor : $sz}]
+}
+# A literal chrome font, floored like the named ones. Every fixed-width chrome widget is
+# built through this, so the floor has one home.
+proc chrome_font {sz} { return [list $::mono [ui_size $sz]] }
+# Aqua draws button, menubutton and checkbutton as native controls that ignore -background,
+# so a dark theme got light blobs. The native appearance follows the THEME (not the system
+# setting, which is what `auto` would follow): dark when ui.bg is dark. Perceived lightness
+# on a 0-255 scale, Rec. 601 weights.
+proc hex_luma {hex} {
+	lassign [winfo rgb . $hex] r g b
+	return [expr {(0.299*$r + 0.587*$g + 0.114*$b) / 257.0}]
+}
+proc aqua_appearance_for {bg} {
+	return [expr {[hex_luma $bg] < 128 ? "darkaqua" : "aqua"}]
+}
+set ::aqua_appearance aqua ;# apply_theme sets it from ui.bg
+# The command is `unsupported` and missing on older Tk, hence the catch. A toplevel has no
+# native window until its first idle pass, so new ones are caught by the <Configure> below,
+# which fires then, withdrawn or not, and before the first map.
+proc aqua_appearance_apply {w} {
+	if {[tk windowingsystem] ne "aqua"} return
+	catch {
+		if {[::tk::unsupported::MacWindowStyle appearance $w] ne $::aqua_appearance} {
+			::tk::unsupported::MacWindowStyle appearance $w $::aqua_appearance
+		}
+	}
+}
+proc aqua_appearance_all {} {
+	set todo [list .]
+	while {[llength $todo]} {
+		set w [lindex $todo 0]; set todo [lrange $todo 1 end]
+		if {$w eq "." || [winfo class $w] eq "Toplevel"} { aqua_appearance_apply $w }
+		lappend todo {*}[winfo children $w]
+	}
+}
+if {[tk windowingsystem] eq "aqua"} {
+	bind Toplevel <Configure> {+if {"%W" eq [winfo toplevel %W]} {aqua_appearance_apply %W}}
+}
 set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
 set ::chat_thinking_open 0 ;# mid-stream: a run of reasoning is open (provider-api 4)
@@ -7988,7 +8035,9 @@ proc editor_zoom_reset {} {
 
 proc ensure_fonts {fonts} {
 	dict for {name spec} $fonts {
-		set opts [list -family [mono_family [dict get $spec family]] -size [dict get $spec size]]
+		set sz [dict get $spec size]
+		if {$name ne "RioEditorFont"} { set sz [ui_size $sz] } ;# D135's Aqua floor
+		set opts [list -family [mono_family [dict get $spec family]] -size $sz]
 		if {[lsearch -exact [font names] $name] >= 0} {
 			font configure $name {*}$opts
 		} else {
@@ -8044,6 +8093,8 @@ proc restyle_group {g} {
 proc apply_theme {theme} {
 	set c [dict get $theme colors]
 	set ::theme_colors $c
+	set ::aqua_appearance [aqua_appearance_for [dict get $c ui.bg]]
+	aqua_appearance_all   ;# D135: native controls follow the theme's lightness (Aqua only)
 	ensure_fonts [dict get $theme fonts]
 	# Record the theme's own editor font, then overlay the user's font override (D56)
 	# back on top of it — otherwise a theme switch would silently discard a picked font
@@ -11514,11 +11565,11 @@ frame .pfiles -background "#dddddd"
 # shown directory and re-reads git flags via populate_nav — the manual counterpart to the
 # fs.changed auto-refresh (D47), for changes rio didn't make (an external tool, git pull).
 frame .pfiles.hdr -background "#dddddd"
-label .pfiles.hdr.head -anchor w -font [list $::mono 9] -padx 4 -pady 2 \
+label .pfiles.hdr.head -anchor w -font [chrome_font 9] -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-label .pfiles.hdr.refresh -text "⟳" -font [list $::mono 9] -padx 6 \
+label .pfiles.hdr.refresh -text "⟳" -font [chrome_font 9] -padx 6 \
 	-background "#dddddd" -foreground black
-label .pfiles.hdr.hidden -text "◌" -font [list $::mono 9] -padx 6 \
+label .pfiles.hdr.hidden -text "◌" -font [chrome_font 9] -padx 6 \
 	-background "#dddddd" -foreground black
 pack .pfiles.hdr.refresh -side right
 pack .pfiles.hdr.hidden  -side right   ;# ◉/◌ toggle for hidden files, left of ⟳ (D62)
@@ -11550,14 +11601,14 @@ bind .pfiles.well.body <Double-Button-1> {nav_b1_double %W %x %y ; break}
 # D43 — same chrome as the file pane), and a read-only diff area below it.
 frame .pgit -background "#dddddd"
 frame .pgit.hdr -background "#dddddd"
-label .pgit.hdr.branch -anchor w -font [list $::mono 9] -padx 4 -pady 2 \
+label .pgit.hdr.branch -anchor w -font [chrome_font 9] -padx 4 -pady 2 \
 	-background "#dddddd" -foreground black
-label .pgit.hdr.refresh -text "⟳" -font [list $::mono 9] -padx 6 \
+label .pgit.hdr.refresh -text "⟳" -font [chrome_font 9] -padx 6 \
 	-background "#dddddd" -foreground black
 # ↩ discards every change in the repo (D93). Built here but NOT packed: refresh_git packs it
 # (left of ⟳) only while the repo has changes, so the pane's one destructive control is
 # absent from a clean repo — and a mis-click is caught by the No-defaulted confirm anyway.
-label .pgit.hdr.discard -text "↩" -font [list $::mono 9] -padx 6 \
+label .pgit.hdr.discard -text "↩" -font [chrome_font 9] -padx 6 \
 	-background "#dddddd" -foreground black
 set ::git_change_count 0
 pack .pgit.hdr.refresh -side right
@@ -11595,19 +11646,19 @@ rl_init .pgit.well.body git_pick {} git_context_menu
 # Built here, not packed; git_commit_body_set lays out the row (body collapsed to start).
 set ::git_commit_body_shown 0
 frame  .pgit.commit -background "#dddddd"
-entry  .pgit.commit.msg  -font [list $::mono 9] -textvariable git_commit_msg
-button .pgit.commit.more -text "＋" -font [list $::mono 9] -takefocus 0 -command git_commit_body_toggle
-button .pgit.commit.go   -text "✓ Commit" -font [list $::mono 9] -command git_commit
-text   .pgit.commit.body -height 4 -font [list $::mono 9] -wrap word -undo 1 \
+entry  .pgit.commit.msg  -font [chrome_font 9] -textvariable git_commit_msg
+button .pgit.commit.more -text "＋" -font [chrome_font 9] -takefocus 0 -command git_commit_body_toggle
+button .pgit.commit.go   -text "✓ Commit" -font [chrome_font 9] -command git_commit
+text   .pgit.commit.body -height 4 -font [chrome_font 9] -wrap word -undo 1 \
 	-borderwidth 1 -relief solid -highlightthickness 0
 # A greyed "message" hint, shown only while the entry is empty (Tk has no native
 # placeholder). It is a child label placed inside the entry, so it never becomes part of
 # `.msg get` — the empty check and the commit stay honest. A trace toggles it on content.
-label .pgit.commit.msg.ph -text message -font [list $::mono 9] -takefocus 0 -borderwidth 0
+label .pgit.commit.msg.ph -text message -font [chrome_font 9] -takefocus 0 -borderwidth 0
 place .pgit.commit.msg.ph -x 3 -rely 0.5 -anchor w
 bind  .pgit.commit.msg.ph <Button-1> {focus .pgit.commit.msg}
 # The body's own placeholder, same device — a child label over the text widget.
-label .pgit.commit.body.ph -text "Longer description (optional)" -font [list $::mono 9] \
+label .pgit.commit.body.ph -text "Longer description (optional)" -font [chrome_font 9] \
 	-takefocus 0 -borderwidth 0
 bind  .pgit.commit.body.ph <Button-1> {focus .pgit.commit.body}
 # Cut/Copy/Paste/Select All on both fields (D115). The placeholder labels are PLACED ON
@@ -13002,7 +13053,7 @@ proc make_editor_group {g} {
 	set f .eg$g
 	frame $f
 	frame $f.tabs -background "#bbbbbb"
-	text $f.t -wrap none -undo 0 -font [list $::mono 12] -width 80 -height 28 \
+	text $f.t -wrap none -undo 0 -font [chrome_font 12] -width 80 -height 28 \
 		-background white -foreground black -insertbackground black \
 		-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 		-yscrollcommand [list edscroll $g] -xscrollcommand [list gridscroll $f.hsb]
@@ -13096,12 +13147,12 @@ relayout_groups
 # core diff.lines alignment into the panes.
 frame .cmp
 frame .cmp.l ; frame .cmp.r
-label .cmp.l.hdr -anchor w -font [list $::mono 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
-label .cmp.r.hdr -anchor w -font [list $::mono 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
-text .cmp.l.t -wrap none -state disabled -font [list $::mono 12] -width 40 -height 28 \
+label .cmp.l.hdr -anchor w -font [chrome_font 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
+label .cmp.r.hdr -anchor w -font [chrome_font 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
+text .cmp.l.t -wrap none -state disabled -font [chrome_font 12] -width 40 -height 28 \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black -yscrollcommand {cmp_yscroll l}
-text .cmp.r.t -wrap none -state disabled -font [list $::mono 12] -width 40 -height 28 \
+text .cmp.r.t -wrap none -state disabled -font [chrome_font 12] -width 40 -height 28 \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black -yscrollcommand {cmp_yscroll r}
 ctx_bind_view .cmp.l.t ; ctx_bind_view .cmp.r.t   ;# Copy / Select All (D115)
@@ -13109,7 +13160,7 @@ scrollbar .cmp.sb -orient vertical -command cmp_yview
 # A top bar with a clear way out — the Esc binding alone isn't discoverable, so the
 # button names the shortcut (D27: a plain × glyph, widely covered).
 frame .cmp.bar
-button .cmp.bar.close -text "× Close compare (Esc)" -font [list $::mono 9] -command compare_close
+button .cmp.bar.close -text "× Close compare (Esc)" -font [chrome_font 9] -command compare_close
 pack .cmp.bar.close -side right -padx 2 -pady 1
 pack .cmp.bar -side bottom -fill x
 pack .cmp.l.hdr -side top -fill x ; pack .cmp.l.t -side left -fill both -expand 1
@@ -13130,14 +13181,14 @@ foreach w {.cmp.l.t .cmp.r.t} {
 # of thing: a proposal being read before it is decided. Wrapped, not scrolled sideways:
 # this is prose, and help_paint's own code/table tags handle what must not reflow.
 frame .plan
-label .plan.hdr -anchor w -font [list $::mono 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
-text .plan.text -wrap word -state disabled -font [list $::mono 12] -width 80 -height 28 \
+label .plan.hdr -anchor w -font [chrome_font 9] -padx 4 -pady 2 -background "#dddddd" -foreground black
+text .plan.text -wrap word -state disabled -font [chrome_font 12] -width 80 -height 28 \
 	-borderwidth 0 -highlightthickness 0 -padx 12 -pady 8 \
 	-background white -foreground black -yscrollcommand {.plan.sb set}
 ctx_bind_view .plan.text   ;# Copy / Select All (D115)
 scrollbar .plan.sb -orient vertical -command {.plan.text yview}
 frame .plan.bar
-button .plan.bar.close -text "× Close plan (Esc)" -font [list $::mono 9] -command plan_close
+button .plan.bar.close -text "× Close plan (Esc)" -font [chrome_font 9] -command plan_close
 pack .plan.bar.close -side right -padx 2 -pady 1
 pack .plan.bar -side bottom -fill x
 pack .plan.hdr -side top -fill x
@@ -13152,16 +13203,16 @@ bind .plan.text <Escape> {plan_close ; break}
 frame .chat -width 340 -background white
 pack propagate .chat 0
 frame .chat.hdr -background white
-label .chat.hdr.title -text "Agent" -anchor w -font [list $::mono 9] -padx 4 -pady 2 \
+label .chat.hdr.title -text "Agent" -anchor w -font [chrome_font 9] -padx 4 -pady 2 \
 	-background white -foreground black
-label .chat.hdr.clear -text "Clear" -font [list $::mono 9] -padx 6 -cursor hand2 \
+label .chat.hdr.clear -text "Clear" -font [chrome_font 9] -padx 6 -cursor hand2 \
 	-background white -foreground black
 # The agent's mode, where it was already being displayed — but as a control (D102). Three
 # exclusive states over the core's two flags: Plan (may read, may not change), Review (each
 # edit waits), Auto (edits apply as they come). The header is the pane's control strip
 # already (Clear lives here, as ⟳ and the hidden toggle do in the Files and Git headers),
 # and a one-word label needs the tooltip to say what it means.
-menubutton .chat.hdr.mode -text "Review ▾" -font [list $::mono 9] -menu .chat.hdr.mode.m \
+menubutton .chat.hdr.mode -text "Review ▾" -font [chrome_font 9] -menu .chat.hdr.mode.m \
 	-padx 4 -cursor hand2 -background white -foreground black
 menu .chat.hdr.mode.m -tearoff 0
 foreach {v lbl} {plan "Plan — read and plan, change nothing" \
@@ -13174,11 +13225,11 @@ pack .chat.hdr.mode  -side right
 pack .chat.hdr.title -side left -fill x -expand 1
 bind .chat.hdr.clear <Button-1> chat_clear
 # Composer: a few-line input + a Send button. Enter sends; Shift+Enter newlines.
-text .chat.input -height 3 -wrap word -undo 1 -font [list $::mono 11] \
+text .chat.input -height 3 -wrap word -undo 1 -font [chrome_font 11] \
 	-borderwidth 1 -relief solid -highlightthickness 0 -padx 3 -pady 2 \
 	-background white -foreground black -insertbackground black
 ctx_bind_input .chat.input   ;# Cut / Copy / Paste / Select All (D115)
-button .chat.send -text "▶" -font [list $::mono 9] -command chat_send  ;# ▶ send (D27)
+button .chat.send -text "▶" -font [chrome_font 9] -command chat_send  ;# ▶ send (D27)
 # …and ■ stop while a turn is working (D104): the same button, because "send" and "stop"
 # are never both available — the turn is either yours to type into or the agent's to run.
 tooltip .chat.send "Send this message"
@@ -13188,11 +13239,11 @@ tooltip .chat.send "Send this message"
 # animation erased the answer to "which model is this?" for the whole time it mattered
 # most. This is also where the eye already is: directly under the composer.
 frame .chat.status -background "#eeeeee"
-menubutton .chat.status.sel -anchor w -font [list $::mono 9] -padx 4 -pady 2 \
+menubutton .chat.status.sel -anchor w -font [chrome_font 9] -padx 4 -pady 2 \
 	-menu .chat.status.sel.m -cursor hand2 \
 	-background "#eeeeee" -foreground "#444444"
 menu .chat.status.sel.m -tearoff 0
-label .chat.status.busy -anchor e -font [list $::mono 9] -padx 4 -pady 2 \
+label .chat.status.busy -anchor e -font [chrome_font 9] -padx 4 -pady 2 \
 	-background "#eeeeee" -foreground "#444444"
 pack .chat.status.sel  -side left
 pack .chat.status.busy -side right
@@ -13206,18 +13257,18 @@ bind .chat.isash <B1-Motion>     { isash_drag %Y }
 bind .chat <Configure> clamp_input_height
 # Approve/Reject bar for a proposed edit (packed on demand by approve_bar; D26 s5).
 frame .chat.approve -background white
-label .chat.approve.lbl -text "Apply this edit?" -anchor w -font [list $::mono 9] \
+label .chat.approve.lbl -text "Apply this edit?" -anchor w -font [chrome_font 9] \
 	-padx 4 -pady 2 -background white -foreground black
-button .chat.approve.yes -text "Approve" -font [list $::mono 9] -command {agent_decide approve}
-button .chat.approve.no  -text "Reject"  -font [list $::mono 9] -command {agent_decide reject}
-button .chat.approve.cmp -text "Compare" -font [list $::mono 9] -command {compare_proposal $::pending_turn}
+button .chat.approve.yes -text "Approve" -font [chrome_font 9] -command {agent_decide approve}
+button .chat.approve.no  -text "Reject"  -font [chrome_font 9] -command {agent_decide reject}
+button .chat.approve.cmp -text "Compare" -font [chrome_font 9] -command {compare_proposal $::pending_turn}
 # "Plan" (plan proposals only, D101): reopen the plan the user closed while thinking. The
 # plan is already in hand — nothing is fetched, it is only shown again.
-button .chat.approve.plan -text "Plan" -font [list $::mono 9] -command plan_reopen
+button .chat.approve.plan -text "Plan" -font [chrome_font 9] -command plan_reopen
 # A plan is approved WITH a policy for the work it starts (D102): the two items are the two
 # ways to say yes, so "approve" never silently means one of them. A menubutton rather than
 # two buttons because the choice is the approval, not a setting beside it.
-menubutton .chat.approve.appr -text "Approve ▾" -font [list $::mono 9] \
+menubutton .chat.approve.appr -text "Approve ▾" -font [chrome_font 9] \
 	-menu .chat.approve.appr.m -relief raised -borderwidth 1 -padx 4
 menu .chat.approve.appr.m -tearoff 0
 .chat.approve.appr.m add command -label "Approve — review each edit" \
@@ -13226,11 +13277,11 @@ menu .chat.approve.appr.m -tearoff 0
 	-command {agent_decide_plan auto}
 # "Edit plan" (plan proposals only, D102): the plan is a file in the project, so changing it
 # is rio's ordinary edit path. Packed only when the plan was filed.
-button .chat.approve.edit -text "Edit plan" -font [list $::mono 9] -command plan_edit
+button .chat.approve.edit -text "Edit plan" -font [chrome_font 9] -command plan_edit
 # "Always allow" (command proposals only, D84): remember a trust rule so this command
 # stops asking. Packed on demand by approve_bar; its menu is rebuilt per proposal by
 # chat_allow_menu_populate. tearoff off — a floating menu makes no sense here.
-menubutton .chat.approve.always -text "Always allow ▾" -font [list $::mono 9] \
+menubutton .chat.approve.always -text "Always allow ▾" -font [chrome_font 9] \
 	-menu .chat.approve.always.m -relief raised -borderwidth 1 -padx 4
 menu .chat.approve.always.m -tearoff 0
 pack .chat.approve.yes -side right
@@ -13238,23 +13289,23 @@ pack .chat.approve.no  -side right
 pack .chat.approve.cmp -side right
 pack .chat.approve.lbl -side left -fill x -expand 1
 # Transcript: read-only, word-wrapped, with an auto-hiding scrollbar.
-text .chat.log -wrap word -state disabled -font [list $::mono 11] -cursor "" \
+text .chat.log -wrap word -state disabled -font [chrome_font 11] -cursor "" \
 	-borderwidth 0 -highlightthickness 0 -padx 4 -pady 2 \
 	-background white -foreground black \
 	-yscrollcommand {autoscroll .chat.sb .chat.log}
 ctx_bind_view .chat.log   ;# Copy / Select All (D115)
 scrollbar .chat.sb -command {.chat.log yview}
-.chat.log tag configure you-label   -font [list $::mono 9] -background "#c3d9ff" \
+.chat.log tag configure you-label   -font [chrome_font 9] -background "#c3d9ff" \
 	-spacing1 4 -spacing3 2
-.chat.log tag configure agent-label -font [list $::mono 9] -background "#dddddd" \
+.chat.log tag configure agent-label -font [chrome_font 9] -background "#dddddd" \
 	-spacing1 4 -spacing3 2
-.chat.log tag configure error-label -font [list $::mono 9]
-.chat.log tag configure tool        -font [list $::mono 9] -foreground "#888888"
-.chat.log tag configure tool-error  -font [list $::mono 9] -foreground "#cc0000"
-.chat.log tag configure thinking    -font [list $::mono 9] -foreground "#888888" \
+.chat.log tag configure error-label -font [chrome_font 9]
+.chat.log tag configure tool        -font [chrome_font 9] -foreground "#888888"
+.chat.log tag configure tool-error  -font [chrome_font 9] -foreground "#cc0000"
+.chat.log tag configure thinking    -font [chrome_font 9] -foreground "#888888" \
 	-lmargin1 12 -lmargin2 12
-.chat.log tag configure diff-add    -font [list $::mono 9] -foreground "#118811"
-.chat.log tag configure diff-del    -font [list $::mono 9] -foreground "#cc0000"
+.chat.log tag configure diff-add    -font [chrome_font 9] -foreground "#118811"
+.chat.log tag configure diff-del    -font [chrome_font 9] -foreground "#cc0000"
 pack .chat.hdr    -side top    -fill x
 pack .chat.status -side bottom -fill x
 pack .chat.send   -side bottom -fill x
@@ -13274,26 +13325,26 @@ bind .csash <ButtonRelease-1> { rio::layout::put right size [winfo width .siteri
 # labelled controls and a × to close (D27) — the bar reads at a glance. Colours
 # are bootstrap; apply_theme restyles (entries take the editor surface).
 frame .find -borderwidth 1 -relief raised -background "#dddddd"
-label .find.fl -text "Find:"    -font [list $::mono 9] -anchor e -background "#dddddd"
-label .find.rl -text "Replace:" -font [list $::mono 9] -anchor e -background "#dddddd"
-entry .find.e  -font [list $::mono 11] -width 24
-entry .find.re -font [list $::mono 11] -width 24
+label .find.fl -text "Find:"    -font [chrome_font 9] -anchor e -background "#dddddd"
+label .find.rl -text "Replace:" -font [chrome_font 9] -anchor e -background "#dddddd"
+entry .find.e  -font [chrome_font 11] -width 24
+entry .find.re -font [chrome_font 11] -width 24
 ctx_bind_input .find.e ; ctx_bind_input .find.re   ;# Cut / Copy / Paste / Select All (D115)
 # ↓/↑ (U+2193/U+2191) step forward/backward through matches (top-to-bottom),
 # the find-widget idiom (D27); F3 / Shift+F3 are the keyboard path.
-button .find.next -text "↓" -width 2 -font [list $::mono 9] -command find_next
-button .find.prev -text "↑" -width 2 -font [list $::mono 9] -command find_prev
-checkbutton .find.case -text "Match case" -font [list $::mono 9] \
+button .find.next -text "↓" -width 2 -font [chrome_font 9] -command find_next
+button .find.prev -text "↑" -width 2 -font [chrome_font 9] -command find_prev
+checkbutton .find.case -text "Match case" -font [chrome_font 9] \
 	-variable ::find_case -command find_update -background "#dddddd"
-checkbutton .find.word -text "Whole word" -font [list $::mono 9] \
+checkbutton .find.word -text "Whole word" -font [chrome_font 9] \
 	-variable ::find_word -command find_update -background "#dddddd"
-checkbutton .find.regex -text "Regex" -font [list $::mono 9] \
+checkbutton .find.regex -text "Regex" -font [chrome_font 9] \
 	-variable ::find_regex -command find_regex_changed -background "#dddddd"
-label .find.count -font [list $::mono 9] -anchor w -background "#dddddd"
-label .find.close -text "×" -font [list $::mono 9] -padx 6 -cursor hand2 \
+label .find.count -font [chrome_font 9] -anchor w -background "#dddddd"
+label .find.close -text "×" -font [chrome_font 9] -padx 6 -cursor hand2 \
 	-background "#dddddd"
-button .find.rep    -text "Replace"     -font [list $::mono 9] -command find_replace_one
-button .find.repall -text "Replace All" -font [list $::mono 9] -command find_replace_all
+button .find.rep    -text "Replace"     -font [chrome_font 9] -command find_replace_one
+button .find.repall -text "Replace All" -font [chrome_font 9] -command find_replace_all
 grid .find.fl     -row 0 -column 0 -sticky e  -padx {6 2} -pady 2
 grid .find.e      -row 0 -column 1 -sticky ew -pady 2
 grid .find.next   -row 0 -column 2 -padx 2
@@ -13340,8 +13391,8 @@ unset _w
 # bootstrap; apply_theme restyles (the query entry the editor surface, the well the chrome).
 frame .results -borderwidth 1 -relief raised -background "#dddddd"
 frame .results.hdr -background "#dddddd"
-label .results.hdr.l -text "Search:" -font [list $::mono 9] -background "#dddddd"
-entry .results.hdr.e -font [list $::mono 11] -width 28
+label .results.hdr.l -text "Search:" -font [chrome_font 9] -background "#dddddd"
+entry .results.hdr.e -font [chrome_font 11] -width 28
 ctx_bind_input .results.hdr.e   ;# (D115)
 # The scope option menu drives ::search_scope; each entry re-runs the query so a
 # scope change is live (like the option toggles). tk_optionMenu returns the menu.
@@ -13349,17 +13400,17 @@ set _scopemenu [tk_optionMenu .results.hdr.scope ::search_scope "Project" "Open 
 for {set _i 0} {$_i <= [$_scopemenu index end]} {incr _i} {
 	$_scopemenu entryconfigure $_i -command search_run
 }
-.results.hdr.scope configure -font [list $::mono 9] -background "#dddddd" \
+.results.hdr.scope configure -font [chrome_font 9] -background "#dddddd" \
 	-highlightthickness 0 -borderwidth 1 -relief raised -padx 4 -pady 0
 unset _scopemenu _i
-checkbutton .results.hdr.case -text "Match case" -font [list $::mono 9] \
+checkbutton .results.hdr.case -text "Match case" -font [chrome_font 9] \
 	-variable ::search_case -command search_run -background "#dddddd"
-checkbutton .results.hdr.word -text "Whole word" -font [list $::mono 9] \
+checkbutton .results.hdr.word -text "Whole word" -font [chrome_font 9] \
 	-variable ::search_word -command search_run -background "#dddddd"
-checkbutton .results.hdr.regex -text "Regex" -font [list $::mono 9] \
+checkbutton .results.hdr.regex -text "Regex" -font [chrome_font 9] \
 	-variable ::search_regex -command search_regex_changed -background "#dddddd"
-label .results.hdr.count -font [list $::mono 9] -anchor w -background "#dddddd"
-label .results.hdr.close -text "×" -font [list $::mono 9] -padx 6 -cursor hand2 -background "#dddddd"
+label .results.hdr.count -font [chrome_font 9] -anchor w -background "#dddddd"
+label .results.hdr.close -text "×" -font [chrome_font 9] -padx 6 -cursor hand2 -background "#dddddd"
 pack .results.hdr.l     -side left  -padx {6 2} -pady 2
 pack .results.hdr.e     -side left  -pady 2
 pack .results.hdr.scope -side left  -padx 6
@@ -13373,10 +13424,10 @@ pack .results.hdr -side bottom -fill x   ;# controls hug the bottom edge (compos
 # just ABOVE the bottom-anchored query row. Replacement entry + Replace All — the scope
 # selector on the query row below decides where it lands (buffers vs disk, confirm-gated).
 frame .results.rep -background "#dddddd"
-label .results.rep.l -text "Replace:" -font [list $::mono 9] -background "#dddddd"
-entry .results.rep.e -font [list $::mono 11] -width 28
+label .results.rep.l -text "Replace:" -font [chrome_font 9] -background "#dddddd"
+entry .results.rep.e -font [chrome_font 11] -width 28
 ctx_bind_input .results.rep.e   ;# (D115)
-button .results.rep.all -text "Replace All" -font [list $::mono 9] -command search_replace_all
+button .results.rep.all -text "Replace All" -font [chrome_font 9] -command search_replace_all
 pack .results.rep.l   -side left -padx {6 2} -pady {0 2}
 pack .results.rep.e   -side left -pady {0 2}
 pack .results.rep.all -side left -padx 6
@@ -13409,7 +13460,7 @@ rio::panel::register git    {title Git    site left   body .pgit   refresh refre
 rio::panel::register chat   {title Agent  site right  body .chat       refresh {}}
 rio::panel::register search {title Search site bottom body .results    refresh search_run}
 
-label .status -anchor w -font [list $::mono 9] -padx 4 -pady 1 \
+label .status -anchor w -font [chrome_font 9] -padx 4 -pady 1 \
 	-background "#dddddd" -foreground black
 pack .status -side bottom -fill x
 # The dock sites and .groups are packed by apply_layout at startup (from the layout);
