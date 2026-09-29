@@ -43,6 +43,10 @@ ok "theme base recorded: family" $::editor_theme_family monospace
 ok "no override -> theme size"   [ef_size]              12
 ok "size_now reads theme"        [editor_font_size_now] 12
 ok "override size starts 0"      $::editor_font_size    0
+# The alias must LAND on a fixed-width font wherever it runs: Aqua knows no `monospace` and
+# used to fall back to the proportional system UI font, taking the editor's columns with it.
+ok "theme monospace is fixed-width"  [font metrics RioEditorFont -fixed] 1
+ok "chrome monospace is fixed-width" [font metrics [list $::mono 9] -fixed] 1
 
 # --- zoom steps an ABSOLUTE size override -----------------------------------------
 editor_zoom 1
