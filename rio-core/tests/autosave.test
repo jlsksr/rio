@@ -19,7 +19,9 @@ source [file join [file dirname [info script]] .. core.tcl]
 # One throwaway autosave root and one throwaway autosave.conf for the whole run, so nothing
 # here can touch (or be touched by) the real ones under $XDG_DATA_HOME / $XDG_CONFIG_HOME.
 set _ch [file tempfile _asbase] ; close $_ch ; file delete $_asbase
-set ::asroot "$_asbase.autosave"
+# Normalized, as `root` normalizes it: macOS keeps the temp dir under /var, a symlink to
+# /private/var, so a raw path here would never equal the one rio builds.
+set ::asroot [file normalize "$_asbase.autosave"]
 set ::asconf "$_asbase.conf"
 set rio::autosave::dir_override $::asroot
 set rio::autosave::settings_override $::asconf
@@ -82,9 +84,10 @@ proc age {path {secs 5}} { file mtime $path [expr {[file mtime $path] - $secs}] 
 # --- where a copy goes ------------------------------------------------------------------
 
 test autosave-path-mirrors-the-directory {a copy sits under the autosave root with the file's
-		own directory mirrored below it, keeping emacs's #name# spelling} -body {
-	rio::autosave::path_for /home/jka/Projekte/rio/README.md
-} -result [file join $::asroot home jka Projekte rio "#README.md#"]
+		own directory mirrored below it, keeping emacs's #name# spelling. The directory is one
+		no host has on purpose: `file normalize` resolves symlinks, and /home is one on macOS} -body {
+	rio::autosave::path_for /rio-no-such-dir/jka/Projekte/rio/README.md
+} -result [file join $::asroot rio-no-such-dir jka Projekte rio "#README.md#"]
 
 test autosave-path-of-a-file-in-the-filesystem-root {nothing to mirror, so the copy sits at
 		the root of the autosave tree} -body {

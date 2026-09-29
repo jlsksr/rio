@@ -10,6 +10,14 @@
 # session.tcl manages its own temp XDG dirs (it inspects the files it writes) and so
 # does not use this.
 
+# Fixtures are built under `file tempfile`'s directory, and the core hands back every path
+# it touches `file normalize`d — which resolves symlinks. On macOS $TMPDIR sits under /var,
+# a symlink to /private/var, so a fixture's raw path would never equal the path the core
+# reports for it (and teardown would miss the tabs open on it). Canonical from the start.
+if {[info exists ::env(TMPDIR)] && $::env(TMPDIR) ne ""} {
+	set ::env(TMPDIR) [file normalize $::env(TMPDIR)]
+}
+
 set _sbxch [file tempfile _sbxname] ; close $_sbxch ; file delete $_sbxname
 set ::sandbox_dir $_sbxname.d
 set ::env(XDG_CONFIG_HOME) [file join $::sandbox_dir config]
