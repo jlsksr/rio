@@ -8905,6 +8905,26 @@ Recorder, label and doc-table checks were proven by injection too.
 two-finger click opens a menu, and that ⌘S saves exactly once are what the next Mac
 run is for.
 
+*(Amendment, 2026-09-29 — the first Mac run, and ⌥⌘F.)* On a Mac everything D136
+claims about Tk held when checked against Tk 8.6.16's source: `<<ContextMenu>>` is
+`<Button-2>` alone (no Ctrl-click, so D40's Ctrl+Shift+drag is safe), and a menu
+shortcut only flashes the menu while the binding does the work. Two tests assumed
+Linux's defaults and were fixed (`keymap.tcl` unbound `quit`, which a Mac already
+leaves unbound; `modes.tcl` pasted with Ctrl+V). And one default was dead: **Replace
+never fired.** Mac Tk derives a keysym through the keyboard's **Option layer**
+(`STATE2INDEX` in `tkMacOSXPrivate.h` folds `Mod2` into the lookup), so ⌥F arrives as
+`ƒ`, keysym `function`, and a binding on `Option-Command-f` matches nothing — nor does
+the menu's native equivalent, which compares against the typed character. The string
+checks above could not see it, since they never go through Tk's lookup. The exception
+table now says `Option-Command-function`, `key_glyph` shows `function` as `F` so the
+menu and the manual still read ⌥⌘F, and pressing ⌥⌘F in the shortcut recorder saves
+exactly that default. `keymap.tcl` gains an Aqua-only check that sends ⌥⌘F through
+Tk's real keycode→keysym path in an off-screen, unmanaged toplevel, and it fails by
+name when the letter spelling is put back. **Limit:** `function` is what ⌥F types on US
+and most Latin layouts; a layout whose Option layer differs needs the key recorded
+there, which the recorder does. The same trap waits for any Option+letter chord a user
+writes into `keys.json` by hand, and keyboard.md now says so.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision

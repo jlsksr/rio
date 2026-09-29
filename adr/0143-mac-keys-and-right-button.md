@@ -77,3 +77,7 @@ and Opt+Backspace/Delete, and takes no Control key at all, so the system's text 
   tables are checked on every host.
 - What cannot be checked off a Mac is still owed to a Mac run: the glyphs as drawn, the
   two-finger click, and ⌘S saving exactly once.
+- *(Amended 2026-09-29, first Mac run.)* Mac Tk looks a key up through the Option layer,
+  so ⌥⌘F arrives as keysym `function` (ƒ). Replace is bound as `Option-Command-function`
+  and still labelled ⌥⌘F; a check on Aqua sends the key through Tk's real lookup. See
+  AGENTS.md D136.

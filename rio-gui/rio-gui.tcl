@@ -12442,12 +12442,16 @@ set ::keymap_base {
 # owns, where a Command binding would fire twice or not at all.
 #   quit      unbound: rio ▸ Quit rio (⌘Q) already reaches do_quit (D134), and a binding
 #             of our own would ask about unsaved work twice
-#   replace   ⌥⌘F, the Mac's own Replace: ⌘H is rio ▸ Hide rio
+#   replace   ⌥⌘F, the Mac's own Replace: ⌘H is rio ▸ Hide rio. Spelled with the
+#             keysym Tk DELIVERS, not the letter: Mac Tk looks a key up through the
+#             Option layer (STATE2INDEX, tkMacOSXPrivate.h), so ⌥F arrives as ƒ, keysym
+#             `function`, and a binding on Option-Command-f never fires. key_glyph shows
+#             it as F. (US and most Latin layouts; the recorder records it the same way.)
 #   next-tab, prev-tab   stay on Control: ⌘Tab is the system's application switcher
 # (No comments INSIDE the braces: there `;#` is data, not a comment.)
 set ::keymap_aqua {
 	quit     {}
-	replace  Option-Command-f
+	replace  Option-Command-function
 	next-tab Control-Tab
 	prev-tab Control-Shift-Tab
 }
@@ -12572,7 +12576,7 @@ proc chord_label {chord {ws ""}} {
 proc key_glyph {key} {
 	set map [dict create \
 		backslash "\\" bracketright "]" bracketleft "\[" slash "/" grave "`" \
-		semicolon ";" comma "," period "." minus "-" equal "=" space "Space"]
+		semicolon ";" comma "," period "." minus "-" equal "=" space "Space"  function F]   ;# ƒ: what ⌥F types on a Mac, so an Opt+Cmd+F chord's keysym (D136)
 	if {[dict exists $map $key]}        { return [dict get $map $key] }
 	if {[string length $key] == 1}      { return [string toupper $key] }
 	return $key   ;# Tab, Escape, Return, F5, … shown as-is

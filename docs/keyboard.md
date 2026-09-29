@@ -36,8 +36,10 @@ edit takes effect at the next start.
 A value is a chord in Tk's spelling: the modifiers `Control`, `Shift` and `Alt`
 joined by `-`, then the key — a letter, or a key name such as `Tab`, `F3`,
 `backslash`, `bracketright`. On a Mac the modifiers are `Command`, `Option`,
-`Control` and `Shift`, so ⌘K is `Command-k` (`Alt` matches no key there). An
-empty string unbinds the command and leaves it on the menu only.
+`Control` and `Shift`, so ⌘K is `Command-k` (`Alt` matches no key there). With
+Option, name the character Option types rather than the letter: ⌥F types ƒ, so
+⌥⌘F is `Option-Command-function`. Recording the chord in the shortcut editor spells
+it for you. An empty string unbinds the command and leaves it on the menu only.
 
 A capital letter implies Shift, so `Control-Shift-s` and `Control-S` are the
 same binding. The menu shows either as `Ctrl+Shift+S`.

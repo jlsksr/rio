@@ -186,7 +186,8 @@ ok "mac: an implicit Shift survives"       [mc save-as]   Command-S
 ok "mac: a keysym key too"                 [mc split-editor] Command-backslash
 ok "mac: a key with no Control is left"    [mc find-next] F3
 ok "mac: quit is the application menu's"   [mc quit]      ""
-ok "mac: replace is Opt+Cmd+F, not Cmd+H"  [mc replace]   Option-Command-f
+ok "mac: replace is Opt+Cmd+F, not Cmd+H"  [mc replace]   Option-Command-function
+ok "mac: ...and its label reads so"        [chord_label [mc replace] aqua] Opt+Cmd+F
 ok "mac: tab cycling keeps Control"        [mc next-tab]  Control-Tab
 ok "mac: ...both ways"                     [mc prev-tab]  Control-Shift-Tab
 ok "mac: action and label untouched"       [lrange [dict get $mac save] 1 2] \
@@ -245,11 +246,31 @@ ok "mac label: every modifier word is one Tk's Mac menus parse" $unparsed {}
 # no key at all there, so a Cmd chord recorded as Alt-… would never fire.
 ok "mac ev: cmd+letter"       [event_to_chord s 8 aqua]        Command-s
 ok "mac ev: shift+cmd"        [event_to_chord S 9 aqua]        Shift-Command-s
-ok "mac ev: opt+cmd"          [event_to_chord f 24 aqua]       Option-Command-f
+ok "mac ev: opt+cmd"          [event_to_chord function 24 aqua] Option-Command-function
+ok "mac ev: ⌥⌘F records the shipped default" [event_to_chord function 24 aqua] [mc replace]
 ok "mac ev: ctrl stays"       [event_to_chord k 4 aqua]        Control-k
 ok "mac ev: never Alt"        [string match *Alt* [event_to_chord n 12 aqua]] 0
 ok "mac ev: a bare letter is still refused" [event_to_chord a 0 aqua] ""
 ok "mac ev: what it records is a valid chord" [keymap_valid [event_to_chord f 24 aqua]] 1
+# On a Mac itself: the Replace chord through Tk's REAL key lookup. `event generate -keysym`
+# turns the keysym into a keycode, and Tk then derives the keysym back from the keycode and
+# the state (TkpGetKeySym), through the Option layer — exactly what a real ⌥⌘F goes through.
+# The checks above hand chords around as strings and so could never see that ⌥F is ƒ; this
+# one does. Only meaningful on Aqua: elsewhere Option has no layer to look through.
+if {[tk windowingsystem] eq "aqua"} {
+	# A toplevel of its own, off-screen and unmanaged (D127): the suite's `.` is withdrawn
+	# and cannot take focus, and key events only ever go to the focus.
+	toplevel .kp ; wm overrideredirect .kp 1 ; wm geometry .kp +-4000+-4000
+	entry .kp.e ; pack .kp.e ; update
+	set ::khit {}
+	bind .kp.e <[key_chord replace]> {lappend ::khit shipped}
+	bind .kp.e <Option-Command-f>    {lappend ::khit letter}
+	focus -force .kp.e ; update
+	event generate .kp.e <KeyPress> -keysym f -state 0x18 -when now  ;# Mod1|Mod2: ⌘ ⌥
+	ok "aqua: a real ⌥⌘F reaches the shipped Replace chord" [lindex $::khit 0] shipped
+	destroy .kp
+}
+
 # In force on THIS platform: the menus carry this platform's labels.
 ok "menu: Save shows this platform's modifier" \
 	[.m.file entrycget "Save" -accelerator] "$PL+S"
