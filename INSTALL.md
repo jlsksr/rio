@@ -27,14 +27,36 @@ The **GUI** additionally needs **Tk** (`tk` / `tk%8.6`). The GUI host does **not
 need `tcltls` — all of rio's HTTPS happens wherever the *core* runs.
 
 **On macOS**, `install-unix.sh` uses Homebrew (`brew install tcl-tk`, plus `tcllib`).
-Two things to know, and one caveat. Homebrew's Tcl is *keg-only*, so its `tclsh` and
-`wish` are not on your `PATH`; the script puts them ahead of the `tclsh` Apple ships,
-which is an ancient 8.5 without Tk or tcllib, and points the launcher at Homebrew's
-`wish` by full path. The caveat: **macOS is unverified** — nobody has yet run rio
-there, so those formula names are the best guess and the script's verify step is what
-actually decides. If it reports `json MISSING`, install tcllib by hand
-([source](https://core.tcl-lang.org/tcllib)) and re-run with `--launcher-only`.
-Please [report what happens](https://github.com/jlsksr/rio/issues) either way.
+Homebrew's Tcl is *keg-only*, so its `tclsh` and `wish` are not on your `PATH`. The
+script puts them ahead of the `tclsh` Apple ships, which is an old 8.5 without Tk or
+tcllib, and points the launcher at Homebrew's `wish` by full path. **That path is still
+unverified**: nobody has run it, so the formula names are a best guess, and the script's
+verify step is what decides. If it reports `json MISSING`, install tcllib by hand and
+re-run with `--launcher-only`. Please
+[report what happens](https://github.com/jlsksr/rio/issues) either way.
+
+**rio itself has run on macOS**, on macOS 27 on Apple Silicon, with the full test suite
+passing (AGENTS.md D133). That machine had no root and a Homebrew it could not write to,
+so the toolchain was built from source into the home directory. This works on any Mac
+with the Xcode command-line tools and an OpenSSL; the one below is Homebrew's, which only
+needs to be readable:
+
+    P=$HOME/.local/rio-env
+    # Tcl and Tk 8.6.16, from https://www.tcl-lang.org/software/tcltk/download.html
+    (cd tcl8.6.16/unix && ./configure --prefix=$P --enable-threads && make && make install)
+    (cd tk8.6.16/unix  && ./configure --prefix=$P --with-tcl=$P/lib --enable-aqua \
+                           && make && make install)
+    # tcllib 2.0 (pure Tcl), from https://core.tcl-lang.org/tcllib
+    (cd tcllib-2.0 && ./configure --prefix=$P --with-tclsh=$P/bin/tclsh8.6 \
+                   && make install-libraries)
+    # tcltls 1.8, from https://core.tcl-lang.org/tcltls/tarball/tls-1-8/tcltls.tar.gz
+    (cd tcltls && ./configure --prefix=$P --with-tcl=$P/lib \
+                     --with-openssl-dir=/opt/homebrew/opt/openssl@3 && make && make install)
+    ln -sf tclsh8.6 $P/bin/tclsh ; ln -sf wish8.6 $P/bin/wish
+    export PATH=$P/bin:$PATH          # add to your shell profile
+
+Then run `./install-unix.sh --verify-only` to confirm the pieces load, and start rio with
+`wish rio-gui/rio-gui.tcl`.
 
 **A missing one says so (D116).** rio checks these at start-up and stops with a
 sentence naming the Tcl package, the OS package above that carries it, and this
@@ -379,9 +401,10 @@ and, at the end, a section on hacking on rio from Windows.
 
 Linux and Windows are **verified** — the full suite passes on both, including a
 Windows GUI driven against a Linux core over an SSH tunnel ([RELEASING.md](RELEASING.md)
-Gate 0). The BSDs remain a design target that nobody has yet run, and **macOS** is
-newly *attempted* rather than verified: `install-unix.sh` knows Homebrew (§1), but no
-one has run rio on a Mac, so treat a first run there as a report worth filing.
+Gate 0). **macOS** has run too: the full suite passed on macOS 27 on 2026-09-29, using
+a Tcl/Tk built in the home directory (§1). The Homebrew path of `install-unix.sh` has
+not been run yet, so a report from it is still worth filing. The BSDs remain a design
+target that nobody has run.
 
 The TUI (Ck) frontend is **deferred** — present only behind `--with-ck` for
 development, not a supported runtime yet (AGENTS.md O1).

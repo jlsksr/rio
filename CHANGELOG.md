@@ -11,6 +11,20 @@ decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
+## [0.2.1] — unreleased
+
+### Fixed
+
+- **A fixed-width editor on macOS** — on a Mac, the editor, the chat and every piece of
+  fixed-width chrome were drawn in the proportional system font. rio asks for a font called
+  `monospace`; Linux knows that name and macOS does not, so it quietly substituted its own
+  UI font. Column-based widths went wrong with it: the line-number gutter and the indent of
+  wrapped lines. rio now checks whether `monospace` gives a fixed-width font on this
+  machine. Where it doesn't, rio uses Tk's own fixed-width font instead: Menlo on macOS.
+  Linux is unchanged. This came from rio's first run on macOS. The whole test suite now
+  passes there, using a Tcl/Tk built without root in your home directory; the Homebrew
+  install path is still unverified. — *D133 · `17c0de1` · 2026-09-29*
+
 ## [0.2.0] — 2026-09-26
 
 ### Added

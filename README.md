@@ -18,8 +18,9 @@ full IDE.
 - **Linux and Windows 11 are tested, not assumed.** The suite passes on both, and
   a Windows GUI has driven a Linux core over an SSH tunnel. Development happens on
   Linux, so the Windows run is periodic rather than continuous; the last was
-  2026-09-17. The BSDs are a design target nobody has sat down and run. macOS is
-  neither.
+  2026-09-17. macOS has had one run, on 2026-09-29: the suite passes there, with
+  a Tcl/Tk built in the home directory, but its installer path is untried. The
+  BSDs are a design target nobody has sat down and run.
 - **Interfaces will change.** Syntax highlighters are stable. The agent-provider
   and editing-mode contracts are still settling, which is what 1.0.0 is reserved
   for. Each carries a contract number, so an extension built against a newer rio

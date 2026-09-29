@@ -595,7 +595,9 @@ The quickest way is the install script in the repo root:
     ./install-unix.sh --no-launcher   # install the core toolchain
     ./install-unix.sh --verify-only   # just check what you already have
 
-It works on Debian/Ubuntu, Alpine, OpenBSD and (unverified) macOS, and finishes by
+It works on Debian/Ubuntu, Alpine, OpenBSD and — through Homebrew, still unverified —
+macOS. (rio itself has run on a Mac, from a Tcl/Tk built without root; see
+[INSTALL.md](INSTALL.md) §1.) It finishes by
 loading the pieces through `tclsh` so you know they actually work. If you also want
 to hack on the terminal version, add `--with-ck` to build the curses toolkit from
 source — otherwise skip it; the GUI doesn't need it.
@@ -690,6 +692,12 @@ themselves: just `wish rio-gui\tests\smoke.tcl`. Windows contributors should rea
 [WINDOWS.md §8](WINDOWS.md), which also covers the two `git config` settings a
 Windows clone needs and how to get an error message out of `wish`, which prints
 none for an uncaught error.)
+
+(On macOS, give `wish` a stdin when you are not at a terminal:
+`: | RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl`. With stdin on `/dev/null` —
+the usual case in a script, CI or an agent's shell — Aqua Tk takes it for a Finder
+launch and sends all output to `/dev/null`. The exit code is still right, but you
+see nothing. [CAVEATS.md](CAVEATS.md) has the details.)
 
 More focused GUI suites live beside it in `rio-gui/tests/` — for example
 `repos.tcl` drives the whole extension-repository flow (scan, consent,

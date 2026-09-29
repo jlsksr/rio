@@ -7760,6 +7760,9 @@ the developer's own display, so it could have been "fixed" by running the suites
 else. That would have left rio able to take a keyboard it was never supposed to have. The
 invariant is the title of this entry, not the flake.
 
+*(Amended by D133: on Aqua the sizing block keeps `overrideredirect` set after the
+withdraw. Clearing it there leaves the event loop spinning, so every later `update` hangs.)*
+
 ### D128 — a provider is configured from the GUI, whatever it declares
 
 **The gap, and it was a promise rio was already making.** `extensions/openai` has called
@@ -8474,6 +8477,85 @@ CAVEATS, and untested on Windows. And a very large buffer is written in full on 
 D126's numbers put that near 20 ms per megabyte, so a 1 MB file is imperceptible and a 64 MB
 one is not, which is what the hand-editable `interval_ms` is there for until someone measures
 a case that warrants a size cap.
+
+---
+
+### D133 — the first macOS run: platform facts are asked of Tk, not assumed
+
+**Before this, rio had never run on a Mac.** D129 gave `install-unix.sh` a Homebrew branch
+and said plainly that it was a guess. The first run, on 2026-09-29, did not use it either.
+The machine was macOS 27 on Apple Silicon, **without root**. Homebrew was installed but not
+writable, and the only Tcl on the machine was Apple's 8.5.9, which has no coroutines and no
+tcllib. So Tcl/Tk 8.6.16 (Aqua), tcllib 2.0 and tcltls 1.8.0 were built from source into
+`~/.local/rio-env`, with tcltls linked against the OpenSSL that Homebrew already had. The
+whole suite ran against that prefix.
+
+It found two real faults in rio, one fault in the fixtures, and one fact about macOS `wish`
+that looks like a fault but isn't.
+
+**1. The editor was not monospaced — a user-visible fault.** Every fixed-width font in rio
+asks for the family `monospace`: the three named fonts in the theme (D24), and about 70
+literal `{monospace N}` fonts in the GUI's chrome. That name is **fontconfig's alias**, so on
+X11 it resolves to DejaVu Sans Mono or similar. Aqua knows no such family and falls back to
+`.AppleSystemUIFont`, which is proportional. The editor's columns, the gutter widths (D49)
+and the wrap indent (which multiplies a column width) were all computed from the width of a
+`0` in a font where not every glyph has that width.
+
+The fix is `mono_family`, and the rule is the decision. **rio asks Tk whether the alias lands
+on a fixed-width font, and substitutes only when it does not**: `font metrics {monospace 12}
+-fixed` is 1, so keep `monospace`; otherwise use `[font actual TkFixedFont -family]`, which
+is Menlo on macOS and Courier New or Consolas on Windows. Every `monospace` goes through it:
+the theme fonts in `ensure_fonts`, the user's override in `apply_editor_font`, and the
+literals, which now read `[list $::mono N]`. Things deliberately left alone:
+
+- **The core's theme data still says `monospace`.** It is a portable intent. Turning it into
+  a family is the GUI applier's job, and D24 already puts the Tk-specific mapping there.
+- **Families are not listed per platform.** A table such as "Menlo on darwin, Consolas on
+  Windows" would be the platform-guessing that D55 rules out. Tk's own `TkFixedFont` is
+  maintained by Tk for exactly this purpose.
+- **X11 does not change.** There the alias is already fixed-width and is kept as it is.
+
+Windows probably had the same fault: the literal `{monospace 9}` sites predate any
+metrics check. Nobody has run it there since, so that stays unconfirmed. `font.tcl` now
+checks that the editor font and the chrome font are fixed-width wherever the suite runs.
+Both checks fail by name when the resolver is disabled.
+
+**2. A headless run hung on its first full `update` — a fault in D127's sizing block.**
+Nothing Tcl-side ran while it hung: no proc, no binding, no fileevent. Tk's Aqua layer was
+consuming native work endlessly, so `update` never found the queue empty. Small isolated
+scripts pinned it to one exact combination:
+
+- place the window off-screen (`-4000-4000`);
+- set `overrideredirect 1`;
+- map and withdraw it;
+- **clear** `overrideredirect` again.
+
+Leave out any one of those steps and it does not happen. A headless run never shows `.`
+again, so on Aqua the flag now simply stays set. The focus protection D127 wanted still
+holds.
+
+**3. The fixtures built paths the core would never report — a fault in the tests.** The
+core `file normalize`s every path it hands out, and normalize resolves symlinks. On macOS
+`/var` links to `/private/var`, where `$TMPDIR` lives, and `/home` links to
+`/System/Volumes/Data/home`. The GUI code was right: its comment says both operands come
+from the core, which normalized them. `sandbox.tcl` now canonicalises `TMPDIR` once, and
+`autosave.test` normalizes its own root.
+
+**4. `wish` discards its own output when stdin is `/dev/null`.** This is macOS behaviour,
+not a rio fault, and it comes straight from `tkMacOSXInit.c`. A non-tty stdin that is an
+empty character device looks to Tk like a Finder launch, so Tk points stdout and stderr at
+`/dev/null`. An agent's shell, a CI runner and a cron job all run with that stdin. The
+suite still runs, and its exit code still gives the verdict, but every `PASS` and `FAIL`
+line is lost. The same goes for `rio --version`. Feeding `wish` any stdin, even an empty
+pipe (`: | wish …`), keeps its output. CONTRIBUTING, RELEASING and CAVEATS say so.
+
+**What was verified, and what was not.** With the three fixes in place, the whole sweep
+passes on macOS: core 924 (under `LANG=C` too), syntax 536, plugins/lib 20, claude 55,
+openai 115, and all 29 GUI suites exit 0. Nothing was skipped, so the https loopback half
+and the `ssh-keygen` signature half both ran. The real GUI was also launched on screen: it
+spawned its core over a pipe, stayed up, and the core left with it. Not verified: the
+installer, because neither branch of `install-unix.sh` ran here; drag-and-drop, since tkdnd
+was not installed; and any interactive use beyond launching.
 
 ---
 

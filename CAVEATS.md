@@ -72,6 +72,23 @@ design limit that surprises, append it to the matching section.
   the same shape as it always was, with the window additionally undecorated for the moment it
   is up, and the tripwire is deliberately not armed (a Windows map is WM-managed by
   definition). If a Windows run ever shows a collapsed layout, that is the line to look at.
+  **On macOS** the block differs in one step: override-redirect is left set after the
+  withdraw. Clearing it there made every later `update` spin forever (**D133**).
+
+### On macOS, `wish` prints nothing when stdin is `/dev/null`
+
+- **Symptom.** A GUI suite run from a script, an agent's shell or CI prints **no output at
+  all** — no `PASS` or `FAIL` lines, no error. The same goes for `wish rio-gui/rio-gui.tcl
+  --version`. The exit code is still right.
+- **Cause.** Tk's Aqua start-up (`tkMacOSXInit.c`) treats a non-terminal stdin that is an
+  empty character device as a **Finder launch**, and points stdout and stderr at
+  `/dev/null` so that a `puts` can never block. Most non-interactive shells run with
+  `/dev/null` as stdin.
+- **Where it's fine.** A terminal, where stdin is a tty. And any run with a real pipe on
+  stdin, even an empty one.
+- **Mitigation.** Give `wish` a stdin: `: | RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl`.
+  CONTRIBUTING says so beside the command. A pipe changes nothing on Linux or Windows.
+- **Planned.** Nothing. This is Tk's behaviour, and the workaround costs two characters.
 
 ### A killed command's exit code differs on Windows (there are no signals)
 

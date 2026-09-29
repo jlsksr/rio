@@ -1,6 +1,6 @@
 # ADR-0134: A headless run must not be able to receive real input
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0140](0140-macos-platform-facts-from-tk.md)
 - **Date:** 2026-09-21
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D127
