@@ -7915,6 +7915,11 @@ one that does not, so the label is never written in the test.
 
 ### D129 — one install script per platform, and a launcher that makes rio an application
 
+> **Amended by D134:** macOS moved out of `install-unix.sh` into its own
+> `install-macos.sh`. The Mac branch shared no package manager, fallback or launcher format
+> with the rest, and it was broken: `tcl-tk` is Tcl 9 now, and there is no `tcllib` formula.
+> The naming rule below is unchanged; this follows it.
+
 **jka, the day before the release:** *"the two deployment scripts currently have
 'dev-deploy' in their names and which script belongs to which OS is only recognized by the
 file extension."*
@@ -8556,6 +8561,121 @@ and the `ssh-keygen` signature half both ran. The real GUI was also launched on 
 spawned its core over a pipe, stayed up, and the core left with it. Not verified: the
 installer, because neither branch of `install-unix.sh` ran here; drag-and-drop, since tkdnd
 was not installed; and any interactive use beyond launching.
+
+*(Amended by D134: the installer now exists, as `install-macos.sh`, and its no-root path
+has run.)*
+
+### D134 — macOS gets its own installer, and rio.app is a copy of wish
+
+**Amends D129**, which put macOS inside `install-unix.sh` and named the scripts by platform.
+The naming rule stands, and this follows it; what changes is that a Mac gets a script of its
+own. D129's argument against separate scripts was drift between two scripts that install the
+same packages. That does not apply: the Mac branch shares nothing with the rest of
+`install-unix.sh`. It uses different package managers (Homebrew and MacPorts, not apt, apk
+and pkg_add), it needs a fallback the others don't (a source build, for a Mac with no
+writable package manager, like the one D133 ran on), and its launcher is a different format
+(an `.app` bundle and an `.icns`, not a `.desktop` file and hicolor PNGs). Kept from D129:
+the platform is in the name, a per-user install needs no root, `--uninstall` removes what was
+installed, and packages are never uninstalled.
+
+**The old Mac branch was broken, not only unverified.** Checked against `brew info` before
+anything was written: `brew install tcl-tk` now installs **Tcl 9**, which rio has never run
+on, and **there is no `tcllib` formula** at all. The right formula is `tcl-tk@8`, which is
+keg-only and bundles tcllib and tcltls 1.7.22.
+
+**Toolchain: the first source that works, in a fixed order.** `--use` forces one.
+1. **`path`**: a `tclsh` 8.6 already on `PATH`, with Aqua Tk and tcllib.
+2. **`brew`**: `tcl-tk@8`, used if already installed. It is installed only when Homebrew's
+   `Cellar` is writable. A Homebrew that isn't ours is skipped, never escalated with sudo,
+   which Homebrew refuses anyway.
+3. **`macports`**: `tcl8 tk8-quartz tcllib tcl8-tls`, after a y/N, through sudo. These are
+   the **8.x subports, pinned by name**. The plain `tcl` and `tk` ports are metaports that
+   can move to 9, as Homebrew's formula did. `tk8-quartz` is the native Tk, and `tcl8-tls`
+   is 2.0.1, which already checks certificate names. The names come from MacPorts' own port
+   data (read 2026-09-29), not from a run.
+4. **`source`**: Tcl/Tk 8.6.18, tcllib 2.0 and tcltls 1.8, built into `~/.local/rio-env`.
+   This needs only the Xcode command-line tools, and **every tarball is pinned by SHA-256
+   and checked before it is unpacked**. A bad one is deleted and refused. The Tcl and Tk
+   hashes were cross-checked against Homebrew's formula, which pins the same files. tcltls
+   is fetched by fossil **check-in**, not by tag, because a tag can move. Its tarball turned
+   out to be byte-stable: fetched twice, and matching the build of 2026-09-29.
+
+Every candidate goes through one probe: a `tclsh` that loads Tk, `json` and `tls`. Its stdin
+is an empty pipe, because D133's `/dev/null` pitfall would otherwise swallow the probe's
+answer. **Apple's `/usr/bin/tclsh` (8.5) and any Tcl 9 are refused with a sentence saying
+why**, as is a Tk that draws through X11.
+
+**tcltls older than 1.8 is topped up, into our directory.** A Homebrew install would
+otherwise give a rio whose hosted providers refuse https (D109/D110/D114). The top-up builds
+tcltls 1.8 against the chosen Tcl, into `~/.local/rio-env/lib`. It never writes into
+Homebrew's keg or MacPorts' tree. That took one non-obvious flag: TEA defaults
+`--exec-prefix` to *Tcl's* prefix, so without an explicit one, "install beside" means
+"install into the keg". Both launchers then put that directory on `TCLLIBPATH`, which the
+core inherits. Tcl picks the highest `tls` it can see whichever directory comes first; that
+was measured, not assumed.
+
+**`rio.app`'s executable is a copy of `wish`, and that is the decision this entry exists
+for.** The plan was a shell script in `Contents/MacOS` that execs wish, with an open risk
+that the menu bar would say "Wish". Tk names its application menu from the main bundle's
+`CFBundleName`. It exposes the main bundle as `::tk::mac::GetAppPath`, which a test app can
+write to a file, and that settled the question without a screen:
+- **A script that execs wish:** the main bundle is wish's own directory. The Dock and
+  LaunchServices do know the app, but the menu reads *Wish*, and *Quit Wish*.
+- **A symlink to wish:** the same, because the link is resolved.
+- **A copy of the 50 KB binary:** the main bundle is `rio.app`. Better still, a wish inside a
+  bundle runs `Resources/Scripts/AppMain.tcl` by itself; that is the mechanism Tk's own
+  `Wish.app` uses. rio's libraries are linked by absolute path, so the copy runs anywhere.
+
+A copy doesn't follow a toolchain upgrade, but re-running the script refreshes it, and
+INSTALL says so. The copy's ad-hoc signature is invalid once the binary sits in a bundle, so
+the bundle is **ad-hoc signed** (`codesign --sign -`). That needs no certificate and
+notarises nothing; it only makes the signature describe what is there.
+
+**Two things the probe found that the plan had missed.**
+- **A Dock launch gets launchd's minimal `PATH`.** rio spawns its core with the first
+  `tclsh` on `PATH`, which there is Apple's 8.5, so rio.app would have started and its core
+  would not. `AppMain.tcl` and the `rio` wrapper both put the chosen toolchain first. The
+  running core's command line shows it worked.
+- **Cmd-Q skipped the unsaved-changes question.** Tk sends Quit to `::tk::mac::Quit` and,
+  if there is no such proc, calls `Tcl_Exit(0)` directly. rio never defined it, so on the one
+  platform where Cmd-Q is the habit, quitting lost unsaved work silently. That was true
+  before this entry, not caused by it. It now routes to `do_quit`, Aqua only, and
+  `smoke.tcl` guards it.
+
+**The `rio` wrapper hands wish an empty pipe when stdin is not a tty.** Tk treats *any*
+non-tty character device as a Finder launch, `/dev/zero` included, so the plan's
+`</dev/zero` would not have helped. With the pipe, `rio --version </dev/null` prints.
+
+**`--uninstall` removes only what the manifest names** (`~/.local/share/rio/installed`),
+**and each thing only if it still looks like ours**: a wrapper carrying our "generated by"
+line, an app with our bundle id. A toolchain it built is kept unless `--toolchain` is given,
+and removed then only if it carries the `.rio-toolchain` marker. The install is equally
+careful the other way. There is a terminal emulator called rio, so an existing `rio`
+command or `rio.app` that isn't ours stops the install before anything is written. Testing
+found this: the first version protected the app and overwrote the command.
+
+**`install-unix.sh` loses its Homebrew branch** and, on Darwin, says to use
+`install-macos.sh`.
+
+**Verified on macOS 27, no root, Homebrew not writable:**
+- the source build end to end, from the network;
+- a planted bad tarball refused and deleted, with nothing built;
+- a re-run reusing the build, and `--verify-only`;
+- `rio --version` with stdin on `/dev/null`;
+- rio.app launched through LaunchServices as `org.skylm.rio` 0.2.1, its core on the chosen
+  `tclsh`, and both processes leaving together;
+- the top-up against a Tcl with no tcltls: the base tree untouched, and `TCLLIBPATH`
+  reaching the core;
+- uninstall with and without `--toolchain`, and both refusals.
+
+The full sweep then ran on the top-up configuration, Tcl/Tk 8.6.18 plus a separate tcltls
+1.8, which is what a Homebrew user gets: core 924 (under `LANG=C` too), syntax 536,
+plugins/lib 20, claude 55, openai 115, and all GUI suites. Nothing was skipped.
+
+**Not run:** the `brew` and `macports` install branches (no writable Homebrew and no
+MacPorts here), MacPorts' tcltls 2.0.1 against rio's TLS code, and whether the menu bar
+*shows* "rio". The last one follows from `GetAppPath` and Tk's source rather than from
+looking; no screen recording was available.
 
 ---
 

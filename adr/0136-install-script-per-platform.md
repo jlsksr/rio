@@ -1,6 +1,6 @@
 # ADR-0136: One install script per platform, and a launcher that makes rio an application
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0141
 - **Date:** 2026-09-22
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D129

@@ -87,8 +87,23 @@ design limit that surprises, append it to the matching section.
 - **Where it's fine.** A terminal, where stdin is a tty. And any run with a real pipe on
   stdin, even an empty one.
 - **Mitigation.** Give `wish` a stdin: `: | RIO_GUI_HEADLESS=1 wish rio-gui/tests/smoke.tcl`.
-  CONTRIBUTING says so beside the command. A pipe changes nothing on Linux or Windows.
+  CONTRIBUTING says so beside the command. A pipe changes nothing on Linux or Windows. The
+  `rio` command that `install-macos.sh` installs already does this, so `rio --version`
+  prints from a script.
 - **Planned.** Nothing. This is Tk's behaviour, and the workaround costs two characters.
+
+### On macOS, rio.app keeps its own copy of `wish`
+
+- **Symptom.** You upgrade or move the Tcl/Tk that `install-macos.sh` chose, and
+  `rio.app` stops starting or still runs the old `wish`. The `rio` command is unaffected.
+- **Cause.** The app's executable is a **copy** of `wish`, not a link to it. A script or a
+  symlink leaves macOS taking the app's identity from `wish`'s own directory, so the menu
+  bar would read *Wish* (AGENTS.md D134). A copy doesn't follow the toolchain it came from.
+- **Where it's fine.** Everywhere until the toolchain changes. A Homebrew upgrade within
+  `tcl-tk@8` keeps its paths stable, so the copy usually keeps working.
+- **Mitigation.** Re-run `./install-macos.sh`. It finds the toolchain again and rewrites the
+  app.
+- **Planned.** Nothing. The copy is the price of the name.
 
 ### A killed command's exit code differs on Windows (there are no signals)
 

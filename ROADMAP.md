@@ -507,9 +507,9 @@ for later:
   survivable, not over: what is still ahead is the interface settling down, which is
   also what **1.0.0** is reserved for.
 - **Install / packaging path** — *half landed.* The **install** half is done (D129): one
-  script per platform, named for it — `install-unix.sh`, `install-windows.ps1`,
-  `install-server.sh` — and the POSIX one now leaves a `rio` command and an application-menu
-  entry rather than stopping at packages. What is still open is **packaging**: a `.deb`, an
+  script per platform, named for it — `install-unix.sh`, `install-macos.sh` (D134),
+  `install-windows.ps1`, `install-server.sh` — and the desktop ones leave a `rio` command and
+  an application-menu entry (on a Mac, a `rio.app`) rather than stopping at packages. What is still open is **packaging**: a `.deb`, an
   `.apk`, a port, a Homebrew formula — anything that installs rio without a `git clone`.
   That is a bigger claim than the one D129 makes, which is only that a checkout can feel
   installed. See [INSTALL.md](INSTALL.md).

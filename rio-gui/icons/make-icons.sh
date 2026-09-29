@@ -9,6 +9,7 @@
 #   ./rio-gui/icons/make-icons.sh redeemer-1       switch to sources/redeemer-1.png
 #   ./rio-gui/icons/make-icons.sh ~/new-icon.png   adopt a new file (kept in sources/)
 #   ./rio-gui/icons/make-icons.sh --list           show what is available, and which is on
+#   ./rio-gui/icons/make-icons.sh --icns           rebuild rio.icns only (macOS; no ImageMagick)
 #
 # CANDIDATES ARE KEPT, not overwritten: every artwork rio has worn lives on under
 # sources/, and `active` (one line, committed) records which one the cut PNGs came from.
@@ -32,6 +33,29 @@ set -e
 dir=$(dirname "$0")
 srcdir=$dir/sources
 mkdir -p "$srcdir"
+
+# --icns: (re)build rio.icns for macOS's rio.app (D134) from the ACTIVE artwork, with
+# the two tools every Mac ships -- sips and iconutil -- so it needs no ImageMagick and
+# can be run on its own. Committed like rio.ico, so the installer does no image work.
+# The source is ~516px, so the iconset stops at 512: iconutil accepts a set without
+# 512@2x, and a 1024 upscaled from 516 would only be a blurrier copy of the 512.
+if [ "$1" = "--icns" ]; then
+	command -v iconutil >/dev/null && command -v sips >/dev/null ||
+		{ echo "--icns needs macOS's sips and iconutil" >&2; exit 1; }
+	name=$(cat "$dir/active") || { echo "no active icon recorded" >&2; exit 1; }
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
+	set_=$tmp/rio.iconset
+	mkdir "$set_"
+	for spec in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x 128:128x128 \
+	            256:128x128@2x 256:256x256 512:256x256@2x 512:512x512; do
+		px=${spec%%:*}
+		sips -z "$px" "$px" "$srcdir/$name.png" --out "$set_/icon_${spec#*:}.png" >/dev/null
+	done
+	iconutil -c icns "$set_" -o "$dir/rio.icns"
+	echo "rio.icns (16-512, from $name, for macOS)"
+	exit 0
+fi
 
 if [ "$1" = "--list" ]; then
 	cur=$(cat "$dir/active" 2>/dev/null || echo "?")
@@ -74,5 +98,11 @@ for n in 16 24 32 48 64 128 256; do
 done
 convert "$dir/rio-16.png" "$dir/rio-32.png" "$dir/rio-48.png" "$dir/rio-256.png" "$dir/rio.ico"
 echo "  rio.ico (16/32/48/256, for Windows)"
+if command -v iconutil >/dev/null && command -v sips >/dev/null; then
+	echo "$name" > "$dir/active"
+	"$0" --icns | sed "s/^/  /"
+else
+	echo "  rio.icns NOT rebuilt (needs macOS) -- run --icns on a Mac before committing"
+fi
 echo "$name" > "$dir/active"
 echo "active icon is now: $name"

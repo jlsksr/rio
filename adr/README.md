@@ -197,8 +197,9 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
 | [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted; amended by 0140 | 2026-09-21 |
 | [0135](0135-provider-declares-its-own-settings.md) | A provider declares its own settings, and rio renders them | Accepted; where the settings window lives reversed by 0137 — the option vocabulary, the `thinking` verb and `provider-api 4` stand; amended by 0138 | 2026-09-22 |
-| [0136](0136-install-script-per-platform.md) | One install script per platform, and a launcher that makes rio an application | Accepted | 2026-09-22 |
+| [0136](0136-install-script-per-platform.md) | One install script per platform, and a launcher that makes rio an application | Accepted; amended by 0141 | 2026-09-22 |
 | [0137](0137-extensions-configure-themselves.md) | A top-level Extensions menu; each extension configures itself | Accepted | 2026-09-23 |
 | [0138](0138-provider-profiles-and-file-options.md) | A provider keeps several named configurations, and an option may name a file | Accepted | 2026-09-23 |
 | [0139](0139-autosave-recovery-copies.md) | Autosave writes a separate recovery copy, never the file you are editing | Accepted | 2026-09-26 |
-| [0140](0140-macos-platform-facts-from-tk.md) | On macOS, platform facts are asked of Tk, not assumed | Accepted | 2026-09-29 |
+| [0140](0140-macos-platform-facts-from-tk.md) | On macOS, platform facts are asked of Tk, not assumed | Accepted; amended by 0141 | 2026-09-29 |
+| [0141](0141-macos-installer-and-rio-app.md) | macOS gets its own installer, and rio.app is a copy of wish | Accepted | 2026-09-29 |

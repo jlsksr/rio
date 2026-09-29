@@ -13611,6 +13611,13 @@ menu .m.help -tearoff 0
 # make_editor_group (editor_bindings + editor_proxy). Only the window-manager close
 # needs binding here.
 wm protocol . WM_DELETE_WINDOW do_quit
+# macOS's Quit (Cmd-Q, the application menu, logging out) is not the close button: Tk
+# routes it to ::tk::mac::Quit, and with no such proc calls Tcl_Exit(0) directly —
+# skipping the unsaved-changes question above (D134). Defined only under Aqua, where
+# Tk looks for it; do_quit returning (a Cancel) leaves rio running, as it should.
+if {[tk windowingsystem] eq "aqua"} {
+	proc ::tk::mac::Quit {} { do_quit }
+}
 
 # The window / taskbar icon (AGENTS.md D117). Without one the window manager and the
 # taskbar each fall back to their OWN default, so rio showed two different generic
