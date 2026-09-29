@@ -798,6 +798,10 @@ reproduces the plain white-bg look. **Open:** colour-theming dialogs / the futur
 the option DB, and how much rio leans on `ttk` vs classic widgets — both firm up
 as the shell grows.
 
+*(Amended by D135: on Aqua the applier also sets the native window appearance from
+`ui.bg`'s lightness, and floors the UI and chat fonts at 11pt. Both are Tk mappings, so
+they live here; the theme data does not change.)*
+
 ### D25 — JSON value encoding is shape-aware, not value-sniffed
 
 The canonical internal form is plain Tcl dicts (D11: the in-process path uses
@@ -8683,6 +8687,60 @@ plugins/lib 20, claude 55, openai 115, and all GUI suites. Nothing was skipped.
 MacPorts here), MacPorts' tcltls 2.0.1 against rio's TLS code, and whether the menu bar
 *shows* "rio". The last one follows from `GetAppPath` and Tk's source rather than from
 looking; no screen recording was available.
+
+### D135 — on Aqua, the theme reaches the native controls, and chrome text has a floor
+
+**Amends D24:** the applier learns two Aqua mappings. The theme data does not change.
+
+A screenshot run on macOS (2026-09-29, sixteen scenes) found two faults that no headless
+check had caught, because both are about what the eye sees.
+
+**1. Dark themes had light buttons.** On Aqua, Tk draws `button`, `menubutton` and
+`checkbutton` as native controls, and those ignore `-background` and `-foreground`. So in
+Solarized Dark and night, the agent's mode menubutton, the Approve/Reject bar, the find bar's
+arrows and every checkbox square stayed light on a dark UI.
+
+The fix makes the native appearance follow the theme. Tk 8.6.16 has
+`::tk::unsupported::MacWindowStyle appearance <toplevel> aqua|darkaqua|auto`. `apply_theme`
+picks `darkaqua` when `ui.bg` is darker than mid-grey (Rec. 601 luma below 128), else
+`aqua`, stores it in `::aqua_appearance`, and applies it to every existing toplevel. Two
+findings from probing it first:
+- **A new toplevel has no native window until its first idle pass**, and setting the
+  appearance before that is silently ignored. A `<Configure>` binding on the `Toplevel`
+  class catches every new one: it fires once the native window exists, even while
+  withdrawn, and before the first map, so a dialog never shows light first.
+- **`auto` is wrong here.** It follows the system setting, not rio's theme, and a user may
+  run a dark theme on a light Mac.
+
+Every call is wrapped in `catch`, since the command is `unsupported` and absent on older Tk.
+Native menus and the system file and message dialogs still follow the system setting: they
+are app-level, not per-window, and out of reach of this command.
+
+**2. Chrome text was about 25% smaller than on Linux.** Theme sizes are points, and Tk
+converts points with `tk scaling`: 1.33 px/pt on X11 (96 dpi), 1.0 on Aqua (72 dpi). So the
+theme's UI 9 was 12px on Linux and 9px on a Mac, below macOS's own 11–13px interface text.
+
+Two options were weighed, and jka took the recommendation:
+- **Rejected: `tk scaling 96/72` on Aqua.** One line, and every size would render as on
+  Linux. But it also grows the editor to 16px (Mac editors sit near 12px) and every
+  dimension given in points.
+- **Chosen: an 11pt floor on Aqua for chrome and chat.** `ui_size` raises a size below
+  `::ui_font_floor` (11 on Aqua, 0 elsewhere). `ensure_fonts` applies it to every named font
+  except `RioEditorFont`, so the theme's editor size and D56's override stand. The ~70
+  literal `[list $::mono 9]` chrome fonts now go through `chrome_font`, so the floor has one
+  home. X11 and Windows are unchanged.
+
+**Guards** (new `rio-gui/tests/aqua.tcl`, 21 checks): `hex_luma`'s ends; the appearance each
+shipped theme asks for, derived from that theme's own `ui.bg` against its `ui.fg` rather than
+typed in; the floor and the editor's exemption; a drift guard that walks every widget and
+every text tag for a font below the floor; and, on Aqua only, the appearance of `.`, of an
+existing toplevel and of a new one across a theme switch. Four injections, each failing by
+name: the applier not setting the appearance, the `<Configure>` binding disabled, the floor
+dropped from `ensure_fonts`, and `chrome_font` unfloored. Full sweep: core 924, syntax 536,
+all 30 GUI suites exit 0.
+
+**Not verified by eye.** Nothing here was looked at on a screen yet. The screenshot tooling in
+`rio-screens/` is what does that.
 
 ---
 
