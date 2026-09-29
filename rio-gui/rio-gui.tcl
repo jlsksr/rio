@@ -1440,7 +1440,11 @@ proc rl_init {b onselect onactivate oncontext} {
 	bind $b <Down>            "rl_move %W 1 ; break"
 	bind $b <Motion>          "rl_hover_at %W %x %y"
 	bind $b <Leave>           "rl_set_hover %W -1"
-	bind $b <Button-3>        "rl_context %W %x %y %X %Y ; break"
+	# <<ContextMenu>>, never <Button-3>: it is Tk's own name for the right mouse button,
+	# which is Button-3 on X11 and Windows but Button-2 on macOS (Tk 8.6's numbering
+	# there), so a hard-coded Button-3 opens nothing on a Mac (D136). Every right-click
+	# menu in rio binds this event.
+	bind $b <<ContextMenu>>   "rl_context %W %x %y %X %Y ; break"
 	# A read-only list selects one row at a time (Button-1 / Return / arrows). It has
 	# no use for the Text widget's own text selection, and -state disabled does not
 	# suppress it: a drag, a shift-click or a line/word multi-click still sweeps a
@@ -1586,8 +1590,8 @@ proc rl_set_hover {b row} {
 # global grab nobody is there to dismiss.
 #
 # NOT here: the rl_* row lists (Files, Git, Search results, the manual's contents).
-# The first two have real row menus already; the other two have Button-3 bound to an
-# empty callback, and filling it means deciding what Copy or Open MEAN for a result
+# The first two have real row menus already; the other two have the right button
+# bound to an empty callback, and filling it means deciding what Copy or Open MEAN for a result
 # row — a Search and Help feature, not the missing door this change is about. And
 # rl_init kills text selection in those panes outright, so a Copy there could not be
 # the copy this menu offers anyway.
@@ -1693,12 +1697,12 @@ proc ctx_menu_key {w kind} {
 }
 
 # Give a widget its menu. Called at the creation site. `break` so the widget binding
-# wins over anything the class or an editing mode puts on Button-3, the same
+# wins over anything the class or an editing mode puts on the right button, the same
 # precedence the editor's own binding takes (D38).
 proc ctx_bind_view  {w} { ctx_bind $w view }
 proc ctx_bind_input {w} { ctx_bind $w input }
 proc ctx_bind {w kind} {
-	bind $w <Button-3>   [list ctx_menu_post %W %x %y %X %Y $kind]\;break
+	bind $w <<ContextMenu>> [list ctx_menu_post %W %x %y %X %Y $kind]\;break
 	bind $w <Shift-F10>  [list ctx_menu_key %W $kind]\;break
 	bind $w <Key-Menu>   [list ctx_menu_key %W $kind]\;break
 }
@@ -1707,7 +1711,7 @@ proc ctx_bind {w kind} {
 # a right-click on an empty field hits the label and never reaches the widget below.
 # Forward it, the same way the label already forwards Button-1.
 proc ctx_bind_placeholder {lbl target kind} {
-	bind $lbl <Button-3> [list ctx_menu_post $target %x %y %X %Y $kind]\;break
+	bind $lbl <<ContextMenu>> [list ctx_menu_post $target %x %y %X %Y $kind]\;break
 }
 
 # Repaint the files pane as a tree from the project root (D87): dirs then files at each
@@ -2666,7 +2670,7 @@ proc render_tabs {site} {
 		bind $t <ButtonPress-1>   [list tab_press $site $id %X %Y]
 		bind $t <B1-Motion>       [list tab_motion %X %Y]
 		bind $t <ButtonRelease-1> [list tab_release $site $id %X %Y]
-		bind $t <Button-3>        [list site_tab_menu $site $id %X %Y]
+		bind $t <<ContextMenu>>   [list site_tab_menu $site $id %X %Y]
 	}
 }
 
@@ -7810,7 +7814,7 @@ proc refresh_tabs {} {
 			bind $f.x <Button-1> [list close_tab $id $g]
 			# Right-click anywhere on the handle (frame, label, ×) for the context menu.
 			foreach w [list $f $f.l $f.x] {
-				bind $w <Button-3> [list tab_context_menu $g $id %X %Y]
+				bind $w <<ContextMenu>> [list tab_context_menu $g $id %X %Y]
 			}
 			pack $f.l -side left ; pack $f.x -side right
 			# The handle FRAME is left unmanaged here — tabstrip_layout decides which
@@ -13121,8 +13125,9 @@ proc make_editor_group {g} {
 	# Right-click opens the editor's context menu (D108); the Menu key and Shift+F10
 	# open the same one at the caret. Bound on the WIDGET, so they sit ahead of the
 	# RioMode tag in the D38 precedence order — the app's menu wins over anything an
-	# editing mode might put on Button-3 — and `break` stops the rest of the chain.
-	bind $f.t <Button-3>   "editor_context_menu $g %x %y %X %Y ; break"
+	# editing mode might put on the right button — and `break` stops the rest of the
+	# chain. <<ContextMenu>> is the right button on every platform (D136, see rl_init).
+	bind $f.t <<ContextMenu>> "editor_context_menu $g %x %y %X %Y ; break"
 	bind $f.t <Key-Menu>   "editor_context_key $g ; break"
 	bind $f.t <Shift-F10>  "editor_context_key $g ; break"
 	# Keep the status bar's Ln/Col segment live: any key-up or click-release may have

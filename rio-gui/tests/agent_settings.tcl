@@ -373,7 +373,7 @@ ok "write: Return is bound to the field committer" \
 ok "write: and so is FocusOut" \
 	[string match "*provider_settings_field*" [bind .provset.body.c3 <FocusOut>]] 1
 ok "write: the field carries the D115 context menu" \
-	[string match "*ctx_menu_post*" [bind .provset.body.c3 <Button-3>]] 1
+	[string match "*ctx_menu_post*" [bind .provset.body.c3 <<ContextMenu>>]] 1
 
 .provset.body.c3 delete 0 end
 .provset.body.c3 insert 0 "http://box.local:8080/v1"
