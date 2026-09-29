@@ -8688,6 +8688,28 @@ MacPorts here), MacPorts' tcltls 2.0.1 against rio's TLS code, and whether the m
 *shows* "rio". The last one follows from `GetAppPath` and Tk's source rather than from
 looking; no screen recording was available.
 
+*(Amendment, 2026-09-29, from a review of this entry on Linux — the core's `tclsh` is a
+link the script makes.)* "Put the chosen toolchain first on `PATH`" was only enough for
+the path that had been run. The GUI starts its core with the first `tclsh` on `PATH` — that
+exact name, never `tclsh8.6` — and only a source build is sure to have one: the script
+makes it there itself. Homebrew's `tcl-tk@8` and MacPorts' `tcl8` may carry `tclsh8.6`
+alone, and then the lookup falls through the toolchain directory to Apple's
+`/usr/bin/tclsh` (8.5), which cannot run the core. rio.app would start and its core would
+not — on exactly the two branches nobody has run. So both launchers now put
+`~/.local/rio-env/shim` first on `PATH` instead, and the one thing in it is a `tclsh` link
+to the chosen interpreter. It is made **for every toolchain**, not only when the name is
+missing, so the branch that has been verified exercises the same mechanism as the two
+that haven't. The install checks the link by asking it for tcllib's `json` and its
+patchlevel, and stops by name if it answers with another Tcl. `--uninstall` removes the
+link (only a link — a real file there is left alone) and the directory it made, and
+`~/.local/rio-env` itself when that was all it held. Checked on Linux with faked macOS
+tools: the wrapper and `AppMain.tcl` point at the link, the GUI's own `auto_execok tclsh`
+resolves to it, a link to the wrong Tcl stops the install, a re-run is idempotent, and
+uninstall keeps a built toolchain while tidying an empty one. Changing the GUI to prefer
+the `tclsh` beside its own `wish` was the alternative, and was rejected: inside rio.app the
+running binary is the copied `wish` named `rio`, so "beside me" would find no `tclsh` at
+all, and the GUI would need a Mac-only rule to know that.
+
 ### D135 — on Aqua, the theme reaches the native controls, and chrome text has a floor
 
 **Amends D24:** the applier learns two Aqua mappings. The theme data does not change.

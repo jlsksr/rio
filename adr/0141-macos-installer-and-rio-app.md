@@ -49,8 +49,8 @@ Homebrew's or MacPorts' tree. Both launchers put that directory on `TCLLIBPATH`.
 **The launcher is a `rio` command and a `rio.app`.**
 - The app's executable is a **copy of the `wish` binary**, so the main bundle is `rio.app`
   and the menu says rio.
-- That wish runs `Resources/Scripts/AppMain.tcl` by itself. The script puts the toolchain
-  first on `PATH` and starts rio.
+- That wish runs `Resources/Scripts/AppMain.tcl` by itself. The script puts a `tclsh` link
+  to the chosen interpreter first on `PATH`, so the core starts on it, and starts rio.
 - The bundle is ad-hoc signed.
 - The `rio` wrapper gives wish an empty pipe for stdin when there is no tty.
 

@@ -217,7 +217,7 @@ Both point back into this checkout.
 ./install-macos.sh                     # the lot: toolchain, verify, launcher
 ./install-macos.sh --use source        # build the toolchain even if Homebrew could provide one
 ./install-macos.sh --launcher-only     # you already have a toolchain; just the launcher
-./install-macos.sh --uninstall         # remove the command, rio.app and a tcltls top-up
+./install-macos.sh --uninstall         # remove the command, rio.app, the core's tclsh link and a tcltls top-up
 ./install-macos.sh --uninstall --toolchain   # ...and a toolchain the script built
 ```
 
