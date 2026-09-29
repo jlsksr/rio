@@ -2421,6 +2421,20 @@ set ::rio_dir [file join / nonexistent-rio-icon-check-[pid]]
 ok "icon: a checkout with no icons/ still starts (soft, like tkdnd)" [catch {apply_window_icon}] 0
 set ::rio_dir $_realdir
 
+# --- D134: macOS Quit asks about unsaved work -----------------------------------
+# Tk sends Cmd-Q to ::tk::mac::Quit and, with no such proc, exits on the spot — so a
+# missing hook is silent data loss. Drive the hook with do_quit stubbed and see it land.
+if {[tk windowingsystem] eq "aqua"} {
+	rename do_quit _real_do_quit
+	set ::_quit_asked 0
+	proc do_quit {} { set ::_quit_asked 1 }
+	catch {::tk::mac::Quit}
+	ok "quit: Cmd-Q goes through do_quit, not straight to exit" $::_quit_asked 1
+	rename do_quit {} ; rename _real_do_quit do_quit
+} else {
+	ok "quit: ::tk::mac::Quit is defined only under Aqua" [info commands ::tk::mac::Quit] ""
+}
+
 # --- D125: a huge or binary file asks before it opens ---------------------------
 # The core declines (fs.test proves that half); what matters here is that the GUI
 # turns the refusal into a QUESTION rather than an error box, and that answering it
