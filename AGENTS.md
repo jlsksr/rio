@@ -8642,6 +8642,13 @@ notarises nothing; it only makes the signature describe what is there.
   before this entry, not caused by it. It now routes to `do_quit`, Aqua only, and
   `smoke.tcl` guards it.
 
+**The Dock icon was blurry, and rio did it itself** (found 2026-09-29, after the fact).
+Tk's Aqua `wm iconphoto` uses only the **first** image and makes it the Dock icon, and
+`apply_window_icon` listed its sizes smallest first. So once rio started, the 16px PNG
+replaced rio.app's `rio.icns`, stretched to Dock size. `window_icon_order` now passes nothing
+inside a bundle that has `rio.icns`, where macOS picks the right size itself, and the largest
+image first anywhere else on Aqua. `smoke.tcl` checks all three cases.
+
 **The `rio` wrapper hands wish an empty pipe when stdin is not a tty.** Tk treats *any*
 non-tty character device as a Finder launch, `/dev/zero` included, so the plan's
 `</dev/zero` would not have helped. With the pipe, `rio --version </dev/null` prints.

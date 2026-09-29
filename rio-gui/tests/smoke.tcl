@@ -2420,6 +2420,21 @@ set _realdir $::rio_dir
 set ::rio_dir [file join / nonexistent-rio-icon-check-[pid]]
 ok "icon: a checkout with no icons/ still starts (soft, like tkdnd)" [catch {apply_window_icon}] 0
 set ::rio_dir $_realdir
+# Aqua uses only the FIRST image for the Dock, so the order is the whole fix there.
+set _imgs {a16 b32 c256}
+ok "icon: X11/Windows get the sizes as asked" \
+	[window_icon_order $_imgs x11 /usr/bin/wish] $_imgs
+ok "icon: Aqua outside rio.app gets the largest first (it is the Dock icon)" \
+	[window_icon_order $_imgs aqua /opt/bin/wish] {c256 b32 a16}
+set _app [file join $::env(TMPDIR) iconorder-[pid] rio.app Contents]
+file mkdir [file join $_app MacOS] [file join $_app Resources]
+set _exe [file join $_app MacOS rio]
+ok "icon: a bundle without rio.icns (Wish.app) is still covered" \
+	[window_icon_order $_imgs aqua $_exe] {c256 b32 a16}
+close [open [file join $_app Resources rio.icns] w]
+ok "icon: inside rio.app the bundle's .icns is left to do its job" \
+	[window_icon_order $_imgs aqua $_exe] {}
+file delete -force [file dirname [file dirname $_app]]
 
 # --- D134: macOS Quit asks about unsaved work -----------------------------------
 # Tk sends Cmd-Q to ::tk::mac::Quit and, with no such proc, exits on the spot — so a

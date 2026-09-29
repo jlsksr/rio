@@ -13640,6 +13640,21 @@ if {[tk windowingsystem] eq "aqua"} {
 # what was asked for rather than reading this proc's source text (AGENTS §7: assert
 # against behaviour). `icons/make-icons.sh` cuts exactly this set.
 set ::icon_sizes {16 24 32 48 64 128 256}
+# macOS (D134) is the exception to "the WM picks". Tk's Aqua `wm iconphoto` uses ONLY
+# THE FIRST image and makes it the Dock icon (tkMacOSXWm.c says so), so handing it the
+# set smallest-first put the 16px PNG, stretched, in the Dock. Two rules:
+#   * inside rio.app, pass nothing — the bundle's rio.icns carries every size and macOS
+#     picks the right one; any photo would only replace it with a single, fixed one.
+#     (It must be rio.icns: a wish run from a terminal may itself live in Wish.app,
+#     whose Resources hold Wish's icon, and that one rio does want to cover.)
+#   * anywhere else, the LARGEST first, since that one image is scaled to Dock size.
+# Other platforms get the list as it came. Pure, so smoke.tcl tests it without a Mac.
+proc window_icon_order {imgs ws exe} {
+	if {$ws ne "aqua"} { return $imgs }
+	set res [file join [file dirname [file dirname $exe]] Resources rio.icns]
+	if {[string match *.app/Contents/MacOS/* $exe] && [file exists $res]} { return {} }
+	return [lreverse $imgs]
+}
 proc apply_window_icon {} {
 	set dir [file join $::rio_dir icons]
 	set imgs {}
@@ -13649,6 +13664,7 @@ proc apply_window_icon {} {
 		if {[catch {image create photo ::rio_icon_$n -file $f}]} continue
 		lappend imgs ::rio_icon_$n
 	}
+	set imgs [window_icon_order $imgs [tk windowingsystem] [info nameofexecutable]]
 	if {[llength $imgs]} { catch {wm iconphoto . -default {*}$imgs} }
 	# Windows only: `wm iconphoto` works there, but a real .ico is what the taskbar and
 	# alt-tab render best. Harmless to attempt and caught if the file isn't there.
