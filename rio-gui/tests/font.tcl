@@ -106,6 +106,14 @@ set w [gget $::focus path]
 ok "bind: Ctrl+wheel present"     [expr {[string match *editor_zoom* [bind $w <Control-MouseWheel>]]}] 1
 ok "bind: Ctrl+plus present"      [expr {[string match *editor_zoom* [bind $w <Control-plus>]]}]       1
 ok "bind: Ctrl+0 resets"          [expr {[string match *editor_zoom_reset* [bind $w <Control-Key-0>]]}] 1
+# This platform's modifier zooms too: Command on a Mac (D136), where Ctrl+wheel is the
+# system's own screen zoom; the same Control bindings everywhere else.
+ok "bind: $::primary_label+plus present" \
+	[expr {[string match *editor_zoom* [bind $w <$::primary_mod-plus>]]}] 1
+ok "bind: $::primary_label+0 resets" \
+	[expr {[string match *editor_zoom_reset* [bind $w <$::primary_mod-Key-0>]]}] 1
+ok "menu: Zoom In shows this platform's modifier" \
+	[.m.view.zoom entrycget "Zoom In" -accelerator] "$::primary_label++"
 ok "menu: Font item present"      [expr {[.m.view.zoom index "Font…"] ne ""}] 1
 ok "menu: Reset Zoom present"     [expr {[.m.view.zoom index "Reset Zoom"] ne ""}] 1
 

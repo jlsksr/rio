@@ -84,7 +84,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0020](0020-agent-orchestration-in-core.md) | Agent orchestration in the core, providers and tools outside | Accepted | 2026-06-24 |
 | [0021](0021-plain-text-config-xdg.md) | Plain-text configuration in XDG locations, never executed | Accepted; session storage amended by 0031 | 2026-06-25 |
 | [0022](0022-encoding-line-endings-cursor.md) | Preserve encoding and line endings; cursors are frontend-local | Accepted | 2026-06-25 |
-| [0023](0023-keybindings-as-data.md) | Keybindings are data | Accepted | 2026-06-25 |
+| [0023](0023-keybindings-as-data.md) | Keybindings are data | Accepted; amended by 0143 | 2026-06-25 |
 | [0024](0024-themes-as-role-data.md) | Themes are semantic-role data files | Accepted; amended by 0142 | 2026-06-25 |
 | [0025](0025-shape-aware-json-encoding.md) | JSON encoding is shape-aware, never value-sniffed | Accepted | 2026-06-25 |
 | [0026](0026-agent-first-slice-api-key.md) | The agent's first slice, on the official API key only | Accepted; amended by 0034, 0069, 0083, 0104 | 2026-06-27 |
@@ -99,7 +99,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0035](0035-tool-windows-dock-sites.md) | Tool windows live in dock sites, not in the document tabs | Accepted | 2026-07-12 |
 | [0036](0036-find-replace-engine-in-core.md) | Find and replace: the engine in the core, a bar in the GUI | Accepted | 2026-07-12 |
 | [0037](0037-stale-link-watchdog.md) | Stale-link detection at the protocol layer | Accepted | 2026-07-12 |
-| [0038](0038-editing-modes.md) | Editing modes as a bind-tag layer | Accepted; amended by 0041 | 2026-07-12 |
+| [0038](0038-editing-modes.md) | Editing modes as a bind-tag layer | Accepted; amended by 0041, 0143 | 2026-07-12 |
 | [0039](0039-extension-repositories.md) | Extension repositories over plain HTTP, apt-sources style | Accepted; amended by 0066, 0107, 0109, 0124 | 2026-07-17 |
 | [0040](0040-column-editing.md) | Column editing as a GUI-only vertical cursor | Accepted | 2026-07-23 |
 | [0041](0041-unbundled-editing-modes.md) | The core ships one editing mode; emacs and vi are extensions | Accepted | 2026-08-03 |
@@ -117,7 +117,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0053](0053-assisted-not-autonomous.md) | LLM integration is assisted, not autonomous | Accepted; amended by 0084 | 2026-08-23 |
 | [0054](0054-utf-8-source-encoding.md) | Every entry point pins the source encoding to UTF-8 | Accepted | 2026-09-03 |
 | [0055](0055-core-answers-host-questions.md) | Questions about the core's host are answered by the core | Accepted | 2026-09-03 |
-| [0056](0056-editor-font-override.md) | The editor font is a user override on the theme font | Accepted | 2026-09-03 |
+| [0056](0056-editor-font-override.md) | The editor font is a user override on the theme font | Accepted; amended by 0143 | 2026-09-03 |
 | [0057](0057-tab-overflow.md) | Tab overflow: page, wrap, or list | Accepted; amended by 0074, 0078 | 2026-09-03 |
 | [0058](0058-preferences-window.md) | A Preferences window that owns no state | Accepted; amended by 0085, 0092 | 2026-09-03 |
 | [0059](0059-menu-hover-patch-reverted.md) | Patching Tk's menu click behaviour | Rejected (shipped, then reverted) | 2026-09-04 |
@@ -169,7 +169,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0105](0105-shipped-prompt-visible.md) | rio's shipped prompt is complete and visible | Accepted | 2026-09-11 |
 | [0106](0106-model-and-effort-options.md) | Model and effort are provider-declared options | Accepted; extended by 0135 and 0138 | 2026-09-12 |
 | [0107](0107-semver-extension-updates.md) | Extension versions are semver and are compared | Accepted | 2026-09-12 |
-| [0108](0108-editor-context-menu.md) | The editor has a context menu built from the Edit menu's table | Accepted; amended by 0121 | 2026-09-12 |
+| [0108](0108-editor-context-menu.md) | The editor has a context menu built from the Edit menu's table | Accepted; amended by 0121, 0143 | 2026-09-12 |
 | [0109](0109-https-repositories.md) | https beside http, trusted from the host's CA store | Accepted; amended by 0110, 0111, 0120 | 2026-09-12 |
 | [0110](0110-agent-https-hostname-checks.md) | The agent refuses https without host-name checks unless allowed | Accepted; amended by 0120 | 2026-09-15 |
 | [0111](0111-certificate-exceptions.md) | A certificate that fails verification can be accepted by fingerprint | Accepted; amended by 0120 | 2026-09-15 |
@@ -182,7 +182,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0118](0118-language-picked-by-hand.md) | A buffer's language can be picked by hand | Accepted | 2026-09-16 |
 | [0119](0119-change-with-agent.md) | Change with Agent: a request about the selected text, and only that | Accepted | 2026-09-16 |
 | [0120](0120-core-wide-unchecked-https-switch.md) | One core-wide switch for https without host-name checks | Accepted | 2026-09-17 |
-| [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted | 2026-09-17 |
+| [0121](0121-context-menu-outside-the-editor.md) | A context menu on every text widget outside the editor | Accepted; amended by 0143 | 2026-09-17 |
 | [0122](0122-missing-dependency-names-its-package.md) | A missing dependency names the package to install | Accepted | 2026-09-17 |
 | [0123](0123-window-and-taskbar-icon.md) | rio has a window and taskbar icon | Accepted; the artworks it compares were removed by 0127 | 2026-09-18 |
 | [0124](0124-signed-repositories.md) | A repository can be signed, and rio checks it | Accepted; amended by 0125; trust on first use superseded by 0126 | 2026-09-16 |
@@ -204,3 +204,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0140](0140-macos-platform-facts-from-tk.md) | On macOS, platform facts are asked of Tk, not assumed | Accepted; amended by 0141 | 2026-09-29 |
 | [0141](0141-macos-installer-and-rio-app.md) | macOS gets its own installer, and rio.app is a copy of wish | Accepted | 2026-09-29 |
 | [0142](0142-aqua-theme-appearance-and-font-floor.md) | On Aqua, the theme reaches the native controls, and chrome text has a floor | Accepted | 2026-09-29 |
+| [0143](0143-mac-keys-and-right-button.md) | On a Mac, rio uses the Mac's keys and its right mouse button | Accepted | 2026-09-29 |

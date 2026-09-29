@@ -1,6 +1,6 @@
 # ADR-0038: Editing modes as a bind-tag layer
 
-- **Status:** Accepted; amended by [ADR-0041](0041-unbundled-editing-modes.md)
+- **Status:** Accepted; amended by [ADR-0041](0041-unbundled-editing-modes.md), [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-07-12
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D38

@@ -495,6 +495,15 @@ for later:
   (rendering, editing, reflow, colour, Unicode), so the risk is retired, but building
   the terminal frontend is a separable later effort. It attaches over the same
   language-neutral protocol, so it lands *without touching the core*.
+- **The rest of the Mac's conventions** — *candidates.* D136 made ⌘ the shortcut key
+  and the right button work on a Mac. It left three things out on purpose:
+  - **⌘G / ⇧⌘G** for find next and previous. `show-git` is ⇧⌘G under D136's rule, so
+    this needs a second exception and a new chord for `show-git`.
+  - **⌘Backspace** to delete to the start of the line. A new key rather than a
+    translation of an existing one.
+  - **Opening a file dropped on rio.app in the Dock**, or chosen with *Open With*.
+    That needs `::tk::mac::OpenDocument` in the GUI and `CFBundleDocumentTypes` in the
+    Info.plist `install-macos.sh` writes.
 
 ## Project & packaging
 

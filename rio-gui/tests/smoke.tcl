@@ -2447,8 +2447,20 @@ if {[tk windowingsystem] eq "aqua"} {
 	catch {::tk::mac::Quit}
 	ok "quit: Cmd-Q goes through do_quit, not straight to exit" $::_quit_asked 1
 	rename do_quit {} ; rename _real_do_quit do_quit
+	# D136: the application menu's other two items open rio's own windows. Tk greys
+	# Preferences… without the hook, and About shows macOS's generic panel.
+	foreach {hook target} {::tk::mac::ShowPreferences preferences_window ::tkAboutDialog about_dialog} {
+		rename $target _real_$target
+		set ::_hook_hit 0
+		proc $target {} { set ::_hook_hit 1 }
+		catch {$hook}
+		ok "app menu: $hook opens $target" $::_hook_hit 1
+		rename $target {} ; rename _real_$target $target
+	}
 } else {
 	ok "quit: ::tk::mac::Quit is defined only under Aqua" [info commands ::tk::mac::Quit] ""
+	ok "app menu: the Mac's hooks are defined only under Aqua" \
+		[concat [info commands ::tk::mac::ShowPreferences] [info commands ::tkAboutDialog]] ""
 }
 
 # --- D125: a huge or binary file asks before it opens ---------------------------

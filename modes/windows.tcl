@@ -10,18 +10,44 @@
 # The clipboard actions call the GUI's shared editor_* procs (the same ones the
 # Edit menu uses), so the menu and the keys can never drift apart. Every edit runs
 # through the group's proxy (%W is the proxy path) and thus through the core.
+#
+# On a Mac (D136) the same mode speaks the Mac's spellings: Cmd+A/C/X/V, and
+# Option+Backspace / Option+Delete for a word. Control is left alone there, because
+# Ctrl+A, Ctrl+E, Ctrl+K, Ctrl+D, Ctrl+T, Ctrl+O and Ctrl+H are the system's own text
+# keys, working in every Mac text field — and Tk's Text class already does them.
 
 namespace eval rio::modes::win {}
 
+# The platform's half of the mode, as {event-sequence script} pairs for windowing system
+# `ws`. Pure, so the Mac's table is tested on any host.
+proc rio::modes::win::keys {ws} {
+	set mac  [expr {$ws eq "aqua"}]
+	set clip [expr {$mac ? "Command" : "Control"}]
+	set word [expr {$mac ? "Option"  : "Control"}]
+	set out [list \
+		<$clip-a>         {editor_select_all %W ; break} \
+		<$clip-c>         {editor_copy  %W ; break} \
+		<$clip-x>         {editor_cut   %W ; break} \
+		<$clip-v>         {editor_paste %W ; break} \
+		<$word-BackSpace> {rio::modes::win::del_word_back %W ; break} \
+		<$word-Delete>    {rio::modes::win::del_word_fwd  %W ; break}]
+	# Tk's built-in emacs leftovers, dead by design in this mode. (Ctrl+H and Ctrl+O
+	# are normally taken by the app keymap first — replace / open — but a user who frees
+	# those in keys.json still shouldn't fall into readline.) Not on a Mac: there the mode
+	# takes no Control key at all, since those are the platform's own.
+	set dead {<Insert>}
+	if {!$mac} {
+		lappend dead <Control-d> <Control-k> <Control-t> <Control-h> <Control-o> \
+			<Control-space> <Control-Shift-space>
+	}
+	foreach seq $dead { lappend out $seq break }
+	return $out
+}
+
 proc rio::modes::win::attach {tag} {
-	bind $tag <Control-a>      {editor_select_all %W ; break}
-	bind $tag <Control-c>      {editor_copy  %W ; break}
-	bind $tag <Control-x>      {editor_cut   %W ; break}
-	bind $tag <Control-v>      {editor_paste %W ; break}
+	foreach {seq script} [keys [tk windowingsystem]] { bind $tag $seq $script }
 	bind $tag <Control-Insert> {editor_copy  %W ; break}
 	bind $tag <Shift-Insert>   {editor_paste %W ; break}
-	bind $tag <Control-BackSpace> {rio::modes::win::del_word_back %W ; break}
-	bind $tag <Control-Delete>    {rio::modes::win::del_word_fwd  %W ; break}
 	# Tab / Shift+Tab indent and dedent the selected lines as one core edit,
 	# preserving each line's existing whitespace (Tk's own <Tab> would delete the
 	# selection). With no selection Tab inserts a plain tab; Shift+Tab dedents the
@@ -47,13 +73,6 @@ proc rio::modes::win::attach {tag} {
 	bind $tag <Escape>         {if {$::col_active} { col_clear ; break }}
 	bind $tag <Button-1>       {col_clear}
 	foreach _k {Left Right Up Down Home End Prior Next Return KP_Enter} { bind $tag <$_k> {col_clear} }
-	# Tk's built-in emacs leftovers, dead by design in this mode. (Ctrl+H and
-	# Ctrl+O are normally taken by the app keymap first — replace / open — but a
-	# user who frees those in keys.json still shouldn't fall into readline.)
-	foreach seq {<Control-d> <Control-k> <Control-t> <Control-h> <Control-o>
-	             <Control-space> <Control-Shift-space> <Insert>} {
-		bind $tag $seq break
-	}
 }
 
 proc rio::modes::win::detach {tag} {

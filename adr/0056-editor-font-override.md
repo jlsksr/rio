@@ -1,6 +1,6 @@
 # ADR-0056: The editor font is a user override on the theme font
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-09-03
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D56

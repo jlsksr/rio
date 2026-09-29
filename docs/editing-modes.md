@@ -7,7 +7,7 @@ Pick one in ***Settings ▸ Editing Mode***.
 
 | Mode | Keys |
 | ---- | ---- |
-| Windows | Notepad and VS Code keys: `Ctrl+A` selects all, `Ctrl+V` pastes. Ships with rio. |
+| Windows | Notepad and VS Code keys: `Ctrl+A` selects all, `Ctrl+V` pastes. Ships with rio. On a Mac it uses the Mac's keys instead: `Cmd+A`, `Cmd+V`, `Opt+Backspace` for a word, and `Ctrl` keeps its macOS meaning (`Ctrl+A` and `Ctrl+E` for start and end of line, `Ctrl+K` kills). |
 | emacs | readline motions: `Ctrl+A` and `Ctrl+E` for start and end of line, `Ctrl+K` kills, `Ctrl+V` scrolls. An [extension](extensions.md). |
 | vi | Modal editing: motions, counts, the `d`, `c` and `y` operators, visual mode, a block cursor in normal mode, and vi's own undo granularity. An [extension](extensions.md). |
 
@@ -21,7 +21,8 @@ explains how vi and emacs are installed and where they live.
 
 ## Two rules that hold in every mode
 
-- **App shortcuts always win.** `Ctrl+S` saves even in vi's insert mode.
+- **App shortcuts always win.** `Ctrl+S` (`Cmd+S` on a Mac) saves even in vi's
+  insert mode.
 - **The mode owns the clipboard keys**, which is why the *Edit* menu shows no
   accelerators beside Cut, Copy and Paste. The menu commands work regardless.
 

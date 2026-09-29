@@ -65,8 +65,20 @@ proc state {label} { return [.tm entrycget $label -state] }
 
 # --- the bindings are on the editor widget -------------------------------------------
 
-ok "Button-3 opens the menu"    [string match "*editor_context_menu 0 *" [bind $p <Button-3>]] 1
-ok "Button-3 breaks the chain"  [string match "*break*" [bind $p <Button-3>]] 1
+ok "right button opens the menu"   [string match "*editor_context_menu 0 *" [bind $p <<ContextMenu>>]] 1
+ok "right button breaks the chain" [string match "*break*" [bind $p <<ContextMenu>>]] 1
+# The right button is whatever Tk calls <<ContextMenu>> on THIS platform: Button-3 on X11
+# and Windows, Button-2 on a Mac (Tk 8.6's numbering there, D136). Press that button and
+# the menu must come — so a binding back on a hard-coded <Button-3> fails here on a Mac,
+# and this check means the same thing on every platform it runs on.
+set _rb [lindex [event info <<ContextMenu>>] 0]
+rename editor_context_menu _real_editor_context_menu
+set ::_ecm {}
+proc editor_context_menu {args} { set ::_ecm $args }
+event generate $p $_rb -x 4 -y 4 -rootx 40 -rooty 40
+update
+ok "the platform's right button ($_rb) reaches the menu" [lindex $::_ecm 0] 0
+rename editor_context_menu {} ; rename _real_editor_context_menu editor_context_menu
 ok "Menu key opens the menu"    [string match "*editor_context_key 0*" [bind $p <Key-Menu>]] 1
 ok "Shift+F10 opens the menu"   [string match "*editor_context_key 0*" [bind $p <Shift-F10>]] 1
 

@@ -48,7 +48,8 @@ yourself, use [syntax highlighting](editor.md#syntax-highlighting).
 
 ## Right-click menus
 
-What a right-click offers depends on what you click.
+What a right-click offers depends on what you click. On a Mac, that is the right
+button or a two-finger click on the trackpad; `Ctrl`-click doesn't open these.
 
 *Text you can type into* — the find and search fields, the agent's message box,
 the git commit bar, the boxes in dialogs — offers **Cut**, **Copy**, **Paste**

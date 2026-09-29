@@ -727,6 +727,10 @@ one-line `<KeyPress>` guard, verified by hand with a real `event generate` (head
 a transient of the withdrawn root, so unmapped — the test drives the handlers directly).
 Still a pure frontend concern — no core, no wire.
 
+*(Amended by D136: the table is read per platform. On a Mac, Control becomes Command
+except where `::keymap_aqua` says otherwise, and the recorder and the labels know that
+`Mod1` is Command there.)*
+
 ### D24 — GUI theming: semantic roles in plain data files (themes are data, not code)
 
 The **GUI is themeable**, and a theme is a flat, human-readable data file — the
@@ -2490,6 +2494,10 @@ strips one leading tab, else up to a 4-space tab stop. Ctrl+Tab / Ctrl+Shift+Tab
 (the app's tab-cycle chords, D23) are a different chord and untouched. Tests:
 the block-indent group in `rio-gui/tests/modes.tcl`.
 
+*(Amended by D136: on a Mac the windows mode uses Cmd+A/C/X/V and Opt+Backspace/Delete,
+and takes no Control key, because Tk's "readline leftovers" are macOS's own text keys
+there.)*
+
 ### D39 — Extension repositories: apt-sources over plain HTTP; never a marketplace
 
 rio had two stable extension surfaces (syntax D32, editing modes D38) plus
@@ -3457,6 +3465,8 @@ X11 (`Button-4/5`) and Windows/macOS (`MouseWheel` + `%D`) wheel idioms are wire
 matching the plain-scroll bindings the gutter already carried; `break` stops a
 `Control`-wheel from also plain-scrolling via the Text class binding. Scoped to the
 document view on purpose — the UI and chat fonts stay theme-controlled.
+
+*(Amended by D136: on a Mac, Command zooms as well, and the menu shows ⌘.)*
 
 ---
 
@@ -6128,6 +6138,9 @@ changed, and the label promising to seed from a multi-line selection. The item l
 `docs/editor.md` prints is a **derived fact** and joins §7's register — `docs.tcl` builds
 the real menu and holds the page against it both ways.
 
+*(Amended by D136: this menu, D115's and every other right-click menu in rio bind Tk's
+`<<ContextMenu>>` rather than `<Button-3>`, because the right button is Button-2 on a Mac.)*
+
 ### D109 — https repositories, beside http, trusted from the host's own store
 
 **jka (2026-09-12):** bring https to the extension store, *"use the OS cert store for
@@ -8779,6 +8792,119 @@ all 30 GUI suites exit 0.
 the dark themes' controls are dark with light text, the light themes' are the standard native
 ones, and chrome text is visibly larger.
 
+### D136 — on a Mac, rio uses the Mac's keys and its right mouse button
+
+**Amends D23** (the keymap is read per platform), **D38** (the windows mode speaks the
+Mac's keys there), **D56** (zoom takes Command too) **and D108/D115** (the context menus
+bind Tk's `<<ContextMenu>>`).
+
+A review of the macOS port on Linux (2026-09-29) asked what a Mac user meets first that the
+screenshot run of D135 could not show. Two answers, both about input, neither visible in a
+still picture. jka: *"Do the fixes."*
+
+**1. Right-click opened nothing.** In Tk 8.6 on Aqua the right mouse button is **Button-2**
+(`tkMacOSXMouseEvent.c`: `button = buttonNumber + Button1`), and every context menu in rio
+was bound to `<Button-3>`: the editor's (D108), the text views' and inputs' (D115), the file
+and git rows, editor tabs and dock tabs. Tk has a portable name for this: **`<<ContextMenu>>`**,
+defined per platform in `tk.tcl` (Button-3 on X11 and Windows, Button-2 on Aqua). All six
+binding sites use it now, which is D133's rule again: ask Tk, don't assume the platform.
+Nothing changes on X11 or Windows. **Ctrl-click is deliberately not added.** It is how
+some Mac users right-click, but the windows mode's column gesture (D40) is Ctrl+Shift+drag,
+and a widget binding on `<Control-Button-1>` would match that press too and take it.
+A right button or a two-finger click works, and the manual says which.
+
+**2. Every shortcut was a Control chord, on every platform.** On a Mac that is wrong twice.
+Command is where every Mac application puts its shortcuts, and Control is the system's own
+text keys (Ctrl+A/E to the line start and end, Ctrl+K to kill, Ctrl+D, Ctrl+T, Ctrl+O,
+Ctrl+H), which work in every Mac text field and which Tk's Text class already implements.
+So:
+
+- **The keymap is read per platform.** The table stays as written (`::keymap_base`) and
+  `keymap_for_platform` produces the defaults in force (`::keymap_default`, as before). On
+  Aqua, Control becomes Command, except in the four places **`::keymap_aqua`** names,
+  where the application menu or the system already owns the Command chord:
+  - `quit` is **unbound**: the application menu's *Quit rio* (⌘Q) already reaches
+    `do_quit` through `::tk::mac::Quit` (D134), and a binding of our own would fire
+    beside it. So would the question about unsaved work.
+  - `replace` is **⌥⌘F**, the Mac's own Replace, because ⌘H is *Hide rio*.
+  - `next-tab` and `prev-tab` **stay on Control**, because ⌘Tab is the system's
+    application switcher.
+
+  **The mechanism is one rule plus a four-row exception table, not a second keymap.** A
+  parallel Mac table would drift the day a command was added to one and not the other;
+  this way a new command needs no Mac thought unless it collides with one of the
+  system's chords.
+- **Double-firing was checked in Tk's source, not assumed.** A menu accelerator on Aqua
+  becomes a native key equivalent, and `TKMenu`'s `performKeyEquivalent:` only flashes
+  the menu: it sets a flag so `tkMenuItemInvoke` runs nothing, "because they are handled
+  by Tk". The binding does the work, once. The exceptions exist because the application
+  menu's own items (Quit, Hide, Preferences) are Cocoa's, not Tk's, and *do* act.
+- **Labels and the recorder learn the platform.** `chord_label` and `event_to_chord` take
+  the windowing system. On Aqua, state bit `0x8` is **Command** and `0x10` is **Option**
+  (`Mod1`/`Mod2`). The recorder used to read `0x8` as Alt, and Tk's `Alt` matches no key
+  on a Mac (`altModMask` is 0 there), so the shortcut editor would have saved every
+  recorded Cmd chord as one that never fires. Labels come in the Mac's order,
+  Ctrl Opt Shift Cmd (⌃⌥⇧⌘), in words `ParseAccelerator` turns into native key
+  equivalents, so the menus draw real ⌘ glyphs.
+- **The windows mode speaks the Mac's keys.** Its platform half is a pure table,
+  `rio::modes::win::keys ws`. On a Mac it is Cmd+A/C/X/V for select-all and the
+  clipboard, and Opt+Backspace/Delete for a word, and it **takes no Control key at all**.
+  The mode used to disable Tk's readline leftovers so that they couldn't leak into a
+  Notepad feel; on a Mac those keys are not leftovers but the platform's, so they are
+  left to work. The mode keeps its name: it is still the Notepad/VS Code behaviour, in
+  the Mac's spelling.
+- **The strays follow.** Zoom takes Command as well as Control (⌘+/−/0, ⌘-wheel), and so
+  do the commit bar's ⌘Enter and the help window's ⌘F. The find bar's escalate-to-Search
+  and the Search panel's replace toggle now bind **the keymap's own chords** rather than
+  a hard-coded `Control-F`/`Control-h`. That both fixes the Mac, where a hard-coded ⌘H
+  would have hidden rio, and makes them follow a `keys.json` remap made before start-up.
+- **The application menu's other items open rio's windows.** Tk greys *Preferences…* (⌘,)
+  until `::tk::mac::ShowPreferences` exists, and *About rio* shows macOS's generic panel
+  unless a `tkAboutDialog` command does (`tkMacOSXMenus.c`). Both now open rio's own.
+
+**Considered and not done:**
+- **⌘G / ⇧⌘G for find-next and find-previous**, the Mac convention. `show-git` is ⇧⌘G
+  under the rule, so it would take a second exception and a moved command. F3 still
+  works, needing `fn` on some Mac keyboards, as do Return and Shift+Return in the find
+  bar. The keyboard page says so.
+- **⌘Backspace to delete to the line start.** It is a real Mac habit, but a new feature
+  rather than a translation of an existing key.
+- **Opening files dropped on rio.app in the Dock** (`::tk::mac::OpenDocument`). That also
+  needs `CFBundleDocumentTypes` in the Info.plist, so it belongs with the installer.
+
+**Guards.** Everything platform-dependent is a pure function of the windowing system, in
+the `window_icon_order` idiom (D134), so the Mac's half is checked on every host:
+- **`keymap.tcl` (58 → 89):**
+  - the Mac table, including that no Control chord is left beyond the exceptions, and
+    that no chord is one the application menu or the system owns (⌘Q ⌘H ⌥⌘H ⌘, ⌘Tab
+    ⌘Space);
+  - every Mac chord is one Tk will bind, since Tk knows `Command`/`Option` on every
+    platform;
+  - the labels, in words Tk's Mac menus parse, and the recorder's bits.
+
+  Its checks of what is in force now go through `::primary_mod`/`::primary_label`, so the
+  suite holds on a Mac instead of failing on Linux's chords.
+- **`modes.tcl`:** both platforms' tables, and that the Mac's takes no Control key and
+  binds.
+- **`context_menu.tcl`:** presses whatever physical button `<<ContextMenu>>` is on the
+  running platform and requires the menu to come. It was proven with Tk *told* the Mac's
+  mapping: a hard-coded `<Button-3>` fails there by name, and the real code passes.
+- **`font.tcl`** (Command zoom and the menu label) and **`smoke.tcl`** (the two
+  application-menu hooks).
+- **`docs.tcl` check 22:** keyboard.md's Mac table against `::keymap_aqua`, both ways.
+
+**Two of the new checks caught real bugs before they shipped:**
+- A `;#` comment *inside* the braced `::keymap_aqua` literal is data, not a comment, so
+  the first cut's exception table was garbage. Every exception fell through to plain
+  Ctrl→Cmd: ⌘Q bound twice, ⌘H over *Hide rio*, ⌘Tab over the app switcher.
+- The windows mode still disabled Ctrl+Space on a Mac.
+
+Recorder, label and doc-table checks were proven by injection too.
+
+**Honest limit: every check ran on Linux.** That the menus draw ⌘ glyphs, that a
+two-finger click opens a menu, and that ⌘S saves exactly once are what the next Mac
+run is for.
+
 ---
 
 ## 4. "Simple debug/terminal" — scope decision
@@ -9311,6 +9437,7 @@ is a *backlog item*, and the fix is to write the guard, not to schedule a re-rea
 | Source of truth | The copy | Guard |
 | --------------- | -------- | ----- |
 | `::keymap_default` (D23) | `docs/keyboard.md`'s chord table | `docs.tcl` — both directions |
+| `::keymap_aqua` (D136) | `docs/keyboard.md`'s *On a Mac* table | `docs.tcl` 22 — both directions, each chord as a Mac labels it |
 | the `docs/*.md` on disk | `docs/index.md`'s contents | `docs.tcl` — no orphans, no dead entries |
 | the provider settings door + window | what `docs/agent.md` promises of it | `docs.tcl` — derives the door from a provider that declares options vs one that does not |
 | the Profile row + its manager (D131) | what `docs/agent.md` says they offer | `docs.tcl` 21 — derives the row from a provider that declares profiles vs one that does not, reads the five verbs off the live buttons, and takes the name rule from the core's own refusal |

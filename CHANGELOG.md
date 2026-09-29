@@ -30,6 +30,20 @@ gets its own entry and says so, rather than editing the history it changed.
 
 ### Fixed
 
+- **Mac keyboard shortcuts use Cmd** — on a Mac every rio shortcut was a Ctrl chord,
+  where Mac applications use Cmd and macOS keeps Ctrl for its own text keys. rio now uses
+  Cmd there: ⌘S saves, ⌘F finds, ⇧⌘F searches, ⌘C and ⌘V copy and paste. Ctrl keeps its
+  macOS meaning, so Ctrl+A and Ctrl+E go to the start and end of the line. Where macOS
+  already owns the Cmd chord, rio uses a different one: Replace is ⌥⌘F because ⌘H hides
+  rio, and tab switching stays on Ctrl+Tab. The shortcut editor now records Cmd and Opt.
+  Before, it recorded a Cmd chord that never fired. The application menu's
+  *Preferences…* and *About rio* open rio's own windows. Nothing changes on Linux or
+  Windows. — *D136 · `317cd00` · 2026-09-29*
+- **Right-click opens rio's menus on macOS** — on a Mac, right-clicking the editor, a
+  file, a git change, a tab or a text field opened nothing, because Tk numbers the Mac's
+  right button differently. rio now binds the right button itself, whatever its number,
+  so a right-click or a two-finger click opens every one of those menus. — *D136 ·
+  `532537e` · 2026-09-29*
 - **Buttons follow a dark theme on macOS** — on a Mac, buttons, menu buttons and checkboxes
   stayed light in a dark theme such as Solarized Dark, because macOS draws them itself and
   ignores the theme's colours. rio now tells macOS whether the theme is dark or light, so

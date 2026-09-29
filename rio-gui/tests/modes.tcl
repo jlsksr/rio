@@ -53,13 +53,50 @@ proc fire {chord} {
 proc clear_buf {} { .ed.t delete 1.0 "end -1c" }
 proc set_clip {txt} { clipboard clear ; clipboard append $txt }
 
+# The windows mode's clipboard keys are Command on a Mac and Control elsewhere, and its
+# word deletes Option and Control (D136); the checks of what is attached HERE use these.
+set mac [expr {[tk windowingsystem] eq "aqua"}]
+set C   [expr {$mac ? "Command" : "Control"}]
+set W   [expr {$mac ? "Option"  : "Control"}]
+
+# --- the windows mode's platform table, both platforms, on any host (D136) -----
+set kx [rio::modes::win::keys x11]
+set ka [rio::modes::win::keys aqua]
+ok "table x11: Ctrl+C copies"          [string match *editor_copy* [dict get $kx <Control-c>]] 1
+ok "table x11: Ctrl+Backspace eats a word" [dict exists $kx <Control-BackSpace>] 1
+# Off a Mac every one of Tk's readline leftovers is still dead, as it was before D136.
+set alive {}
+foreach seq {<Control-d> <Control-k> <Control-t> <Control-h> <Control-o>
+             <Control-space> <Control-Shift-space> <Insert>} {
+	if {![dict exists $kx $seq] || [dict get $kx $seq] ne "break"} { lappend alive $seq }
+}
+ok "table x11: Tk's readline leftovers all dead" $alive {}
+ok "table mac: Cmd+C copies"           [string match *editor_copy* [dict get $ka <Command-c>]] 1
+ok "table mac: Cmd+A selects all"      [string match *editor_select_all* [dict get $ka <Command-a>]] 1
+ok "table mac: Opt+Backspace eats a word" \
+	[string match *del_word_back* [dict get $ka <Option-BackSpace>]] 1
+ok "table mac: Opt+Delete eats a word" [string match *del_word_fwd* [dict get $ka <Option-Delete>]] 1
+# Derived: on a Mac the mode claims NO Control key at all — Ctrl+A/E/K/D/T/O/H are the
+# system's own text keys there, and Tk's Text class already does them.
+set ctl {}
+foreach seq [dict keys $ka] { if {[string match <Control-* $seq]} { lappend ctl $seq } }
+ok "table mac: no Control key taken"   $ctl {}
+# ...and every sequence in it is one Tk accepts (Command and Option are Mod1 and Mod2 on
+# every platform, so this is checkable here).
+frame .probe
+set bad {}
+foreach seq [dict keys $ka] { if {[catch {bind .probe $seq {}}]} { lappend bad $seq } }
+destroy .probe
+ok "table mac: every sequence binds" $bad {}
+
 # --- boot state: windows mode attached, tag layered correctly ------------------
 ok "boot: default mode"          $::edit_mode        windows
 ok "boot: mode attached"         $::editmode_active  windows
 ok "boot: tag after widget path" [lindex [bindtags [gget 0 path]] 1] RioMode
-ok "boot: app chord still bound" [expr {[bind [gget 0 path] <Control-n>] ne ""}] 1
-ok "boot: mode chord bound"      [expr {[bind RioMode <Control-a>] ne ""}] 1
-ok "boot: emacs leftover dead"   [bind RioMode <Control-k>] break
+ok "boot: app chord still bound" [expr {[bind [gget 0 path] <$::primary_mod-n>] ne ""}] 1
+ok "boot: mode chord bound"      [expr {[bind RioMode <$C-a>] ne ""}] 1
+# ...dead off a Mac; on one, Ctrl+K is the system's own kill-line and is left alone (D136).
+ok "boot: emacs leftover dead"   [bind RioMode <Control-k>] [expr {$mac ? "" : "break"}]
 ok "boot: menu has the modes"    [expr {[.m.settings.editmode index end] >= 2}] 1
 
 # --- windows mode: clipboard + select-all, edits flow through the core ---------
@@ -67,10 +104,10 @@ clear_buf
 .ed.t insert insert "hello world"
 ok "win: typed through core"  [buf_text $::cur] "hello world"
 
-ok "win: select-all fires"    [fire <Control-a>] ok
+ok "win: select-all fires"    [fire <$C-a>] ok
 ok "win: select-all range"    [rio_real_t get sel.first sel.last] "hello world"
 
-ok "win: copy fires"          [fire <Control-c>] ok
+ok "win: copy fires"          [fire <$C-c>] ok
 ok "win: copy on clipboard"   [clipboard get] "hello world"
 
 # paste replaces the selection as ONE core edit (the proxy's replace arm): a
@@ -78,7 +115,7 @@ ok "win: copy on clipboard"   [clipboard get] "hello world"
 set_clip "bye"
 rio_real_t tag remove sel 1.0 end
 rio_real_t tag add sel 1.0 1.5           ;# select "hello"
-ok "win: paste fires"          [fire <Control-v>] ok
+ok "win: paste fires"          [fire <$C-v>] ok
 ok "win: paste replaced sel"   [buf_text $::cur] "bye world"
 do_undo
 ok "win: replace is one undo"  [buf_text $::cur] "hello world"
@@ -86,7 +123,7 @@ ok "win: replace is one undo"  [buf_text $::cur] "hello world"
 # cut removes through the core and loads the clipboard
 rio_real_t tag remove sel 1.0 end
 rio_real_t tag add sel 1.6 1.11          ;# select "world"
-ok "win: cut fires"            [fire <Control-x>] ok
+ok "win: cut fires"            [fire <$C-x>] ok
 ok "win: cut removed text"     [buf_text $::cur] "hello "
 ok "win: cut on clipboard"     [clipboard get] "world"
 
@@ -94,12 +131,12 @@ ok "win: cut on clipboard"     [clipboard get] "world"
 clear_buf
 .ed.t insert insert "alpha beta"
 .ed.t mark set insert "1.0 lineend"
-ok "win: word-back fires"      [fire <Control-BackSpace>] ok
+ok "win: word-back fires"      [fire <$W-BackSpace>] ok
 ok "win: word-back result"     [buf_text $::cur] "alpha "
 
 # Ctrl+Delete eats to the next word start
 .ed.t mark set insert 1.0
-ok "win: word-fwd fires"       [fire <Control-Delete>] ok
+ok "win: word-fwd fires"       [fire <$W-Delete>] ok
 ok "win: word-fwd result"      [buf_text $::cur] ""
 
 # --- windows mode: Tab / Shift+Tab block-indent, keeping each line's whitespace --
@@ -243,7 +280,7 @@ ok "menu: Select All"   [.m.edit entrycget "Select All" -command] editor_select_
 set ::edit_mode emacs
 apply_editmode
 ok "emacs: attached"            $::editmode_active emacs
-ok "emacs: windows chords gone" [bind RioMode <Control-x>] ""
+ok "emacs: windows chords gone" [bind RioMode <$C-x>] ""
 ok "emacs: kill-line falls through" [bind RioMode <Control-k>] ""
 
 clear_buf

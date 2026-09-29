@@ -9,8 +9,8 @@
 # field withholding Cut and Copy; the commands actually acting when invoked; what a
 # right-click settles before the menu appears, which differs between a read-only view
 # (no caret to move) and an editable one; and the DRIFT GUARD — every Entry and Text in
-# the main window carries a Button-3 binding, so a widget added later without a menu
-# fails here rather than shipping bare.
+# the main window carries a right-button binding (<<ContextMenu>>, D136), so a widget
+# added later without a menu fails here rather than shipping bare.
 #
 # It builds the menus, it never POSTS them: tk_popup takes a global grab on X11 and
 # there is nobody here to dismiss it. That split — a builder beside the popup wrapper —
@@ -192,7 +192,7 @@ foreach {w kind} {.chat.log view .cmp.l.t view .cmp.r.t view .pgit.diff view .pl
                   .chat.input input .find.e input .find.re input .results.hdr.e input
                   .results.rep.e input .pgit.commit.msg input .pgit.commit.body input} {
 	ok "bound: $w is a $kind menu" \
-		[expr {[string match "*ctx_menu_post*$kind*" [bind $w <Button-3>]] ? $kind : [bind $w <Button-3>]}] $kind
+		[expr {[string match "*ctx_menu_post*$kind*" [bind $w <<ContextMenu>>]] ? $kind : [bind $w <<ContextMenu>>]}] $kind
 }
 foreach w {.chat.log .find.e} {
 	ok "bound: $w answers the keyboard route too (Shift+F10 and Menu)" \
@@ -202,11 +202,11 @@ foreach w {.chat.log .find.e} {
 # empty bar hits the label and never reaches the widget below.
 foreach {lbl target} {.pgit.commit.msg.ph .pgit.commit.msg .pgit.commit.body.ph .pgit.commit.body} {
 	ok "bound: the placeholder $lbl forwards to $target" \
-		[string match "*ctx_menu_post $target*" [bind $lbl <Button-3>]] 1
+		[string match "*ctx_menu_post $target*" [bind $lbl <<ContextMenu>>]] 1
 }
 
 # THE DRIFT GUARD. Not a list of what we bound — a sweep of what exists. Every Entry and
-# Text in the main window must have a Button-3 binding, whether it got one here, from
+# Text in the main window must have a right-button binding, whether it got one here, from
 # D108 (the editor) or from rl_init (the row panes). A new bare widget added later fails
 # this check by existing.
 proc all_text_widgets {w} {
@@ -218,7 +218,7 @@ proc all_text_widgets {w} {
 set bare {}
 foreach w [all_text_widgets .] {
 	if {[string match ".fx*" $w]} continue   ;# this suite's own fixtures
-	if {[bind $w <Button-3>] eq ""} { lappend bare $w }
+	if {[bind $w <<ContextMenu>>] eq ""} { lappend bare $w }
 }
 ok "drift guard: no Entry or Text in the main window is left without a menu" $bare {}
 ok "drift guard: …and it actually looked at something" \

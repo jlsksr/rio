@@ -221,6 +221,11 @@ proc mono_family {fam} {
 	return $::mono_resolved
 }
 set ::mono [mono_family monospace] ;# the chrome's fixed-width family, resolved once
+# The platform's primary shortcut modifier (D136): Command on a Mac, where Control keeps the
+# system's own text keys (Ctrl+A to the line start, Ctrl+K to kill, …), and Control
+# everywhere else. `::primary_label` is how a menu or a page spells it.
+set ::primary_mod   [expr {[tk windowingsystem] eq "aqua" ? "Command" : "Control"}]
+set ::primary_label [expr {[tk windowingsystem] eq "aqua" ? "Cmd" : "Ctrl"}]
 # Aqua sizes and appearance (D135). Tk converts a font's points with `tk scaling`, which is
 # 1 px/pt on Aqua against 1.33 on X11, so the theme's UI 9 is 9 px on a Mac: below the
 # platform's own floor for interface text. Rather than rescale everything (which would also
@@ -1440,7 +1445,11 @@ proc rl_init {b onselect onactivate oncontext} {
 	bind $b <Down>            "rl_move %W 1 ; break"
 	bind $b <Motion>          "rl_hover_at %W %x %y"
 	bind $b <Leave>           "rl_set_hover %W -1"
-	bind $b <Button-3>        "rl_context %W %x %y %X %Y ; break"
+	# <<ContextMenu>>, never <Button-3>: it is Tk's own name for the right mouse button,
+	# which is Button-3 on X11 and Windows but Button-2 on macOS (Tk 8.6's numbering
+	# there), so a hard-coded Button-3 opens nothing on a Mac (D136). Every right-click
+	# menu in rio binds this event.
+	bind $b <<ContextMenu>>   "rl_context %W %x %y %X %Y ; break"
 	# A read-only list selects one row at a time (Button-1 / Return / arrows). It has
 	# no use for the Text widget's own text selection, and -state disabled does not
 	# suppress it: a drag, a shift-click or a line/word multi-click still sweeps a
@@ -1586,8 +1595,8 @@ proc rl_set_hover {b row} {
 # global grab nobody is there to dismiss.
 #
 # NOT here: the rl_* row lists (Files, Git, Search results, the manual's contents).
-# The first two have real row menus already; the other two have Button-3 bound to an
-# empty callback, and filling it means deciding what Copy or Open MEAN for a result
+# The first two have real row menus already; the other two have the right button
+# bound to an empty callback, and filling it means deciding what Copy or Open MEAN for a result
 # row — a Search and Help feature, not the missing door this change is about. And
 # rl_init kills text selection in those panes outright, so a Copy there could not be
 # the copy this menu offers anyway.
@@ -1693,12 +1702,12 @@ proc ctx_menu_key {w kind} {
 }
 
 # Give a widget its menu. Called at the creation site. `break` so the widget binding
-# wins over anything the class or an editing mode puts on Button-3, the same
+# wins over anything the class or an editing mode puts on the right button, the same
 # precedence the editor's own binding takes (D38).
 proc ctx_bind_view  {w} { ctx_bind $w view }
 proc ctx_bind_input {w} { ctx_bind $w input }
 proc ctx_bind {w kind} {
-	bind $w <Button-3>   [list ctx_menu_post %W %x %y %X %Y $kind]\;break
+	bind $w <<ContextMenu>> [list ctx_menu_post %W %x %y %X %Y $kind]\;break
 	bind $w <Shift-F10>  [list ctx_menu_key %W $kind]\;break
 	bind $w <Key-Menu>   [list ctx_menu_key %W $kind]\;break
 }
@@ -1707,7 +1716,7 @@ proc ctx_bind {w kind} {
 # a right-click on an empty field hits the label and never reaches the widget below.
 # Forward it, the same way the label already forwards Button-1.
 proc ctx_bind_placeholder {lbl target kind} {
-	bind $lbl <Button-3> [list ctx_menu_post $target %x %y %X %Y $kind]\;break
+	bind $lbl <<ContextMenu>> [list ctx_menu_post $target %x %y %X %Y $kind]\;break
 }
 
 # Repaint the files pane as a tree from the project root (D87): dirs then files at each
@@ -2666,7 +2675,7 @@ proc render_tabs {site} {
 		bind $t <ButtonPress-1>   [list tab_press $site $id %X %Y]
 		bind $t <B1-Motion>       [list tab_motion %X %Y]
 		bind $t <ButtonRelease-1> [list tab_release $site $id %X %Y]
-		bind $t <Button-3>        [list site_tab_menu $site $id %X %Y]
+		bind $t <<ContextMenu>>   [list site_tab_menu $site $id %X %Y]
 	}
 }
 
@@ -4220,7 +4229,7 @@ proc help_window {{topic ""}} {
 	bind $w <Escape> [list destroy $w]
 	bind $w <Alt-Left>  {help_history back}
 	bind $w <Alt-Right> {help_history forward}
-	bind $w <Control-f> {focus .help.find.e ; .help.find.e selection range 0 end}
+	bind $w <$::primary_mod-f> {focus .help.find.e ; .help.find.e selection range 0 end}
 	bind $w <Destroy> {if {"%W" eq ".help"} {set ::help_topic "" ; set ::help_needle ""}}
 
 	set ::help_back {} ; set ::help_fwd {} ; set ::help_needle ""
@@ -7810,7 +7819,7 @@ proc refresh_tabs {} {
 			bind $f.x <Button-1> [list close_tab $id $g]
 			# Right-click anywhere on the handle (frame, label, ×) for the context menu.
 			foreach w [list $f $f.l $f.x] {
-				bind $w <Button-3> [list tab_context_menu $g $id %X %Y]
+				bind $w <<ContextMenu>> [list tab_context_menu $g $id %X %Y]
 			}
 			pack $f.l -side left ; pack $f.x -side right
 			# The handle FRAME is left unmanaged here — tabstrip_layout decides which
@@ -11703,9 +11712,13 @@ tooltip .pgit.commit.more "Add a longer description"
 git_commit_body_set 0   ;# summary row only; body hidden until ＋
 # Enter in the one-line summary commits; in the multi-line body it inserts a newline, so
 # Ctrl+Enter is the commit chord there (and works from the summary too, for muscle memory).
+# On a Mac, ⌘Enter as well (D136).
 bind .pgit.commit.msg  <Return>         git_commit
-bind .pgit.commit.msg  <Control-Return> git_commit
-bind .pgit.commit.body <Control-Return> {git_commit ; break}
+foreach _m [lsort -unique [list Control $::primary_mod]] {
+	bind .pgit.commit.msg  <$_m-Return> git_commit
+	bind .pgit.commit.body <$_m-Return> {git_commit ; break}
+}
+unset _m
 
 # A thin draggable divider between the dock and the editor. apply_layout parks it on
 # whichever edge the dock occupies; dragging it resizes the dock (the editor, which
@@ -12384,16 +12397,18 @@ proc apply_column_edit {} {
 # accelerator labels shown in the menus, so a remap moves both together. Users remap
 # by dropping a keys.json in the config dir (D21) — {"command":"chord", ...} overrides
 # the default chord per command; "" unbinds one. Chords are Tk event syntax minus the
-# <>: modifiers Control/Shift/Alt joined by '-', then the key (a letter, or a keysym
-# like Tab/backslash/bracketright). A capital letter carries an implicit Shift, the Tk
-# convention: Control-S is Ctrl+Shift+S. New commands slot in here as one line each —
+# <>: modifiers Control/Shift/Alt (Command/Option on a Mac) joined by '-', then the key
+# (a letter, or a keysym like Tab/backslash/bracketright). A capital letter carries an
+# implicit Shift, the Tk convention: Control-S is Ctrl+Shift+S. New commands slot in here as one line each —
 # the binder and the menus pick them up with no further wiring.
 # ---------------------------------------------------------------------------
 # Each entry is {chord action label}: `action` is the KEY behaviour (a menu item may run
 # a different -command — split-editor's key toggles, its menu only splits — and just
 # borrows this chord for its accelerator); `label` is the human name the shortcuts editor
 # shows. An override changes only the chord; action and label are fixed in code here.
-set ::keymap_default {
+# This is the table as written; ::keymap_default, below it, is the table as read on this
+# platform, and is what everything else consults.
+set ::keymap_base {
 	new            {Control-n            do_new                                                        "New tab"}
 	open           {Control-o            open_dialog                                                   "Open file…"}
 	open-folder    {Control-O            open_folder_dialog                                            "Open folder…"}
@@ -12421,6 +12436,36 @@ set ::keymap_default {
 	preferences    {{}                   preferences_window                                            "Preferences…"}
 	help           {F1                   help_window                                                   "Help contents…"}
 }
+# On a Mac the table above is read with Command wherever it says Control (D136), which
+# is what every Mac application does and what leaves Control to the system's own text
+# keys. These are the exceptions: chords the application menu or the system already
+# owns, where a Command binding would fire twice or not at all.
+#   quit      unbound: rio ▸ Quit rio (⌘Q) already reaches do_quit (D134), and a binding
+#             of our own would ask about unsaved work twice
+#   replace   ⌥⌘F, the Mac's own Replace: ⌘H is rio ▸ Hide rio
+#   next-tab, prev-tab   stay on Control: ⌘Tab is the system's application switcher
+# (No comments INSIDE the braces: there `;#` is data, not a comment.)
+set ::keymap_aqua {
+	quit     {}
+	replace  Option-Command-f
+	next-tab Control-Tab
+	prev-tab Control-Shift-Tab
+}
+# The defaults for windowing system `ws`. Pure, so the Mac's table is tested on any host.
+proc keymap_for_platform {map ws} {
+	if {$ws ne "aqua"} { return $map }
+	dict for {cmd spec} $map {
+		set chord [lindex $spec 0]
+		if {[dict exists $::keymap_aqua $cmd]} {
+			set chord [dict get $::keymap_aqua $cmd]
+		} elseif {[string match Control-* $chord]} {
+			set chord Command-[string range $chord 8 end]
+		}
+		dict set map $cmd [lreplace $spec 0 0 $chord]
+	}
+	return $map
+}
+set ::keymap_default [keymap_for_platform $::keymap_base [tk windowingsystem]] ;# the defaults in force here
 set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); keymap_resolve fills it
 set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
 set ::keymap_live_chords {}        ;# chords currently bound on the group widgets (to clear on a live remap)
@@ -12492,8 +12537,14 @@ proc key_accel {cmd} { return [chord_label [key_chord $cmd]] }
 
 # Turn a Tk chord (Control-Shift-e, Control-backslash, Control-S) into a display label
 # (Ctrl+Shift+E, Ctrl+\, Ctrl+Shift+S). A lone capital letter carries an implicit Shift.
-proc chord_label {chord} {
+# `ws` is the windowing system (default: this one), because Mod1 and Mod2 are Command and
+# Option on a Mac but Alt and nothing much elsewhere (D136). On a Mac the modifiers come
+# in the Mac's own order, Ctrl Opt Shift Cmd — the order its menus draw ⌃⌥⇧⌘ in — and
+# Tk's menus there parse exactly these words into native key equivalents.
+proc chord_label {chord {ws ""}} {
 	if {$chord eq ""} { return "" }
+	if {$ws eq ""} { set ws [tk windowingsystem] }
+	set mac [expr {$ws eq "aqua"}]
 	set parts [split $chord -]
 	set key   [lindex $parts end]
 	set out {} ; set shift 0
@@ -12501,14 +12552,18 @@ proc chord_label {chord} {
 		switch -- $m {
 			Control - Ctrl    { lappend out Ctrl }
 			Shift             { set shift 1 }
-			Alt - Mod1 - Meta { lappend out Alt }
+			Command           { lappend out Cmd }
+			Option            { lappend out Opt }
+			Mod1              { lappend out [expr {$mac ? "Cmd" : "Alt"}] }
+			Mod2              { lappend out [expr {$mac ? "Opt" : "Mod2"}] }
+			Alt - Meta        { lappend out Alt }
 			default           { lappend out $m }
 		}
 	}
 	if {[string length $key] == 1 && [string is upper $key]} { set shift 1 }
 	if {$shift} { lappend out Shift }
 	set order {}
-	foreach want {Ctrl Alt Shift} { if {$want in $out} { lappend order $want } }
+	foreach want {Ctrl Alt Opt Shift Cmd} { if {$want in $out} { lappend order $want } }
 	lappend order [key_glyph $key]
 	return [join $order +]
 }
@@ -12553,6 +12608,15 @@ proc editor_zoom_bindings {w} {
 	bind $w <Control-KP_Subtract> {editor_zoom -1 ; break}
 	bind $w <Control-Key-0>      {editor_zoom_reset ; break}
 	bind $w <Control-KP_0>       {editor_zoom_reset ; break}
+	# A Mac zooms with Command (D136). The Control forms above stay too: harmless, and
+	# the wheel ones are what a Mac mouse user may still reach for.
+	if {$::primary_mod ne "Control"} {
+		foreach {seq script} {
+			MouseWheel {editor_zoom [expr {%D > 0 ? 1 : -1}] ; break}
+			plus {editor_zoom 1 ; break}     equal {editor_zoom 1 ; break}
+			minus {editor_zoom -1 ; break}   Key-0 {editor_zoom_reset ; break}
+		} { bind $w <$::primary_mod-$seq> $script }
+	}
 }
 
 # The non-empty chords in the resolved keymap.
@@ -12617,13 +12681,20 @@ proc keymap_apply_live {} {
 # isn't a usable shortcut: a bare modifier press, or a bare printable key with no modifier
 # (binding a lone letter would hijack typing — a named key like F5/Delete is allowed).
 # Modifiers are emitted Control/Alt/Shift; a letter is lower-cased with Shift kept explicit.
-proc event_to_chord {keysym state} {
+# On a Mac (`ws` aqua) the state bits mean something else (D136): 0x8 (Mod1) is Command and
+# 0x10 (Mod2) is Option. Tk's `Alt` matches no key at all there, so recording Cmd+S as
+# Alt-s would have saved a shortcut that never fires.
+proc event_to_chord {keysym state {ws ""}} {
+	if {$ws eq ""} { set ws [tk windowingsystem] }
 	if {[string match *_L $keysym] || [string match *_R $keysym] \
 		|| $keysym in {Caps_Lock Num_Lock Shift Control Alt Meta ISO_Level3_Shift}} { return "" }
 	set mods {}
 	if {$state & 0x4} { lappend mods Control }
-	if {$state & 0x8} { lappend mods Alt }      ;# Mod1
+	if {$ws eq "aqua"} {
+		if {$state & 0x10} { lappend mods Option } ;# Mod2
+	} elseif {$state & 0x8} { lappend mods Alt }   ;# Mod1
 	if {$state & 0x1} { lappend mods Shift }
+	if {$ws eq "aqua" && ($state & 0x8)} { lappend mods Command } ;# Mod1
 	set key $keysym
 	if {[string length $key] == 1 && [string is alpha $key]} { set key [string tolower $key] }
 	if {[llength $mods] == 0 && [string length $key] == 1} { return "" }  ;# bare printable: refuse
@@ -13121,8 +13192,9 @@ proc make_editor_group {g} {
 	# Right-click opens the editor's context menu (D108); the Menu key and Shift+F10
 	# open the same one at the caret. Bound on the WIDGET, so they sit ahead of the
 	# RioMode tag in the D38 precedence order — the app's menu wins over anything an
-	# editing mode might put on Button-3 — and `break` stops the rest of the chain.
-	bind $f.t <Button-3>   "editor_context_menu $g %x %y %X %Y ; break"
+	# editing mode might put on the right button — and `break` stops the rest of the
+	# chain. <<ContextMenu>> is the right button on every platform (D136, see rl_init).
+	bind $f.t <<ContextMenu>> "editor_context_menu $g %x %y %X %Y ; break"
 	bind $f.t <Key-Menu>   "editor_context_key $g ; break"
 	bind $f.t <Shift-F10>  "editor_context_key $g ; break"
 	# Keep the status bar's Ln/Col segment live: any key-up or click-release may have
@@ -13399,7 +13471,8 @@ foreach _w {.find.e .find.re} {
 	# Escalate to the full Search panel (D52), carrying the bar's needle + options.
 	# Bound here too because the group-widget keymap chord doesn't fire while a bar
 	# entry holds focus.
-	bind $_w <Control-F>    {search_from_bar ; break}
+	# The search chord, so a Mac gets ⇧⌘F (D136); none if keys.json unbound it.
+	if {[set _c [key_chord search]] ne ""} { bind $_w <$_c> {search_from_bar ; break} }
 }
 bind .find.re <Return> {find_replace_one ; break}
 bind .find.e  <KeyRelease> find_update
@@ -13472,10 +13545,14 @@ pack .results.well.body -side left -fill both -expand 1
 rl_init .results.well.body {} search_activate {}
 bind .results.hdr.e    <Return>    {search_run ; break}
 bind .results.hdr.e    <Escape>    {search_close ; break}
-bind .results.hdr.e    <Control-h> {search_show_replace 1 ; break}
+# The replace chord toggles the row, as in the find bar: ⌥⌘F on a Mac (D136).
+if {[set _c [key_chord replace]] ne ""} {
+	bind .results.hdr.e <$_c> {search_show_replace 1 ; break}
+	bind .results.rep.e <$_c> {search_show_replace 0 ; focus .results.hdr.e ; break}
+}
+unset _c
 bind .results.rep.e    <Return>    {search_replace_all ; break}
 bind .results.rep.e    <Escape>    {search_close ; break}
-bind .results.rep.e    <Control-h> {search_show_replace 0 ; focus .results.hdr.e ; break}
 bind .results.hdr.close <Button-1> search_close
 
 # Register the four tool panes now that their body widgets exist (AGENTS.md D35 step
@@ -13575,9 +13652,9 @@ menu .m.view.zoom -tearoff 0
 .m.view add cascade -label "Font & Zoom" -menu .m.view.zoom
 .m.view.zoom add command -label "Font…"      -command editor_font_dialog
 .m.view.zoom add separator
-.m.view.zoom add command -label "Zoom In"    -accelerator "Ctrl++" -command {editor_zoom 1}
-.m.view.zoom add command -label "Zoom Out"   -accelerator "Ctrl+-" -command {editor_zoom -1}
-.m.view.zoom add command -label "Reset Zoom" -accelerator "Ctrl+0" -command editor_zoom_reset
+.m.view.zoom add command -label "Zoom In"    -accelerator "$::primary_label++" -command {editor_zoom 1}
+.m.view.zoom add command -label "Zoom Out"   -accelerator "$::primary_label+-" -command {editor_zoom -1}
+.m.view.zoom add command -label "Reset Zoom" -accelerator "$::primary_label+0" -command editor_zoom_reset
 menu .m.view.layout -tearoff 0
 .m.view add cascade -label "Editor Layout" -menu .m.view.layout
 .m.view.layout add command -label "Split Editor"          -accelerator [key_accel split-editor] -command split_editor
@@ -13695,6 +13772,11 @@ wm protocol . WM_DELETE_WINDOW do_quit
 # Tk looks for it; do_quit returning (a Cancel) leaves rio running, as it should.
 if {[tk windowingsystem] eq "aqua"} {
 	proc ::tk::mac::Quit {} { do_quit }
+	# The rest of that application menu (D136). Tk greys rio ▸ Preferences… (⌘,) until
+	# ::tk::mac::ShowPreferences exists, and rio ▸ About rio shows macOS's generic panel
+	# unless a `tkAboutDialog` command does (tkMacOSXMenus.c). Both are rio's own windows.
+	proc ::tk::mac::ShowPreferences {} { preferences_window }
+	proc ::tkAboutDialog {} { about_dialog }
 }
 
 # The window / taskbar icon (AGENTS.md D117). Without one the window manager and the
