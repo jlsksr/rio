@@ -42,4 +42,5 @@ which applies the same floor. The editor keeps the theme's size and the user's o
 - Native menus and system dialogs still follow the system setting.
 - Chrome text on a Mac is 11px instead of 9px. X11 and Windows are unchanged.
 - The theme data does not change.
-- Headless checks cover both. Nobody has looked at the result on a screen yet.
+- On Aqua, rio leaves the colours of buttons and menubuttons to the native appearance; a tinted bezel with rio's text colour was unreadable in a dark theme.
+- Headless checks cover both, and the sixteen screenshot scenes were checked by eye.

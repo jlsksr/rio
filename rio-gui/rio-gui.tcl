@@ -265,8 +265,34 @@ proc aqua_appearance_all {} {
 		lappend todo {*}[winfo children $w]
 	}
 }
+# The appearance only works on a button left at its native colours. Given a -background, Aqua
+# tints the bezel toward it and draws the -foreground on top, which in a dark theme is a pale
+# pill with unreadable text. So on Aqua, rio's colours are taken back off every button and
+# menubutton: once when it is mapped, and across the tree after each theme switch, because
+# the applier and the dialog builders set them in many places. A checkbutton's box is drawn
+# natively too, but its colours only fill the label area around it, so it keeps them.
+proc aqua_native_colours {w} {
+	if {[tk windowingsystem] ne "aqua"} return
+	if {[winfo class $w] ni {Button Menubutton}} return
+	foreach opt {-background -foreground -activebackground -activeforeground} {
+		catch {
+			set def [lindex [$w configure $opt] 3]
+			if {[$w cget $opt] ne $def} { $w configure $opt $def }
+		}
+	}
+}
+proc aqua_native_colours_all {} {
+	set todo [list .]
+	while {[llength $todo]} {
+		set w [lindex $todo 0]; set todo [lrange $todo 1 end]
+		aqua_native_colours $w
+		lappend todo {*}[winfo children $w]
+	}
+}
 if {[tk windowingsystem] eq "aqua"} {
 	bind Toplevel <Configure> {+if {"%W" eq [winfo toplevel %W]} {aqua_appearance_apply %W}}
+	bind Button     <Map> {+aqua_native_colours %W}
+	bind Menubutton <Map> {+aqua_native_colours %W}
 }
 set ::editor_theme_size   12        ;# the active theme's editor size
 set ::chat_turn_open 0 ;# mid-stream: an assistant block is open, deltas appending
@@ -8310,6 +8336,7 @@ proc apply_theme {theme} {
 	option add *Text.font RioEditorFont
 	option add *Label.font RioUIFont
 	if {[dict size $::buffers]} refresh_tabs
+	aqua_native_colours_all   ;# D135: leave native buttons to the appearance (Aqua only)
 }
 
 # Switch themes live (View menu): re-fetch from the core and re-apply.

@@ -8730,17 +8730,32 @@ Two options were weighed, and jka took the recommendation:
   literal `[list $::mono 9]` chrome fonts now go through `chrome_font`, so the floor has one
   home. X11 and Windows are unchanged.
 
-**Guards** (new `rio-gui/tests/aqua.tcl`, 21 checks): `hex_luma`'s ends; the appearance each
+**The appearance alone was not enough — found by the screenshots.** The first rerun showed
+Compare/Reject/Approve drawn correctly and five other controls drawn as a pale pill with
+unreadable text: the Search scope, the agent mode and provider menubuttons, *× Close compare*,
+and the send button. The difference was that rio set `-background` and `-foreground` on those
+five and not on the three. Given a background, Aqua tints the native bezel toward it and puts
+rio's text colour on top. So on Aqua rio takes its colours back off every `button` and
+`menubutton`, in one place: a `<Map>` binding on both classes, plus a sweep of the tree at the
+end of `apply_theme`, since the applier and the dialog builders set those colours in many
+places. Checkbuttons keep theirs: their box is native, and their colours fill only the label
+area around it, which drew correctly. With this, D68's accent on the mode and provider
+menubuttons is gone on a Mac; the native bezel already says "control".
+
+**Guards** (new `rio-gui/tests/aqua.tcl`, 23 checks): `hex_luma`'s ends; the appearance each
 shipped theme asks for, derived from that theme's own `ui.bg` against its `ui.fg` rather than
 typed in; the floor and the editor's exemption; a drift guard that walks every widget and
 every text tag for a font below the floor; and, on Aqua only, the appearance of `.`, of an
-existing toplevel and of a new one across a theme switch. Four injections, each failing by
-name: the applier not setting the appearance, the `<Configure>` binding disabled, the floor
-dropped from `ensure_fonts`, and `chrome_font` unfloored. Full sweep: core 924, syntax 536,
+existing toplevel and of a new one across a theme switch, and that no button or menubutton
+anywhere keeps a non-native colour, including one built after the switch. Six injections, each
+failing by name: the applier not setting the appearance, the `<Configure>` binding disabled,
+the floor dropped from `ensure_fonts`, `chrome_font` unfloored, the colour sweep removed, and
+the `<Map>` binding disabled. Full sweep: core 924, syntax 536,
 all 30 GUI suites exit 0.
 
-**Not verified by eye.** Nothing here was looked at on a screen yet. The screenshot tooling in
-`rio-screens/` is what does that.
+**Checked by eye** on all sixteen scenes from `rio-screens/`, retaken after the colour fix:
+the dark themes' controls are dark with light text, the light themes' are the standard native
+ones, and chrome text is visibly larger.
 
 ---
 

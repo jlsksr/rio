@@ -97,6 +97,23 @@ if {$aqua} {
 	ok "dark theme: existing toplevel too"  [appearance .old] darkaqua
 	toplevel .new; wm withdraw .new; update
 	ok "dark theme: a new toplevel follows" [appearance .new] darkaqua
+	# A button given rio's colours is drawn as a tinted pill, so none may keep them. Walks
+	# the whole tree rather than naming the ones that were wrong.
+	proc coloured_buttons {w} {
+		set bad {}
+		if {[winfo class $w] in {Button Menubutton}} {
+			foreach opt {-background -foreground} {
+				if {[$w cget $opt] ne [lindex [$w configure $opt] 3]} { lappend bad "$w $opt" }
+			}
+		}
+		foreach k [winfo children $w] { lappend bad {*}[coloured_buttons $k] }
+		return $bad
+	}
+	ok "dark theme: no button keeps rio's colours" [coloured_buttons .] {}
+	button .new.b -text later -background #073642 -foreground #93a1a1
+	# A headless run maps nothing (D127), so run the class binding itself.
+	pack .new.b; uplevel #0 [string map {%W .new.b} [bind Button <Map>]]
+	ok "a button built later is cleared when mapped" [coloured_buttons .new] {}
 	do_theme default
 	ok "light theme: . is aqua"             [appearance .]    aqua
 	ok "light theme: existing toplevel too" [appearance .new] aqua
