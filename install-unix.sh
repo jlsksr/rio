@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# install-unix.sh — install rio on Linux, the BSDs, and macOS.
+# install-unix.sh — install rio on Linux and the BSDs. (macOS: ./install-macos.sh)
 #
 # rio is a small IDE written in Tcl/Tk. There is nothing to compile: it runs from
 # this checkout. So "installing" it is three things, and this script does all three.
@@ -39,8 +39,9 @@
 # Safe to re-run: every step is idempotent, and it finishes by verifying, which is
 # the part that actually tells you whether rio will start.
 #
-# Supported: Debian/Ubuntu (apt), Alpine (apk), OpenBSD (pkg_add), macOS (Homebrew).
-# macOS is UNVERIFIED — nobody has yet run it there; see the note in install_base.
+# Supported: Debian/Ubuntu (apt), Alpine (apk), OpenBSD (pkg_add). macOS has its
+# own script, install-macos.sh: it shares no package manager, fallback or launcher
+# format with these (AGENTS.md D134).
 
 set -eu
 
@@ -116,16 +117,6 @@ run() {
 	fi
 }
 
-# Like run(), but never privileged. Homebrew refuses to run under sudo, and the
-# launcher half writes into the user's own ~/.local.
-run_user() {
-	if [ "$DRY_RUN" = 1 ]; then
-		printf '  [dry-run] %s\n' "$*"
-	else
-		"$@"
-	fi
-}
-
 # --- package manager detection ----------------------------------------------
 #
 # Per-manager package name lists. The verify step below is what actually
@@ -133,20 +124,13 @@ run_user() {
 # verifier will confirm.
 
 detect_pm() {
-	# Darwin first and explicitly: a Mac has none of the others, and reaching
-	# "no supported package manager" there would be a worse answer than naming
-	# the one thing it does need.
 	# --launcher-only skips the package half entirely, so not recognising this
 	# system is not an error there — it is the reason someone passes the flag.
-	if [ "$(uname -s)" = "Darwin" ] && have brew; then
-		PM=brew
-	elif [ "$(uname -s)" = "Darwin" ] && [ "$LAUNCHER_ONLY" = 0 ]; then
-		die "macOS needs Homebrew for this — install it from https://brew.sh and re-run, or install Tcl/Tk and tcllib by hand and use --launcher-only"
-	elif have apt-get; then PM=apt
+	if   have apt-get; then PM=apt
 	elif have apk;     then PM=apk
 	elif have pkg_add; then PM=pkg_add   # OpenBSD
 	elif [ "$LAUNCHER_ONLY" = 1 ]; then PM=""
-	else die "no supported package manager found (need apt-get, apk, pkg_add, or brew). If you have Tcl/Tk and tcllib already, use --launcher-only"
+	else die "no supported package manager found (need apt-get, apk or pkg_add). If you have Tcl/Tk and tcllib already, use --launcher-only"
 	fi
 	if [ -n "${PM:-}" ]; then log "package manager: $PM"; fi
 }
@@ -165,36 +149,7 @@ install_base() {
 			# extension is "tcltls" on OpenBSD (one word), unlike apt/apk's tcl-tls.
 			run pkg_add -I tcl%8.6 tk%8.6 tcltls tcllib git
 			;;
-		brew)
-			# macOS is UNVERIFIED: nobody has run rio there yet, so these formula
-			# names are the best guess and the verify step below is the arbiter —
-			# exactly how this script already treats an unfamiliar distro. Not run
-			# through run(): Homebrew refuses to operate under sudo.
-			warn "macOS is not verified yet — the verify step below is the real answer."
-			warn "Please report what happens: https://github.com/jlsksr/rio/issues"
-			run_user brew install tcl-tk
-			# tcllib may not be a formula on every tap. A missing one must not abort
-			# the run: verify reports `json MISSING` and the hint below says what to do.
-			if [ "$DRY_RUN" = 1 ]; then
-				printf '  [dry-run] brew install tcllib\n'
-			elif ! brew install tcllib; then
-				warn "no 'tcllib' formula here — if the json check below fails, install tcllib by hand: https://core.tcl-lang.org/tcllib"
-			fi
-			;;
 	esac
-}
-
-# Homebrew's tcl-tk is keg-only, so its tclsh/wish are NOT on PATH — and the tclsh
-# that IS on a Mac's PATH is Apple's deprecated 8.5, without Tk or tcllib. Put
-# Homebrew's ahead of it, or we would verify the wrong interpreter.
-brew_path() {
-	if [ "${PM:-}" = brew ] && have brew; then
-		p=$(brew --prefix tcl-tk 2>/dev/null || true)
-		if [ -n "$p" ] && [ -d "$p/bin" ]; then
-			PATH="$p/bin:$PATH"
-			export PATH
-		fi
-	fi
 }
 
 # --- optional: build Ck (curses Tk) from source -----------------------------
@@ -207,7 +162,6 @@ install_ck_deps() {
 		apt)     run apt-get install -y build-essential tcl-dev libncurses-dev ;;
 		apk)     run apk add --no-interactive build-base tcl-dev ncurses-dev ;;
 		pkg_add) warn "OpenBSD: install C toolchain + ncurses headers yourself if missing" ;;
-		brew)    warn "macOS: Ck is untried here; install ncurses yourself if the build complains" ;;
 	esac
 }
 
@@ -296,19 +250,11 @@ EOF
 # What makes this feel installed rather than checked out. Everything here lands
 # under $PREFIX (default ~/.local), so it needs no root and removes cleanly.
 
-# Where the user's wish lives. Distributions version the binary name, and on macOS
-# Homebrew's is keg-only and therefore off PATH entirely.
+# Where the user's wish lives. Distributions version the binary name.
 find_wish() {
 	for c in wish wish8.6 wish8.7 wish9.0 wish86 wish90; do
 		if have "$c"; then command -v "$c"; return 0; fi
 	done
-	if have brew; then
-		p=$(brew --prefix tcl-tk 2>/dev/null || true)
-		if [ -n "$p" ] && [ -x "$p/bin/wish" ]; then
-			printf '%s\n' "$p/bin/wish"
-			return 0
-		fi
-	fi
 	return 1
 }
 
@@ -463,8 +409,8 @@ if [ "$NO_LAUNCHER" = 1 ] && [ "$LAUNCHER_ONLY" = 1 ]; then
 	die "--no-launcher and --launcher-only ask for opposite halves; pick one"
 fi
 
+[ "$(uname -s)" = Darwin ] && die "on macOS, use ./install-macos.sh — it knows Homebrew, MacPorts and a no-root source build, and makes a rio.app"
 detect_pm
-brew_path
 
 if [ "$VERIFY_ONLY" = 1 ]; then
 	verify
