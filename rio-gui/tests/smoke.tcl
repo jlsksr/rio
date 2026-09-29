@@ -2426,7 +2426,8 @@ ok "icon: X11/Windows get the sizes as asked" \
 	[window_icon_order $_imgs x11 /usr/bin/wish] $_imgs
 ok "icon: Aqua outside rio.app gets the largest first (it is the Dock icon)" \
 	[window_icon_order $_imgs aqua /opt/bin/wish] {c256 b32 a16}
-set _app [file join $::env(TMPDIR) iconorder-[pid] rio.app Contents]
+# Under the sandbox, not $::env(TMPDIR): macOS always sets that, Linux often does not.
+set _app [file join $::sandbox_dir iconorder rio.app Contents]
 file mkdir [file join $_app MacOS] [file join $_app Resources]
 set _exe [file join $_app MacOS rio]
 ok "icon: a bundle without rio.icns (Wish.app) is still covered" \
