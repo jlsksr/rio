@@ -1,6 +1,6 @@
 # ADR-0140: On macOS, platform facts are asked of Tk, not assumed
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0141
 - **Date:** 2026-09-29
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D133

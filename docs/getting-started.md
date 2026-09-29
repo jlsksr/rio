@@ -8,7 +8,8 @@ for Windows.
 ## Start rio
 
 After an install script has run, rio is in your application menu (on Windows,
-the Start Menu and the Desktop), and `rio` is a command:
+the Start Menu and the Desktop; on a Mac, where `install-macos.sh` puts it in
+`~/Applications`, Spotlight and the Dock), and `rio` is a command:
 
 ```sh
 rio                        # an empty tab

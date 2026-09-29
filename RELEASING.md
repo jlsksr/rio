@@ -164,7 +164,9 @@ asked for, so nothing about authorship changes here.
     vX.Y.Z --notes-file …` if it ever is). This is what gives the link ref of step 5
     something to point at and the tarball a page to sit on.
 11. **Download GitHub's own tarball**, extract it outside the repository, run
-    `./install-unix.sh`, launch. It is a *different artifact* from a clone — `.gitattributes`
+    `./install-unix.sh`, launch. On a Mac, run `./install-macos.sh --launcher-only` and open
+    `~/Applications/rio.app`: the app runs from the extracted tree, and `rio.icns` must be
+    in it. It is a *different artifact* from a clone — `.gitattributes`
     `export-ignore` drops `adr/`, `spike/` and every `tests/` directory — and
     **no test can cover it**, because every suite runs in a repository where those paths
     exist either way.
@@ -184,7 +186,7 @@ asked for, so nothing about authorship changes here.
 | if the release … | then, because … |
 |---|---|
 | adds a dependency | the installer has to be re-run; `git pull` installs nothing |
-| changes the launcher, icons or menu entry (D129) | `git pull` does not re-install them — `./install-unix.sh` does |
+| changes the launcher, icons or menu entry (D129, D134) | `git pull` does not re-install them — `./install-unix.sh` or `./install-macos.sh` does |
 | bumps the wire `protocol` (now **2**) | a GUI and a `--connect` core of different versions stop talking |
 | bumps `provider-api` (now **5**) or `mode-api` (now **1**) | an extension built for the new one is greyed with a reason on an older rio, and a stale one on this rio |
 | needs a newer extension | rio never auto-updates one (D39/D107) — the user goes to *Extensions ▸ Browse…* |

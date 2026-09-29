@@ -11,10 +11,29 @@ decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
-## [0.2.1] — unreleased
+## [0.3.0] — unreleased
+
+### Added
+
+- **An installer for macOS, and rio.app** — `./install-macos.sh` installs rio on any Mac,
+  with root or without. It uses a Tcl/Tk you already have, or Homebrew's `tcl-tk@8`, or
+  MacPorts'. With none of those, and no root, it builds one into `~/.local/rio-env` from
+  sources pinned by checksum, which needs only Apple's command-line tools. If the toolchain's
+  `tcltls` is too old to check certificate names, which is the case with Homebrew's, it builds
+  a current one beside it, so hosted agent providers work over https. Then it installs a
+  `rio` command and **`~/Applications/rio.app`**, which you can start from Spotlight, the
+  Dock or Finder, with rio's own icon and rio's name in the menu bar. `--uninstall` removes
+  exactly what it installed. The Homebrew and MacPorts paths follow those tools' package data
+  but have not been run yet; the build-it-yourself path has, on macOS 27. `install-unix.sh`
+  no longer tries macOS: its Homebrew branch asked for a formula that is now Tcl 9, and for
+  a `tcllib` formula that doesn't exist. — *D134 · `df00640` · 2026-09-29*
 
 ### Fixed
 
+- **Cmd-Q no longer quits without asking about unsaved work** — on a Mac, Quit from the
+  keyboard or the application menu went straight past rio's "save changes?" question and
+  exited, losing any unsaved edits. It now asks, exactly like closing the window. —
+  *D134 · `f9e1eb8` · 2026-09-29*
 - **A fixed-width editor on macOS** — on a Mac, the editor, the chat and every piece of
   fixed-width chrome were drawn in the proportional system font. rio asks for a font called
   `monospace`; Linux knows that name and macOS does not, so it quietly substituted its own

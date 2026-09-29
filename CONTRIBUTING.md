@@ -595,9 +595,9 @@ The quickest way is the install script in the repo root:
     ./install-unix.sh --no-launcher   # install the core toolchain
     ./install-unix.sh --verify-only   # just check what you already have
 
-It works on Debian/Ubuntu, Alpine, OpenBSD and — through Homebrew, still unverified —
-macOS. (rio itself has run on a Mac, from a Tcl/Tk built without root; see
-[INSTALL.md](INSTALL.md) §1.) It finishes by
+It works on Debian/Ubuntu, Alpine and OpenBSD. On a Mac, use `install-macos.sh` with the
+same flags: it takes Homebrew's or MacPorts' Tcl, or builds one into your home directory
+without root (see [INSTALL.md](INSTALL.md) §3). It finishes by
 loading the pieces through `tclsh` so you know they actually work. If you also want
 to hack on the terminal version, add `--with-ck` to build the curses toolkit from
 source — otherwise skip it; the GUI doesn't need it.
