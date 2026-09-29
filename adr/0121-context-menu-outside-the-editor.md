@@ -1,6 +1,6 @@
 # ADR-0121: A context menu on every text widget outside the editor
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-09-17
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D115

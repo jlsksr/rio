@@ -105,6 +105,20 @@ design limit that surprises, append it to the matching section.
   app.
 - **Planned.** Nothing. The copy is the price of the name.
 
+### On macOS, Ctrl-click is not a right-click in rio
+
+- **Symptom.** Ctrl-clicking in rio doesn't open a context menu, where many Mac
+  applications treat it as a right-click.
+- **Cause.** Tk passes a Ctrl-click through as an ordinary click with Control held. rio
+  binds its menus to the right button itself (`<<ContextMenu>>`, **D136**). Adding
+  Control-click would also catch the Windows mode's column gesture, Ctrl+Shift+drag
+  (**D40**), which starts with the same press.
+- **Where it's fine.** A mouse with a right button, and a two-finger click on a trackpad.
+  Both open every rio menu.
+- **Mitigation.** Use one of those. The Menu key and Shift+F10 open the editor's menu from
+  the keyboard too, on a keyboard that has them.
+- **Planned.** Nothing, unless the column gesture moves.
+
 ### A killed command's exit code differs on Windows (there are no signals)
 
 - **Symptom.** When the agent's `run_command` tool **times out** and rio kills the child, the

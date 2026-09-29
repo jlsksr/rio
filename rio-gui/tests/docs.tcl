@@ -1659,5 +1659,33 @@ foreach s [concat $d131row $d131verbs [list $d131rule]] {
 }
 ok "every word those two surfaces say is in the manual" $d131unsaid {}
 
+# --- 22. the Mac's exceptions to "Cmd for Ctrl" --------------------------------
+#
+# keyboard.md's "On a Mac" table restates ::keymap_aqua (D136): the commands whose Mac
+# chord is NOT simply the table's Ctrl read as Cmd. Held both ways against the code, with
+# each chord rendered by chord_label as a Mac shows it — so this runs the same on any
+# host, and a new exception, a changed chord or a row for a command that is no longer an
+# exception all fail by name. (That the rest really is Cmd-for-Ctrl is keymap.tcl's check.)
+set kbmac ""
+regexp {\n## On a Mac\n(.*?)(?:\n## |$)} $kb -> kbmac
+ok "keyboard.md has an \"On a Mac\" section" [expr {$kbmac ne ""}] 1
+set macrows [dict create]
+foreach {_ cmd chord} [regexp -all -inline -line {^\| `([a-z-]+)` \| ([^|]+?) \|} $kbmac] {
+	dict set macrows $cmd [string trim $chord]
+}
+set macwrong {}
+dict for {cmd chord} $::keymap_aqua {
+	set want [expr {$chord eq "" ? "*(unbound)*" : "`[chord_label $chord aqua]`"}]
+	if {![dict exists $macrows $cmd]} {
+		lappend macwrong "$cmd: no row"
+	} elseif {[dict get $macrows $cmd] ne $want} {
+		lappend macwrong "$cmd: says [dict get $macrows $cmd], is $want"
+	}
+}
+ok "every Mac exception is in the table, with its Mac chord" $macwrong {}
+set macextra {}
+foreach cmd [dict keys $macrows] { if {![dict exists $::keymap_aqua $cmd]} { lappend macextra $cmd } }
+ok "the table lists no command that isn't an exception" $macextra {}
+
 puts [expr {$::fails ? "FAILED ($::fails)" : "ALL PASS"}]
 exit [expr {$::fails ? 1 : 0}]

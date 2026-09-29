@@ -35,8 +35,9 @@ edit takes effect at the next start.
 
 A value is a chord in Tk's spelling: the modifiers `Control`, `Shift` and `Alt`
 joined by `-`, then the key — a letter, or a key name such as `Tab`, `F3`,
-`backslash`, `bracketright`. An empty string unbinds the command and leaves it
-on the menu only.
+`backslash`, `bracketright`. On a Mac the modifiers are `Command`, `Option`,
+`Control` and `Shift`, so ⌘K is `Command-k` (`Alt` matches no key there). An
+empty string unbinds the command and leaves it on the menu only.
 
 A capital letter implies Shift, so `Control-Shift-s` and `Control-S` are the
 same binding. The menu shows either as `Ctrl+Shift+S`.
@@ -82,12 +83,34 @@ menus show.
 `preferences` ships with no chord. The command exists and sits on the *Settings*
 menu; give it one like any other.
 
+## On a Mac
+
+rio uses `Cmd` wherever the table above says `Ctrl`: `Cmd+S` saves, `Cmd+F`
+finds, `Shift+Cmd+F` searches. `Ctrl` is left to macOS's own text keys, which
+work in rio as in any Mac text field. The menus show the Mac's symbols (⌘S,
+⇧⌘F), and the shortcut editor records `Cmd` and `Opt` as you press them.
+
+Four commands keep a different chord, because macOS already uses the `Cmd` one:
+
+| Command | On a Mac | Why |
+| ------- | -------- | --- |
+| `quit` | *(unbound)* | The application menu's *Quit rio*, `Cmd+Q`, already asks about unsaved work. |
+| `replace` | `Opt+Cmd+F` | `Cmd+H` hides rio. `Opt+Cmd+F` is the Mac's own Replace. |
+| `next-tab` | `Ctrl+Tab` | `Cmd+Tab` switches between applications. |
+| `prev-tab` | `Ctrl+Shift+Tab` | The same. |
+
+The application menu's *Preferences…* (`Cmd+,`) and *About rio* open rio's own
+windows.
+
+`find-next` and `find-prev` stay on `F3`. A Mac keyboard may need `fn` for that;
+`Return` and `Shift+Return` in the find bar step through matches too.
+
 ## Keys this table does not cover
 
 | Keys | Belong to |
 | ---- | --------- |
-| `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Home, End and the other text motions | The **editing mode** — Windows, vi or emacs. Each mode has its own idea of what they do. See [editing modes](editing-modes.md). |
-| `Ctrl+scroll`, `Ctrl++`, `Ctrl+-`, `Ctrl+0` | Zoom, on the ***View ▸ Font & Zoom*** submenu. |
+| `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Home, End and the other text motions | The **editing mode** — Windows, vi or emacs. Each mode has its own idea of what they do. See [editing modes](editing-modes.md). On a Mac, the Windows mode's are `Cmd+A`, `Cmd+C`, `Cmd+X` and `Cmd+V`. |
+| `Ctrl+scroll`, `Ctrl++`, `Ctrl+-`, `Ctrl+0` | Zoom, on the ***View ▸ Font & Zoom*** submenu. On a Mac, `Cmd` as well. |
 | The `Menu` key, `Shift+F10` | Opening the editor's [right-click menu](editor.md#the-right-click-menu) at the caret. |
 | `Esc` | Closing the find bar, and leaving the compare view. |
 

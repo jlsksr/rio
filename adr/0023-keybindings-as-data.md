@@ -1,6 +1,6 @@
 # ADR-0023: Keybindings are data
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-06-25
 - **Deciders:** jka
 - **Decision log:** AGENTS.md D23
