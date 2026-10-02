@@ -1,17 +1,12 @@
 # rio-core — the agent.* op namespace (D20, D26).
 #
-# Thin handlers over rio::agent. agent.send is the core's first STREAMING op
-# (register_stream): it receives the live `emit` and returns only an ack, while
-# the turn's content streams back as agent.* events (D26). agent.reset and
-# agent.history are ordinary request/response ops over the conversation state.
+# Thin handlers over rio::agent. A streaming op (register_stream) gets the
+# live `emit` and answers with an ack; its content follows as events (D26).
 
-# agent.send {text, ?buffer, start, end?} -> {started, turn} ; streams agent.delta ->
-# agent.message (or agent.error). The reply is an ack — the content is the events, not
-# the response (D26). `buffer` with `start`/`end` scopes the turn to that range of an
-# open buffer (D113) — flat, the way buffer.replace names a range, since params are a
-# flat object (D25). The core reads the range itself, and the turn's only changing tool
-# is replace_selection. A buffer that doesn't exist, or a range that doesn't exist or
-# is empty, is refused before any turn starts.
+# agent.send {text, ?buffer, start, end?} -> {started, turn} ; streams
+# agent.delta, then agent.message or agent.error. `buffer` with `start` and
+# `end` scopes the turn to that range (D113). A missing buffer, or a bad or
+# empty range, is refused before the turn starts.
 proc rio::ops::agent_send {params emit} {
 	if {![dict exists $params text]} {
 		rio::error::raise bad_request "agent.send requires text"
@@ -40,10 +35,9 @@ proc rio::ops::agent_send {params emit} {
 }
 rio::dispatch::register_stream agent.send rio::ops::agent_send
 
-# agent.approve {turn, decision} -> {id} ; resolves a proposed edit awaiting the
-# user's decision ("approve" | "reject"). The suspended turn resumes and its
-# remaining content streams as agent.* events on that turn's original emit (D26 s5).
-# A turn with nothing pending is a `bad_request` error.
+# agent.approve {turn, decision} -> {id} ; decide a pending proposal:
+# "approve" or "reject". The turn resumes on its own emit. Nothing pending is
+# a bad_request.
 proc rio::ops::agent_approve {params} {
 	foreach k {turn decision} {
 		if {![dict exists $params $k]} {
@@ -55,10 +49,9 @@ proc rio::ops::agent_approve {params} {
 }
 rio::dispatch::register agent.approve rio::ops::agent_approve
 
-# agent.proposal {turn} -> {name, path, original, proposed} ; the full original and
-# proposed text of a write awaiting review for `turn` (D28). The compare/diff view
-# pulls this on demand to render the two versions side by side; the agent.propose
-# event stays lean. A turn with nothing pending is a `bad_request`.
+# agent.proposal {turn} -> {name, path, original, proposed} ; the full texts
+# of a pending write, for the compare view (D28). Nothing pending is a
+# bad_request.
 proc rio::ops::agent_proposal {params} {
 	if {![dict exists $params turn]} {
 		rio::error::raise bad_request "agent.proposal requires turn"
@@ -67,11 +60,9 @@ proc rio::ops::agent_proposal {params} {
 }
 rio::dispatch::register agent.proposal rio::ops::agent_proposal
 
-# agent.stop {?turn?} -> {stopped N} ; stop a turn in flight (D104). Omit `turn` to stop
-# whatever is running — which is what a frontend's Stop button means. Each stopped turn is
-# announced as an `agent.stopped` event so EVERY attached frontend takes its working
-# indicator down, not just the one that clicked (D3/D30). Stopping nothing is not an error:
-# the click may have raced the turn's last event.
+# agent.stop {?turn?} -> {stopped N} ; stop a turn in flight (D104); without
+# `turn`, every one. Each stopped turn is announced as `agent.stopped`, so
+# every attached frontend sees it. Stopping nothing is not an error.
 proc rio::ops::agent_stop {params} {
 	set turn [expr {[dict exists $params turn] ? [dict get $params turn] : ""}]
 	set stopped [rio::agent::stop $turn]
@@ -92,17 +83,18 @@ rio::dispatch::register agent.reset rio::ops::agent_reset
 
 # --- command allow-list (D84) -------------------------------------------------
 #
-# Standing approval for trusted commands: a human-authored allow-list, persisted in the
-# core's XDG agent dir / open project (D79's home). A rule is an argv PREFIX (a list of
-# leading tokens); a command whose argv starts with a rule's tokens runs without the
-# approval bar (rio::agent::_do_exec consults it, D84). THREE SCOPES mirror the prompt
-# layers: `global` (every project), `provider` (the named/active provider only, echo
-# excluded), `project` (the open project's .rio/). `matches` unions the active layers.
-# Like every agent setting these are ops, so a remote core owns the lists on ITS disk
-# (D30). The list changes ONLY whether the human bar appears — prepare_exec always runs.
+# Standing approval for commands the user trusts. A rule is an argv prefix:
 #
-# `scope` defaults to `global` and `name` to the active provider, so the pre-scope flat
-# calls still work. Provider `name` is validated as a registered non-echo provider.
+#   rule {git status}   allows  git status, git status -s
+#   rule {make}         allows  make with any arguments
+#
+# Three scopes, as for the prompts: `global`, `provider` (not echo),
+# `project` (the open project's .rio/). A command matching a rule in any
+# active scope runs without asking. Only the confirmation is skipped;
+# prepare_exec always runs. The lists are on the core's disk (D30).
+#
+# Returns {scope name}. `scope` defaults to `global`, `name` to the active
+# provider.
 proc rio::ops::_agent_allow_scope {params} {
 	set scope [expr {[dict exists $params scope] ? [dict get $params scope] : "global"}]
 	if {$scope ni {global provider project}} {
@@ -124,18 +116,16 @@ proc rio::ops::_agent_allow_scope {params} {
 	return [list $scope $name]
 }
 
-# agent.allow.list {?scope? ?name?} -> {rules:[[token,…],…]} ; one scope's list, for a
-# manager view. Each rule is an array of argv-prefix token strings (wire encoder, D25).
+# agent.allow.list {?scope? ?name?} -> {rules:[[token,…],…]} ; one scope's rules.
 proc rio::ops::agent_allow_list {params} {
 	lassign [_agent_allow_scope $params] scope name
 	return [dict create result [dict create rules [rio::agent::allow::rules $scope $name]]]
 }
 rio::dispatch::register agent.allow.list rio::ops::agent_allow_list
 
-# agent.allow.add {rule ?scope? ?name?} -> {} ; trust an argv prefix in one scope.
-# `rule` is a JSON array of strings — a one-element rule trusts a program with any args,
-# a full-argv rule trusts only that exact command. An empty rule is bad_request (it
-# would trust everything). Adding a rule already present is a no-op (dedup).
+# agent.allow.add {rule ?scope? ?name?} -> {} ; trust an argv prefix in one
+# scope. `rule` is a JSON array of strings. An empty rule is a bad_request: it
+# would trust everything. A rule already present is a no-op.
 proc rio::ops::agent_allow_add {params} {
 	if {![dict exists $params rule]} {
 		rio::error::raise bad_request "agent.allow.add requires rule"
@@ -164,13 +154,12 @@ rio::dispatch::register agent.allow.remove rio::ops::agent_allow_remove
 
 # --- provider / key / policy controls (D30) ----------------------------------
 #
-# The agent is a core concern reached over the channel, so its settings are ops,
-# not in-process calls: a frontend (the GUI, local or remote) drives them the same
-# way. The provider runs and the key lives WHEREVER THE CORE RUNS (server-side for
-# a remote core; D21's 0600 store) — the frontend never holds the credential (D3).
+# The agent's settings are ops, so a local and a remote frontend drive them
+# alike. The provider runs, and its key is stored, where the core runs (D21).
+# The frontend never keeps the key (D3).
 
-# agent.provider.set {name} -> {name} ; choose the live provider by name
-# (echo | a plugin-registered provider such as claude). Unknown name is bad_request.
+# agent.provider.set {name} -> {name} ; choose the live provider. An unknown
+# name is a bad_request.
 proc rio::ops::agent_provider_set {params} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.provider.set requires name"
@@ -180,10 +169,8 @@ proc rio::ops::agent_provider_set {params} {
 }
 rio::dispatch::register agent.provider.set rio::ops::agent_provider_set
 
-# agent.key.set {key ?name?} -> {} ; store a keyed provider's credential (an API
-# key) in the core's 0600 secret store (D21). `name` picks which provider's store
-# (claude | openai | …); omitted, it targets the active provider. The frontend
-# hands the key across once and never keeps it.
+# agent.key.set {key ?name?} -> {} ; store a provider's API key in the core's
+# 0600 secret store (D21). `name` defaults to the active provider.
 proc rio::ops::agent_key_set {params} {
 	if {![dict exists $params key]} {
 		rio::error::raise bad_request "agent.key.set requires key"
@@ -194,8 +181,7 @@ proc rio::ops::agent_key_set {params} {
 }
 rio::dispatch::register agent.key.set rio::ops::agent_key_set
 
-# agent.key.clear {?name?} -> {} ; forget a keyed provider's stored credential
-# (defaults to the active provider, as agent.key.set does).
+# agent.key.clear {?name?} -> {} ; forget a provider's stored key.
 proc rio::ops::agent_key_clear {params} {
 	set name [expr {[dict exists $params name] ? [dict get $params name] : ""}]
 	rio::agent::key_clear $name
@@ -203,11 +189,9 @@ proc rio::ops::agent_key_clear {params} {
 }
 rio::dispatch::register agent.key.clear rio::ops::agent_key_clear
 
-# agent.providers -> {providers:[{name, label, keyed, key_set, signup, options}]} ; every
-# registered provider, so a frontend renders its picker and per-provider key dialog
-# from data the provider declares rather than hardcoding names (D30; serves the
-# installable-provider milestone). A non-flat result — the wire layer registers a
-# shape encoder (D25).
+# agent.providers -> {providers:[{name, label, keyed, key_set, signup,
+# options, profiles}]} ; every registered provider, so a frontend builds its
+# picker and key dialog from data (D30).
 proc rio::ops::agent_providers {params} {
 	return [dict create result [dict create providers [rio::agent::providers_info]]]
 }
@@ -215,13 +199,11 @@ rio::dispatch::register agent.providers rio::ops::agent_providers
 
 # --- a provider's runtime options (D106) -------------------------------------
 #
-# Model and effort — and anything else a provider declares. The ops are generic on
-# purpose: they carry an option's NAME, never a meaning, so the core (and this file)
-# stay ignorant of what any of them do. `provider` defaults to the active one, which
-# is the case a frontend almost always wants ("the agent I am talking to now").
+# Model, effort, whatever a provider declares. The ops carry an option's
+# name, never its meaning. `provider` defaults to the active one.
 
-# The provider an option op targets: the one named, else the active one. Resolved
-# here rather than passed as "" so every reply says WHICH provider it answered for.
+# The provider an option op targets: the named one, else the active one.
+# Resolved here, so every reply names the provider it answered for.
 proc rio::ops::_option_provider {params} {
 	if {[dict exists $params provider] && [dict get $params provider] ne ""} {
 		return [dict get $params provider]
@@ -230,15 +212,10 @@ proc rio::ops::_option_provider {params} {
 }
 
 # agent.options.list {?provider?} -> {provider, options:[{name,label,hint,value,free,
-# refresh,kind,group,quick, choices:[{value,label}]}]} ; what this provider lets you
-# choose right now. The last three are the frontend's rendering vocabulary, which the
-# core carries without interpreting — see _option_norm for what each one means.
-# A provider with no options answers with an empty list (echo), so a frontend can ask
-# unconditionally — but a provider this core does NOT CARRY is a bad_request, as it is
-# for every other agent op. The two must not read alike: "nothing to choose" and "no
-# such provider here" send a frontend in different directions (a remote core carrying
-# only openai answered for `claude` as though it merely had no options; D106).
-# A two-level result — the wire layer spells both levels out (D25).
+# refresh,file,kind,group,quick, choices:[{value,label}]}]} ; what this provider
+# lets you choose now. The keys: see rio::agent::_option_norm.
+# A provider without options answers with an empty list. A provider this core
+# does not carry is a bad_request (D106).
 proc rio::ops::agent_options_list {params} {
 	set name [_option_provider $params]
 	if {![rio::agent::provider_known $name]} {
@@ -249,11 +226,9 @@ proc rio::ops::agent_options_list {params} {
 }
 rio::dispatch::register agent.options.list rio::ops::agent_options_list
 
-# agent.option.set {name value ?provider?} -> {provider, name, value} ; choose a value.
-# The reply carries what the provider ACCEPTED (it may canonicalize), so a frontend
-# mirrors the core rather than its own guess. An unknown provider/option, or a value
-# the provider refuses, is a bad_request and nothing changes. Also announces
-# agent.options, so every other attached frontend repaints (D3/D30).
+# agent.option.set {name value ?provider?} -> {provider, name, value} ; choose
+# a value. The reply carries what the provider accepted. An unknown provider
+# or option, or a refused value, is a bad_request. Announces agent.options.
 proc rio::ops::agent_option_set {params emit} {
 	foreach k {name value} {
 		if {![dict exists $params $k]} {
@@ -268,11 +243,9 @@ proc rio::ops::agent_option_set {params emit} {
 }
 rio::dispatch::register_stream agent.option.set rio::ops::agent_option_set
 
-# agent.options.refresh {name ?provider?} -> {started} ; re-enumerate an option's
-# choices from wherever the provider gets them (a vendor's models endpoint, a local
-# server's own list). A STREAMING op: the network call is asynchronous, so the reply
-# is an ack and the refreshed list arrives as an `agent.options` event (D26's shape,
-# D10's rule that the core never blocks).
+# agent.options.refresh {name ?provider?} -> {started} ; re-fetch an option's
+# choices, e.g. from a models endpoint. The reply is an ack; the new list is
+# announced as `agent.options` (D10: the core never blocks).
 proc rio::ops::agent_options_refresh {params emit} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.options.refresh requires name"
@@ -282,12 +255,10 @@ proc rio::ops::agent_options_refresh {params emit} {
 }
 rio::dispatch::register_stream agent.options.refresh rio::ops::agent_options_refresh
 
-# agent.option.file {name ?provider?} -> {path, created} ; resolve AND create the file an
-# option's value names, so a frontend can open it in the editor (D131). The same shape
-# agent.prompt.edit has, and for the same reason: the core owns the path — a remote core
-# resolves it on its OWN disk (D30) — and an absent file is created rather than reported,
-# because a button called Edit… that opens nothing is worse than one that opens a blank.
-# An option the provider did not flag `file` is a bad_request.
+# agent.option.file {name ?provider?} -> {provider, name, path, created} ;
+# resolve and create the file an option's value names, so a frontend can open
+# it (D131). The path is on the core's disk (D30). An option not flagged
+# `file` is a bad_request.
 proc rio::ops::agent_option_file {params} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.option.file requires name"
@@ -303,20 +274,13 @@ rio::dispatch::register agent.option.file rio::ops::agent_option_file
 
 # --- a provider's profiles (D131) --------------------------------------------
 #
-# Named configurations of everything the provider keeps — one for a vendor's hosted API,
-# one for the server on your own box — with one of them active. Generic in exactly the
-# way the option ops are: these carry a profile's NAME and never a meaning, so a provider
-# that grows profiles needs no core change and no GUI change.
-#
-# Each verb announces `agent.options`, because switching, removing or renaming can all
-# change what the options say — so every attached frontend repaints from one event rather
-# than each of them learning a second one (D3/D30).
+# Named configurations of a provider, one active. The ops carry a profile's
+# name, never its meaning. Each verb announces `agent.options`, because a
+# profile change can change the options.
 
 # agent.profiles.list {?provider?} -> {provider, active, profiles:[{name, active}]} ;
-# what this provider keeps and which one it is running. A provider with no profiles
-# answers with an empty list and an empty `active` (echo, claude) so a frontend may ask
-# unconditionally — but an unknown provider is a bad_request, the distinction D106 had to
-# learn the hard way. A two-level result: the wire layer spells it out (D25).
+# a provider's profiles and the active one. A provider without profiles
+# answers with an empty list. An unknown provider is a bad_request.
 proc rio::ops::agent_profiles_list {params} {
 	set name [_option_provider $params]
 	if {![rio::agent::provider_known $name]} {
@@ -333,10 +297,9 @@ proc rio::ops::agent_profiles_list {params} {
 }
 rio::dispatch::register agent.profiles.list rio::ops::agent_profiles_list
 
-# agent.profile.set {name ?provider?} -> {provider, name} ; run this profile from now on.
-# The reply carries what the provider actually ACTIVATED, which need not be what was
-# asked for — a profile deleted by hand since the frontend last listed lands on another
-# one rather than on nothing.
+# agent.profile.set {name ?provider?} -> {provider, name} ; make this profile
+# active. The reply names the one the provider activated, which may differ if
+# the named one is gone.
 proc rio::ops::agent_profile_set {params emit} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.profile.set requires name"
@@ -348,10 +311,8 @@ proc rio::ops::agent_profile_set {params emit} {
 }
 rio::dispatch::register_stream agent.profile.set rio::ops::agent_profile_set
 
-# agent.profile.add {name ?from? ?provider?} -> {provider, name} ; a new profile. With
-# `from` it is a copy of that one (Duplicate); without, it starts at the provider's own
-# shipped defaults. Creating does not switch to it — two separate acts, so a frontend can
-# offer either without the other.
+# agent.profile.add {name ?from? ?provider?} -> {provider, name} ; a new
+# profile: a copy of `from`, or the provider's defaults. It is not made active.
 proc rio::ops::agent_profile_add {params emit} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.profile.add requires name"
@@ -364,9 +325,8 @@ proc rio::ops::agent_profile_add {params emit} {
 }
 rio::dispatch::register_stream agent.profile.add rio::ops::agent_profile_add
 
-# agent.profile.remove {name ?provider?} -> {provider, name, active} ; delete one, and
-# say which profile is active afterwards — removing the running profile has to land
-# somewhere, and the frontend should not have to guess where.
+# agent.profile.remove {name ?provider?} -> {provider, name, active} ; delete
+# one. `active` is the profile active afterwards.
 proc rio::ops::agent_profile_remove {params emit} {
 	if {![dict exists $params name]} {
 		rio::error::raise bad_request "agent.profile.remove requires name"
@@ -397,10 +357,8 @@ rio::dispatch::register_stream agent.profile.rename rio::ops::agent_profile_rena
 # `base` and `plan` are rio's own shipped layers; the other three are the user's.
 namespace eval rio::ops { variable prompt_layers {base system provider project plan} }
 
-# Validate a {which ?name?} pair for the three prompt ops and return the provider name
-# ("" unless `which` is provider). One gate for all three, because "which prompt do you
-# mean" has exactly one right answer whether you are listing, reading or editing it.
-# `allow` narrows the acceptable set (agent.prompt.get also takes `composed`).
+# Validate {which ?name?} for the prompt ops. Returns the provider name, ""
+# unless `which` is provider. `allow` is the set of layers accepted.
 proc rio::ops::_prompt_which {params allow op} {
 	if {![dict exists $params which]} {
 		rio::error::raise bad_request "$op requires which"
@@ -429,27 +387,20 @@ proc rio::ops::_prompt_which {params allow op} {
 }
 
 # agent.prompt.list {} -> {prompts: [{which,name,path,origin,exists,builtin,active,chars}]} ;
-# the whole system prompt laid out layer by layer, in the order they are composed (D105).
-# `origin` says where each layer's file actually comes from — `shipped` (rio's own copy),
-# `user` (the XDG agent dir, including an override of a shipped layer), `project`, or
-# `none` — and `active` says whether that layer is contributing to what the provider is
-# being sent RIGHT NOW, for the live provider and the live mode. This is the op behind
-# Preferences ▸ Agent ▸ Agent Prompts…: the point is that nothing about the agent's
-# instructions is hidden from the person whose project they act on. Non-flat result — the
-# wire layer registers a shape encoder (D25).
+# the system prompt's layers in composition order (D105).
+#   origin — shipped | user | project | none
+#   active — is the layer part of what the provider is sent now?
+# Behind Preferences ▸ Agent ▸ Agent Prompts….
 proc rio::ops::agent_prompt_list {params} {
 	set ls [rio::agent::prompt::layers [rio::agent::provider_name] [rio::agent::mode]]
 	return [dict create result [dict create prompts $ls]]
 }
 rio::dispatch::register agent.prompt.list rio::ops::agent_prompt_list
 
-# agent.prompt.get {which ?name?} -> {which, path, origin, text} ; one layer's text, for
-# READING (D105) — including rio's shipped `base` and `plan`, which have no editable file
-# of their own, and `composed`, the finished string the provider would be sent right now.
-# The core reads it on its own disk, so a remote core shows the prompts that are really in
-# effect there (D30). `plan` comes back whatever the current mode is: being asked to read
-# it is a different question from whether it is live. A layer with no file yields empty
-# `text` and `origin none` — absent is a normal state, not an error.
+# agent.prompt.get {which ?name?} -> {which, path, origin, text} ; one layer's
+# text, for reading (D105). `which` is a layer, or `composed` for the string
+# the provider would get now. `plan` is returned in any mode. A layer without
+# a file gives empty `text` and `origin none`.
 proc rio::ops::agent_prompt_get {params} {
 	variable prompt_layers
 	set name [_prompt_which $params [concat $prompt_layers composed] agent.prompt.get]
@@ -467,18 +418,10 @@ proc rio::ops::agent_prompt_get {params} {
 }
 rio::dispatch::register agent.prompt.get rio::ops::agent_prompt_get
 
-# agent.prompt.edit {which ?name?} -> {path, created} ; resolve a WRITABLE prompt file
-# (D70/D79/D105) and ensure it exists so a frontend can open it in the editor. `which` is
-# `system` (the user's standing prompt for all projects, in the XDG agent dir), `provider`
-# (that provider's own prompt, `providers/<name>.md` in the same dir — `name` required,
-# must be a registered provider and not echo), `project` (`.rio/agent.md` at the open
-# project root), or one of rio's shipped layers, `base` / `plan` — for which the writable
-# file is the OVERRIDE in the user's agent dir, seeded with a copy of the text it
-# overrides (rio's own copy is never edited in place: an upgrade would take the edit
-# away, and on a packaged install it may not even be writable). The core owns the path —
-# a remote core resolves it on its OWN disk (D30) — and creates the file if absent
-# (`created` says which). `project` with no open project, and `provider` with a missing/
-# unknown/echo name, are bad_request. Flat result, so the default wire encoder applies.
+# agent.prompt.edit {which ?name?} -> {path, created} ; make sure a layer's
+# writable file exists, so a frontend can open it (D70/D79/D105). For `base`
+# and `plan` that is the user's override, seeded with a copy. The path is on
+# the core's disk (D30). See rio::agent::prompt::ensure.
 proc rio::ops::agent_prompt_edit {params} {
 	variable prompt_layers
 	set name [_prompt_which $params $prompt_layers agent.prompt.edit]
@@ -504,11 +447,9 @@ proc rio::ops::agent_autoaccept_set {params} {
 }
 rio::dispatch::register agent.autoaccept.set rio::ops::agent_autoaccept_set
 
-# agent.mode.set {mode} -> {mode} ; switch between `build` and `plan` (D101). In plan
-# mode the core hands the provider only the read tools and present_plan, and adds the
-# plan prompt layer — so what the agent may do changes here, in the core, not in a
-# provider. An unknown mode is a bad_request. Approving a presented plan flips the mode
-# back to `build` on its own and announces it with an `agent.mode` event.
+# agent.mode.set {mode} -> {mode} ; `build` or `plan` (D101). An unknown mode
+# is a bad_request. Approving a plan sets `build` by itself and announces it
+# as `agent.mode`.
 proc rio::ops::agent_mode_set {params} {
 	if {![dict exists $params mode]} {
 		rio::error::raise bad_request "agent.mode.set requires mode"
@@ -517,12 +458,10 @@ proc rio::ops::agent_mode_set {params} {
 }
 rio::dispatch::register agent.mode.set rio::ops::agent_mode_set
 
-# agent.status -> {provider, profile, auto_accept, mode, key_set, options} ; the agent's
-# current settings, so a frontend renders its menus/dialogs without holding the state
-# itself (D3). `key_set` is whether the ACTIVE provider has a key stored (0 for a keyless
-# one like echo); per-provider key state is in agent.providers. `profile` is the active
-# profile's name, "" for a provider that keeps none (D131). Whether https may go ahead
-# without host-name checks is core-wide since D114 — tls.settings, not here.
+# agent.status -> {provider, profile, auto_accept, mode, key_set, options} ;
+# the agent's settings, so a frontend holds no state of its own (D3).
+#   key_set — has the active provider a key stored?
+#   profile — the active profile, "" for a provider without profiles (D131)
 proc rio::ops::agent_status {params} {
 	return [dict create result [dict create \
 		provider    [rio::agent::provider_name] \
@@ -534,9 +473,7 @@ proc rio::ops::agent_status {params} {
 }
 rio::dispatch::register agent.status rio::ops::agent_status
 
-# agent.history -> {messages:[{role,text}]} ; the conversation so far (newest
-# last). A non-flat result (an array), so the wire layer registers a shape
-# encoder (D25; see rio::wire).
+# agent.history -> {messages:[{role,text}]} ; the conversation, newest last.
 proc rio::ops::agent_history {params} {
 	return [dict create result [dict create messages [rio::agent::history]]]
 }

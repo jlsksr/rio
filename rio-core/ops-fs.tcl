@@ -1,39 +1,19 @@
 # rio-core — the fs.* op namespace (D11, D22).
 #
-# Thin handlers bridging the protocol to file I/O. file.open reads a file into a
-# NEW buffer, recording the detected encoding/BOM/line-ending as buffer metadata
-# (D22) so file.save can reproduce the original on-disk form. As with buffer.*,
-# the real work lives elsewhere (rio::fs, rio::doc).
+# Thin handlers over rio::fs and rio::doc. file.open reads a file into a new
+# buffer and records its encoding, BOM and line ending in the buffer's meta
+# (D22), so file.save can reproduce them.
 
-# How big a file file.open will read without being asked twice (D125). A judgement
-# about a PERSON'S patience, not a technical ceiling: rio's own largest source file is
-# half a megabyte, so this is generous for anything you meant to edit, while a log, a
-# core dump or a database lands well the other side of it. Deliberately NOT the same
-# number as project.tcl's search budget — a search skipping a file costs you nothing,
-# an editor refusing one costs you the file — and deliberately not a preference: the
-# answer to "I did mean it" is the question the frontend asks, not a setting to find.
-#
-# 64 MiB exactly, not a round 64000000, so that the number here and the number rio says
-# out loud are the same one: rio::fs::human_size counts in binary units under the
-# customary MB label (what Windows and most file managers show), and 64000000 bytes
-# would have announced itself as "61.0 MB" while the manual called the limit 64 MB.
-#
-# It was 8 MiB until D126, and the eight was never about patience — it was the cost of
-# three whole-file passes rio did not need to make. Removing them (a C-level UTF-8
-# verdict, highlighting only the visible window, and pulling the document over the
-# channel in chunks so the inbound JSON parser stays linear) took an 8 MB open from
-# ~13 s to ~1.6 s and made the curve linear, so the budget could follow the measurement
-# up. 64 MiB is where it lands: ~13 s, which is about what 8 MB used to cost and is
-# firmly back in "worth asking about" territory.
+# How big a file file.open reads without asking (D125, D126): about where an
+# open starts to take seconds. Not a preference: the frontend asks "open it
+# anyway?". 64 MiB exactly, so rio::fs::human_size shows it as "64.0 MB".
 variable rio::ops::open_max_bytes 67108864
 
 # file.open {path, ?force?} -> {buffer, name, encoding, eol, bom, mixed, linecount}
 #
-# Unless `force` is true, a file that is too large or looks binary is DECLINED rather
-# than read (D125) — see rio::fs::classify. The frontend turns that into "open it
-# anyway?" and asks again with force; a frontend that doesn't know the codes shows the
-# message, which is the same sentence. `force` is additive, so an older client simply
-# gets the guard.
+# Without `force`, a file that is too large or looks binary is declined, not
+# read (D125, rio::fs::classify): error too_large or binary_file. The
+# frontend asks "open it anyway?" and sends `force`.
 proc rio::ops::file_open {params} {
 	variable open_max_bytes
 	if {![dict exists $params path]} {
@@ -58,23 +38,19 @@ proc rio::ops::file_open {params} {
 		rio::error::raise io_error $info
 	}
 	set name [file tail $path]
-	# mtime/size ride in meta beside the encoding facts: the same "what was on disk when
-	# we last looked" record, and what buffers.stale compares a fresh stat against (D94).
+	# mtime and size go into meta too: buffers.stale compares them (D94).
 	set meta [dict create path $path \
 		encoding [dict get $info encoding] \
 		eol      [dict get $info eol] \
 		bom      [dict get $info bom]]
-	# Absent when the file went away between the read and the stat — the buffer then
-	# reads as "never stamped", which is the honest answer and not an error.
+	# Absent if the file vanished after the read: the buffer is then unstamped.
 	foreach k {mtime size} {
 		if {[dict exists $info $k]} { dict set meta $k [dict get $info $k] }
 	}
 	set id [rio::doc::new [dict get $info text] $name $meta]
-	# The fresh buffer IS the file, so autosave has nothing to write for it yet (D132).
-	# A recovery copy left by a previous session is reported as a FACT and never acted on
-	# here: whether to take it is the frontend's question (D125). `recovery` is "" when
-	# there is none. Flat string keys, so they ride the default encoder and adding them
-	# owes no protocol bump (D55/D19) — a client too old simply ignores them.
+	# The new buffer equals the file: nothing to autosave yet (D132). A recovery
+	# copy from an earlier session is reported, not taken; the frontend asks.
+	# `recovery` is "" when there is none.
 	rio::autosave::note_saved $id
 	set rec [rio::autosave::recovery_for $path]
 	return [dict create result [dict create \
@@ -92,9 +68,8 @@ proc rio::ops::file_open {params} {
 rio::dispatch::register file.open rio::ops::file_open
 
 # file.save {?buffer?, ?path?} -> {path}
-# Writes the buffer's current text, preserving its recorded encoding/BOM/EOL.
-# An explicit `path` is a save-as: the file is written there and the buffer's
-# stored path is updated so subsequent saves follow.
+# Writes the buffer's text with its recorded encoding, BOM and EOL. A `path`
+# is a save-as: the buffer follows it from then on.
 proc rio::ops::file_save {params} {
 	set id [_bufid $params]
 	set meta [rio::doc::meta $id]
@@ -107,22 +82,17 @@ proc rio::ops::file_save {params} {
 		rio::error::raise io_error $err
 	}
 	if {$stored ne $path} { rio::doc::setmeta $id path $path }
-	# Re-stamp: the buffer has just BECOME what is on disk, so this is the version it has
-	# seen. Without it every save would leave the buffer looking stale against its own
-	# write, and the next check would ask about a change the user made themselves (D94).
+	# Re-stamp, or the buffer would look stale against its own write (D94).
 	_restamp $id $path
-	# The file now holds what the buffer holds, so the recovery copy is spent. Dropped
-	# whether or not autosave is enabled, so one left by an earlier session is cleaned up
-	# too; on a save-as the OLD name's copy goes as well, since nothing points at it any
-	# more and it could never be offered back (D132).
+	# The file holds the buffer's text: drop the recovery copy (D132), and on
+	# a save-as the old name's too.
 	rio::autosave::note_saved $id
 	rio::autosave::discard_path $path
 	if {$stored ne $path && $stored ne ""} { rio::autosave::discard_path $stored }
 	return [dict create result [dict create path $path]]
 }
 
-# Record what is on disk right now as the version buffer $id has seen (D94). Called
-# wherever the buffer and the file are known to agree: after a save, after a reload.
+# Record what is on disk now as the version buffer $id has seen (D94).
 proc rio::ops::_restamp {id path} {
 	set st [rio::fs::stamp $path]
 	foreach k {mtime size} {
@@ -133,10 +103,8 @@ proc rio::ops::_restamp {id path} {
 rio::dispatch::register file.save rio::ops::file_save
 
 # fs.list {?path?} -> {path <abs dir>, entries:[{name,type}]}
-# Lists one directory for the file tree. `path` resolves against the project root
-# (D11 project.*): omitted means the root itself; a relative path is joined onto
-# it; an absolute path is taken as-is. So with a project open, the GUI lists the
-# root with no params and expands a subtree by passing its relative path.
+# Lists one directory. `path` resolves against the project root: omitted is
+# the root, a relative path is joined onto it, an absolute one is taken as is.
 proc rio::ops::fs_list {params} {
 	set path [expr {[dict exists $params path] ? [dict get $params path] : ""}]
 	set dir [rio::project::resolve $path]
@@ -151,11 +119,8 @@ proc rio::ops::fs_list {params} {
 rio::dispatch::register fs.list rio::ops::fs_list
 
 # fs.read {path} -> {path, text, encoding, eol, bom, mixed, linecount}
-# Read-only sibling of file.open: returns a file's decoded text (the same
-# encoding/BOM/EOL detection of D22) WITHOUT minting a buffer — no tab, no
-# document-model state. Reading is the inspection primitive the agent's read-only
-# tools build on (D26), where opening a buffer per file would be a side effect.
-# `path` resolves against the project root exactly like fs.list.
+# file.open without a buffer: the decoded text and nothing else. The agent's
+# read tools use it (D26). `path` resolves like fs.list.
 proc rio::ops::fs_read {params} {
 	if {![dict exists $params path]} {
 		rio::error::raise bad_request "fs.read requires a path"
@@ -182,10 +147,9 @@ proc rio::ops::fs_read {params} {
 rio::dispatch::register fs.read rio::ops::fs_read
 
 # fs.write {path, text, ?encoding?, ?eol?, ?bom?} -> {path, chars}
-# Write text to a project path, creating any missing parent directories. The
-# write-sibling of fs.read and the agent's only disk-write primitive (reached
-# solely through the approval gate, D26 slice 5); the user's own Save still goes
-# through file.save. `path` resolves against the project root like fs.read.
+# Write text to a project path; missing parents are created. The agent's only
+# disk write, reached only through the approval gate (D26). The user's Save
+# is file.save.
 proc rio::ops::fs_write {params} {
 	foreach k {path text} {
 		if {![dict exists $params $k]} {
@@ -203,9 +167,7 @@ proc rio::ops::fs_write {params} {
 	} err]} {
 		rio::error::raise io_error $err
 	}
-	# Announce the disk write so frontends can refresh a file tree that isn't backed
-	# by an open buffer (buffer.changed covers the open-buffer case). This is what
-	# lets the GUI's file pane show an agent-created file without a manual reload.
+	# Announce the write, so a file pane can repaint (D47).
 	set ev [dict create event fs.changed params [dict create path $abs]]
 	return [dict create result [dict create \
 		path $abs chars [string length [dict get $params text]]] \
@@ -213,12 +175,9 @@ proc rio::ops::fs_write {params} {
 }
 rio::dispatch::register fs.write rio::ops::fs_write
 
-# The file-management write ops (D48): create / rename / delete a path, core-side so
-# they work over a remote core exactly like git.add. Each mirrors fs.write's shape —
-# resolve against the project root, wrap the I/O in a catch surfaced as io_error, and
-# emit fs.changed so the GUI's file pane (D47) repaints without a manual reload. The
-# GUI supplies the New/Rename names (a modal prompt) and the Delete confirmation; the
-# core just does the work and announces it.
+# File management (D48): create, rename, delete. Each resolves against the
+# project root, maps an I/O failure to io_error and emits fs.changed (D47).
+# Names and confirmations are the frontend's.
 
 # fs.create {path, ?type file|dir?} -> {path} ; make an empty file (default) or a dir.
 proc rio::ops::fs_create {params} {
@@ -238,9 +197,8 @@ proc rio::ops::fs_create {params} {
 }
 rio::dispatch::register fs.create rio::ops::fs_create
 
-# fs.rename {path, to} -> {from, to} ; move/rename, refusing to overwrite. Emits TWO
-# fs.changed events — one for the source, one for the destination — so a move across
-# directories repaints both ends (on_fs_changed keys the repaint on each path's dir).
+# fs.rename {path, to} -> {from, to} ; move, never overwriting. Emits two
+# fs.changed, source and destination, so both directories repaint.
 proc rio::ops::fs_rename {params} {
 	foreach k {path to} {
 		if {![dict exists $params $k]} {

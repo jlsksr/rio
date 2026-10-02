@@ -1,29 +1,17 @@
 # rio-core — the repo.* op namespace (D39, D11).
 #
-# One op: the fetch primitive extension repositories are built on. The GUI
-# does all the interpreting (manifests, indexes, install targets); the core
-# just retrieves a URL, bounded (rio::http — ≤5 redirects, 2 MB cap).
-#
-# Trust posture: like exec.run, this op is as open as the channel it arrives
-# on (D30 — whoever may talk to the core may use its network). It fetches
-# http:// or https:// (D109): plain http is first-class, https an option that
-# needs tcltls 1.8+ on the core's host (rio::http / rio::tls say so when absent).
-#
-# Re-entrancy: a fetch pumps the event loop while it waits (rio::http header),
-# and touches no document state — other requests interleaving with it is safe.
+# One op: fetch a URL for the extension repositories (rio::http). The GUI
+# interprets what comes back. As open as the channel it arrives on (D30):
+# whoever may talk to the core may use its network.
 
 # repo.fetch {url ?timeout? ?sha256 0|1?}
 #     -> {status <ncode> url <final-url> text <body> ?sha256 <hex>?}
 #
-# A completed exchange is data whatever the status (a 404 is an answer); only
-# not getting an answer — connect failure, timeout, cap, redirect loop — is an
-# io_error, or untrusted_cert when it was an https certificate the core refused
-# (D111: the client can offer tls.inspect / tls.accept). `timeout` is in milliseconds.
-#
-# `sha256` asks for the hash of the body AS IT ARRIVED (D118) — the bytes, before
-# any decoding, which is what a publisher's SHA256SUMS holds. It is opt-in because
-# the hash is pure-Tcl work a client only needs for a signed repository; the GUI
-# asks for it exactly where it is going to check one.
+# - A completed exchange is data, whatever the status. No answer is an
+#   io_error; a refused https certificate is untrusted_cert (D111).
+# - `timeout` is in milliseconds.
+# - `sha256` asks for the hash of the body's bytes as they arrived (D118).
+#   Only on request: it is slow.
 proc rio::ops::repo_fetch {params} {
 	if {![dict exists $params url]} {
 		rio::error::raise bad_request "repo.fetch requires url"

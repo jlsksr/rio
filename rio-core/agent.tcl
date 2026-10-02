@@ -1,40 +1,29 @@
 # rio-core — the agent orchestration loop (D20, D26).
 #
-# The durable, core-owned half of the agent: it owns the conversation state and
-# the orchestration loop, and drives a *provider* (D8) which absorbs one LLM
-# service's wire specifics. The loop is transport-agnostic — it speaks only the
-# `agent.*` event vocabulary through an `emit` callback (D11/D3), so the same loop
-# streams in-process (GUI) and over the socket (server.tcl broadcast).
+# The core owns the conversation and the loop. A provider (D8) only talks to
+# its model. The loop speaks `agent.*` events through an `emit` callback, so
+# it does not know the transport.
 #
-# Streaming model (D26): a turn's content is delivered as a sequence of events
-# (agent.delta -> agent.message, or agent.error); the op's response is just an
-# ack. The loop runs as a coroutine (D10) so it yields while the provider does
-# its (async) I/O and never blocks the event loop. The provider posts typed
-# messages back to the loop; because a provider may post synchronously, posts are
-# always deferred onto the event loop (after 0) so resuming the coroutine is legal
-# whether the provider is synchronous (the echo stub) or async (a real network
-# provider).
+#   agent.send ──► _run (a coroutine, one per turn)
+#                    │  provider conversation tools system post
+#                    ▼
+#                  provider ──post──► delta, thinking, tool, done, error
+#                    │
+#                    ├─ done, no tools ──► agent.message, turn ends
+#                    └─ done tool_use  ──► run the tools, append the results,
+#                                          call the provider again
 #
-# Tool round-trip (D26 slice 4): when the provider asks to run tools
-# (`done tool_use`), the loop auto-executes the *read-only* built-ins
-# (rio::agent::tools — fs/buffer reads), feeds their results back as a follow-up
-# user turn, and re-invokes the provider, repeating until the model finishes.
-# Reads happen (they are not proposals); the approval gate is reserved for the
-# write/run slice (O4). The loop runs until the model is done: a job worth doing
-# takes the steps it takes, and the bound is the user's Stop, not a number the core
-# guessed in advance (agent.stop, D104).
+# - The op's response is an ack; the content arrives as events (D26).
+# - A coroutine (D10), so the core never blocks on the provider's I/O. A post
+#   is deferred with `after 0`: a provider may post before the loop yields.
+# - Reads run at once. A write, a command and a plan wait for the user.
+# - No step cap. The user's Stop ends a long turn (agent.stop, D104).
+# - Modes (D101): `build`, or `plan`, where the tool list holds only the reads
+#   and `present_plan`. Tools and prompt are composed here, so a mode holds
+#   for every provider.
 #
-# Modes (D101): the loop runs in `build` (the normal working set) or `plan`, where the
-# tool list handed to the provider holds only the reads and `present_plan` and the prompt
-# gains a planning layer. Because BOTH the tool list and the system prompt are composed
-# here, planning behaves the same whatever provider is live — a provider cannot opt out of
-# a mode it never learns about. Approving a presented plan flips the mode back to `build`
-# inside the same turn, which is why the loop recomputes tools and prompt every step.
-#
-# Conversation entries are {role, content} where content is a list of blocks —
-# {type text …} / {type tool_use …} / {type tool_result …} — the shape Claude's
-# Messages API needs to carry tool exchanges across a turn. history() flattens the
-# text blocks back to a readable {role, text} transcript.
+# A conversation entry is {role content}. `content` is a list of blocks:
+# {type text …}, {type tool_use …}, {type tool_result …}.
 
 namespace eval rio::agent {
 	variable conversation {}                       ;# list of {role, content} dicts
@@ -49,31 +38,25 @@ namespace eval rio::agent {
 	variable running                                ;# array: turn -> {coro token} a run_command in flight (D83)
 	variable scopes                                 ;# array: turn -> {buffer start end original} a selection-scoped turn (D113)
 
-	# The named-provider registry (D26/D30). A provider is known by NAME so a
-	# frontend can pick one over the channel (agent.provider.set) without ever
-	# naming a Tcl command: `echo` is built in; a plugin (claude-api, openai)
-	# registers itself when the core loads it. An entry is
-	# {provider <cmd> label <text> signup <text> ?key <caps>?}, where caps =
-	# {set <cmd> clear <cmd> status <cmd>} for a provider that holds a durable
-	# credential (an API key; D21). Key state is PER PROVIDER — several keyed
-	# providers coexist (claude AND openai), each with its own store — so there is
-	# no single key-holder slot; agent.key.* names its target.
+	# The provider registry (D26/D30). A frontend picks a provider by name
+	# (agent.provider.set), never by Tcl command. `echo` is built in; an
+	# extension registers itself when the core loads it. An entry:
+	#   {provider <cmd> label <text> signup <text> ?key <caps>? ?options <caps>?
+	#    ?profiles <caps>?}
+	# Each keyed provider has its own key store (D21).
 	variable providers       {}                     ;# name -> entry
 	variable active_provider echo                   ;# the registered provider now live
 }
 
-# The write-apply policy (read by rio::agent::tools::apply_write) and its toggles —
-# data, so a frontend setting can flip them (the toggle UI is deferred).
+# The write-apply policy and its toggles (read by rio::agent::tools::apply_write).
 proc rio::agent::writes_disk {} { variable apply_writes_disk ; return $apply_writes_disk }
 proc rio::agent::set_writes_disk {v} { variable apply_writes_disk ; set apply_writes_disk [expr {$v ? 1 : 0}] }
 proc rio::agent::set_auto_accept {v} { variable auto_accept ; set auto_accept [expr {$v ? 1 : 0}] }
 proc rio::agent::auto_accept {} { variable auto_accept ; return $auto_accept }
 
-# The agent's mode (D101). `plan` withholds every tool that changes anything — the model
-# can read and then present_plan, nothing else — and adds the plan prompt layer; `build`
-# is the normal working set. It lives here, in the core, so the restriction holds for every
-# provider and every frontend attached to this core (D3/D30). An unknown value is a
-# bad_request: a mode is a state, not a hint.
+# The agent's mode (D101): `build`, or `plan`, which withholds every tool that
+# changes anything and adds the plan prompt layer. An unknown value is a
+# bad_request.
 proc rio::agent::set_mode {m} {
 	variable mode
 	if {$m ni {build plan}} {
@@ -84,9 +67,8 @@ proc rio::agent::set_mode {m} {
 }
 proc rio::agent::mode {} { variable mode ; return $mode }
 
-# Swap the active provider directly — a command prefix obeying the contract in
-# _run. The low-level hook used by the core's own tests; frontends pick a provider
-# by NAME through use_provider (the registry), which also keeps the live name.
+# Set the active provider command directly (contract: see _run). For the
+# core's tests; a frontend uses use_provider.
 proc rio::agent::set_provider {cmd} {
 	variable provider
 	set provider $cmd
@@ -97,21 +79,13 @@ proc rio::agent::set_provider {cmd} {
 # register_provider name cmd ?-label <text>? ?-signup <text>? ?-key {set .. clear .. status ..}?
 #                             ?-options {list .. set .. ?refresh ..? ?file ..?}?
 #                             ?-profiles {list .. switch .. add .. remove .. rename ..}?
-#   Record a provider under `name`. `-label` is its display name (a frontend's
-#   menus/badge; defaults to the name) and `-signup` a where-to-get-a-key hint —
-#   both DATA the provider owns, so the GUI's picker and key dialog are generic
-#   (they render whatever a provider declares; an installed provider ships its own,
-#   milestone B). `-key` declares the provider holds a durable credential and wires
-#   the three commands the agent.key.* ops drive; the agent layer stays
-#   credential-blind and each keyed provider keeps its own store. `-options` declares
-#   the provider has runtime CHOICES a frontend may offer — its model, how much effort
-#   to ask for, anything else it names (D106) — and wires the commands agent.option.*
-#   drive. `-profiles` declares the provider keeps SEVERAL named configurations and
-#   can switch between them (D131) — one for hosted ChatGPT, one for the llama-server
-#   on your own box — and wires the commands agent.profile* drive. All three are
-#   capability blocks of COMMANDS, not data, because all three answer questions only
-#   the provider can: whether a key is stored, what choices are valid right now, which
-#   profile is active and what switching to another one entails.
+#   Record a provider under `name`.
+#     -label     display name; defaults to the name
+#     -signup    a hint where to get a key
+#     -key       it stores a credential; the commands behind agent.key.*
+#     -options   it has runtime choices, e.g. its model (D106); agent.option.*
+#     -profiles  it keeps several named configurations (D131); agent.profile*
+#   The last three are commands, not data: only the provider can answer them.
 proc rio::agent::register_provider {name cmd args} {
 	variable providers
 	set entry [dict create provider $cmd label $name signup ""]
@@ -128,8 +102,7 @@ proc rio::agent::register_provider {name cmd args} {
 	dict set providers $name $entry
 }
 
-# Activate a registered provider by name (agent.provider.set). An unknown name is a
-# bad_request — the frontend offered a provider this core doesn't carry.
+# Activate a registered provider by name (agent.provider.set).
 proc rio::agent::use_provider {name} {
 	variable providers
 	variable provider
@@ -145,24 +118,18 @@ proc rio::agent::use_provider {name} {
 proc rio::agent::provider_name  {} { variable active_provider ; return $active_provider }
 proc rio::agent::provider_names {} { variable providers ; return [lsort [dict keys $providers]] }
 
-# Whether this core carries a provider by that name. Lets an op tell "a provider that
-# offers nothing" apart from "a provider this core has never heard of" — two different
-# answers that must not read the same (found against a remote core that carries only
-# openai and answered for `claude` as though it simply had no options, D106).
+# Does this core carry a provider by that name? "Unknown provider" and
+# "provider without options" are different answers (D106).
 proc rio::agent::provider_known {name} {
 	variable providers
 	return [dict exists $providers $name]
 }
 
-# A rendering of every registered provider for a frontend's picker + key UI
-# (agent.providers): {name, label, keyed (0/1), key_set (0/1), signup, options (0/1),
-# profiles (0/1)}. Sorted by name for a stable menu order. All leaves are strings (the
-# wire's flat-object encoder applies).
-#
-# `options` and `profiles` say only whether the provider declares any — enough for a
-# frontend to decide whether to offer a settings door and whether to draw a profile row,
-# without a round-trip per provider just to find out that most of them have nothing to
-# show.
+# Every registered provider, for a frontend's picker and key UI
+# (agent.providers), sorted by name:
+#   {name label keyed key_set signup options profiles}
+# `options` and `profiles` are 0/1: does it declare any? That saves a round
+# trip per provider.
 proc rio::agent::providers_info {} {
 	variable providers
 	set out {}
@@ -181,17 +148,14 @@ proc rio::agent::providers_info {} {
 	return $out
 }
 
-# The provider a key or option op targets: the given name, or the active provider when
-# none is named (the common case — configure the provider you just picked).
+# The provider a key or option op targets: the named one, else the active one.
 proc rio::agent::_key_target {name} {
 	variable active_provider
 	return [expr {$name eq "" ? $active_provider : $name}]
 }
 
-# The key capability of a named provider, or raise if it has none. (A frontend
-# should only offer the key dialog for a provider whose agent.providers entry has
-# keyed=1, so this raises only on a misuse.) key_status answers softly (0) so a
-# frontend can render "no key" for any provider, keyed or not.
+# The key capability of a named provider, or raise. key_status answers 0
+# instead, so a frontend can ask about any provider.
 proc rio::agent::_key_caps {name} {
 	variable providers
 	if {![dict exists $providers $name] || ![dict exists $providers $name key]} {
@@ -214,19 +178,13 @@ proc rio::agent::key_status {{name ""}} {
 
 # --- a provider's runtime options (D106) -------------------------------------
 #
-# Which model, how much effort, whatever else a provider names: choices that belong
-# to the PROVIDER's vocabulary, not the core's. The core routes and shapes; it never
-# learns what an option means, the same discipline that keeps the tool list and the
-# system prompt out of `extensions/` (D20/D34). So a provider that grows a third knob
-# needs no core change and no GUI change — it declares it, and it appears.
+# Which model, how much effort: a provider's own choices. The core routes them
+# and never learns what one means, so a new option needs no core or GUI change.
 #
-# A descriptor is {name, label, hint, value, free, refresh, choices [{value label}…]}.
-# The provider may omit everything but `name` and `value`; _option_norm fills the rest
-# in, so a frontend can rely on every key being there.
+# A descriptor is a dict; a provider must give `name` and `value`, and
+# _option_norm fills in the rest.
 
-# The options capability of a named provider, or raise. A frontend should only offer
-# options for a provider that declared them, so this raises only on a misuse — or on
-# a core that carries an older build of that provider.
+# The options capability of a named provider, or raise.
 proc rio::agent::_options_caps {name} {
 	variable providers
 	if {![dict exists $providers $name]} {
@@ -238,36 +196,23 @@ proc rio::agent::_options_caps {name} {
 	return [dict get $providers $name options]
 }
 
-# One descriptor with every key present. `choices` is normalized too: a bare value is
-# its own label, so a provider may declare {claude-opus-5 …} or the long form.
+# One descriptor with every key present:
 #
-# Three of the keys are a frontend's rendering vocabulary, and the core stays as blind
-# to them as it is to what an option MEANS (D106):
+#   name, label, hint, value
+#   choices  a list of {value label}; a bare value is its own label
+#   free     1 = a value outside `choices` is allowed
+#   refresh  1 = the choices can be re-fetched (options_refresh)
+#   kind     choice (default) | text | number: which control to draw. The
+#            provider, not the core, decides what is valid.
+#   group    a section heading, "" for none. Sections and members keep
+#            declaration order.
+#   file     1 = the value names a file the user may edit. The provider
+#            resolves the path (agent.option.file, D131).
+#   quick    1 (default) = a frontend may also offer it in a quick control;
+#            0 = settings only.
 #
-#   kind   choice (the default) | text | number — which control to draw. `number` is a
-#          rendering hint only: the provider remains the authority on what is valid, so
-#          the core carries no range and never checks one.
-#   group  a section heading, "" for none. Sections appear in the order their first
-#          member is declared, members in declaration order within them — a contract a
-#          provider relies on when it orders its list.
-#   file   1 = this option's VALUE names a file the user may edit, so a frontend offers
-#          a way in (rio's GUI: an Edit… button beside the field, which opens the file
-#          as an ordinary tab). A flag beside `free` and `refresh` rather than a `kind`,
-#          because it is the same shape as `refresh` — a flag, an op, a button next to
-#          the field — and it composes with whichever kind the option already is. The
-#          core does not resolve the path: only the provider knows where its file lives,
-#          so agent.option.file routes back to it (D131).
-#   quick  1 = a frontend MAY also offer this in a quick control (rio's GUI: the chat
-#          status strip), 0 = settings-only. It defaults to 1, a constant, rather than
-#          being derived from `kind`: that a Tk menu cannot hold an entry field is a
-#          frontend fact and does not belong in a core default. The frontend applies
-#          that test where the knowledge lives. The constant is also the more
-#          compatible default — a provider built against provider-api 2 declares no
-#          `quick` and keeps the strip presence it has today.
-#
-# A frontend meeting an unrecognised `kind` (a newer provider, or a typo) falls back to
-# `choice` when the descriptor carries choices and to `text` otherwise, so an unknown
-# kind is always renderable and provider-api 5 can add one safely.
+# A frontend that meets an unknown `kind` draws `choice` if there are choices,
+# else `text`.
 proc rio::agent::_option_norm {o} {
 	set out [dict create name "" label "" hint "" value "" free 0 refresh 0 file 0 \
 		choices {} kind choice group "" quick 1]
@@ -292,9 +237,7 @@ proc rio::agent::_option_norm {o} {
 	return $out
 }
 
-# Every option a provider declares, normalized. A provider WITHOUT options answers
-# softly with {} — a frontend renders "no options" for echo without having to ask
-# whether it has any first (like key_status's soft 0).
+# Every option a provider declares, normalized. {} for a provider without any.
 proc rio::agent::options {{name ""}} {
 	variable providers
 	set name [_key_target $name]
@@ -304,17 +247,15 @@ proc rio::agent::options {{name ""}} {
 	return $out
 }
 
-# A flat {name value …} view of the same, for agent.status — one attach call still
-# tells a frontend everything about the live agent.
+# The same as a flat {name value …} dict, for agent.status.
 proc rio::agent::options_summary {{name ""}} {
 	set out [dict create]
 	foreach o [options $name] { dict set out [dict get $o name] [dict get $o value] }
 	return $out
 }
 
-# Whether a provider declares an option by this name (structural — the core checks
-# that the option EXISTS so every frontend gets the same error for a typo; whether a
-# VALUE is acceptable is the provider's question, and only it can answer).
+# The descriptor of a provider's option, or raise. The core checks that the
+# option exists; whether a value is valid is the provider's question.
 proc rio::agent::_option_find {name option} {
 	foreach o [options $name] {
 		if {[dict get $o name] eq $option} { return $o }
@@ -322,9 +263,8 @@ proc rio::agent::_option_find {name option} {
 	rio::error::raise bad_request "agent provider '$name' has no option '$option'"
 }
 
-# Choose a value (agent.option.set). Returns what the provider ACCEPTED — it may
-# canonicalize — so a frontend mirrors the core rather than its own guess. A refused
-# value raises out of the provider as a bad_request, leaving the agent untouched.
+# Choose a value (agent.option.set). Returns what the provider accepted,
+# which may be a canonical form. The provider raises on a refused value.
 proc rio::agent::option_set {option value {name ""}} {
 	set name [_key_target $name]
 	set caps [_options_caps $name]
@@ -333,10 +273,8 @@ proc rio::agent::option_set {option value {name ""}} {
 	return [dict get [_option_find $name $option] value]
 }
 
-# Re-enumerate an option's choices from wherever the provider gets them — a vendor's
-# models endpoint, a local server's own list (D106). Asynchronous by construction: the
-# provider is handed the turn-style `emit` and announces `agent.options` when the
-# answer lands, so the core never blocks on a network call (D10).
+# Re-fetch an option's choices, e.g. from a models endpoint (D106).
+# Asynchronous: the provider announces `agent.options` when the answer lands.
 proc rio::agent::options_refresh {option emit {name ""}} {
 	set name [_key_target $name]
 	set caps [_options_caps $name]
@@ -348,10 +286,9 @@ proc rio::agent::options_refresh {option emit {name ""}} {
 	return 1
 }
 
-# Resolve — and create — the file an option's value names (agent.option.file, D131), so
-# a frontend can open it in the editor. The provider does both: only it knows where its
-# file lives and what an empty one should contain, and only the CORE's host can answer
-# at all when the frontend is somewhere else (D30). Returns {path created}.
+# Resolve and create the file an option's value names (agent.option.file,
+# D131), so a frontend can open it. The provider does both: it knows where the
+# file lives. Returns {path created}.
 proc rio::agent::option_file {option {name ""}} {
 	set name [_key_target $name]
 	set caps [_options_caps $name]
@@ -368,14 +305,11 @@ proc rio::agent::option_file {option {name ""}} {
 
 # --- a provider's profiles (D131) --------------------------------------------
 #
-# Several named configurations, one active: hosted ChatGPT here, the llama-server on
-# your own box there. The core routes and shapes exactly as it does for options, and
-# learns just as little — what a profile CONTAINS is the provider's vocabulary, and
-# where its file lives is rio::agent::settings' business. All this layer knows is that
-# a profile has a name and one of them is active.
+# Several named configurations, one active: hosted ChatGPT here, a local
+# llama-server there. The core knows only that a profile has a name and one is
+# active. What it holds is the provider's business.
 
-# The profiles capability of a named provider, or raise — the sibling of _options_caps,
-# with the same two distinct refusals (no such provider / this one has no profiles).
+# The profiles capability of a named provider, or raise.
 proc rio::agent::_profiles_caps {name} {
 	variable providers
 	if {![dict exists $providers $name]} {
@@ -387,8 +321,8 @@ proc rio::agent::_profiles_caps {name} {
 	return [dict get $providers $name profiles]
 }
 
-# {profiles {…names…} active <name>} for a provider, or empty for one without the
-# capability — the soft answer `options` gives, so a frontend may ask unconditionally.
+# {profiles {…names…} active <name>} for a provider; empty for one without
+# profiles.
 proc rio::agent::profiles {{name ""}} {
 	variable providers
 	set name [_key_target $name]
@@ -401,16 +335,13 @@ proc rio::agent::profiles {{name ""}} {
 	return [dict create profiles $ps active $a]
 }
 
-# The active profile's name, "" for a provider without profiles — for agent.status, so
-# one attach call still says everything about the live agent.
+# The active profile's name, "" for a provider without profiles (agent.status).
 proc rio::agent::profile_name {{name ""}} {
 	return [dict get [profiles $name] active]
 }
 
-# Switch, create, remove, rename. Each returns what the PROVIDER settled on rather than
-# what was asked for: a switch may land elsewhere if the named profile has been deleted
-# under it, and a remove has to say which profile became active in place of the one that
-# is gone. Every one of them can change what the options say, so the ops announce.
+# Switch, create, remove, rename. Each returns what the provider settled on:
+# a remove, for one, says which profile is active now.
 proc rio::agent::profile_set {profile {name ""}} {
 	set name [_key_target $name]
 	set caps [_profiles_caps $name]
@@ -435,28 +366,17 @@ proc rio::agent::profile_rename {profile to {name ""}} {
 	return [{*}[dict get $caps rename] $profile $to]
 }
 
-# The `agent.options` event: "this provider's options changed — look again". Broadcast
-# to every attached frontend (D3/D30), so a change made in one window, or a refresh
-# that has just completed, repaints in all of them.
-#
-# It carries the provider NAME and not the options themselves, because an event is a
-# flat object on the wire (rio::wire::event) and the option list is two levels deep.
-# A frontend that cares re-lists; one that doesn't ignores a short line. The choice
-# also keeps the event honest under a race — the list a frontend then reads is the
-# list as it is now, not as it was when the event was queued.
-#
-# `error` is how an ASYNCHRONOUS failure gets back to the user: a refresh's reply is
-# long gone by the time the network answers, so a provider that couldn't fetch says so
-# here (and leaves its choices untouched) rather than failing silently.
+# The `agent.options` event: this provider's options changed, list them again.
+# - It carries the provider's name, not the options: an event is a flat object
+#   on the wire, and a re-list reads the list as it is now.
+# - `error` reports a failed refresh, whose reply is long gone.
 proc rio::agent::announce_options {name emit {error ""}} {
 	{*}$emit [dict create event agent.options \
 		params [dict create provider $name error $error]]
 	return
 }
 
-# Clear the conversation (agent.reset). Also abort any turn suspended awaiting an
-# approval — its coroutine would otherwise linger waiting for a decision that the
-# cleared conversation will never produce.
+# Clear the conversation (agent.reset) and abort every turn in flight.
 proc rio::agent::reset {} {
 	variable conversation
 	_abort_all
@@ -464,11 +384,9 @@ proc rio::agent::reset {} {
 	return
 }
 
-# Abort ONE turn: cancel a command it has running, delete its coroutine, forget its
-# bookkeeping. Returns 1 only if a turn was actually live — a registration whose coroutine
-# has already finished is pruned, not counted, so Stop cannot report a phantom (D104).
-# The three abort paths — reset, a new message, and Stop — all go through here, because
-# "forget this turn" means the same thing in each.
+# Abort one turn: cancel its running command, delete its coroutine, forget its
+# bookkeeping. Returns 1 only if the turn was live (D104). Reset, a new
+# message and Stop all come through here.
 proc rio::agent::_abort {t} {
 	variable live
 	variable pending
@@ -488,10 +406,8 @@ proc rio::agent::_abort {t} {
 	return $was
 }
 
-# Abort every turn the core is carrying. Before D104 this reached only turns parked at the
-# approval gate or running a command; a turn waiting on the PROVIDER was left alone, and
-# would wake up later to stream into a conversation that had been cleared or replaced. The
-# live registry makes that reachable, and turns now run long enough for it to matter.
+# Abort every turn, one waiting on its provider included (D104). Returns how
+# many were live.
 proc rio::agent::_abort_all {} {
 	variable live
 	variable pending
@@ -504,9 +420,8 @@ proc rio::agent::_abort_all {} {
 	return $n
 }
 
-# The conversation so far (agent.history) — a readable {role, text} list. Text is
-# the concatenation of an entry's text blocks; pure-machinery turns (tool_use /
-# tool_result only) are omitted — the live event stream already surfaced them.
+# The conversation so far (agent.history), as {role text} dicts. An entry
+# without a text block (tool traffic only) is left out.
 proc rio::agent::history {} {
 	variable conversation
 	set out {}
@@ -517,16 +432,10 @@ proc rio::agent::history {} {
 	return $out
 }
 
-# Make the conversation safe to extend with a fresh turn. A turn can be abandoned
-# with unfinished tool business — suspended at the approval gate (the user typed a
-# new message instead of deciding) or stopped at the step cap — leaving an
-# assistant turn whose tool_use blocks have no tool_result. Claude rejects that on
-# the next request ("tool_use ids ... without tool_result"), so before a new turn
-# we (a) abort any turn suspended awaiting approval — its coroutine must never
-# resume into the new turn's conversation — and (b) return an "interrupted"
-# tool_result for each dangling tool_use, which `send` folds into the new user
-# message so the assistant tool_use stays immediately followed by its tool_result
-# (one user turn carrying both the results and the new text — roles still alternate).
+# Make the conversation safe to extend. A turn abandoned at the approval gate
+# leaves a tool_use without a tool_result, which the Messages API rejects. So:
+# abort every turn in flight, and return an "interrupted" tool_result for each
+# dangling tool_use. `send` puts them at the head of the new user message.
 proc rio::agent::_seal_dangling {} {
 	variable conversation
 	_abort_all
@@ -544,14 +453,12 @@ proc rio::agent::_seal_dangling {} {
 	return $results
 }
 
-# Start a turn: record the user message, kick off the orchestration coroutine,
-# and return the ack {started, turn}. The turn's content arrives afterward as
-# agent.* events on `emit` (D26).
+# Start a turn: record the user message, start the coroutine, return the ack
+# {started turn}. The content follows as agent.* events on `emit` (D26).
 #
-# `scope` (D113) is {buffer start end original} from agent.send, or {} for an ordinary
-# turn. A scoped turn's user message carries the selection VISIBLY — the instruction,
-# then where the text is and the text itself — so agent.history shows exactly what the
-# model was given (D105). The scope lives for this turn only.
+# `scope` (D113) is {buffer start end original}, or {} for an ordinary turn.
+# The selection is appended to the user message, so agent.history shows what
+# the model was given (D105). A scope lasts one turn.
 proc rio::agent::send {text emit {scope {}}} {
 	variable conversation
 	variable turnseq
@@ -565,18 +472,15 @@ proc rio::agent::send {text emit {scope {}}} {
 	}
 	lappend conversation [dict create role user \
 		content [concat $seal [list [dict create type text text $text]]]]
-	# Registered BEFORE the coroutine runs: `coroutine` executes the body up to its first
-	# yield, and a turn that finishes without yielding would otherwise clear an entry that
-	# had not been made yet.
+	# Register before starting: `coroutine` runs the body to its first yield,
+	# and a turn that never yields clears its entry on the way out.
 	set co [namespace current]::_turn_$turn
 	set live($turn) $co
 	coroutine $co [namespace current]::_run_guarded $turn $emit
 	return [dict create result [dict create started true turn $turn]]
 }
 
-# _run under a registration guard: the turn is "live" from the moment it starts until it
-# returns, however it returns (D104). Stopping a turn deletes its coroutine, so this is not
-# the only thing that clears the entry — `stop` unsets it too, and both are idempotent.
+# _run, with its `live` entry cleared however it returns (D104).
 proc rio::agent::_run_guarded {turn emit} {
 	variable live
 	variable scopes
@@ -587,9 +491,8 @@ proc rio::agent::_run_guarded {turn emit} {
 	}
 }
 
-# The selection a scoped turn is about, as the model reads it (D113): which buffer,
-# which lines, the text fenced, and the one rule the tool list enforces anyway. The
-# fence is longer than any backtick run in the text, so selected Markdown can't close it.
+# The selection as the model reads it (D113): buffer, lines, the text in a
+# fence. The fence is longer than any backtick run in the text.
 proc rio::agent::_scope_block {scope} {
 	set id  [dict get $scope buffer]
 	set old [dict get $scope original]
@@ -604,17 +507,11 @@ proc rio::agent::_scope_block {scope} {
 		only tool that edits, and it replaces exactly this text.\n\n$fence\n$old\n$fence"
 }
 
-# Stop a turn in flight (agent.stop, D104) — the frontend's Stop button, and the only way
-# out of a long turn now that there is no step cap. `turn` omitted stops every live turn.
+# Stop a turn in flight (agent.stop, D104). No `turn` stops every live one.
+# Returns the turns stopped; one already finished is not an error.
 #
-# Mechanically it is the abort the reset/seal paths already use: cancel a command if one is
-# running, delete the coroutine. Deleting it is enough to stop the provider from driving the
-# turn any further — _resume drops a post whose coroutine is gone — though a request already
-# on the wire is not recalled: it finishes into the void and is still billed. The user asked
-# for the work to stop, and it stops; we do not pretend the tokens come back.
-#
-# Returns the turns actually stopped (a turn that had already finished is not an error —
-# the click raced the last event, which is not the user's problem).
+# A request already sent is not recalled: its answer is dropped by _resume,
+# and it is still billed.
 proc rio::agent::stop {{turn ""}} {
 	variable live
 	set turns [expr {$turn eq "" ? [array names live] : [list $turn]}]
@@ -626,14 +523,10 @@ proc rio::agent::stop {{turn ""}} {
 	return $stopped
 }
 
-# Leave the conversation extendable after a turn was cut off mid-flight. A turn killed while
-# the provider was still working has recorded nothing — the assistant entry is written only
-# once the provider says `done` — so the last entry is the user's message, and the next
-# `send` would append a second user entry in a row, which the Messages API rejects. A short
-# assistant note restores the alternation and is honest about what happened; anything the
-# model had already streamed is lost with its coroutine, which is why the note says only
-# that it was stopped. A turn killed at the approval gate needs nothing here: its assistant
-# turn IS recorded, and _seal_dangling answers its dangling tool_use on the next send.
+# Keep roles alternating after a stop. A turn stopped before `done` recorded
+# no assistant entry, so the next `send` would add a second user entry in a
+# row, which the Messages API rejects. A short assistant note fills the gap.
+# A turn stopped at the approval gate needs none: see _seal_dangling.
 proc rio::agent::_close_interrupted {} {
 	variable conversation
 	set last [lindex $conversation end]
@@ -642,42 +535,31 @@ proc rio::agent::_close_interrupted {} {
 		content [list [dict create type text text "(Stopped by the user.)"]]]
 }
 
-# The orchestration coroutine. Each pass invokes the provider, yields to collect
-# the typed messages it posts back (mapping each onto an agent.* event), records
-# the assistant turn, and — if the model asked for tools — runs them and loops.
+# The loop. Each pass calls the provider, yields for what it posts back, maps
+# each post onto an agent.* event, records the assistant turn and, if the
+# model asked for tools, runs them and goes round again.
 #
-# Provider contract — `{*}$provider conversation tools system post`:
-#   tools  = the available tool specs (rio::agent::tools::specs); a provider that
-#            doesn't do tools ignores it.
-#   system = the core-composed system prompt (rio::agent::prompt::compose, D34/D70/
-#            D79) — base + the user's system layer + the ACTIVE provider's own layer +
-#            the project layer, joined into one provider-agnostic string the provider
-#            sends however its API spells "system prompt"; a provider without one (echo)
-#            ignores it. The provider never sees the layers — only the composed string.
+# The provider contract: `{*}$provider conversation tools system post`
+#   tools   the tool specs (rio::agent::tools::specs)
+#   system  the composed system prompt (rio::agent::prompt::compose)
 #   {*}$post delta <text>                 a chunk of assistant text
-#   {*}$post thinking <text>              a chunk of the model's REASONING — shown, but
-#                                         deliberately not part of the answer: it never
-#                                         enters `conversation`, so it is not re-sent on
-#                                         a later step of the turn and not billed again
-#   {*}$post tool  <id> <name> <in> <raw> a requested tool call (in = parsed dict,
-#                                         raw = the original input JSON)
-#   {*}$post done  ?stop_reason?          the provider step finished; stop_reason
-#                                         "tool_use" means "run the tools, continue"
-#   {*}$post error <code> <message>       the turn failed (a classified error; D26)
+#   {*}$post thinking <text>              a chunk of reasoning: shown, never
+#                                         recorded, so never re-sent or billed
+#   {*}$post tool  <id> <name> <in> <raw> a tool call (in = parsed dict,
+#                                         raw = the input JSON)
+#   {*}$post done  ?stop_reason?          this step is finished; "tool_use"
+#                                         means: run the tools, continue
+#   {*}$post error <code> <message>       the turn failed (D26)
 #
-# A verb this core does not know is IGNORED, not an error — a provider written against a
-# newer rio degrades to silence on the parts this one cannot render, rather than hanging
-# the turn or failing it.
+# An unknown verb is ignored, so a provider written for a newer rio still runs.
 proc rio::agent::_run {turn emit} {
 	variable conversation
 	variable provider
 	variable scopes
 	set co [info coroutine]
 	while {1} {
-		# Recomputed EVERY step, not once per turn: approving a plan flips the mode
-		# mid-turn (D101), and the model has to see the tools it just earned on the very
-		# next call — otherwise it goes on planning with a stale list. The system prompt
-		# follows for the same reason (the plan layer drops away with the mode).
+		# Every step, not once a turn: approving a plan changes the mode mid-turn
+		# (D101), and with it the tools and the prompt.
 		set toolspecs [rio::agent::tools::specs [mode] [info exists scopes($turn)]]
 		set system [rio::agent::prompt::compose [rio::agent::provider_name] [mode]]
 		set acc ""
@@ -695,20 +577,15 @@ proc rio::agent::_run {turn emit} {
 						params [dict create turn $turn text $text]]
 				}
 				thinking {
-					# Shown, never recorded: `acc` is what becomes the assistant turn's
-					# text block below and is re-sent on every later step, so reasoning
-					# routed through `delta` would join the conversation and be paid for
-					# again each round-trip. A local model can spend a whole short turn
-					# here, so the alternative — dropping it — renders an empty answer.
+					# Shown, not appended to `acc`: `acc` is recorded and re-sent.
 					{*}$emit [dict create event agent.thinking \
 						params [dict create turn $turn text [lindex $msg 1]]]
 				}
 				tool {
 					lassign $msg _ id name input raw
 					lappend calls [dict create id $id name $name input $input raw $raw]
-					# Announce a read call now (it auto-runs); a gated call (write or
-					# run_command) is announced in phase 2 as agent.propose, carrying the
-					# diff / the command for review.
+					# Announce a read now. A gated call is announced below, as
+					# agent.propose.
 					if {![rio::agent::tools::is_gated $name]} {
 						{*}$emit [dict create event agent.tool \
 							params [dict create turn $turn id $id name $name \
@@ -727,8 +604,7 @@ proc rio::agent::_run {turn emit} {
 		}
 		if {$failed} return
 
-		# Record the assistant turn (text preamble + any tool_use blocks) so a
-		# follow-up request carries Claude's own tool_use, paired with our results.
+		# Record the assistant turn: its text and its tool_use blocks.
 		set blocks {}
 		if {$acc ne ""} { lappend blocks [dict create type text text $acc] }
 		foreach c $calls {
@@ -738,16 +614,15 @@ proc rio::agent::_run {turn emit} {
 		}
 		lappend conversation [dict create role assistant content $blocks]
 
-		# Model is done (or asked for nothing): close the turn.
+		# The model is done: close the turn.
 		if {$stop ne "tool_use" || ![llength $calls]} {
 			{*}$emit [dict create event agent.message \
 				params [dict create turn $turn role assistant text $acc]]
 			return
 		}
 
-		# Run each tool and feed its result back. Reads auto-execute (they are not
-		# proposals); writes go through the approval gate (_do_write) — proposed,
-		# reviewed, then applied or rejected (D26 s5). Each outcome is surfaced.
+		# Run each tool and collect its result. A read runs at once; the other
+		# kinds wait at the approval gate.
 		set results {}
 		foreach c $calls {
 			set name [dict get $c name]
@@ -771,12 +646,10 @@ proc rio::agent::_run {turn emit} {
 	}
 }
 
-# Handle one WRITE tool call: prepare a reviewable proposal, surface it
-# (agent.propose, with the diff), then either auto-accept or yield until an
-# agent.approve resumes us with the user's decision. On approval the edit applies
-# (its buffer.changed events forwarded so an open view updates); a rejection feeds
-# Claude a plain "rejected" tool_result. Returns the {ok, content, summary} the
-# loop turns into the tool_result block. (D26 slice 5.)
+# One write call: prepare a proposal, emit it (agent.propose, with the diff),
+# then auto-accept or yield until agent.approve brings the user's decision.
+# Approved, the edit applies and its buffer.changed events are forwarded.
+# Returns {ok content summary} for the tool_result.
 proc rio::agent::_do_write {turn id name input emit co} {
 	variable pending
 	variable auto_accept
@@ -809,8 +682,8 @@ proc rio::agent::_do_write {turn id name input emit co} {
 		return [dict create ok 0 content "The user rejected this edit." summary "rejected by user"]
 	}
 	set r [rio::agent::tools::apply_write [dict get $prep plan]]
-	# A selection replaced is still the selection (D113): the scope moves onto the new
-	# text, so a second replace_selection in this turn replaces what the first wrote.
+	# The scope moves onto the new text (D113), so a second replace_selection
+	# replaces what the first wrote.
 	if {[dict exists $r scope] && [info exists scopes($turn)]} {
 		set scopes($turn) [dict get $r scope]
 	}
@@ -823,16 +696,12 @@ proc rio::agent::_do_write {turn id name input emit co} {
 	return $r
 }
 
-# Handle one run_command call (D83): prepare a reviewable command, surface it
-# (agent.propose, kind command), and — unless a human-authored allow-list rule already
-# covers this argv (D84 standing approval) — yield until an agent.approve resumes us
-# with the user's decision. The edits-only auto_accept toggle never applies here:
-# running arbitrary argv is the most dangerous tool, so absent an explicit allow rule a
-# human always confirms the exact command. On approval (or an allow-list match) the
-# command runs ASYNCHRONOUSLY via rio::exec::start (the core stays responsive while
-# it runs) and we yield again until its completion callback resumes us; the result
-# becomes the tool_result. On rejection the model gets a plain "rejected". The
-# in-flight command is registered in `running` so reset/_seal_dangling can kill it.
+# One run_command call (D83): prepare the command, emit it (agent.propose,
+# kind command), and yield for the user's decision.
+# - auto_accept never applies: it is for edits only.
+# - An allow-list rule the user wrote skips the wait (D84).
+# - The command runs asynchronously (rio::exec::start); the loop yields again
+#   until it completes. `running` holds it so an abort can kill it.
 proc rio::agent::_do_exec {turn id name input emit co} {
 	variable pending
 	variable running
@@ -843,10 +712,8 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 				summary [dict get $prep summary]]]
 		return $prep
 	}
-	# Standing approval (D84): a command whose argv is covered by a human-authored
-	# allow-list rule runs WITHOUT the bar. The `auto` flag rides the propose event so
-	# the frontend can show what auto-ran (no bar, work continues). This skips only the
-	# human confirmation — prepare_exec above already applied every other guard.
+	# Standing approval (D84). `auto` tells the frontend the command ran without
+	# asking. Only the confirmation is skipped; prepare_exec's guards applied.
 	set auto [rio::agent::allow::matches [dict get $prep command]]
 	{*}$emit [dict create event agent.propose \
 		params [dict create turn $turn id $id name $name kind command \
@@ -875,20 +742,13 @@ proc rio::agent::_do_exec {turn id name input emit co} {
 	return $r
 }
 
-# Handle one present_plan call (D101): file the plan, surface it (agent.propose, kind
-# plan, carrying the Markdown itself — unlike a write's full texts there is only one
-# document and the frontend needs all of it to render anything, so there is nothing for a
-# pull op to keep lean), and yield until the user decides. ALWAYS gated: `auto_accept` is
-# edits-only (D83), and a plan whose whole purpose is a human's judgement is the last
-# thing to auto-approve. Approval flips the mode to `build` and tells the model to carry
-# the plan out — the loop's per-step spec recompute then hands it the tools to do it with,
-# each edit still stopped by the ordinary gate. Rejection leaves the mode alone: the user
-# is still planning, and the model should plan again.
-#
-# The plan is re-read at approval (D102). Its file in the project IS the plan, so the user
-# can open it and change it before approving, and what they approved — not what the model
-# wrote — is what comes back in the tool_result. Unchanged, the short result stands: there
-# is no point echoing the model's own words at it.
+# One present_plan call (D101): file the plan, emit it (agent.propose, kind
+# plan, with the Markdown), and yield for the user's decision.
+# - Always gated: auto_accept is for edits only (D83).
+# - Approved: the mode becomes `build`, and the model is told to carry it out.
+# - Rejected: the mode stays, and the model should plan again.
+# - The plan file is re-read at approval (D102). If the user edited it, the
+#   tool_result carries their version.
 proc rio::agent::_do_plan {turn id name input emit co} {
 	variable pending
 	set prep [rio::agent::tools::prepare_plan $input]
@@ -912,9 +772,8 @@ proc rio::agent::_do_plan {turn id name input emit co} {
 			content "The user rejected this plan. Do not start work — ask what they want changed about it, or present a revised plan." \
 			summary "rejected by user"]
 	}
-	# Leaving plan mode is news only if we were in it (D103: a plan can be presented from
-	# any mode). Announcing a flip that did not happen would relabel the frontend's mode
-	# control for nothing.
+	# A plan can be presented from any mode (D103): announce a mode change only
+	# if there is one.
 	if {[mode] eq "plan"} {
 		set_mode build
 		{*}$emit [dict create event agent.mode params [dict create mode build]]
@@ -933,15 +792,13 @@ proc rio::agent::_do_plan {turn id name input emit co} {
 	return [dict create ok 1 content $content summary $summary]
 }
 
-# rio::exec::start's completion bridge: resume the suspended turn with the capture.
-# Deferred onto the event loop like _post, so resuming is always legal.
+# rio::exec::start's completion callback: resume the turn with the result.
 proc rio::agent::_exec_done {co result} {
 	after 0 [list [namespace current]::_resume $co $result]
 }
 
-# Resolve a pending approval: resume the suspended turn's coroutine with the user's
-# decision ("approve" | "reject"). Driven by the agent.approve op (D26 s5). Serves a
-# proposed edit, a proposed command and a presented plan alike — all park in `pending`.
+# Resolve a pending approval (agent.approve): resume the turn with "approve"
+# or "reject". An edit, a command and a plan all wait in `pending`.
 proc rio::agent::approve {turn decision} {
 	variable pending
 	if {![info exists pending($turn)]} {
@@ -952,10 +809,8 @@ proc rio::agent::approve {turn decision} {
 	return $id
 }
 
-# A pending proposal's full texts (agent.proposal, D28): the original file content
-# and the proposed new content for a turn whose write is awaiting the user's
-# decision. The compare/diff view pulls this on demand — only when opened — so the
-# agent.propose event itself stays lean. Raises if nothing is pending for the turn.
+# A pending write's full texts (agent.proposal, D28): original and proposed.
+# The compare view pulls them when opened, so agent.propose stays small.
 proc rio::agent::proposal {turn} {
 	variable proposals
 	if {![info exists proposals($turn)]} {
@@ -993,9 +848,8 @@ proc rio::agent::_has_text {m} {
 	return 0
 }
 
-# Provider -> loop bridge. Defer the resume onto the event loop so it is always
-# legal (a provider may post synchronously, before the coroutine has yielded),
-# and guard against a stray post arriving after the coroutine has ended.
+# Provider -> loop. Deferred, because a provider may post before the loop has
+# yielded. A post for a coroutine that is gone is dropped.
 proc rio::agent::_post {co args} {
 	after 0 [list [namespace current]::_resume $co $args]
 }
@@ -1003,12 +857,10 @@ proc rio::agent::_resume {co msg} {
 	if {[llength [info commands $co]]} { $co $msg }
 }
 
-# The built-in echo provider — the stub that proves the streaming path with no
-# network. It echoes the latest user message back, streamed in word-sized chunks
-# on successive event-loop turns (so the async path is genuinely exercised), then
-# signals done. The trivial reference implementation of the provider contract;
-# the Claude faces (D26) replace it. It does no tools and has no system prompt, so
-# it ignores `tools` and `system`.
+# The built-in echo provider: the smallest implementation of the contract, and
+# a test of the streaming path without a network. It echoes the last user
+# message word by word, one event-loop turn each, then posts done. It ignores
+# `tools` and `system`.
 proc rio::agent::echo_provider {conversation tools system post} {
 	set last [lindex $conversation end]
 	set reply "echo: [_text_of $last]"
@@ -1025,6 +877,5 @@ proc rio::agent::_echo_stream {post chunks} {
 	after 0 [list [namespace current]::_echo_stream $post $chunks]
 }
 
-# The built-in, always-available provider. Keyed providers (claude, openai)
-# register themselves from their plugins when the core loads them (server.tcl).
+# Always available. Other providers register when the core loads them.
 rio::agent::register_provider echo ::rio::agent::echo_provider -label Echo

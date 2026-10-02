@@ -1,11 +1,8 @@
 # rio-core — package entry point.
 #
-# Sources the transport-independent core — the document model, dispatch, and op
-# namespaces — shared by every transport. It also exposes rio::core::call /
-# call_stream: an IN-CORE op-invocation path used by the agent (which runs in the
-# core, D26/D30) and by tests. This is NOT a GUI transport — since D29/D30 the GUI
-# is always a client over a channel (a pipe or socket), and those out-of-process
-# transports live in server.tcl, not here.
+# Sources the core: document model, dispatch, ops. rio::core::call and
+# call_stream invoke an op from inside the core, for the agent and for tests.
+# The transports are in server.tcl.
 
 namespace eval rio {}
 namespace eval rio::core {
@@ -20,8 +17,7 @@ apply {{} {
 	}
 }}
 
-# A default buffer exists so callers can edit without first opening a file
-# (file I/O / multi-buffer management arrives with the fs.* ops).
+# A default buffer, for a request that names none.
 set rio::ops::default [rio::doc::new ""]
 
 # In-process call: returns {response <dict> events <list>}.
@@ -39,10 +35,8 @@ proc rio::core::_sink {ev} {
 	lappend evbuf $ev
 }
 
-# In-process STREAMING call (D26): like `call`, but events are delivered LIVE to
-# `emit` as they happen rather than batched into the return — because a streaming
-# op (agent.send) keeps emitting after this returns its ack. `emit` is a command
-# prefix invoked with each event dict; the return is just the ack response dict.
+# In-process streaming call (D26): events go to `emit` as they happen, since
+# a streaming op keeps emitting after its ack. Returns the ack.
 proc rio::core::call_stream {op params emit} {
 	return [rio::dispatch::handle [dict create op $op params $params] $emit]
 }

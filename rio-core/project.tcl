@@ -1,23 +1,15 @@
 # rio-core — the project / workspace root (D11, the project.* namespace).
 #
-# rio is "the editor with a project open": one canonical root folder the core
-# holds, which anchors everything that is otherwise relative — git operations
-# (the cwd for git.*), directory listing for the file tree (fs.list), and the
-# per-project `.rio/` config dir. Before this, git.* leaned on the core process's
-# own working directory; the root makes "the project" an explicit, queryable
-# fact instead of an accident of how rio was launched.
-#
-# Single-root by design (a workspace is one open folder, matching one git repo);
-# multi-root can grow later without changing this seam. Pure state — no Tk, no
-# protocol — so it tests headless.
+# One root folder, held by the core. Everything relative resolves against it:
+# git's cwd, fs.list, the project's `.rio/` dir. One root at a time.
+# No Tk, no protocol.
 
 namespace eval rio::project {
 	variable root ""   ;# absolute path of the open project, or "" if none
 }
 
-# Open `path` as the project root: it must be an existing directory. Returns the
-# normalized absolute root. Replacing one root with another is allowed (the
-# caller decides what that means for open buffers; the model just records it).
+# Open `path`, an existing directory, as the project root. Returns the
+# normalized root. It may replace another root.
 proc rio::project::open {path} {
 	variable root
 	if {$path eq ""} {
@@ -37,10 +29,11 @@ proc rio::project::root {} {
 	return $root
 }
 
-# Resolve `path` against the project root the way a frontend means it: an empty
-# path is the root itself; an absolute path is taken as-is; a relative path is
-# joined onto the root. Raises if there is nothing to resolve against (no path
-# and no open project) — callers that need a concrete directory use this.
+# Resolve `path` against the project root:
+#   ""         the root
+#   /abs/x     as is
+#   src/x      <root>/src/x
+# Raises when a root is needed and no project is open.
 proc rio::project::resolve {path} {
 	variable root
 	if {$path eq ""} {
@@ -65,25 +58,15 @@ proc rio::project::close {} {
 }
 
 # --- project-wide text search (Find in Files, D51) -----------------
-# Walk the open project's tree and return every LINE that contains `needle`,
-# grouped by file. Pure logic over rio::fs (listdir + read), so it tests headless
-# and — the load-bearing reason — runs core-side: in remote mode only the core
-# can see the project tree (D36's "find-in-files is necessarily core-side" note),
-# so the in-buffer search ops (D36) and this share one engine, not two.
-#
-# Scope kept small for v1: a plain substring match (optionally case-insensitive,
-# mirroring buffer.find's `nocase`), skipping the VCS dir (.git), binary files (a
-# NUL byte), and oversized files. Whole-word / regex / glob filters are deferred.
-# One row per matching line (jumping to the first hit on it); `count` is total
-# occurrences (a line with two hits shows once but counts twice, like VSCode).
-# Rows are capped so a broad needle can't walk away with the core; the cap
-# surfaces as `truncated`.
+# Walk the open project's tree and return every line that contains `needle`,
+# grouped by file. In the core: with a remote core only it sees the tree.
+# - Same matcher and flags as the buffer search (rio::doc::grep_lines).
+# - Skipped: `.git`, binary files, files over `search_max_bytes`.
+# - One row per matching line; `count` is every hit.
+# - At most `search_max_rows` rows; beyond that, `truncated` is 1.
 variable rio::project::search_max_rows  2000
-# Decimal, deliberately, though its sibling rio::ops::open_max_bytes is 8 MiB exactly
-# (D125). That one had to be binary because rio SAYS it out loud — human_size counts in
-# binary units, so a round 8000000 would have announced itself as "7.6 MB". This budget
-# is never quoted at anybody: a search just passes silently over what it can't usefully
-# show. So the plain number stays, and the manual says "about 2 MB", which it is.
+# Never shown to the user, so a round decimal number will do (compare
+# rio::ops::open_max_bytes).
 variable rio::project::search_max_bytes 2000000
 
 proc rio::project::search {needle nocase wholeword {regex 0}} {
@@ -120,10 +103,8 @@ proc rio::project::search {needle nocase wholeword {regex 0}} {
 		truncated $truncated results $results]
 }
 
-# Recursively collect the regular files under `dir` into the list var `accVar`,
-# skipping the VCS metadata dir so a search never wanders into .git/. Other
-# dotfiles stay searchable (the files pane shows them too — filtering is a
-# frontend choice, D22/fs.listdir).
+# Collect the files under `dir` into the list var `accVar`, skipping `.git`.
+# Other dotfiles are searched.
 proc rio::project::_search_walk {dir accVar} {
 	upvar 1 $accVar acc
 	foreach e [rio::fs::listdir $dir] {
@@ -138,22 +119,14 @@ proc rio::project::_search_walk {dir accVar} {
 	}
 }
 
-# Search one file. Returns {matches occurrences truncated}: the same line-grouped
-# {line col cols text} rows the Search panel renders — produced by the shared
-# rio::doc::grep_lines (D52), so the disk walk and the open-buffer walk
-# (buffers.search) use one matcher. `truncated` is 1 when the file held more
-# matching lines than the per-call row `budget` (the rest are dropped and the
-# occurrence total is recomputed over the kept rows). Skips a file that is too
-# large, is binary (holds a NUL), or won't read — a search silently passes over
-# what it can't show.
+# Search one file. Returns {matches occurrences truncated}; the rows are
+# rio::doc::grep_lines' (D52). `truncated` is 1 when the file had more
+# matching lines than `budget`; the rest are dropped. A file that is too
+# large, binary or unreadable gives no rows.
 proc rio::project::_search_file {path needle nocase wholeword budget {regex 0}} {
 	variable search_max_bytes
-	# The size-and-NUL rule is rio::fs::classify (D125), shared with file.open so the
-	# editor and the search cannot drift on what "too big" or "binary" means — only on
-	# the budget each passes it. The second NUL test below is not a duplicate of it:
-	# classify looks at a cheap prefix because it runs BEFORE the read, while here the
-	# whole text is already in hand, so a file that turns out to hold a NUL deeper in
-	# can still be skipped rather than spilling control bytes into the results.
+	# rio::fs::classify (D125) is file.open's rule too. It probes only the
+	# file's head, so the whole text is tested for a NUL again below.
 	if {[dict get [rio::fs::classify $path $search_max_bytes] verdict] ne "ok"} {
 		return [list {} 0 0]
 	}

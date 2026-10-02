@@ -1,33 +1,27 @@
 # rio-core — the agent's built-in tools: read (auto) + write (gated). D20, D26.
 #
-# The core owns tool *execution* (D20: security and cross-provider consistency
-# live here, not in a provider plugin). This module is the registry + executor for
-# the built-ins. Each tool wraps existing core ops (one implementation, the op's
-# validation reused).
+# The core runs the tools (D20), so the guards hold for every provider. Each
+# tool wraps core ops.
 #
-# Kinds, split on safety:
-#   read  (fs_list/fs_read/buffer_list/buffer_text) — inspection; auto-executed,
-#         never mutates, rendered as transparency (slice 4).
-#   write (propose_edit/propose_create, and replace_selection in a turn scoped to a
-#         selection, D113) — mutation; NEVER auto-run. The loop
-#         surfaces a diff and waits for the user's approval before apply_write
-#         touches anything (slice 5). On approval the edit applies to the open
-#         buffer (undoable) and, by default, is written to disk.
-#   exec  (run_command) — an argv the user always confirms (D83).
-#   plan  (present_plan) — the work described before it is done (D101): gated like a
-#         write, but what it changes is the mode, not the project.
+#   kind   tools                                       runs
+#   read   fs_list fs_read buffer_list buffer_text     at once
+#   write  propose_edit propose_create                 after the user approves a diff
+#          replace_selection (scoped turn only, D113)
+#   exec   run_command                                 after the user confirms (D83)
+#   plan   present_plan                                after the user approves (D101);
+#                                                      changes the mode, not the project
 #
-# Rails: path inputs are confined to the open project root (absolute / ../ escapes
-# refused); read results are size-capped. The write surface reaches disk only
-# through fs.write, only after approval — and an approved edit is RE-LOCATED at
-# apply time (see apply_write): the editor stays live while a proposal awaits its
-# decision, so coordinates computed at prepare time may be stale.
+# Guards:
+# - A path is confined to the open project root.
+# - A read result is capped in size.
+# - An approved edit is located again at apply time: the editor stays live
+#   while a proposal waits.
 
 namespace eval rio::agent::tools {
 	variable max_bytes 100000    ;# per-read cap; larger reads are truncated + noted
 
-	# name -> {kind, op, description, schema}. kind is read|write. The Claude-facing
-	# name uses underscores — the Messages API tool-name grammar forbids '.'.
+	# name -> {kind op description schema}. Names use underscores: the Messages
+	# API forbids '.' in a tool name.
 	variable specs {}
 
 	# Tools that exist only inside a selection-scoped turn (D113).
@@ -63,9 +57,8 @@ rio::agent::tools::_def propose_create write "" \
 	"Propose creating a new file in the project with the given content. Fails if the file already exists (use propose_edit instead). Parent folders are created. The user reviews and approves before the file is written." \
 	{{"type":"object","properties":{"path":{"type":"string","description":"New file path relative to the project root."},"content":{"type":"string","description":"The file's contents."}},"required":["path","content"]}}
 
-# The selection tool (D113): offered ONLY in a turn the user scoped to a selection, and
-# in such a turn it is the only tool that changes anything. It names no path and no
-# match — the core already holds the range — so the model can't aim it anywhere else.
+# The selection tool (D113): offered only in a scoped turn, where it is the
+# only tool that changes anything. It takes no path: the core holds the range.
 rio::agent::tools::_def replace_selection write "" \
 	"Replace the text the user selected (quoted in their message) with new text. This is the only way to change anything in this request, and it changes exactly the selection — nothing before or after it, no other buffer or file. Pass the whole replacement for the selected text, not a fragment of it. The user reviews a diff and approves or rejects before anything changes. Calling it again replaces what the previous call wrote." \
 	{{"type":"object","properties":{"text":{"type":"string","description":"The complete replacement for the selected text."}},"required":["text"]}}
@@ -79,25 +72,17 @@ rio::agent::tools::_def present_plan plan "" \
 	"Present your plan for the work, for the user to read and approve BEFORE anything changes. Use this whenever the user ASKS for a plan (\"plan this\", \"what would you do\", \"show me the plan first\"), and on your own judgement before a large, ambiguous or hard-to-reverse change — not for a small, obvious fix. Investigate first with the read tools, then call this ONCE with the whole plan. `plan` is Markdown — headings, lists, tables, fenced code — and the user reads it RENDERED, not as source, so write it for a person: what you understood the task to be, what you will change (file by file), and how it will be verified. Say what you are deliberately NOT doing. The user approves or rejects; on approval you carry the plan out, one reviewed edit at a time." \
 	{{"type":"object","properties":{"title":{"type":"string","description":"A short name for the plan — one line, no Markdown."},"plan":{"type":"string","description":"The plan itself, as Markdown."}},"required":["title","plan"]}}
 
-# The tool specs handed to a provider: {name, description, input_schema} per tool.
-# input_schema is a JSON-string fragment the provider splices verbatim (D26).
+# The tool specs for a provider: {name description input_schema} each.
+# input_schema is JSON text the provider splices in as is (D26).
 #
-# The set depends on the agent's MODE (D101): in `plan` mode the model gets the reads
-# plus present_plan and NOTHING that changes anything — the restriction is real, not a
-# request in the prompt, and it is provider-agnostic because the core composes this list
-# for every provider.
+#                   reads  present_plan  write, exec     replace_selection
+#   build           yes    yes           yes             no
+#   plan            yes    yes           no              no
+#   build, scoped   yes    yes           no              yes
+#   plan, scoped    yes    yes           no              no
 #
-# present_plan is offered in EVERY mode (D103). D101 withheld it outside plan mode, on the
-# theory that a plan is what plan mode is for; the first live test showed what that costs —
-# asked in plain words for a plan, the model had no plan tool to reach for and wrote a text
-# file instead. Planning is a thing the user asks for, not a mode they must remember to
-# enter first. Plan mode still has all its teeth: it is the mode that withholds every
-# changing tool, which is a different guarantee from being able to present a plan.
-#
-# A turn `scoped` to a selection (D113) narrows it the same way, and for the same reason
-# — the restriction is real, not a request in the prompt: every write and exec tool goes
-# except replace_selection, which in turn exists in no other turn. Reads stay, for
-# context. The two narrowings compose: scoped plan mode is reads + present_plan.
+# A tool that is not listed cannot be called: the restriction does not rest
+# on the prompt. present_plan is in every mode (D103).
 proc rio::agent::tools::specs {{mode build} {scoped 0}} {
 	variable specs
 	variable scoped_only
@@ -135,10 +120,9 @@ proc rio::agent::tools::is_gated {name} {
 	expr {$k in {write exec plan}}
 }
 
-# Execute one READ tool call. Returns {ok <0|1>, content <text for Claude>, summary
-# <short line for the chat>}. Never raises: a refusal or a failed op comes back as
-# ok 0 with an explanatory content, which the loop relays to Claude as an is_error
-# tool_result so the model can recover (D26 resilience).
+# Run one read tool. Returns {ok content summary}: `content` for the model,
+# `summary` a short line for the chat. Never raises: a failure is ok 0 with
+# the reason, so the model can recover.
 proc rio::agent::tools::run {name input} {
 	variable specs
 	if {![dict exists $specs $name]} {
@@ -158,10 +142,9 @@ proc rio::agent::tools::run {name input} {
 	return [_format $name [dict get $resp result]]
 }
 
-# --- write: prepare (build a reviewable plan + diff) -------------------------
-# Returns {ok 1, name, path, diff, plan} for the loop to surface and later apply,
-# or {ok 0, content, summary} when the proposal can't be formed (so the model gets
-# an actionable tool_result without anything being touched).
+# --- write: prepare (a plan and a diff to review) ----------------------------
+# Returns {ok 1 name path diff original proposed plan}, or {ok 0 content
+# summary} when no proposal can be formed. Touches nothing.
 proc rio::agent::tools::prepare_write {name input {scope {}}} {
 	if {$name eq "replace_selection"} { return [_prepare_selection $input $scope] }
 	if {![dict exists $input path]} { return [_err "missing path" "error: missing path"] }
@@ -188,9 +171,8 @@ proc rio::agent::tools::prepare_write {name input {scope {}}} {
 				return [_err "old_string is not unique in $rel ($c matches) — add surrounding context" "error: $c matches"]
 			}
 			set newfull [string map [list $old $new] $text]
-			# The plan carries old/new, NOT the located coordinates: apply_write
-			# re-locates the match when the approval lands, so a buffer that moved
-			# underneath the pending proposal can't be edited at a stale position.
+			# The plan carries old/new, not the position: apply_write locates
+			# the match again.
 			return [dict create ok 1 name $name path $rel diff [_difftext $old $new] \
 				original $text proposed $newfull \
 				plan [dict create kind edit abs $abs old $old new $new]]
@@ -208,19 +190,17 @@ proc rio::agent::tools::prepare_write {name input {scope {}}} {
 }
 
 # --- write: apply (after approval) -------------------------------------------
-# Returns {ok, content, summary, ?events?}. The loop forwards `events` on its emit so
-# frontends update: buffer.changed for an open-buffer edit (the editor view repaints),
-# fs.changed for a create or closed-file write (the file tree repaints, D47). Edits to
-# an open buffer go through buffer.replace (undoable) and, when the disk flag is on,
-# file.save; edits to a closed file and all creates are written straight to disk via
-# fs.write, which is what emits the fs.changed the create/closed-edit paths forward.
+# Returns {ok content summary ?events?}. The loop forwards `events`.
 #
-# The ground truth is RE-RESOLVED here, not reused from prepare_write: the editor
-# stays live while a proposal awaits its decision (the turn's coroutine is suspended
-# at the approval gate), so the text — and even whether the file is open in a buffer
-# — may have changed since the diff was built. An edit re-locates old_string under
-# the same unique-match contract the user reviewed and refuses if it no longer
-# holds; a create refuses if the file has appeared. Never apply at a stale position.
+#   target        through                              event
+#   open buffer   buffer.replace (undoable), then      buffer.changed
+#                 file.save if writes_disk
+#   closed file   fs.write                             fs.changed (D47)
+#   new file      fs.write                             fs.changed
+#
+# Nothing from prepare_write is trusted: the text may have changed while the
+# proposal waited. An edit locates old_string again and refuses unless it
+# still matches once. A create refuses if the file has appeared.
 proc rio::agent::tools::apply_write {plan} {
 	if {[dict get $plan kind] eq "replace"} { return [_apply_selection $plan] }
 	set abs  [dict get $plan abs]
@@ -234,7 +214,6 @@ proc rio::agent::tools::apply_write {plan} {
 		if {![_ok $out msg]} {
 			return [_err "couldn't create $rel: $msg" "error: write failed"]
 		}
-		# Forward fs.write's fs.changed so the GUI file tree shows the new file (D47).
 		return [dict create ok 1 content "created $rel" summary "created $rel" \
 			events [dict get $out events]]
 	}
@@ -266,7 +245,7 @@ proc rio::agent::tools::apply_write {plan} {
 		return [dict create ok 1 content "edited $rel" \
 			summary "edited $rel ([expr {$disk ? {buffer+disk} : {buffer}}])" events $events]
 	}
-	# closed file: write straight to disk (stage-only has no buffer to land in)
+	# closed file: write straight to disk
 	set out [rio::core::call fs.write [dict create path $abs text [string map [list $old $new] $text]]]
 	if {![_ok $out msg]} {
 		return [_err "couldn't write $rel: $msg" "error: write failed"]
@@ -276,12 +255,11 @@ proc rio::agent::tools::apply_write {plan} {
 }
 
 # --- write: the selection (D113) ----------------------------------------------
-# replace_selection edits the range agent.send was scoped to, in the open buffer,
-# never a path. It keeps propose_edit's two promises: nothing applies at a stale
-# position, and what applies is what the user reviewed.
+# replace_selection edits the range agent.send was scoped to, in the open
+# buffer. Like propose_edit: never at a stale position, only what was reviewed.
 
-# A buffer as the user knows it: its path (relative when inside the project), or its
-# name when it has none — an untitled buffer can be scoped too.
+# A buffer as the user knows it: its path, relative inside the project, or
+# its name when it has no file.
 proc rio::agent::tools::bufname {id} {
 	set meta [rio::doc::meta $id]
 	if {[dict exists $meta path] && [dict get $meta path] ne ""} {
@@ -295,9 +273,9 @@ proc rio::agent::tools::bufname {id} {
 	return $id
 }
 
-# Where the selection is NOW: {ok 1 start end}, or {ok 0}. Its own range if that still
-# holds the text; else the text's one occurrence in the buffer (an edit above it moved
-# it); else nowhere — changed, or no longer unique, and the caller refuses.
+# Where the selection is now: {ok 1 start end}, or {ok 0}. Its own range if
+# that still holds the text; else the text's one occurrence in the buffer;
+# else nowhere.
 proc rio::agent::tools::_anchor {id start end old} {
 	if {![catch {rio::doc::range_text $id $start $end} got] && $got eq $old} {
 		return [dict create ok 1 start $start end $end]
@@ -333,9 +311,9 @@ proc rio::agent::tools::_prepare_selection {input scope} {
 			start [dict get $at start] end [dict get $at end] old $old new $new]]
 }
 
-# Apply after approval: anchor afresh (the editor stayed live), replace through
-# buffer.replace (one undo step), save under the same rule as any agent edit — a buffer
-# with no file is never saved. Returns the moved scope for the turn to keep.
+# Apply after approval: anchor again, replace through buffer.replace (one
+# undo step), save if writes_disk and the buffer has a file. Returns the
+# moved scope for the turn to keep.
 proc rio::agent::tools::_apply_selection {plan} {
 	set id  [dict get $plan buffer]
 	set old [dict get $plan old]
@@ -369,11 +347,9 @@ proc rio::agent::tools::_apply_selection {plan} {
 }
 
 # --- plan: prepare (shape it, and keep a copy) -------------------------------
-# The present_plan tool (D101). Returns {ok 1, name, title, markdown, path} for the loop
-# to surface (agent.propose, kind plan) and for the user to approve. Nothing here touches
-# the project's own files: the only write is the plan's own copy under `.rio/plans/`, so
-# a plan is a record even when it is rejected — and `path` is "" when there is no project
-# to keep it in (D72), which is not an error, only a plan that leaves no trace.
+# present_plan (D101). Returns {ok 1 name title markdown path}. The only write
+# is the plan's copy under `.rio/plans/`, kept even if it is rejected. `path`
+# is "" without an open project (D72); that is not an error.
 proc rio::agent::tools::prepare_plan {input} {
 	foreach k {title plan} {
 		if {![dict exists $input $k] || [string trim [dict get $input $k]] eq ""} {
@@ -386,8 +362,8 @@ proc rio::agent::tools::prepare_plan {input} {
 		path [_plan_save $title $md]]
 }
 
-# The plan as one Markdown document: its title as the opening heading, unless the model
-# already wrote one (then its own is kept — two titles read worse than either).
+# The plan as one Markdown document: the title becomes the opening heading,
+# unless the body already starts with one.
 proc rio::agent::tools::_plan_markdown {title body} {
 	foreach line [split $body "\n"] {
 		if {[string trim $line] eq ""} continue
@@ -397,10 +373,9 @@ proc rio::agent::tools::_plan_markdown {title body} {
 	return "# $title\n\n$body"
 }
 
-# Write the plan under the open project's `.rio/plans/` and return its project-relative
-# path, or "" (no project, or the write failed — a plan that cannot be filed is still a
-# plan worth reading). Timestamped and slugged so the directory reads as a history; a
-# same-second collision takes the next free suffix rather than overwriting.
+# Write the plan under the project's `.rio/plans/` and return its relative
+# path, or "" (no project, or the write failed).
+#   .rio/plans/20261002-113000-cap-undo.md, then …-cap-undo-2.md on a collision
 proc rio::agent::tools::_plan_save {title md} {
 	set root [rio::project::root]
 	if {$root eq ""} { return "" }
@@ -421,10 +396,8 @@ proc rio::agent::tools::_plan_save {title md} {
 	return $rel
 }
 
-# Read a filed plan back, as the user has it NOW: the live buffer when the file is open
-# (so a plan edited and not yet saved still counts — nobody should have to remember to
-# save before approving), else the disk copy. Returns "" for no path, no project, or an
-# unreadable file; the caller falls back to the plan as presented (D102).
+# Read a filed plan as the user has it now (D102): the open buffer, unsaved
+# edits included, else the file. "" if there is nothing to read.
 proc rio::agent::tools::read_plan {path} {
 	if {$path eq ""} { return "" }
 	if {[catch {rio::project::resolve $path} abs]} { return "" }
@@ -433,32 +406,25 @@ proc rio::agent::tools::read_plan {path} {
 	return [dict get $cur text]
 }
 
-# A title as a filename fragment: lowercase, runs of anything else collapsed to one
-# dash, trimmed and length-capped. Never empty — a title of pure punctuation still
-# needs a name.
+# A title as a filename fragment: "Cap undo!" -> "cap-undo". At most 48
+# chars; "plan" if nothing is left.
 proc rio::agent::tools::_slug {s} {
 	set out [string trim [regsub -all -- {-+} [regsub -all {[^a-z0-9]+} [string tolower $s] -] -] -]
 	if {$out eq ""} { return plan }
 	return [string trim [string range $out 0 47] -]
 }
 
-# --- exec: prepare (validate + build a reviewable command) -------------------
-# The run_command tool (D83). Returns {ok 1, name, command, cwd, timeout, display}
-# for the loop to surface (agent.propose, kind command) and — only after the user
-# approves — run asynchronously via rio::exec::start. Like a write it NEVER
-# auto-runs; unlike a write the approval is not skippable (running arbitrary argv
-# is the most dangerous surface, so a human always sees the exact command first).
-# On a bad request returns an ok 0 _err the model can act on.
+# --- exec: prepare (validate, and build a command to review) -----------------
+# run_command (D83). Returns {ok 1 name command cwd cwddisp timeout display},
+# or an ok 0 _err the model can act on. Runs nothing.
 proc rio::agent::tools::prepare_exec {input} {
 	if {![dict exists $input command]} {
 		return [_err "run_command requires command (an argument vector)" "error: missing command"]
 	}
 	set argv [dict get $input command]
 	if {[llength $argv] == 0} { return [_err "command is empty" "error: empty command"] }
-	# No shell: refuse any element Tcl's exec would interpret as a redirection or
-	# pipe rather than pass to the program. This closes the residual exec
-	# redirection-token surface (exec.tcl) on the agent path — a model can't smuggle
-	# a `> /etc/passwd` past the human by hiding it in an argv element.
+	# Refuse an element Tcl's exec would read as a redirection or pipe, e.g.
+	# ">/etc/passwd".
 	foreach a $argv {
 		if {[_is_redirection $a]} {
 			return [_err "the argument \"$a\" looks like a shell redirection or pipe — run_command takes a literal argument vector, not a shell line (no <, >, |, &). Pass the program and each argument separately." \
@@ -479,17 +445,14 @@ proc rio::agent::tools::prepare_exec {input} {
 		}
 	}
 	set timeout [_clamp_timeout [expr {[dict exists $input timeout] ? [dict get $input timeout] : 0}]]
-	# cwd is absolute (for the run); cwddisp is the project-relative dir for the
-	# review surface ("" = the project root), so a frontend needn't know the root.
+	# cwd is absolute, for the run. cwddisp is project-relative, for display.
 	return [dict create ok 1 name run_command command $argv cwd $cwd \
 		cwddisp [_rel $cwd] timeout $timeout display [_cmd_display $argv]]
 }
 
-# Shape an async exec result ({exitcode, stdout, stderr, timedout, ?error}) into the
-# {ok, content, summary} the loop turns into a tool_result. A non-zero exit is a
-# SUCCESSFUL run (ok 1) — the exit code is data the model reads; only a launch
-# failure or a timeout is ok 0 (is_error), so the model knows the command didn't
-# actually complete.
+# Shape an exec result {exitcode stdout stderr timedout ?error?} into
+# {ok content summary}. A non-zero exit is ok 1: the code is data for the
+# model. Only a failed launch or a timeout is ok 0.
 proc rio::agent::tools::format_exec {argv result} {
 	set disp [_cmd_display $argv]
 	if {[dict exists $result error]} {
@@ -504,27 +467,23 @@ proc rio::agent::tools::format_exec {argv result} {
 	return [_cap "exit code: $ec\n[_exec_streams $result]" "ran $disp -> exit $ec"]
 }
 
-# Would Tcl's exec read this argument as a redirection or pipe (rather than pass it
-# to the program)? True for a leading <, >, >>, 2>, <<, <@, >@, >&, a leading |, or
-# a lone &. Only leading operators matter — exec treats a whole argument as
-# redirection only when it starts with the operator (an arg like "a>b" is literal).
+# Would Tcl's exec read this argument as a redirection or pipe? True for a
+# leading <, >, 2>, | and for a lone &. "a>b" is literal.
 proc rio::agent::tools::_is_redirection {a} {
 	if {$a eq "&"} { return 1 }
 	return [regexp {^([0-9]*[<>]|\|)} $a]
 }
 
-# Clamp a requested timeout (seconds) to [1,600]; a missing/invalid/<=0 value
-# becomes the 120 s default. There is no "unlimited" — every command is bounded,
-# since there is no per-command cancel yet.
+# Clamp a timeout in seconds to [1,600]. Missing or invalid: 120. Every
+# command is bounded.
 proc rio::agent::tools::_clamp_timeout {v} {
 	if {![string is integer -strict $v] || $v <= 0} { return 120 }
 	if {$v > 600} { return 600 }
 	return $v
 }
 
-# A shell-style rendering of an argv, for the human's review line and the tool_result
-# echo. Display only — nothing is ever run through a shell; single-quote any element
-# with whitespace or shell-special characters so the review reads unambiguously.
+# An argv as a shell would show it, for display only: {echo "a b"} ->
+# echo 'a b'. Nothing runs through a shell.
 proc rio::agent::tools::_cmd_display {argv} {
 	set out {}
 	foreach a $argv {

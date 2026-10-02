@@ -1,25 +1,18 @@
 # rio-core — the secrets store (D21, D26).
 #
-# Tokens and credentials (e.g. the Claude API key, D26) are kept OUT of both the
-# plain-text settings file and the synced session JSON, in their own files under
-# the data dir with restrictive perms (0600). They are machine-written, never
-# hand-edited, and must not ride along in a diff-friendly config a user might
-# commit or sync. (OS keychain integration is a later refinement.)
+# API keys live in files of their own under the data dir, mode 0600. Not in
+# the settings, not in the session: a user might commit or sync those.
 #
-# A secret is a flat set of key=value pairs (one provider's token set), stored in
-# the same plain "[section]/key = value" format the rest of rio uses (rio::conf)
-# — parsed, never executed — under the top-level section. Pure: no Tk.
+# A secret is a flat set of key = value pairs in rio::conf's format, parsed
+# and never executed. No Tk.
 #
-# The proc names deliberately avoid `set`/`read`/`load` so they cannot shadow the
-# Tcl builtins inside this namespace (cf. rio::fs's ::read discipline).
+# No proc here is named `set`, `read` or `load`: it would shadow the builtin.
 
 namespace eval rio::secret {
 	variable override_dir ""   ;# tests point this at a temp dir; "" = real XDG path
 }
 
-# The secrets directory: $XDG_DATA_HOME/rio/secrets (default ~/.local/share/...),
-# per D21's data-dir locations — distinct from config (settings/themes) and from
-# session state.
+# The secrets directory: $XDG_DATA_HOME/rio/secrets, default ~/.local/share/.
 proc rio::secret::_dir {} {
 	variable override_dir
 	if {$override_dir ne ""} { return $override_dir }

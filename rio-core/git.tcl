@@ -1,18 +1,12 @@
 # rio-core — git, by shelling out to `git` and parsing porcelain (D7).
 #
-# No libgit2: we run the installed `git` through the command-execution primitive
-# (rio::exec, D15) and parse its machine-readable output. Portable and
-# dependency-light — it works identically everywhere `git` is installed.
-#
-# This is the read layer (status, diff): pure data ops that git's UI (and the
-# agent) build on. It carries no UI — output surfaces in whatever flow asked.
+# No libgit2: rio runs the installed `git` through rio::exec (D15) and parses
+# its machine-readable output. Data only, no UI.
 
 namespace eval rio::git {}
 
-# Run `git <args>` in $cwd and return its stdout. A non-zero git exit (not a
-# repo, bad path, …) is surfaced as bad_request with git's own stderr — the
-# caller pointed us somewhere git can't honour. (git missing entirely raises
-# io_error from rio::exec's launch path, before we get here.)
+# Run `git <args>` in $cwd and return its stdout. A non-zero exit is a
+# bad_request carrying git's stderr. A missing git is rio::exec's io_error.
 proc rio::git::_run {cwd args} {
 	set r [rio::exec::run [list git {*}$args] $cwd]
 	if {[dict get $r exitcode] != 0} {
@@ -36,10 +30,10 @@ proc rio::git::_branch_name {hdr} {
 	return $first
 }
 
-# git.status: parse `status --porcelain=v1 -b -z` into {branch, changes}, where
-# each change is {x y path ?orig?} — X/Y the staged/worktree status chars, and
-# orig the source path for a rename/copy (R/C). -z makes records NUL-terminated,
-# so paths with spaces or newlines parse cleanly.
+# git.status: parse `status --porcelain=v1 -b -z` into {branch changes}. A
+# change is {x y path ?orig?}: x and y are the staged and worktree status
+# chars, orig the source of a rename or copy. -z: NUL-terminated records, so
+# any path parses.
 proc rio::git::status {cwd} {
 	set out [_run $cwd status --porcelain=v1 -b -z]
 	set recs [split $out \0]
@@ -66,43 +60,30 @@ proc rio::git::status {cwd} {
 	return [dict create branch $branch changes $changes]
 }
 
-# git.add: track/stage a path — `git add -- <path>`. An untracked file becomes
-# tracked+staged; a modified tracked file has its worktree changes staged. This is
-# the first git WRITE op (D7 was read-only status/diffs); it carries no result.
+# git.add: stage a path, `git add -- <path>`.
 proc rio::git::add {cwd path} {
 	_run $cwd add -- $path
 	return ""
 }
 
-# git.unstage: the inverse of add — `git reset -q -- <path>` drops the path from the
-# index (a staged-add returns to untracked; a staged modification returns to modified-
-# unstaged). `reset` rather than `restore --staged` so it also works on an unborn HEAD
-# (a repo with no commits yet), where `restore --staged` cannot resolve HEAD.
+# git.unstage: `git reset -q -- <path>`. `reset`, not `restore --staged`: it
+# also works in a repo without a commit.
 proc rio::git::unstage {cwd path} {
 	_run $cwd reset -q -- $path
 	return ""
 }
 
-# git.discard: throw away a path's local changes (D80) — the destructive counterpart to
-# add/unstage/commit, for the everyday "undo my edits to this file". Behaviour is keyed
-# on the path's own porcelain staged char X:
-#   ?  (untracked)       -> remove the new file:   `git clean -fd -- <path>`
-#   A  (staged addition) -> unstage, then remove:  `git reset` then `git clean -fd`
-#   C  (staged copy)     -> the same: a copy IS a new file, and its source is untouched by
-#                           the copy, so there is nothing to put back there
-#   R  (staged rename)   -> put the file back under its OLD name (D97), see below
-#   else (tracked M/D/…) -> revert to the last commit, dropping BOTH the staged and the
-#                           worktree change:  `git restore --staged --worktree -- <path>`
-# The restore branch only runs for a file with a committed baseline, so HEAD always
-# exists there — the unborn-HEAD case (no commits) is only ?/A, handled above — so unlike
-# unstage this can safely use `restore`. Returns {action revert|remove, paths {...}}:
-# `action` words the frontend's confirmation, `paths` is every file the call rewrote, which
-# the op turns into fs.changed events (D94) — two of them for a rename. A path with no
+# git.discard: throw away a path's local changes (D80). By the path's staged
+# status char:
+#   ?  untracked        remove it:              `git clean -fd -- <path>`
+#   A  staged addition  unstage, then remove:   `git reset`, `git clean -fd`
+#   C  staged copy      the same: a copy is a new file
+#   R  staged rename    back under its old name (D97), see below
+#   else  M, D, …       back to the last commit, staged and worktree:
+#                       `git restore --staged --worktree -- <path>`
+# Returns {action revert|remove, paths {...}}: `paths` is every file rewritten,
+# two for a rename (they become fs.changed events, D94). A path without
 # changes is a bad_request.
-#
-# The status lookup goes through the full `status` rather than `status -- <path>`: rename
-# detection needs BOTH ends of the rename in the same diff, so narrowing the pathspec to the
-# new name alone makes git report a plain `A` and the rename would be invisible here.
 proc rio::git::discard {cwd path} {
 	set entry [_entry $cwd $path]
 	if {$entry eq ""} {
@@ -117,12 +98,8 @@ proc rio::git::discard {cwd path} {
 		_run $cwd clean -fd -- $path
 		return [dict create action remove paths [list $path]]
 	} elseif {$x eq "R"} {
-		# A rename is one change with two names, so undoing it takes both: empty the index
-		# of each (back to HEAD — the old name returns to it, the new name leaves it), write
-		# the old name back to disk from that index, and clean away the new name, which the
-		# unstage has just turned into an ordinary untracked file. `restore --worktree` on
-		# the new name would be wrong (it is not in HEAD, so there is nothing to write) and
-		# leaving it would turn a rename into a copy.
+		# A rename has two names: unstage both, write the old name back to
+		# disk, remove the new one, which is now untracked.
 		set orig [dict get $entry orig]
 		_run $cwd restore --staged -- $path $orig
 		_run $cwd restore --worktree -- $orig
@@ -133,10 +110,8 @@ proc rio::git::discard {cwd path} {
 	return [dict create action revert paths [list $path]]
 }
 
-# The status entry for PATH, or "" when git reports no change under that name. Every caller
-# that needs to know WHAT a path's change is shares this, and they all need the wide lookup
-# described above: `status -- <path>` cannot see a rename, so the one question worth asking
-# has to be asked of the whole status.
+# The status entry for `path`, or "". Looked up in the full status:
+# `status -- <path>` sees only one end of a rename and reports a plain `A`.
 proc rio::git::_entry {cwd path} {
 	foreach c [dict get [status $cwd] changes] {
 		if {[dict get $c path] eq $path} { return $c }
@@ -144,32 +119,21 @@ proc rio::git::_entry {cwd path} {
 	return ""
 }
 
-# Has this repo a commit yet? A non-zero exit is the ANSWER here ("unborn HEAD"), not a
-# failure, so this goes around _run rather than through it (_run would raise).
+# Has this repo a commit yet? A non-zero exit is the answer "no", so this
+# does not go through _run, which would raise.
 proc rio::git::_has_head {cwd} {
 	set r [rio::exec::run [list git rev-parse --verify -q HEAD] $cwd]
 	return [expr {[dict get $r exitcode] == 0}]
 }
 
-# git.discard_all: throw away EVERY local change at once (D93) — the bulk form of discard,
-# for "put this project back the way the last commit left it". It is the per-path rule
-# applied to the whole repo, but NOT a loop over the paths: two git commands, one round
-# trip, so a channel that drops mid-way (D29) can't leave a half-discarded tree.
-#   HEAD exists -> `git reset -q --hard`  : index AND worktree back to HEAD — every tracked
-#                  modification and deletion reverted, every staged addition demoted to a
-#                  plain untracked file
-#   unborn HEAD -> `git reset -q`         : there is nothing to revert *to*, so only empty
-#                  the index (`--hard` can't resolve HEAD on older git; plain `reset` is
-#                  the same choice D44's unstage made)
-# then `git clean -fd -- :/` removes what is left — the untracked files, the former staged
-# additions among them. `:/` is git's repo-root pathspec, so the sweep covers the whole repo
-# however deep the cwd sits; no `-x`, so IGNORED files (build output, a local .env) survive:
-# discarding your edits must not cost you untracked state git was told to disregard.
-# Returns {count N paths {...}}: N is how many changed ENTRIES the pane showed (what the
-# frontend's confirmation counted), and paths are the repo-relative files touched, which the
-# op turns into fs.changed events (D94). The two differ by renames — one entry, but BOTH
-# names change on disk when the rename is reverted, so both are listed. A repo with nothing
-# to discard is a bad_request, like the per-path op.
+# git.discard_all: throw away every local change (D93). Two git commands in
+# one op, not a loop over paths, so a dropped channel leaves no half-done tree.
+#   1. a commit exists:  `git reset -q --hard`   index and worktree back to HEAD
+#      no commit yet:    `git reset -q`          only empty the index
+#   2. `git clean -fd -- :/`   remove what is untracked now, repo-wide.
+#      No `-x`: ignored files (build output, a local .env) survive.
+# Returns {count N paths {...}}: N changed entries, and every file touched. A
+# rename is one entry and two paths. Nothing to discard is a bad_request.
 proc rio::git::discard_all {cwd} {
 	set changes [dict get [status $cwd] changes]
 	if {![llength $changes]} {
@@ -189,11 +153,8 @@ proc rio::git::discard_all {cwd} {
 	return [dict create count [llength $changes] paths $paths]
 }
 
-# git.commit: record the staged index as a commit — `git commit -m <msg>`. The second
-# git write family after D44's add/unstage. We lean on git's own guards, surfaced as
-# bad_request by _run: an empty message (`commit -m ""` aborts) and nothing staged
-# ("nothing to commit") both fail honestly with git's wording — no pre-checks here.
-# Returns the new HEAD's short hash, for the frontend to confirm the commit.
+# git.commit: `git commit -m <msg>`. No checks of its own: an empty message
+# or nothing staged fails with git's wording. Returns the new short hash.
 proc rio::git::commit {cwd msg} {
 	_run $cwd commit -m $msg
 	return [string trim [_run $cwd rev-parse --short HEAD]]
@@ -202,13 +163,8 @@ proc rio::git::commit {cwd msg} {
 # git.diff: the unified diff text. `staged` selects the index (--cached); `path`
 # limits it to one file. Returned raw for the caller to render.
 #
-# A RENAME has to be asked for by BOTH of its names, for the same reason discard's lookup is
-# wide (D97): rename detection needs both ends inside the pathspec, so `diff --cached -- new`
-# makes git report a whole-file ADDITION — it cannot see where the file came from, so it
-# describes the change as the one thing it is not. Only the staged side needs this: an
-# unstaged diff compares the index and the worktree, which hold the file under the same name,
-# so `RM`'s worktree half is already right. That also keeps the extra status off every
-# ordinary row click.
+# A staged rename is asked for by both names (D97): with the new name alone
+# git reports a whole-file addition. An unstaged diff needs no such lookup.
 proc rio::git::diff {cwd path staged} {
 	set args diff
 	if {$staged} { lappend args --cached }
@@ -224,11 +180,10 @@ proc rio::git::diff {cwd path staged} {
 	return [_run $cwd {*}$args]
 }
 
-# git.log: newest-first commits as {hash, short, author, date, subject}. We pin a
-# field-delimited --pretty (US 0x1f between fields) under -z (NUL between commits)
-# so subjects with spaces, and any field, parse unambiguously. `max` caps the
-# count; `path` limits to a file's history. A repo with no commits yet errors
-# (bad_request) — that's git's own behaviour for `log`.
+# git.log: commits, newest first, as {hash short author date subject}. Fields
+# are separated by 0x1f and commits by NUL, so any subject parses. `max` caps
+# the count; `path` limits it to one file. A repo without a commit is a
+# bad_request, as git itself fails.
 proc rio::git::log {cwd max path} {
 	set args [list log --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s -z]
 	if {$max ne "" && $max > 0} { lappend args --max-count=$max }

@@ -1,22 +1,16 @@
 # rio-core — the git.* op namespace (D11, D7).
 #
-# Thin handlers over rio::git's read layer. No logic of their own beyond reading
-# params and shaping the result; the porcelain parsing lives in rio::git.
+# Thin handlers over rio::git.
 #
-# cwd defaults to the open project root (project.*), so a frontend just calls
-# git.status with no cwd and gets the open project's git — the git pane no longer
-# leans on the core process's own working directory. An explicit cwd overrides it
-# (e.g. a tool operating on some other checkout); with neither, rio::git falls
-# back to the process cwd as before.
+# cwd: the `cwd` param, else the open project root, else the process's cwd.
 proc rio::ops::_git_cwd {params} {
 	if {[dict exists $params cwd]} { return [dict get $params cwd] }
 	return [rio::project::root]
 }
 
-# A git write that rewrote the worktree announces it exactly like an fs.* op does (D94):
-# one fs.changed per path, absolute, so the file pane repaints and open buffers can notice
-# they went stale. git names paths relative to the repo root, which IS the project root
-# (D43); the pwd fallback matches rio::git's own when no cwd is set.
+# One fs.changed per path a git write rewrote (D94), absolute, so the file
+# pane repaints and open buffers notice. git's paths are relative to the repo
+# root, which is the project root (D43).
 proc rio::ops::_git_changed_evs {cwd paths} {
 	if {$cwd eq ""} { set cwd [pwd] }
 	set evs {}
@@ -33,7 +27,7 @@ proc rio::ops::git_status {params} {
 }
 rio::dispatch::register git.status rio::ops::git_status
 
-# git.add {path, ?cwd?} -> {} ; track/stage the path (the first git write op).
+# git.add {path, ?cwd?} -> {} ; stage the path.
 proc rio::ops::git_add {params} {
 	rio::git::add [_git_cwd $params] [dict get $params path]
 	return [dict create result {}]
@@ -54,12 +48,9 @@ proc rio::ops::git_commit {params} {
 }
 rio::dispatch::register git.commit rio::ops::git_commit
 
-# git.discard {path, ?cwd?} -> {action revert|remove} ; discard a path's local changes
-# (D80). A tracked file reverts to its last committed version (staged AND worktree changes
-# dropped); a new file (untracked, or a staged addition) is removed; a rename goes back to
-# its old name (D97). The GUI gates this behind a confirm and words its outcome from
-# `action`. Emits fs.changed for every path the discard rewrote — TWO for a rename, both
-# names — since these are disk writes rio itself caused (D94).
+# git.discard {path, ?cwd?} -> {action revert|remove} ; discard a path's
+# local changes (D80; the rules are in rio::git::discard). The GUI confirms
+# first. Emits fs.changed for every path rewritten, two for a rename (D94).
 proc rio::ops::git_discard {params} {
 	set cwd  [_git_cwd $params]
 	set path [dict get $params path]
@@ -69,12 +60,9 @@ proc rio::ops::git_discard {params} {
 }
 rio::dispatch::register git.discard rio::ops::git_discard
 
-# git.discard_all {?cwd?} -> {count N} ; discard every local change in the repo at once
-# (D93) — the bulk form of git.discard, done in git rather than by looping the per-path op
-# over N paths. `count` is how many changed paths there were, for the frontend's
-# confirmation; nothing to discard is a bad_request, as it is per path. Emits one fs.changed
-# per path rewritten (D94) — bounded by the change list the user just confirmed, and honest
-# in a way a single "the root changed" event would not be.
+# git.discard_all {?cwd?} -> {count N} ; discard every local change (D93).
+# `count` is the number of changed entries. Nothing to discard is a
+# bad_request. Emits one fs.changed per path rewritten (D94).
 proc rio::ops::git_discard_all {params} {
 	set cwd [_git_cwd $params]
 	set r [rio::git::discard_all $cwd]

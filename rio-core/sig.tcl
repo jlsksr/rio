@@ -1,46 +1,23 @@
 # rio-core — verifying an OpenSSH detached signature (D118).
 #
-# The primitive behind signed extension repositories: a publisher signs one root
-# SHA256SUMS with an ed25519 SSH key, as git does, and rio checks it by running
-# the same tool the publisher used —
+# A publisher signs a repository's root SHA256SUMS with an SSH key. rio checks
+# it with the same tool, so it owns no crypto:
 #
 #   ssh-keygen -Y sign   -f key -n rio-repository SHA256SUMS      (publisher)
 #   ssh-keygen -Y verify -f <allowed_signers> -I <principal> \
 #              -n rio-repository -s SHA256SUMS.sig < SHA256SUMS   (here)
 #
-# Why the tool and not Tcl: rio would otherwise own Ed25519 and SHA-512, which is
-# the heavier and less POSIX road (decided with jka 2026-09-16, revised from an
-# earlier pure-Tcl sketch). OpenSSH is on every host rio targets. It lives CORE-side
-# for the same reason tcltls does (D30): the core's host is where the tool must be,
-# and a GUI-only box stays Tk-and-nothing-else.
-#
-# WITHOUT ssh-keygen NOTHING CAN BE VERIFIED, and this says so as its own answer
-# (`available 0`) rather than as a failed signature — the caller's policy decides
-# what that means, and the two must never be confused.
-#
-# `-Y verify` arrived in OpenSSH 8.0 (2019). Older ones — Windows 10 1809 shipped
-# 7.7 — report an unknown option, which is reported as the version problem it is
-# (CAVEATS.md, WINDOWS.md §9), not as a bad signature.
-#
-# THE PRINCIPAL IS A LOOKUP KEY, NOT A CLAIM. `-I` selects a line in the
-# allowed-signers file, and rio writes that file itself, with one line, from the key
-# it already trusts — so the principal contributes nothing to the verdict (verified
-# 2026-09-19: the same signature verifies under any principal we care to write).
-# What the verdict rests on is the KEY and the NAMESPACE: a signature made for git
-# (`-n git`) or for ssh authentication fails here, and a signature by any other key
-# fails here.
-#
-# A KEY IS REFUSED BEFORE IT REACHES A FILE unless it is a type and base64 on one
-# line (key_ok). The allowed-signers file rio writes is the whole trust decision, and
-# a newline inside a published key would add principals to it.
-#
-# EXACT BYTES, EVERYWHERE. A signature covers bytes, so nothing in this file may
-# re-encode anything by accident: the data and the signature are written to temp
-# files as raw UTF-8 and handed to the child as file redirections. `exec << $string`
-# would encode with the SYSTEM encoding — cp1252 on Windows — and quietly produce a
-# different message than the one that was signed. That is also why this does not use
-# rio::exec::run, which is a `<< stdin` interface by design; the plumbing below is
-# its pattern (argv, never a shell; temp files; the exit code out of -errorcode).
+# - Core-side: the tool must be on the core's host (D30).
+# - No ssh-keygen, or one older than OpenSSH 8.0 (no `-Y`): `available 0`.
+#   That is not a failed signature; the caller decides what it means
+#   (CAVEATS.md, WINDOWS.md §9).
+# - The verdict rests on the key and the namespace. The principal only selects
+#   the one line of the allowed-signers file, which rio writes itself.
+# - A key must be a type and base64 on one line (key_ok). A newline in it
+#   would add principals to that file.
+# - Exact bytes: data and signature go to the child as temp files in UTF-8.
+#   `exec <<` would re-encode them in the system encoding, so rio::exec::run
+#   is not used.
 
 namespace eval rio::sig {
 	variable _tool     ""   ;# cached path to ssh-keygen ("" = none), see tool
@@ -48,10 +25,8 @@ namespace eval rio::sig {
 	variable namespace_default rio-repository
 }
 
-# Where ssh-keygen is, or "" — looked up once. A core that starts before OpenSSH is
-# installed and is then told to verify would keep saying no, which is why this is
-# only cached after a HIT: the miss stays cheap to re-ask (auto_execok is a PATH
-# walk, not a spawn) and the answer can improve without a restart.
+# Where ssh-keygen is, or "". Only a hit is cached, so installing OpenSSH
+# later works without a restart.
 proc rio::sig::tool {} {
 	variable _tool
 	variable _searched
@@ -99,10 +74,8 @@ proc rio::sig::_run {argv stdin_path} {
 	return [dict create exitcode $exitcode stdout $out stderr $err]
 }
 
-# A public key as a repository publishes it: TYPE and base64, one line, nothing
-# else. Anything else is refused BEFORE it reaches a file — an embedded newline
-# would otherwise smuggle extra principals into the allowed-signers file we write,
-# and that file is the whole of the trust decision.
+# Is `key` a public key as a repository publishes it: type and base64, one
+# line, nothing else?
 proc rio::sig::key_ok {key} {
 	if {[regexp {[\n\r]} $key]} { return 0 }
 	set parts [regexp -all -inline {\S+} $key]
@@ -164,11 +137,8 @@ proc rio::sig::verify {data sig key principal {ns ""}} {
 	set sf   [file tempfile spath] ; close $sf
 	set df   [file tempfile dpath] ; close $df
 	set rc [catch {
-		# One principal, one key: the file IS the trust decision, so it says exactly
-		# what rio decided and nothing more. The namespace is NOT repeated here as a
-		# `namespaces="…"` option — `-n` below is what enforces it (measured: with the
-		# option removed, a `-n git` signature still fails as "namespace does not
-		# match"), and an option no test can make fail is decoration, not defence.
+		# One principal, one key. `-n` below enforces the namespace, so the file
+		# carries no `namespaces=` option.
 		_spit $apath "$principal $key\n"
 		_spit $spath $sig
 		_spit $dpath $data
@@ -181,22 +151,20 @@ proc rio::sig::verify {data sig key principal {ns ""}} {
 	}
 	set err [string trim [dict get $r stderr]]
 	set sout [string trim [dict get $r stdout]]
-	# OpenSSH older than 8.0 has no -Y at all. That is a version problem, not a
-	# signature problem, and must never be reported as one.
+	# OpenSSH older than 8.0 has no -Y: a version problem, not a bad signature.
 	if {[string match -nocase "*unknown option*" $err] || [string match -nocase "*usage:*sign*" $err]} {
 		return [dict merge $out [dict create available 0 \
 			reason "the ssh-keygen on the core's host is older than OpenSSH 8.0 and can't verify signatures"]]
 	}
-	# BOTH, never either: a zero exit is not a verdict on its own (a tool invoked in a
-	# way it did not understand can succeed at doing nothing), and neither is a line of
-	# output. ssh-keygen says Good for the namespace it was asked about, or this is a no.
+	# Both: exit 0 and ssh-keygen's "Good" for this namespace. Neither alone
+	# is a verdict.
 	if {[dict get $r exitcode] == 0 && [regexp "^Good \"$ns\" signature" $sout]} {
 		set fp ""
 		regexp {(SHA256:[A-Za-z0-9+/=]+)} $sout -> fp
 		return [dict merge $out [dict create verified 1 signer $fp]]
 	}
-	# A wrong key exits non-zero with NOTHING on stderr (verified 2026-09-19), so
-	# the fallbacks matter: a refusal always carries a reason.
+	# A wrong key exits non-zero with nothing on stderr, hence the fallbacks:
+	# a refusal always carries a reason.
 	set why $err
 	if {$why eq ""} { set why $sout }
 	if {$why eq ""} { set why "ssh-keygen refused the signature (exit [dict get $r exitcode])" }
