@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0085](0085-agent-config-in-preferences.md), [ADR-0092](0092-theme-picker.md)
 - **Date:** 2026-09-03
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D58
+- **Decision:** D58
 
 ## Context
 

@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0129](0129-extension-payload-carries-its-licence.md)
 - **Date:** 2026-09-20
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D121
+- **Decision:** D121
 
 ## Context
 

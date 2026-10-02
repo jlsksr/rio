@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0089](0089-remember-tree-shape.md)
 - **Date:** 2026-09-09
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D88
+- **Decision:** D88
 
 ## Context
 

@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0096](0096-rio-does-not-dial.md)
 - **Date:** 2026-06-30
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D30
+- **Decision:** D30
 
 ## Context
 

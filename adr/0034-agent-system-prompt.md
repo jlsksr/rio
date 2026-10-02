@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0070](0070-user-and-project-prompts.md), [ADR-0079](0079-per-provider-prompts.md), [ADR-0105](0105-shipped-prompt-visible.md)
 - **Date:** 2026-07-08
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D34
+- **Decision:** D34
 
 ## Context
 

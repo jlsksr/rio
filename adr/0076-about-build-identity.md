@@ -3,7 +3,7 @@
 - **Status:** Accepted; the release version it lacked arrived with [ADR-0130](0130-release-version-and-contract-versions.md)
 - **Date:** 2026-09-08
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D76
+- **Decision:** D76
 
 ## Context
 

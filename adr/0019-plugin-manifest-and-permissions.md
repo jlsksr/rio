@@ -3,7 +3,7 @@
 - **Status:** Accepted; distribution amended by [ADR-0039](0039-extension-repositories.md)
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D19
+- **Decision:** D19
 
 ## Context
 

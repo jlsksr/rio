@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0121](0121-context-menu-outside-the-editor.md), [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-09-12
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D108
+- **Decision:** D108
 
 ## Context
 

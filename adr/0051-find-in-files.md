@@ -3,7 +3,7 @@
 - **Status:** Accepted; scope amended by [ADR-0052](0052-search-panel.md)
 - **Date:** 2026-08-19
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D51
+- **Decision:** D51
 
 ## Context
 

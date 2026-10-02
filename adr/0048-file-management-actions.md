@@ -3,7 +3,7 @@
 - **Status:** Accepted; target directory rule amended by [ADR-0087](0087-files-tree.md)
 - **Date:** 2026-08-18
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D48
+- **Decision:** D48
 
 ## Context
 

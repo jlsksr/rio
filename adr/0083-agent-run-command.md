@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0084](0084-command-allow-list.md)
 - **Date:** 2026-09-09
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D83
+- **Decision:** D83
 
 ## Context
 

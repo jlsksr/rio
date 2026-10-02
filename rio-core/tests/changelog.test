@@ -1,27 +1,22 @@
-# Tests for CHANGELOG.md (AGENTS.md D124) — the guard that keeps it current.
+# Tests for CHANGELOG.md (D124) — the guard that keeps it current.
 #
-# A changelog is the classic derived fact (AGENTS.md §7): the decisions in AGENTS.md are
-# the truth, CHANGELOG.md restates the user-visible ones for a reader who will never open
-# the design log, and nothing fails when that copy falls behind. It already had: the copy
-# in PITCH.md (a landing-page draft, since deleted) stopped at D108 while the tree reached
-# D123, and nobody noticed for eight days. "Remember to add an entry" is the rule that
-# failed there, so it is not the rule here.
+# The decisions are the records in adr/. CHANGELOG.md restates the user-visible ones,
+# and nothing fails when a copy falls behind — so this holds the two both ways:
 #
-# So this holds the two BOTH WAYS. Every `### Dnn` in AGENTS.md is cited by an entry, or
-# it is in the exemption table below with a reason written out — and every exemption has
-# to still be true, so the table cannot quietly grow into a backlog. The other direction
-# catches an entry citing a decision that does not exist.
+#   every decision  ->  cited by an entry, or exempted below with a reason
+#   every citation  ->  a decision that exists
 #
-# The rest is shape: Keep a Changelog sections in their canonical order, the release
-# heading holding rio's actual version, entries newest first, and — where there is a git
-# repository to ask — every commit id resolving and every date being the one that commit
-# actually carries. That last pair is the "assert against behaviour" rule reached as far
-# as a document allows: the dates are not proofread, they are looked up.
+# A decision is named D1..D136 (the record's **Decision:** line) or, for a record
+# without a D number, ADR-NNNN.
 #
-# No network. git is only ever read.
+# The rest is shape: Keep a Changelog sections in order, the top heading carrying
+# rio's version, entries newest first, and — given a git repository — every commit
+# resolving and every date being that commit's own.
+#
+# No network. git is only read.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8 (D54).
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]
@@ -56,17 +51,20 @@ array set ::no_entry {
 	D95 {a headless run never asks a human anything — a test-harness rule}
 	D96 {rio speaks the protocol and does not dial — a refusal, and refusing a feature is not a change}
 	D124 {this file and the changelog itself — an entry would have to cite the commit that creates the changelog, which does not exist while the entry is being written, and a file announcing its own existence tells its reader nothing}
+	ADR-0112 {the TUI is deferred — nothing shipped}
+	ADR-0113 {the error-code taxonomy — a wire-format internal}
+	ADR-0114 {one project root — how the core is built, not a change to it}
+	ADR-0117 {the derived-facts register — policy}
+	ADR-0144 {decisions move from AGENTS.md to adr/ — a change to the documents, not to rio}
 }
-# D1–D21 predate anything runnable: the protocol seam, the core/frontend split and the
-# config format were all settled before rio could open a file, so there was no release
-# and no user for them to be a change to. D22 (the core foundation) is where the log
-# starts, and it has an entry.
+# D1–D21 predate anything runnable, so they were a change to nothing. D22 is the
+# first with an entry.
 set ::no_entry_before 22
 
 # --- parsing ----------------------------------------------------------------------------
 #
 # An entry is a top-level list item under a `### Section`, possibly wrapped over several
-# lines, ending in its citation: *D101/D102/D103 · `b01bf98` · 2026-09-11* (the decisions
+# lines, ending in its citation: *D101/ADR-0144 · `b01bf98` · 2026-09-11* (the decisions
 # are optional — two entries predate the numbering). Nothing here greps the file for a
 # word: the parse yields a list of entries and every check below is about that list.
 proc parse_entries {text} {
@@ -97,7 +95,7 @@ proc entry {release section text} {
 	# The separator is U+00B7, written as an escape: this file is decoded with the SYSTEM
 	# encoding on Windows (rio-core/tests/all.tcl), where a literal would arrive mojibake.
 	set sep \u00b7
-	if {[regexp "\\*((?:D\[0-9A-Za-z/\]+ )?)(?:$sep )?`(\[0-9a-f\]{7,40})` $sep (\\d{4}-\\d{2}-\\d{2})\\*\\s*\$" \
+	if {[regexp "\\*((?:\[0-9A-Za-z/-\]+ )?)(?:$sep )?`(\[0-9a-f\]{7,40})` $sep (\\d{4}-\\d{2}-\\d{2})\\*\\s*\$" \
 			$text -> dpart commit date]} {
 		foreach d [split [string trim $dpart] /] { if {$d ne ""} { lappend ds $d } }
 	}
@@ -107,20 +105,18 @@ proc entry {release section text} {
 
 set ::entries [parse_entries $::changelog]
 
-# The decisions AGENTS.md carries, and the ones a changelog entry cites.
-proc agents_decisions {} {
+# Every decision the records carry, by name: {D1 D2 … D106 D106a … ADR-0112 …}.
+proc decisions {} {
 	set out {}
-	foreach line [split [slurp [file join $::root AGENTS.md]] \n] {
-		if {[regexp {^### D(\d+) } $line -> n]} { lappend out $n }
+	foreach path [glob -directory [file join $::root adr] {[0-9][0-9][0-9][0-9]-*.md}] {
+		regexp {^(\d{4})-} [file tail $path] -> num
+		set line ""
+		regexp -line {^- \*\*Decision:\*\* (.+)$} [slurp $path] -> line
+		set ds [regexp -all -inline {\mD\d+[a-z]?} $line]
+		if {![llength $ds]} { set ds [list ADR-$num] }
+		lappend out {*}$ds
 	}
-	return [lsort -integer -unique $out]
-}
-proc agents_subdecisions {} {
-	set out {}
-	foreach line [split [slurp [file join $::root AGENTS.md]] \n] {
-		if {[regexp {^#### (D\d+[a-z]) } $line -> d]} { lappend out $d }
-	}
-	return [lsort -unique $out]
+	return [lsort -dictionary -unique $out]
 }
 proc cited_decisions {} {
 	set out {}
@@ -133,40 +129,35 @@ testConstraint hasgit [expr {[file isdirectory [file join $::root .git]] &&
 
 # --- the register: both directions ------------------------------------------------------
 
-test changelog-every-decision-has-an-entry-or-a-reason {a decision reaches the user or it
-		does not; either way it is accounted for. The result is the list of decisions that
-		are neither — which is what "the changelog is behind" looks like, named} -body {
+test changelog-every-decision-has-an-entry-or-a-reason {the result is the decisions that
+		are neither cited nor exempt — "the changelog is behind", by name} -body {
 	set cited [cited_decisions]
 	set missing {}
-	foreach n [agents_decisions] {
-		if {$n < $::no_entry_before} continue
-		if {[info exists ::no_entry(D$n)]} continue
-		if {"D$n" ni $cited} { lappend missing D$n }
+	foreach d [decisions] {
+		if {[regexp {^D(\d+)$} $d -> n] && $n < $::no_entry_before} continue
+		if {[regexp {^D\d+[a-z]$} $d]} continue   ;# D106a..e ride on D106
+		if {[info exists ::no_entry($d)]} continue
+		if {$d ni $cited} { lappend missing $d }
 	}
 	set missing
 } -result {}
 
-test changelog-exemptions-are-live {an exemption is a claim about a real decision that
-		really has no entry. One naming a decision that does not exist, or one that has
-		since been written up, is stale and says so here rather than sitting in the table} -body {
+test changelog-exemptions-are-live {an exemption names a real decision that really has
+		no entry, and says why} -body {
 	set cited [cited_decisions]
-	set nums [agents_decisions]
+	set have [decisions]
 	set wrong {}
 	foreach d [lsort -dictionary [array names ::no_entry]] {
-		regexp {^D(\d+)$} $d -> n
-		if {$n ni $nums} { lappend wrong "$d: no such decision" }
+		if {$d ni $have} { lappend wrong "$d: no such decision" }
 		if {$d in $cited} { lappend wrong "$d: has an entry now" }
 		if {[string trim $::no_entry($d)] eq ""} { lappend wrong "$d: no reason given" }
 	}
 	set wrong
 } -result {}
 
-test changelog-cites-only-decisions-that-exist {the other direction: an entry citing a
-		decision AGENTS.md does not have is a typo'd number, and a reader following it
-		lands nowhere} -body {
-	set have [list]
-	foreach n [agents_decisions] { lappend have D$n }
-	foreach d [agents_subdecisions] { lappend have $d }
+test changelog-cites-only-decisions-that-exist {an entry citing a decision no record
+		carries is a typo'd number} -body {
+	set have [decisions]
 	set bad {}
 	foreach d [cited_decisions] { if {$d ni $have} { lappend bad $d } }
 	set bad

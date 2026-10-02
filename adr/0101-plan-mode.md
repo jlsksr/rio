@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0102](0102-plan-approval-policy.md), [ADR-0103](0103-plan-tool-in-every-mode.md)
 - **Date:** 2026-09-11
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D101
+- **Decision:** D101
 
 ## Context
 

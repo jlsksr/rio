@@ -1,9 +1,9 @@
 # ADR-0131: rio has a changelog, and a guard keeps it current
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0144](0144-decisions-live-in-adr-only.md)
 - **Date:** 2026-09-20
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D124
+- **Decision:** D124
 
 ## Context
 

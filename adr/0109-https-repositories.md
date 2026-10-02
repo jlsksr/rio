@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0110](0110-agent-https-hostname-checks.md), [ADR-0111](0111-certificate-exceptions.md), [ADR-0120](0120-core-wide-unchecked-https-switch.md)
 - **Date:** 2026-09-12
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D109
+- **Decision:** D109
 
 ## Context
 

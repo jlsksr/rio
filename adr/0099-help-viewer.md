@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0100](0100-manual-renderer.md)
 - **Date:** 2026-09-11
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D99
+- **Decision:** D99
 
 ## Context
 

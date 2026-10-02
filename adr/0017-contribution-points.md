@@ -3,7 +3,7 @@
 - **Status:** Accepted, not implemented (the general plugin platform is deferred)
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D17
+- **Decision:** D17
 
 ## Context
 

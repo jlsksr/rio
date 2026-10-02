@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0043](0043-shared-rich-list-and-git-flags.md), [ADR-0087](0087-files-tree.md)
 - **Date:** 2026-08-06
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D42
+- **Decision:** D42
 
 ## Context
 

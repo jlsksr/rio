@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0113](0113-error-code-taxonomy.md)
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D11
+- **Decision:** D11
 
 ## Context
 

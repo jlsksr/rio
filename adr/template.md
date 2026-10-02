@@ -3,7 +3,6 @@
 - **Status:** Proposed | Accepted | Amended by ADR-NNNN | Superseded by ADR-NNNN | Rejected
 - **Date:** YYYY-MM-DD
 - **Deciders:** jka
-- **Decision log:** AGENTS.md DNNN
 
 ## Context
 

@@ -3,7 +3,7 @@
 - **Status:** Accepted; distribution amended by [ADR-0066](0066-installable-providers.md); keys made per profile by [ADR-0138](0138-provider-profiles-and-file-options.md)
 - **Date:** 2026-09-04
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D65
+- **Decision:** D65
 
 ## Context
 

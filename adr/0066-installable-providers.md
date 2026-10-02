@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0069](0069-claude-as-extension.md)
 - **Date:** 2026-09-04
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D66
+- **Decision:** D66
 
 ## Context
 

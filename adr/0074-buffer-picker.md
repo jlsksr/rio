@@ -3,7 +3,7 @@
 - **Status:** Accepted; generalised by [ADR-0092](0092-theme-picker.md)
 - **Date:** 2026-09-08
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D74
+- **Decision:** D74
 
 ## Context
 

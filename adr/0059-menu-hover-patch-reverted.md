@@ -3,7 +3,7 @@
 - **Status:** Rejected (shipped, then reverted)
 - **Date:** 2026-09-04
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D59
+- **Decision:** D59
 
 ## Context
 

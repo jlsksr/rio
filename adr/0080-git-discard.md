@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0093](0093-discard-tree-and-bulk.md), [ADR-0097](0097-rename-aware-discard.md)
 - **Date:** 2026-09-08
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D80
+- **Decision:** D80
 
 ## Context
 

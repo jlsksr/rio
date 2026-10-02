@@ -5,36 +5,27 @@ described at [adr.github.io](https://adr.github.io/) and in Michael Nygard's
 original template. Each record states one decision: the situation that called
 for it, what was decided, and what follows from it.
 
-## How the records relate to AGENTS.md
+## Names
 
-rio has kept a running decision log in [AGENTS.md](../AGENTS.md) since the first
-day of the project. Entries there are numbered D1, D2, … and are edited in place
-as decisions are amended. The ADRs here are the formal, one-file-per-decision form
-of the same material.
+Decisions are recorded here and nowhere else ([ADR-0144](0144-decisions-live-in-adr-only.md)).
 
-- **ADR-0001 to ADR-0111 correspond one-to-one to D1 to D111.** Source comments
-  and documents that cite "D30" refer to the decision recorded in ADR-0030.
-- **ADR-0112 onwards** each take the next free number. ADR-0112 to ADR-0117
-  record decisions that were settled without a D number of their own: in the
-  open-questions section of AGENTS.md, in `spike/`, or as standing project
-  policy. From D112 on, a D entry's record is not numbered after it; its
-  **Decision log** line names the D number. Dates are the dates the decisions
-  were taken, not the dates the records were written.
-- AGENTS.md remains the working log and carries the implementation detail (test
-  counts, proc names, bug narratives). An ADR carries the decision and its
-  reasoning, and should still read correctly once that detail has changed.
+- **D1 to D136** are the names the old decision log in AGENTS.md used. Source comments
+  and the changelog still cite them. A record's **Decision:** line carries its D number.
+  - D1 to D111 are ADR-0001 to ADR-0111.
+  - D112 to D136 are ADR-0118 to ADR-0143: `grep -l 'Decision:\*\* D123' adr/*`.
+  - ADR-0112 to ADR-0117 never had one.
+- **From ADR-0144 on** a decision has one name: `ADR-NNNN`.
+
+The old log, with its implementation detail: `git show 1400edf:AGENTS.md`.
 
 ## Writing a new record
 
-1. Copy [template.md](template.md) to `NNNN-short-title.md`, using the next free
-   number.
-2. Record the decision in AGENTS.md as the next D number as well, so the two
-   series stay aligned.
-3. Add a row to the index below. The row carries the record's own title, status
-   and date; `check.tcl` holds the two together.
-4. Do not rewrite an accepted record to reflect a later change of mind. Write a
-   new record, and update only the **Status** line of the old one
-   ("Superseded by ADR-NNNN", "Amended by ADR-NNNN") — and its index row.
+1. Copy [template.md](template.md) to `NNNN-short-title.md`, next free number.
+2. Add a row to the index below: the record's own title, status and date.
+3. Never rewrite an accepted record. Write a new one, and change only the old one's
+   **Status** line ("Superseded by ADR-NNNN", "Amended by ADR-NNNN") and its index row.
+4. Give it a CHANGELOG.md entry citing `ADR-NNNN`, or an exemption with a reason in
+   `rio-core/tests/changelog.test`.
 
 ## Checking the set
 
@@ -42,11 +33,8 @@ of the same material.
 tclsh adr/check.tcl
 ```
 
-It must print `ALL PASS`. It holds the index below against the records themselves —
-title, status and date, in both directions — and the D numbers in AGENTS.md against the
-record numbers, so a record without a row, a row whose status was edited in one place
-only, or a D entry nobody wrote up all fail by name. It reads files and nothing else:
-no Tk, no display, no network. Run it before committing anything in this directory.
+It must print `ALL PASS`. It holds the index against the records both ways (title,
+status, date) and the D numbers gap-free. Files only: no Tk, no display, no network.
 
 ## Statuses
 
@@ -192,7 +180,7 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0128](0128-mit-license.md) | rio is MIT-licensed | Accepted; amended by 0129 | 2026-09-20 |
 | [0129](0129-extension-payload-carries-its-licence.md) | An extension payload carries its licence inside it | Accepted | 2026-09-20 |
 | [0130](0130-release-version-and-contract-versions.md) | rio is 0.1.0: semver for releases, integers for contracts | Accepted | 2026-09-20 |
-| [0131](0131-changelog-with-a-guard.md) | rio has a changelog, and a guard keeps it current | Accepted | 2026-09-20 |
+| [0131](0131-changelog-with-a-guard.md) | rio has a changelog, and a guard keeps it current | Accepted; amended by 0144 | 2026-09-20 |
 | [0132](0132-decline-a-file-too-big-to-open.md) | A file too big or too binary to open is declined, not read | Accepted; the budget was raised by 0133 | 2026-09-20 |
 | [0133](0133-big-files-are-slow-for-what-rio-does-to-them.md) | A big file is slow because of what rio does to it, not because it is big | Accepted | 2026-09-20 |
 | [0134](0134-headless-run-cannot-receive-real-input.md) | A headless run must not be able to receive real input | Accepted; amended by 0140 | 2026-09-21 |
@@ -205,3 +193,4 @@ no Tk, no display, no network. Run it before committing anything in this directo
 | [0141](0141-macos-installer-and-rio-app.md) | macOS gets its own installer, and rio.app is a copy of wish | Accepted | 2026-09-29 |
 | [0142](0142-aqua-theme-appearance-and-font-floor.md) | On Aqua, the theme reaches the native controls, and chrome text has a floor | Accepted | 2026-09-29 |
 | [0143](0143-mac-keys-and-right-button.md) | On a Mac, rio uses the Mac's keys and its right mouse button | Accepted | 2026-09-29 |
+| [0144](0144-decisions-live-in-adr-only.md) | Decisions live in adr/ only; AGENTS.md is instructions | Accepted | 2026-10-02 |
