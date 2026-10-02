@@ -1,8 +1,7 @@
-# extensions/claude — the shared Claude inference core (AGENTS.md D8, D26).
+# extensions/claude — the Claude inference core (D8, D26).
 #
-# MIT-licensed, like rio itself (D121). The notice is IN this file because an installed
-# extension travels alone: rio writes the payload into your extension directory, and there
-# is no LICENSE beside it there (D122).
+# MIT, like rio (D121). The notice is in this file because an installed
+# extension has no LICENSE beside it (D122).
 #
 # Copyright (c) 2026 Julius Kaiser <jkdata@mailbox.org>
 #
@@ -23,18 +22,17 @@
 # CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 # OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-# The ~80% of a Claude provider that is identical whichever way you authenticate:
-# shaping the Messages-API request, parsing the streaming SSE response, mapping
-# Claude's output onto the agent provider vocabulary (post delta/tool/done/error,
-# see rio-core/agent.tcl), and classifying failures into helpful, actionable
-# messages (the D26 resilience requirement). The auth face (claude-api) calls
-# infer with its own auth header + config; nothing here knows how the credential
-# was obtained — the split keeps room for other auth strategies without rewriting
-# this core.
+# The part of a Claude provider that does not depend on how you
+# authenticate:
 #
-# The network itself is a seam: infer is handed a `transport` command, so this
-# module is fully testable against canned SSE bytes with no HTTPS (the real
-# tcltls transport is wired in step 3). Event-loop driven (D10), Tk-free (D1).
+#   request   shape the Messages API body
+#   response  parse the SSE stream
+#   events    post delta / tool / done / error (rio-core/agent.tcl)
+#   failures  classify them into messages that name the next step (D26)
+#
+# The face (api-face.tcl) calls infer with its auth header and config. The
+# network is a seam: infer takes a `transport` command, so the tests feed
+# it canned SSE bytes. Event-loop driven (D10), Tk-free (D1).
 
 package require json
 
@@ -51,16 +49,17 @@ namespace eval rio::claude {
 	variable tujson ;# sid -> accumulated input_json_delta for the current tool_use
 }
 
-# Start one streaming completion. `conf` carries the config-as-data (D26):
-# messages_url, anthropic_version, anthropic_beta, model, max_tokens, ?system?,
-# ?effort_json? (the face's already-spelled effort fragment, D106), ?request_timeout?.
-# `auth` is a {header value} pair the face supplies (x-api-key <key> for the
-# API face). `transport` is `{*}$transport request on_chunk on_done`:
-#   request  = {url, headers, body, ?timeout?}
-#   on_chunk = invoked with each response body chunk (bytes)
-#   on_done  = invoked {status err}: HTTP status (0 = couldn't connect), err text
-# `post` is the agent provider callback. Returns immediately; the turn completes
-# asynchronously as the transport drives the callbacks.
+# Start one streaming completion and return at once; the transport's
+# callbacks finish the turn.
+#
+#   conf       messages_url, anthropic_version, ?anthropic_beta?, model,
+#              max_tokens, ?system?, ?effort_json? (D106), ?request_timeout?
+#   auth       {header value}: x-api-key <key>
+#   transport  called as {*}$transport request on_chunk on_done
+#                request   {url headers body ?timeout?}
+#                on_chunk  one chunk of the response body
+#                on_done   {status err}; status 0 = could not connect
+#   post       the agent's provider callback
 proc rio::claude::infer {conf conversation tools auth transport post} {
 	variable seq ; variable buf ; variable raw ; variable cb ; variable fin
 	variable stop ; variable cbtype ; variable tujson
@@ -78,8 +77,8 @@ proc rio::claude::infer {conf conversation tools auth transport post} {
 		url     [dict get $conf messages_url] \
 		headers $headers \
 		body    [_request_json $conf $conversation $tools]]
-	# Forward the request-timeout budget only when configured; the transport keeps
-	# a generous default otherwise (D26: the wire specifics are data, not code).
+	# Pass a timeout only if one is configured; the transport has its own
+	# default.
 	if {[dict exists $conf request_timeout]} {
 		dict set req timeout [dict get $conf request_timeout]
 	}
@@ -88,10 +87,9 @@ proc rio::claude::infer {conf conversation tools auth transport post} {
 }
 
 # --- request shaping ---------------------------------------------------------
-# The conversation is agent.tcl's list of {role, content} dicts -> Claude messages,
-# each `content` a block array (text / tool_use / tool_result). `tools` is the
-# agent's tool specs ({name, description, input_schema}); when present they ride
-# along so the model can request a read (D26 slice 4).
+# agent.tcl's conversation, a list of {role content}, becomes Claude
+# messages; each `content` is a block array. `tools` is the agent's tool
+# specs: {name description input_schema}.
 proc rio::claude::_request_json {conf conversation tools} {
 	set msgs {}
 	foreach m $conversation {
@@ -105,9 +103,7 @@ proc rio::claude::_request_json {conf conversation tools} {
 	if {[dict exists $conf system] && [dict get $conf system] ne ""} {
 		lappend parts "\"system\":[rio::llm::jstr [dict get $conf system]]"
 	}
-	# The effort choice (D106), already spelled as a JSON fragment by the face — or
-	# empty, which is the default and means the request is byte-for-byte the one rio
-	# has always sent.
+	# The effort (D106), spelled by the face. Empty by default.
 	if {[dict exists $conf effort_json] && [dict get $conf effort_json] ne ""} {
 		lappend parts [dict get $conf effort_json]
 	}
@@ -118,17 +114,14 @@ proc rio::claude::_request_json {conf conversation tools} {
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
-	# jascii is the last word on the body, because not every part of it came through
-	# jstr: a tool's `input_schema` is spliced raw (it is already JSON), as is a
-	# tool_use block's own `raw` input. The HTTP layer is handed a pure-ASCII body or
-	# it mangles what it doesn't expect — see rio::llm::jascii for what that cost.
+	# jascii last, over the whole body: a tool's input_schema is spliced
+	# raw, not through jstr. The HTTP layer needs pure ASCII; see
+	# rio::llm::jascii.
 	return [rio::llm::jascii "{[join $parts ,]}"]
 }
 
-# A message's content -> a JSON array of block objects. A legacy {role,text} entry
-# (no `content`) is wrapped as a single text block, so the echo path and older
-# callers keep working. tool_use re-sends Claude's own input JSON verbatim (`raw`);
-# tool_result carries our captured output and an optional is_error flag.
+# A message's content -> a JSON array of blocks. An old {role text} entry,
+# with no `content`, becomes one text block.
 proc rio::claude::_content_json {m} {
 	if {![dict exists $m content]} {
 		return "\[{\"type\":\"text\",\"text\":[rio::llm::jstr [dict get $m text]]}\]"
@@ -140,11 +133,9 @@ proc rio::claude::_content_json {m} {
 				lappend blocks "{\"type\":\"text\",\"text\":[rio::llm::jstr [dict get $b text]]}"
 			}
 			tool_use {
-				# Re-serialize the PARSED input through jstr rather than splicing the
-				# raw streamed JSON: the raw fragments carry already-unescaped string
-				# values (json2dict decoded them during SSE parsing), so echoing them
-				# verbatim would put literal control characters (a file's newlines)
-				# into the body and the API rejects it. obj_json escapes every value.
+				# Serialise the parsed input again; do not splice the streamed
+				# JSON. Its strings are already unescaped, so a file's newlines
+				# would go out raw and the API rejects the body.
 				lappend blocks "{\"type\":\"tool_use\",\"id\":[rio::llm::jstr [dict get $b id]],\"name\":[rio::llm::jstr [dict get $b name]],\"input\":[rio::llm::obj_json [dict get $b input]]}"
 			}
 			tool_result {
@@ -159,14 +150,11 @@ proc rio::claude::_content_json {m} {
 	return "\[[join $blocks ,]\]"
 }
 
-# Request-body string/object serialisation (jstr / obj_json) is provider-agnostic
-# and now lives in the shared plugin lib (plugins/lib/json.tcl, rio::llm::*), so
-# the Claude and OpenAI cores share one copy.
+# jstr and obj_json are shared with the OpenAI core: plugins/lib/json.tcl.
 
 # --- streaming SSE -> agent events -------------------------------------------
-# Each response chunk: buffer it (and the raw body), split into complete lines,
-# and act on each. Anthropic's stream carries the event type INSIDE the data
-# JSON, so we key off `data:` lines alone and switch on the JSON `type`.
+# Buffer each chunk, split it into lines, act on each. Anthropic puts the
+# event type inside the data JSON, so only `data:` lines matter.
 proc rio::claude::_chunk {sid bytes} {
 	variable buf ; variable raw ; variable cb
 	if {![info exists cb($sid)]} return
@@ -192,8 +180,8 @@ proc rio::claude::_line {sid line postcmd} {
 	}
 	switch -- [dict get $d type] {
 		content_block_start {
-			# A new content block opens. Remember its kind; for a tool_use block,
-			# capture id/name and start accumulating its streamed input JSON.
+			# A block opens. For a tool_use, keep its id and name and start
+			# collecting its input JSON.
 			set cbtype($sid) text
 			if {[dict exists $d content_block type] &&
 			    [dict get $d content_block type] eq "tool_use"} {
@@ -211,8 +199,7 @@ proc rio::claude::_line {sid line postcmd} {
 			}
 		}
 		content_block_stop {
-			# A tool_use block closed — parse its accumulated input and surface the
-			# tool call (raw kept verbatim so the loop can re-send Claude's own JSON).
+			# A tool_use block closed: parse its input and post the tool call.
 			if {$cbtype($sid) eq "tool_use"} {
 				set rawjson [expr {$tujson($sid) eq "" ? "{}" : $tujson($sid)}]
 				if {[catch {json::json2dict $rawjson} input]} { set input {} }
@@ -221,7 +208,7 @@ proc rio::claude::_line {sid line postcmd} {
 			}
 		}
 		message_delta {
-			# Carries the stop_reason ("tool_use" means more work follows).
+			# Carries the stop_reason; "tool_use" means more work follows.
 			catch {set stop($sid) [dict get $d delta stop_reason]}
 		}
 		error {
@@ -238,16 +225,15 @@ proc rio::claude::_line {sid line postcmd} {
 	}
 }
 
-# Post the terminal `done`, carrying the stop_reason only when there is one — a
-# plain completion is a bare `done` (the same shape the echo provider posts), and
-# `done tool_use` tells the loop to run the requested tools and continue.
+# Post `done`, with the stop_reason if there is one. `done tool_use` tells
+# the loop to run the tools and continue.
 proc rio::claude::_post_done {postcmd stop} {
 	if {$stop eq ""} { {*}$postcmd done } else { {*}$postcmd done $stop }
 }
 
-# Transport finished. If the stream already produced a terminal event we are
-# done; otherwise classify by HTTP status into an actionable agent.error (D26),
-# enriched with the API's own error message when the body carries one.
+# The transport finished. If no terminal event was posted yet, the HTTP
+# status decides: an agent.error that names the next step (D26), with the
+# API's own message when the body has one.
 proc rio::claude::_done {sid status err} {
 	variable buf ; variable raw ; variable cb ; variable fin ; variable stop
 	variable cbtype ; variable tuid ; variable tuname ; variable tujson
@@ -255,17 +241,14 @@ proc rio::claude::_done {sid status err} {
 	set postcmd $cb($sid)
 	if {!$fin($sid)} {
 		if {$status == 0} {
-			# Status 0 is "the transport never got an HTTP reply" — usually a real
-			# connection failure, but ALSO the case where the core can't even set up
-			# TLS because the tcltls package is missing (D30: the agent's HTTPS runs
-			# in the core, so a TLS-less server fails here). Tell those apart — the
-			# fixes are different (check the network vs. install tcltls on the core).
+			# No HTTP reply. Usually the network, but also a core without
+			# tcltls (D30: the agent's HTTPS runs in the core). The fixes
+			# differ, so tell them apart.
 			if {[string match {*can't find package tls*} $err]} {
 				{*}$postcmd error tls_unavailable \
 					"The core can't load the TLS library Claude's HTTPS needs — install tcltls where the core runs (apt/apk: tcl-tls; OpenBSD: tcltls) and restart it. This is the core's host, not yours, when it's remote ($err)"
 			} elseif {[string match {*the agent refused https to*} $err]} {
-				# The transport's own refusal (D110): nothing was dialled, so the connection
-				# is not what to check — the message already says what is.
+				# The transport refused to dial (D110). Its message says why.
 				{*}$postcmd error tls_unchecked $err
 			} else {
 				{*}$postcmd error network "Couldn't reach Claude — check your connection ($err)"
@@ -281,9 +264,8 @@ proc rio::claude::_done {sid status err} {
 		cbtype($sid) tuid($sid) tuname($sid) tujson($sid)
 }
 
-# Map an HTTP status (+ optional JSON error body) to {code, message}. The
-# messages always name the user's next action — the break-without-notice case is
-# `unexpected`, told plainly. (D26.)
+# An HTTP status, and the JSON error body if any -> {code message}. Each
+# message names the user's next step (D26).
 proc rio::claude::_classify {status raw} {
 	set detail ""
 	catch {

@@ -1,8 +1,7 @@
-# extensions/openai — loader / entry file (AGENTS.md D8, D26, D66).
+# extensions/openai — the entry file (D8, D26, D66).
 #
-# MIT-licensed, like rio itself (D121). The notice is IN this file because an installed
-# extension travels alone: rio writes the payload into your extension directory, and there
-# is no LICENSE beside it there (D122).
+# MIT, like rio (D121). The notice is in this file because an installed
+# extension has no LICENSE beside it (D122).
 #
 # Copyright (c) 2026 Julius Kaiser <jkdata@mailbox.org>
 #
@@ -23,15 +22,13 @@
 # CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 # OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-# The OpenAI-compatible agent provider, shipped as an INSTALLABLE provider extension
-# (kind = provider, D66) rather than in-tree: it lands in the core's provider store
-# and the core sources THIS file (the manifest's `entry`) at startup. It sources
-# only its own two payload files — the inference core and the auth face; the shared
-# rio::llm::* runtime (JSON serialisers + HTTPS transport) and rio::secret::* are
-# guaranteed present by the core BEFORE any provider loads (the provider-api = 1
-# surface, server.tcl), so an installed provider ships no copy of them.
+# The OpenAI-compatible agent provider, as an installable extension (kind =
+# provider). The core sources this file, the manifest's `entry`, at startup.
+# It loads its own two files only: rio::llm::* (JSON, HTTPS) and
+# rio::secret::* are the core's, loaded before any provider (provider-api 1,
+# server.tcl).
 #
-# (The plugin's own unit tests source the core lib themselves — see tests/.)
+# The tests source the core's lib themselves; see tests/.
 
 apply {{} {
 	set dir [file dirname [file normalize [info script]]]
