@@ -1,38 +1,35 @@
 # plugins/lib — the shared HTTPS streaming transport (D8/D26, D10).
 #
-# The network layer every LLM provider plugs into. Two command-prefix seams, both
-# async via the http package + tcltls (event loop, D10), both taking
-# req = {url, headers (flat {k v ...}), ?body?, ?timeout?} with status the HTTP code
-# (0 = couldn't connect):
-#   stream req on_chunk on_done  — a STREAMING POST for an SSE completions API,
-#                                  delivering body chunks live (on_chunk <text>;
-#                                  on_done <status> <err>)
-#   get    req on_done           — a plain GET for one small document, e.g. the
-#                                  vendor's model list (on_done <status> <err> <body>)
-# How the server's certificate is verified is not decided here: rio::tls (rio-core/
-# tls.tcl, D109) owns that for every https connection the core makes — the host's own
-# CA store on each platform, the same for a turn as for a repository fetch. Nothing
-# here is provider-specific — Claude and OpenAI share this copy.
+# The network layer of every LLM provider. Two calls, both asynchronous
+# (http + tcltls in the event loop, D10):
 #
-# Sourced by more than one plugin loader (server.tcl loads each), so it is guarded
-# to define its procs exactly once.
+#   stream req on_chunk on_done   a streaming POST, for an SSE API
+#       on_chunk <text>           each piece of the body, as it arrives
+#       on_done  <status> <err>
+#   get req on_done               a GET of one small document
+#       on_done  <status> <err> <body>
+#
+#   req      {url <u> headers {k v ...} ?body <s>? ?timeout <ms>?}
+#   status   the HTTP code; 0 = no connection, and <err> says why
+#
+# rio::tls (rio-core/tls.tcl, D109) decides how a certificate is verified.
+#
+# Several plugin loaders source this file; the guard defines it once.
 
 if {[llength [info commands rio::llm::http::stream]]} { return }
 
 package require http
-# The core has normally loaded rio::tls already; standalone (this suite) it has not.
+# The core has loaded rio::tls already; this file's own tests have not.
 if {![llength [info commands rio::tls::socket]]} {
 	source [file join [file dirname [file normalize [info script]]] .. .. rio-core tls.tcl]
 }
 
 namespace eval rio::llm::http {}
 
-# Load tcltls, and refuse an https URL this core cannot verify properly (D110). A tcltls
-# older than 1.8 checks the certificate's chain but never its name, so any trusted
-# certificate for any host would do. That goes ahead only when the user allowed it —
-# rio::tls::unchecked_ok, the core-wide switch repositories share (D114), asked at request
-# time so it is the core's current choice. Plain http is not this gate's business: nothing
-# is being verified there. Providers match "the agent refused https to" in this message.
+# Load tcltls, and refuse an https URL this core cannot verify (D110). A
+# tcltls before 1.8 checks a certificate's chain but not its host name; that
+# is allowed only if the user said so (rio::tls::unchecked_ok, D114). Plain
+# http passes. Providers match "the agent refused https to" in the message.
 proc rio::llm::http::_ensure_tls {url} {
 	rio::tls::ensure
 	if {![regexp -nocase {^https://([^/?#]*)} $url -> host]} return
@@ -56,10 +53,8 @@ proc rio::llm::http::_headers {headers ctypeVar} {
 proc rio::llm::http::stream {req on_chunk on_done} {
 	if {[catch {_ensure_tls [dict get $req url]} e]} { {*}$on_done 0 $e ; return }
 	set hlist [_headers [dict get $req headers] ctype]
-	# -timeout is the WHOLE-request budget, and a streaming turn (a long
-	# generation, or several tool round-trips) can legitimately take minutes —
-	# too tight a cap severs it mid-stream and mislabels it a network error. Keep
-	# a generous default and let the face override it as data (D26 request_timeout).
+	# -timeout covers the whole request, and a turn can take minutes: 10
+	# minutes unless the request says otherwise.
 	set timeout [expr {[dict exists $req timeout] ? [dict get $req timeout] : 600000}]
 	if {[catch {
 		::http::geturl [dict get $req url] -method POST \
@@ -72,13 +67,7 @@ proc rio::llm::http::stream {req on_chunk on_done} {
 	}
 }
 
-# --- plain GET (a small JSON document: the vendor's model list) ---------------
-#
-# The second seam (D106): one request, one whole body — no streaming, because a
-# models listing is a few kB that is useless in pieces. Same request shape as
-# `stream` minus the body, and the same "never block the core" rule (D10): the
-# reply arrives on the callback, in the event loop.
-#   get req on_done   — on_done <status> <err> <body>; status 0 = couldn't connect
+# --- plain GET (a small JSON document: the vendor's model list, D106) ---------
 proc rio::llm::http::get {req on_done} {
 	if {[catch {_ensure_tls [dict get $req url]} e]} { {*}$on_done 0 $e "" ; return }
 	set hlist [_headers [dict get $req headers] ctype]
@@ -91,10 +80,8 @@ proc rio::llm::http::get {req on_done} {
 	}
 }
 
-# A JSON response is `application/json`, which the http package treats as BINARY —
-# so ::http::data hands back raw bytes and the utf-8 decode is ours to do, exactly as
-# the streaming path does it at the socket. When the server did declare a charset,
-# http has already decoded, and decoding twice would mangle every non-ASCII name.
+# http treats application/json as binary, so decode utf-8 here. Not if the
+# server named a charset: then http has decoded already.
 proc rio::llm::http::_on_get_end {on_done token} {
 	lassign [_status $token] status err
 	set body [::http::data $token]
@@ -107,9 +94,8 @@ proc rio::llm::http::_on_get_end {on_done token} {
 	{*}$on_done $status $err $body
 }
 
-# Per-chunk: hand the decoded text to on_chunk. Decoding at the socket (utf-8)
-# means partial multibyte sequences at a chunk boundary are held by Tcl until
-# complete, so on_chunk only ever sees whole characters.
+# Hand each chunk to on_chunk. The socket decodes utf-8, so a character
+# split across two chunks arrives whole.
 proc rio::llm::http::_on_data {on_chunk sock token} {
 	fconfigure $sock -encoding utf-8 -translation lf
 	set chunk [read $sock]
@@ -123,17 +109,16 @@ proc rio::llm::http::_on_end {on_done token} {
 	{*}$on_done $status $err
 }
 
-# Map an http token to {status err}: a completed HTTP exchange (even a 4xx/5xx)
-# is {<ncode> ""}; a connection failure/timeout/reset is {0 <reason>}.
+# An http token as {status err}: {<code> ""} for any completed exchange,
+# a 4xx or 5xx too; {0 <reason>} for a failure, timeout or reset.
 proc rio::llm::http::_status {token} {
 	if {[::http::status $token] eq "ok"} {
 		return [list [::http::ncode $token] ""]
 	}
 	set err [::http::error $token]
 	if {$err eq ""} { set err [::http::status $token] }
-	# A refused certificate reaches http as "failed to use socket", which reads like a
-	# network outage; rio::tls kept the real reason. (http's error is a {msg info code}
-	# list — only the message is worth showing once there is a better one.)
+	# A refused certificate reaches http as "failed to use socket";
+	# rio::tls kept the real reason.
 	if {![catch {lindex $err 0} msg]} {
 		set told [rio::tls::explain $msg]
 		if {$told ne $msg} { set err $told }
