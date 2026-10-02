@@ -10,7 +10,10 @@ decision behind it — *Dnn* or *ADR-NNNN*, a record in [adr/](adr/README.md) �
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
-## [0.3.0] — unreleased
+## [0.3.0] — 2026-10-02
+
+The macOS release. Verified on Linux at the tag. macOS last ran on 2026-09-29, Windows on
+2026-09-17. If you installed on a Mac from `main`, run `./install-macos.sh` again.
 
 ### Added
 
@@ -508,5 +511,6 @@ tagged.
 - **Stale-link watchdog** — a dead SSH tunnel is detected in seconds, not minutes. — *D37 ·
   `eed9bfc` · 2026-07-12*
 
+[0.3.0]: https://github.com/jlsksr/rio/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jlsksr/rio/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jlsksr/rio/releases/tag/v0.1.0

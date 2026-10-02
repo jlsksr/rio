@@ -667,6 +667,12 @@ autosave included, are unexercised there. macOS: still never executed. The BSDs:
 design target. Same rule as 0.1.0 — the release notes say this rather than listing
 platforms that are supported only in principle.
 
+**What 0.3.0 shipped on (2026-10-02).** Linux, at the tagged commit: zero skips — core
+924, syntax 536, plugins/lib 20, claude 55, openai 115, all **30** GUI suites exit 0 —
+under UTF-8 and `LANG=C`. macOS: last run 2026-09-29 during D133–D136, not re-run at the
+tag; Homebrew and MacPorts paths untried. Windows: last pass still 2026-09-17. The BSDs:
+still a design target.
+
 ### The two decisions to take before the first push
 
 Both are one-way-ish once the history is public, so they are here rather than inline.
