@@ -63,6 +63,10 @@ Undo history belongs to the file, not to the view, so it survives switching tabs
 and moving a tab to the other group. You can undo past your last save; the `●`
 marker tells you whether what is on screen matches the disk.
 
+History is bounded. After a very long session in one file the oldest steps drop
+off, and undo stops earlier. The last edit can always be undone, whatever its
+size.
+
 > **In vi mode** the granularity is vi's. Pressing `x` three times gives three
 > separate undos, but a whole insert session (`i`, type a word, `Esc`) comes
 > back with one `u`. See [editing modes](editing-modes.md).

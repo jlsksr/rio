@@ -10,6 +10,15 @@ decision behind it — *Dnn* or *ADR-NNNN*, a record in [adr/](adr/README.md) �
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
+## [0.4.0] — unreleased
+
+### Changed
+
+- **Undo history is bounded, and lighter** — a buffer keeps about 4 MB of undo steps; past
+  that the oldest go. The last edit can always be undone, whatever its size. A step takes
+  a third of the memory it did, and a reload or Replace All keeps one copy of the file,
+  not two. — *ADR-0146 · `6c8d713` · 2026-10-02*
+
 ## [0.3.0] — 2026-10-02
 
 The macOS release. Verified on Linux at the tag. macOS last ran on 2026-09-29, Windows on

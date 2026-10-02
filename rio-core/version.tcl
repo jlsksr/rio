@@ -49,5 +49,5 @@
 # says which exact commit, and between releases Build is the precise one.
 
 namespace eval rio {
-	variable version 0.3.0
+	variable version 0.4.0
 }
