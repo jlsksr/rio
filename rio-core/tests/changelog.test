@@ -56,6 +56,7 @@ array set ::no_entry {
 	ADR-0114 {one project root — how the core is built, not a change to it}
 	ADR-0117 {the derived-facts register — policy}
 	ADR-0144 {decisions move from AGENTS.md to adr/ — a change to the documents, not to rio}
+	ADR-0145 {the GUI's source is split into files — no code changed, nothing a user can see}
 }
 # D1–D21 predate anything runnable, so they were a change to nothing. D22 is the
 # first with an entry.
