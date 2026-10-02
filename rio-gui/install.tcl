@@ -3,16 +3,11 @@
 
 # --- what is installed, and what is an update (D107) -----------------
 
-# The installed view: "kind/name" -> {version source}. The ledger is the base —
-# but for a PROVIDER the core wins, because a provider installs core-side and
-# provider.list reports the store's own truth ({name, version, source}, D66).
-# That is D39's recorded ledger caveat answered where it actually bites: a
-# provider installed by another frontend, or onto a remote core, still shows its
-# real version here and still gets update tracking.
-#
-# This view is DERIVED and never written back to extensions.json: a GUI that
-# talks to two cores in turn would otherwise persist one core's answer as what
-# it believes it installed on the other.
+# What is installed: "kind/name" -> {version source}. From the ledger, except
+# that for a provider the core's store wins (provider.list, D66): it also
+# knows a provider another frontend installed.
+# Derived, never written to extensions.json: that file must not record one
+# core's answer for another.
 proc ext_installed_compute {} {
 	set ::ext_installed {}
 	dict for {key e} $::ext_ledger {
@@ -24,9 +19,8 @@ proc ext_installed_compute {} {
 	}
 }
 
-# Ask the core which providers its store holds, at which versions (D66's op, put
-# to a second use). Best effort: an old core without provider.list, or a failed
-# call, leaves the ledger to speak for providers as it did before.
+# Ask the core which providers its store holds, and their versions. If the
+# call fails, the ledger speaks for providers.
 proc ext_core_providers_refresh {} {
 	set ::ext_core_providers {}
 	set pr [rio_call provider.list {}]
@@ -45,12 +39,9 @@ proc ext_core_providers_refresh {} {
 	}
 }
 
-# Whether an extension takes updates from repositories OTHER than the one it was
-# installed from. Off by default, and that default is the safe direction: with no
-# central index nobody is forced to respect a namespace, so `vi` on another host
-# may be an entirely different program that merely shares a name (jka, D107).
-# Switching to it stays possible — as an INSTALL, with the consent that names the
-# new source — it just is not an "update".
+# Does an extension take updates from repositories other than the one it was
+# installed from? Off by default (D107): without a central index, `vi` on
+# another host may be a different program. Installing it stays possible.
 proc ext_anysource {key} {
 	if {![dict exists $::ext_ledger $key]} { return 0 }
 	set e [dict get $::ext_ledger $key]
@@ -64,12 +55,10 @@ proc ext_anysource_set {key on} {
 	ext_updates_compute
 }
 
-# Is this variant an update to what is installed? Returns the installed version it
-# would replace, or "" for anything that is not an update — not installed, an
-# unparseable version on either side (no claim, D107), the same or a lower
-# version, a foreign source without the flag, or a variant this rio can't install
-# anyway (an unknown kind, a provider needing a newer provider-api: never offer an
-# update that would be refused).
+# Is this variant an update to what is installed? Returns the installed
+# version it would replace, or "". Not an update: not installed, a version
+# that is not semver, the same or a lower version, another source without the
+# flag, a variant this rio cannot install.
 proc ext_variant_update {v} {
 	set key "[dict get $v kind]/[dict get $v name]"
 	if {![dict exists $::ext_installed $key]} { return "" }
@@ -100,9 +89,7 @@ proc ext_updates_compute {} {
 
 # --- installing & removing ----------------------------------------------------
 
-# The kind -> install-target map: the ONLY version-specific piece of the whole
-# format (D39's forward-compatibility contract). A kind not listed here still
-# LISTS in the window — greyed "(needs a newer rio)" — it just can't install.
+# The kinds this rio can install. Any other kind is listed greyed (D39).
 proc ext_kind_known {kind} {
 	return [expr {$kind in {syntax mode theme provider}}]
 }
@@ -115,20 +102,11 @@ proc ext_kind_dir {kind} {
 	return ""
 }
 
-# The VERSIONED CONTRACT a kind binds to, as {manifest-key ceiling default}, or ""
-# for a kind that has none (D123). Only a surface that can BREAK gets one: a provider
-# is sourced into the core (D66) and a mode into the frontend (modes/registry.tcl), and
-# the mode surface is the one ROADMAP says will change. A theme binds to the additive
-# D24 role table and syntax is stable today, so a number there would be one nothing
-# ever checks.
-#
-# The DEFAULT is the difference between the two. A provider with no `provider-api` is
-# refused outright (the core has required it since providers became installable, so ""
-# fails the integer test below and greys the row). A mode with no `mode-api` is read as
-# 1: modes have shipped without the key since D38, and making it mandatory now would
-# grey `vi` and `emacs` out of the live repository until every manifest is re-signed.
-# That is the D19 forward-compatibility rule, and it costs nothing — the key only
-# starts carrying weight when there is a mode-api 2.
+# The versioned contract of a kind, as {manifest-key ceiling default}, or ""
+# for a kind without one (D123).
+#   provider   provider-api, required: a manifest without it is refused
+#   mode       mode-api, default 1: older modes shipped without the key
+#   syntax, theme   none
 proc ext_kind_api {kind} {
 	switch -- $kind {
 		provider { return [list provider-api $::provider_api_max ""] }
@@ -137,17 +115,15 @@ proc ext_kind_api {kind} {
 	return ""
 }
 
-# Whether THIS rio can install a given variant. A kind it doesn't know can't be
-# installed (forward-compat); nor can one whose declared contract level is past what
-# this rio implements (`too_new`, set at scan time by ext_kind_api's ceiling).
+# Can this rio install the variant? Not an unknown kind, and not one that
+# needs a newer contract (`too_new`, set by the scan).
 proc ext_variant_installable {v} {
 	if {![ext_kind_known [dict get $v kind]]} { return 0 }
 	if {[dict exists $v too_new] && [dict get $v too_new]} { return 0 }
 	return 1
 }
 
-# A row is greyed ("needs a newer rio") when none of its variants can be installed
-# here — an unknown kind, or one whose every variant needs a newer contract level.
+# A row is greyed when none of its variants can be installed here.
 proc ext_row_installable {row} {
 	foreach v [dict get $row variants] {
 		if {[ext_variant_installable $v]} { return 1 }
@@ -155,9 +131,8 @@ proc ext_row_installable {row} {
 	return 0
 }
 
-# Does any OTHER ledger entry of this kind own one of these payload filenames?
-# Payloads of one kind share a flat drop-in dir, so a name collision would let
-# extension B silently overwrite extension A's file — refuse instead.
+# Which other installed extension of this kind owns one of these filenames?
+# "" for none. Payloads of one kind share a dir, so a clash would overwrite.
 proc ext_file_owner {kind name files} {
 	dict for {key e} $::ext_ledger {
 		lassign [split $key /] ekind ename
@@ -169,26 +144,22 @@ proc ext_file_owner {kind name files} {
 	return ""
 }
 
-# Install one variant (a dict out of ::repo_variants): consent -> fetch ALL
-# payloads -> write -> activate -> ledger. Returns 1 installed / 0 not.
-# Nothing is written until every payload arrived intact, and a half-failed
-# write rolls the files back — an install is all-or-nothing on disk.
+# Install one variant. Returns 1 if installed, 0 if not.
 #
-# `consented` is set only by Update All (D107), which asked ONCE for the whole
-# batch — a summary listing every extension, its version change and its source.
-# It suppresses this dialog and nothing else: the collision refusal, the
-# fetch-everything-first rule, the rollback and the ledger write are unchanged.
+#   consent ─► fetch every payload ─► write ─► activate ─► ledger
+#
+# - Nothing is written until every payload has arrived and passed its hash.
+# - A failed write is rolled back.
+# - `consented`: Update All already asked once for the batch (D107). Only the
+#   dialog is skipped.
 proc ext_install {variant {consented 0}} {
 	dict with variant {}  ;# source dir name kind version author description files
 	if {![ext_kind_known $kind]} {
 		report_error "'$name' has kind '$kind', which this rio doesn't know — it needs a newer rio."
 		return 0
 	}
-	# The contract level, refused HERE and not only greyed in the list (D123). Greying is
-	# the UI telling the user; this is the enforcement, and until D123 there was none: a
-	# too-new PROVIDER was stopped by the core's own `put`, which is a check a mode — a
-	# frontend drop-in with no core in the path — does not get. Refusing at the one place
-	# every install funnels through covers both, and any kind that gains a contract later.
+	# The contract level is enforced here, not only greyed in the list
+	# (D123): a mode has no core in its path to refuse it.
 	if {[dict exists $variant too_new] && [dict get $variant too_new]} {
 		lassign [ext_kind_api $kind] _key ceiling
 		report_error "'$name' needs $_key [dict get $variant api], but this rio implements\
@@ -196,8 +167,7 @@ proc ext_install {variant {consented 0}} {
 		return 0
 	}
 	set key $kind/$name
-	# Consent, stated honestly: code is code, data is data, and the source URL
-	# is the provenance the user is trusting.
+	# Consent: say whether it is data or code, and name the source.
 	if {$kind eq "theme"} {
 		set what "'$name' is a THEME: colour/font data, parsed and never executed."
 	} elseif {$kind eq "provider"} {
@@ -215,10 +185,8 @@ proc ext_install {variant {consented 0}} {
 	}
 	if {!$consented && [tk_messageBox -icon warning -type yesno -title "rio — install extension" \
 			-message $msg] ne "yes"} { return 0 }
-	# Payloads of one kind share a flat drop-in dir (syntax/mode) — a name owned by
-	# another installed extension would be silently overwritten, so refuse. A
-	# provider (D66) lives in its OWN core-side dir, so filenames never collide
-	# across providers; the check does not apply to it.
+	# Refuse a filename another extension owns. A provider has a dir of its
+	# own (D66), so no clash there.
 	if {$kind ne "provider"} {
 		set owner [ext_file_owner $kind $name $files]
 		if {$owner ne ""} {
@@ -226,10 +194,8 @@ proc ext_install {variant {consented 0}} {
 			return 0
 		}
 	}
-	# Fetch everything first; only then touch disk. On a signed source every payload
-	# is checked against the signature's hashes HERE, inside that rule — so a file
-	# that isn't what was signed aborts with nothing written, and the repository
-	# having changed under a stale scan reads as what it is.
+	# Fetch everything first. On a signed source each payload is checked
+	# against the signed hashes here, before anything is written.
 	set signed [expr {[dict get [repo_sig_of $source] state] eq "signed"}]
 	set payload {}
 	foreach f $files {
@@ -254,20 +220,16 @@ proc ext_install {variant {consented 0}} {
 	} else {
 		if {![ext_install_files $kind $name $payload]} { return 0 }
 	}
-	# A provider's installed version is read back from the core (ext_installed_compute),
-	# and the store just changed under us — record it rather than re-asking, so the row
-	# shows the version that was actually written.
+	# The core's store just changed: record the provider's new version here.
 	if {$kind eq "provider"} {
 		dict set ::ext_core_providers $name [dict create version $version source $source]
 	}
 	set entry [dict create \
 		source $source dir $dir version $version files $files \
 		installed [clock format [clock seconds] -format %Y-%m-%d]]
-	# The cross-source flag is the USER's setting for this extension, not a property
-	# of the payload — an update must not silently reset it (D107).
+	# The cross-source flag is the user's: an update keeps it (D107).
 	if {[ext_anysource $key]} { dict set entry anysource 1 }
-	# Provenance now includes WHO vouched for these bytes (D118). Written only when
-	# there was a signature, so a ledger that never met one keeps its old shape.
+	# Who signed these files, if anyone (D118).
 	set sigstate [repo_sig_of $source]
 	if {[dict get $sigstate state] eq "signed" && [dict get $sigstate signer] ne ""} {
 		dict set entry signed_by [dict get $sigstate signer]
@@ -279,10 +241,9 @@ proc ext_install {variant {consented 0}} {
 	return 1
 }
 
-# Write syntax/mode payloads into the kind's drop-in dir, then reload that
-# machinery so the extension is live at once — install is drop-the-file, the
-# same act as D32/D38 by hand, just performed by rio. Failure rolls back:
-# previously-existing files are restored, fresh ones removed.
+# Write syntax or mode payloads into the kind's user dir and reload it, so
+# the extension is live at once. On failure: files that existed are
+# restored, new ones removed.
 proc ext_install_files {kind name payload} {
 	set dstdir [ext_kind_dir $kind]
 	if {$dstdir eq ""} { report_error "No user $kind directory resolvable (no HOME?)." ; return 0 }
@@ -316,11 +277,9 @@ proc ext_install_files {kind name payload} {
 	return 1
 }
 
-# Themes install CORE-side through theme.put — each payload file becomes the
-# theme named by its rootname (night.theme -> night), validated by the core
-# before anything lands. On a partial failure the already-put files of this
-# install are deleted again (best effort — the core validated them going in,
-# so in practice the first failure is also the last).
+# A theme installs in the core, through theme.put: night.theme becomes the
+# theme `night`. The core validates it. On a failure the themes already put
+# by this install are deleted again.
 proc ext_install_theme {name payload} {
 	set put {}
 	dict for {f text} $payload {
@@ -338,11 +297,9 @@ proc ext_install_theme {name payload} {
 	return 1
 }
 
-# Install a provider CORE-side through provider.put (D66) — like a theme, its code
-# is the CORE's (a remote core stores on its own disk), so it lands there, not in
-# the frontend's dirs. The core validates the manifest (kind, provider-api, entry,
-# every name) before writing. It is NOT sourced now: a provider activates on the
-# core's next start (restart-to-activate), so on success we say so plainly.
+# A provider installs in the core, through provider.put (D66). The core
+# validates the manifest. It is not sourced now: it starts with the next core
+# start, and the dialog says so.
 proc ext_install_provider {name manifest payload source} {
 	set resp [rio_call provider.put [dict create \
 		name $name manifest $manifest files $payload source $source]]
@@ -357,15 +314,12 @@ proc ext_install_provider {name manifest payload source} {
 	return 1
 }
 
-# Remove an installed extension by ledger key parts. Files (or core-side
-# themes) go first, the ledger entry last — a failed delete leaves the entry,
-# so Remove can be retried; a vanished file is already what delete wanted.
+# Remove an installed extension: the files first, the ledger entry last.
 proc ext_remove {kind name} {
 	set key $kind/$name
 	if {![dict exists $::ext_ledger $key]} {
-		# A provider the CORE holds but this GUI's ledger doesn't know — installed by
-		# another frontend, or onto a shared core (D107). provider.delete takes a name
-		# and nothing else, so Remove works without an entry to consult.
+		# A provider the core holds but this ledger does not know (D107):
+		# provider.delete needs only the name.
 		if {$kind eq "provider" && [dict exists $::ext_core_providers $name]} {
 			catch {rio_call provider.delete [dict create name $name]}
 			dict unset ::ext_core_providers $name
@@ -397,13 +351,11 @@ proc ext_remove {kind name} {
 	return 1
 }
 
-# Re-arm the machinery a kind plugs into, after an install or a removal:
-#   syntax — reload the scanner registry, re-pick and re-paint every group;
-#   mode   — reload, refill the menu, re-attach (apply_editmode falls back to
-#            windows if the active mode was just removed);
-#   theme  — nothing to refill (the picker lists theme.list on open, D92); if the
-#            ACTIVE theme changed under us, re-apply it — or fall back to default
-#            if it was removed.
+# Reload what a kind plugs into, after an install or a removal:
+#   syntax   — reload the scanners, repaint every group
+#   mode     — reload, refill the menu, re-attach
+#   theme    — re-apply the active theme, or the default if it is gone
+#   provider — nothing: the core sources it at its next start (D66)
 proc ext_reload {kind} {
 	switch -- $kind {
 		syntax {
@@ -426,24 +378,15 @@ proc ext_reload {kind} {
 			}
 		}
 		provider {
-			# Nothing to re-arm live: a provider is sourced by the CORE at startup
-			# (restart-to-activate, D66). An install/remove changes the store on disk;
-			# it takes effect on the core's next start, so there is no reload here.
+			# Nothing to reload.
 		}
 	}
 }
 
-# Update everything ::ext_updates lists, under ONE consent (D107) —
-# apt's shape, and the reasoning is apt's too: you already trusted each of these
-# source+extension pairs when you installed them, so an update is not a fresh
-# trust decision, and N dialogs for N updates is a prompt people click through.
-#
-# The exception is spelled out in its own paragraph of the same dialog: an update
-# taken from a DIFFERENT repository than the one it was installed from (only
-# possible where the user set that extension's cross-source flag) IS a trust
-# decision, because nothing makes two repositories agree on what a name means.
-#
-# ::ext_updates is snapshotted first — each install recomputes it.
+# Update everything in ::ext_updates under one consent (D107), as apt does:
+# each source was trusted at install time. An update from another repository
+# is a new trust decision, so the dialog lists those apart.
+# ::ext_updates is copied first: each install recomputes it.
 proc ext_update_all {} {
 	set pending $::ext_updates
 	if {![dict size $pending]} { return 0 }

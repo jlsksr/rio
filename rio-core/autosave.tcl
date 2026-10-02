@@ -1,39 +1,22 @@
 # rio-core — automatic recovery files (D132).
 #
-# A buffer's edits live only in this process until someone saves: kill the core, lose the
-# tunnel or pull the plug, and everything typed since the last save is gone. So every so
-# often each CHANGED buffer is written to a copy of its own, which is deleted the moment
-# that buffer is really saved and offered back the next time the file is opened.
+# Edits live only in this process until a save. So every interval each changed
+# buffer is written to a recovery copy. The copy is deleted when the buffer is
+# saved and offered back when the file is next opened.
 #
-# emacs's model, not VSCode's: the file you are editing is NEVER written without an
-# explicit save. What this module writes is recovery data and nothing else — a save is
-# still a save, and until you make one the bytes on disk are the ones you last put there.
-#
-# It lives in the core because the file does (D30). A frontend may be on another machine,
-# where the project's path means nothing (D55), and a persistent daemon holds buffers with
-# no frontend attached at all — so the policy has to be the core's, not something a client
-# announces when it arrives. The frontend keeps only the toggle's mirror and the question.
-#
-# WHERE the copies go — out of the project tree, under $XDG_DATA_HOME/rio/autosave/, with
-# the file's own directory mirrored below it:
+# - The file being edited is never written without a save (emacs's model).
+# - In the core, because the file is there (D30) and a daemon may hold buffers
+#   with no frontend attached.
+# - The copies are outside the project, so git, search and the files pane
+#   never see them. The file's directory is mirrored under the root:
 #
 #     /home/jka/Projekte/rio/rio-gui/rio-gui.tcl
 #         -> ~/.local/share/rio/autosave/home/jka/Projekte/rio/rio-gui/#rio-gui.tcl#
 #
-# emacs writes `#rio-gui.tcl#` beside the file; rio keeps the name and moves the place, for
-# the reason D31 moved session state out of the tree: it never shows in `git status`, needs
-# no `.gitignore`, and cannot be committed by accident. Beside the file it would also have
-# to be hidden from the files pane, from project search, from the agent's fs tools and from
-# git's own porcelain — four copies of one rule. The mirrored path is readable on purpose:
-# `ls -R` over the autosave root is a plain report of what is unsaved and where it belongs.
+# - "Changed" is `rio::doc::revision`, not a frontend's dirty flag (D22).
+#   `saved` holds the revision at the last write.
 #
-# WHAT COUNTS AS CHANGED is `rio::doc::revision` (D132), the document's own change counter
-# — not a dirty flag, which is a view's word for how a buffer differs from disk and belongs
-# to each frontend (D22). `saved` below holds the revision at this module's last write.
-#
-# Tk-free and protocol-free (D1): ops-autosave.tcl carries the ops, and the question a
-# recovery file raises is the frontend's (D125 — the core states the fact, the frontend
-# owns the question).
+# No Tk, no protocol: the ops are in ops-autosave.tcl.
 
 namespace eval rio::autosave {
 	variable saved ; array set saved {}  ;# buffer id -> doc revision at the last write
@@ -45,9 +28,8 @@ namespace eval rio::autosave {
 
 # --- where things are -------------------------------------------------------------------
 
-# The autosave root, on the CORE's host. With neither XDG_DATA_HOME nor HOME there is no
-# root and no autosaving: unlike a session file, recovery data scattered through the
-# current working directory would be worse than none at all.
+# The autosave root, on the core's host. Without XDG_DATA_HOME and HOME there
+# is none, and no autosaving.
 proc rio::autosave::root {} {
 	variable dir_override
 	if {$dir_override ne ""} { return [file normalize $dir_override] }
@@ -61,11 +43,12 @@ proc rio::autosave::root {} {
 	return [file normalize [file join $base rio autosave]]
 }
 
-# The mirrored segments for a directory, given what `file split` made of it: a RELATIVE
-# list, always, because `file join /a /b` is "/b" — an absolute remainder would silently
-# escape the autosave root and write over something real. Split out from `path_for` so
-# every head shape is testable on any host: a Windows volume only ever comes back from a
-# `file split` running on Windows.
+# The mirrored segments for a directory, from its `file split`. Always
+# relative: `file join /a /b` is "/b", so an absolute part would escape the
+# root.
+#   {/ home jka}  -> {home jka}
+#   {C:/ Users}   -> {C Users}
+# Its own proc, so a Windows head is testable on any host.
 proc rio::autosave::_mirror_parts {parts} {
 	set head [lindex $parts 0]
 	set rest [lrange $parts 1 end]
@@ -75,17 +58,12 @@ proc rio::autosave::_mirror_parts {parts} {
 	if {$head eq "/" || $head eq "\\" || $head eq ""} {
 		return $rest                               ;# the ordinary POSIX absolute path
 	}
-	# Anything else — a UNC "//server/share" head, a volume-relative oddity — is flattened
-	# into ONE segment rather than trusted to stay relative.
+	# Anything else, e.g. a UNC "//server/share", becomes one segment.
 	return [linsert $rest 0 [string map {/ _ \\ _ : _} $head]]
 }
 
-# The recovery file for a document path, or "" when there can be none.
-#
-# Built from `file split`, never string surgery, because `file join /a /b` is "/b": an
-# absolute remainder — a Windows drive, a UNC share — would silently escape the root and
-# write over something real. Every head a split can hand back becomes exactly one readable
-# segment, and the result is checked to sit under the root before it is returned.
+# The recovery file for a document path, or "" when there can be none. The
+# result is checked to sit under the root.
 proc rio::autosave::path_for {file} {
 	if {$file eq ""} { return "" }
 	set r [root]
@@ -104,10 +82,8 @@ proc rio::autosave::path_for {file} {
 # $XDG_CONFIG_HOME/rio/autosave.conf, beside tls.conf, top-level keys:
 #     autosave    = on|off        (default ON)
 #     interval_ms = 30000         (minimum 1000)
-# Absent, unreadable, malformed, or any value but a plain no — "off", "0", "no", "false",
-# whatever the case — leaves autosave ON. That is
-# the opposite of tls.conf's fail-closed rule and deliberately so: there the safe side is
-# refusing a connection, here it is protecting work the user has not saved.
+# Only off, 0, no or false (any case) turns it off. Absent or malformed
+# leaves it on: the safe side is protecting unsaved work.
 proc rio::autosave::settings_path {} {
 	variable settings_override
 	if {$settings_override ne ""} { return $settings_override }
@@ -119,8 +95,7 @@ proc rio::autosave::settings_path {} {
 	return ""
 }
 
-# One top-level key, or "" for every way there is no answer. Read on each call, so a hand
-# edit counts at the next tick with no restart (tls.conf's habit, same reason).
+# One top-level key, or "". Read on each call, so a hand edit needs no restart.
 proc rio::autosave::_conf {key} {
 	set p [settings_path]
 	if {$p eq "" || ![file isfile $p] || ![llength [info commands ::rio::conf::read_file]]} {
@@ -145,8 +120,8 @@ proc rio::autosave::interval {} {
 	return $v
 }
 
-# Turn it on or off. The interval is read BEFORE the rewrite and written back, so ticking
-# the box never silently discards a hand-tuned one.
+# Turn it on or off. The interval is read first and written back, so a
+# hand-set one survives.
 proc rio::autosave::set_enabled {on} {
 	set on [expr {$on ? 1 : 0}]
 	set p [settings_path]
@@ -171,8 +146,8 @@ proc rio::autosave::set_enabled {on} {
 
 # --- bookkeeping ------------------------------------------------------------------------
 
-# "I have written this buffer" — after an autosave, a real save, an open, a reload or a
-# recovery, all of which leave the copy (or the file) matching the buffer.
+# Record that the buffer matches its copy or its file: after an autosave, a
+# save, an open, a reload or a recovery.
 proc rio::autosave::note_saved {id} {
 	variable saved
 	if {[catch {rio::doc::revision $id} r]} return
@@ -194,9 +169,9 @@ proc rio::autosave::dirty {id} {
 
 # --- writing and discarding -------------------------------------------------------------
 
-# Write one buffer's recovery copy; 1 if it was written, 0 if there was nowhere to put it.
-# The buffer's own meta goes to rio::fs::write, so the copy reproduces the file's encoding,
-# BOM and line endings (D22) — recovery hands back what a save would have made.
+# Write one buffer's recovery copy; 1 if written, 0 if there is no place for
+# it. Written with the buffer's meta, so the copy is what a save would make
+# (D22).
 proc rio::autosave::write_one {id} {
 	set meta [rio::doc::meta $id]
 	if {![dict exists $meta path] || [dict get $meta path] eq ""} { return 0 }
@@ -219,9 +194,8 @@ proc rio::autosave::discard_path {file} {
 	set ap [path_for $file]
 	if {$ap eq "" || ![file exists $ap]} return
 	catch {file delete -- $ap}
-	# Tidy the mirror directory if that was the last copy in it, so the root stays a
-	# readable report of what is unsaved. `file delete` refuses a non-empty directory, so
-	# the catch IS the emptiness check. One level only, and never the root itself.
+	# Remove the mirror directory if it is now empty: `file delete` refuses a
+	# non-empty one. One level only, never the root.
 	set parent [file dirname $ap]
 	if {$parent ne [root]} { catch {file delete -- $parent} }
 	return
@@ -231,10 +205,8 @@ proc rio::autosave::discard_path {file} {
 
 # {path mtime newer} for a document path with a recovery copy, or {} for none.
 #
-# A copy OLDER than the file is still reported. It can hold work the file never had — a
-# `git checkout` or another editor landed on top of it — so hiding it, or deleting it as
-# spent, would be the lie. `newer` lets the frontend say which way round it is; a file
-# that has since vanished leaves the copy as the only text there is, so: newer.
+# A copy older than the file is still reported: it may hold work the file
+# never had. `newer` says which way round it is; with the file gone, 1.
 proc rio::autosave::recovery_for {file} {
 	set ap [path_for $file]
 	if {$ap eq "" || ![file isfile $ap]} { return {} }
@@ -247,9 +219,8 @@ proc rio::autosave::recovery_for {file} {
 
 # --- the timer --------------------------------------------------------------------------
 
-# Write every changed buffer that has a file. Returns how many were written. A failure —
-# a read-only directory, a full disk, a path the host cannot take — skips that buffer and
-# nothing more: it must not raise into the event loop or take the timer down with it.
+# Write every changed buffer that has a file. Returns how many were written.
+# A failure (read-only directory, full disk) skips that buffer only.
 proc rio::autosave::sweep {} {
 	set n 0
 	foreach b [rio::doc::inventory] {
@@ -262,13 +233,10 @@ proc rio::autosave::sweep {} {
 	return $n
 }
 
-# rio's first RECURRING timer in the core; every other `after` here is one-shot. Started by
-# server.tcl on the direct-execution path only, so a test that sources it gets a core with
-# no timer and drives `sweep` itself.
-#
-# It needs none of the guards the frontend's deferred work carries (::pending,
-# fs_changed_settle): a sweep dispatches no op, emits no event and touches no channel, so
-# it is safe wherever the event loop reaches it — a nested vwait in rio::http included.
+# Start the recurring timer. server.tcl calls this only when run directly, so
+# a test that sources the core has no timer and calls `sweep` itself.
+# A sweep dispatches no op and emits no event, so it is safe anywhere in the
+# event loop, a nested vwait included.
 proc rio::autosave::start {} {
 	variable timer
 	stop
@@ -282,9 +250,8 @@ proc rio::autosave::stop {} {
 	return
 }
 
-# The setting and the interval are re-read every tick, so the toggle and a hand edit both
-# take effect at the next one — and turning autosave off leaves the timer running, so
-# turning it back on needs no restart either.
+# Setting and interval are read every tick. Off leaves the timer running, so
+# on again needs no restart.
 proc rio::autosave::_tick {} {
 	variable timer
 	set timer ""

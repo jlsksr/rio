@@ -1,37 +1,24 @@
 # rio — the syntax-highlighting registry (D32).
 #
-# Syntax highlighting is PRESENTATION, not document state — like the cursor and
-# selection (D22) and the theme *applier* (D24), it is a frontend concern. So the
-# tokenisers live here, in the frontend, as PURE Tcl modules: no Tk, no I/O, no
-# protocol. Each highlighter turns text into a flat list of coloured spans; the
-# frontend maps the span TYPES onto the theme's `syntax.*` colour roles and paints
-# them (in the GUI, as text tags). Because a module is Tk-free it is portable — a
-# future TUI reuses the identical files with its own applier.
+# Highlighting is presentation, so it lives in the frontend. A highlighter
+# is pure Tcl (no Tk, no I/O, no packages): a terminal client can reuse it.
+# It registers for file extensions; a later registration wins, so a file in
+# the user's syntax dir replaces a shipped one.
 #
-# A highlighter is SWAPPABLE: it registers itself for a set of file extensions, so
-# dropping a better `perl.tcl` into the user's syntax dir shadows the shipped one
-# (same override pattern as themes, D24). No external packages — core Tcl only.
-#
-# Contract. A highlighter is a per-line SCANNER:
+# A highlighter is a scanner of one line:
 #
 #     proc <ns>::scan {line state param} -> {spans nextstate nextparam}
 #
-# It scans ONE line of text that begins in tokeniser `state`/`param`, and returns:
-#   spans      a flat {c0 c1 type c0 c1 type ...} of half-open COLUMN ranges within
-#              the line (0-based columns — rio's shared position format, D12) each
-#              tagged with one TOKEN TYPE from the vocabulary below;
-#   nextstate  the opaque scan state ENTERING the next line (open comment, string
-#              body, …) and its `nextparam` carry.
-# Entering the FIRST line the state is the START pair (see `start`): a scanner must
-# treat state "" as "start of document / plain text". Per-line is the natural unit
-# for a state machine and it is what lets the frontend re-highlight INCREMENTALLY —
-# it caches each line's entry state and, after an edit, re-scans from the changed
-# line only until the state re-converges (see the GUI's hl_incremental).
+#   state, param   the state the line begins in; {"" ""} on the first line
+#   spans          flat {c0 c1 type ...}: half-open, 0-based columns (D12),
+#                  each with a type from `tokens`
+#   nextstate,     the state the next line begins in (an open comment, a
+#   nextparam      string body)
 #
-# The whole-buffer `tokenize {scan text}` is DERIVED from the scanner (below), for
-# tests and any consumer that just wants the lot in one call.
+#     scan {x /* a} "" ""   ->   {2 6 comment} comment {}     (C, Go)
 #
-# Pure: no Tk here — tests headless under tclsh.
+# Per line, so the frontend can cache each line's entry state and, after
+# an edit, scan again only until the state matches the cache.
 
 namespace eval rio::syntax {
 	variable scanners {}     ;# ext (lowercased, no dot) -> scanner proc
@@ -41,27 +28,21 @@ namespace eval rio::syntax {
 	variable langs {}        ;# lang name -> {exts/files <list> scanner <proc>} (introspection)
 }
 
-# The canonical TOKEN VOCABULARY. Highlighters emit only these type names; a theme
-# maps each to a colour via a `syntax.<type>` role, and the GUI configures one text
-# tag per type. Kept small and language-neutral so themes map a manageable set and
-# highlighters share a vocabulary. A type a theme doesn't colour simply renders as
-# ordinary text (the GUI falls the role back to editor.fg).
+# The token types. A highlighter emits only these; a theme colours each
+# through its `syntax.<type>` role. A type without a role is plain text.
 proc rio::syntax::tokens {} {
 	return [list comment string number keyword tag attribute entity meta \
 		operator function variable type constant]
 }
 
-# The START scan state — what a scanner is handed entering the first line. Kept in
-# one place so neither the frontend nor the tests hardcode it.
+# The {state param} a scanner gets for the first line.
 proc rio::syntax::start {} {
 	return [list "" ""]
 }
 
-# Register a highlighter: a language name (human-readable — shown in the GUI status
-# bar), the file extensions it claims (bare, no dot — matched case-insensitively),
-# and its per-line scanner proc. A later registration for the same extension WINS,
-# which is what makes a user override replace a shipped highlighter (the frontend
-# loads shipped modules first, user modules last).
+# Register a highlighter: its display name, its extensions (no dot, any
+# case) and its scanner. A later registration for an extension wins.
+#   register Go {go} rio::syntax::go::scan
 proc rio::syntax::register {lang exts scan} {
 	variable scanners
 	variable extlang
@@ -74,11 +55,8 @@ proc rio::syntax::register {lang exts scan} {
 	}
 }
 
-# Register a highlighter by whole FILE NAME rather than extension — for the build files
-# that carry no extension (`Makefile`, `Dockerfile`, `GNUmakefile`). Same "later
-# registration wins" and case-insensitive matching; the names are bare basenames. A file
-# resolves by exact basename first, then by extension, then by rootname (so `Makefile.inc`
-# and `Dockerfile.prod` also match) — see `_resolve`.
+# Register a highlighter by file name, for files without an extension
+# (Makefile, Dockerfile). Any case; a later registration wins.
 proc rio::syntax::register_filename {lang names scan} {
 	variable filenames
 	variable filelang
@@ -92,11 +70,11 @@ proc rio::syntax::register_filename {lang names scan} {
 	}
 }
 
-# Resolve a path against the two maps `files` (whole-basename) and `exts` (extension),
-# returning the matched value or "". Precedence: exact basename, then extension, then the
-# rootname-of-basename (the last-suffix-stripped name) against the filename map — so an
-# explicit extension always beats a rootname guess (`Makefile.tcl` is Tcl, not make) while
-# `Dockerfile.prod` / `Makefile.inc` still resolve to their build-file highlighter.
+# Look a path up in `files` (by name) and `exts` (by extension); "" if
+# neither has it. In this order:
+#   1. the file name          Makefile         -> Makefile
+#   2. the extension          Makefile.tcl     -> Tcl
+#   3. the name, less suffix  Dockerfile.prod  -> Dockerfile
 proc rio::syntax::_resolve {path files exts} {
 	set tail [string tolower [file tail $path]]
 	if {[dict exists $files $tail]} { return [dict get $files $tail] }
@@ -107,47 +85,40 @@ proc rio::syntax::_resolve {path files exts} {
 	return ""
 }
 
-# The scanner proc registered for a file path (by basename or extension), or "" when the
-# file type has no highlighter (the caller then leaves the text un-highlighted).
+# The scanner for a file path, or "".
 proc rio::syntax::for_path {path} {
 	variable scanners
 	variable filenames
 	return [_resolve $path $filenames $scanners]
 }
 
-# The language display NAME registered for a file path, or "" when the file type has no
-# highlighter — the frontend then shows a plain-text label. Parallels for_path exactly.
+# The language name for a file path, or "".
 proc rio::syntax::lang_for_path {path} {
 	variable extlang
 	variable filelang
 	return [_resolve $path $filelang $extlang]
 }
 
-# Every registered language display name, sorted — what the frontend offers when the
-# user picks a buffer's language by hand instead of by file name (View ▸ Language…).
+# Every language name, sorted: the choices in View ▸ Language….
 proc rio::syntax::names {} {
 	variable langs
 	return [lsort -dictionary [dict keys $langs]]
 }
 
-# The scanner proc registered under language display NAME `lang`, or "" when no
-# highlighter carries that name. The by-name counterpart of for_path; a later
-# registration under the same name wins here too.
+# The scanner for language name `lang`, or "".
 proc rio::syntax::for_lang {lang} {
 	variable langs
 	if {![dict exists $langs $lang scanner]} { return "" }
 	return [dict get $langs $lang scanner]
 }
 
-# Scan one line with a scanner. A one-line indirection so callers never invoke the
-# scanner proc by hand — the contract stays stated in exactly one place.
+# Scan one line. Callers use this, never the scanner proc itself.
 proc rio::syntax::scan_line {scan line state param} {
 	return [$scan $line $state $param]
 }
 
-# Whole-buffer convenience: drive the scanner over every line of `text` and flatten
-# to {line.col line.col type ...} triples (1-based line, 0-based column). Derived
-# from the per-line contract; used by the tests and any non-incremental consumer.
+# Scan a whole text: {line.col line.col type ...}, lines from 1, columns
+# from 0. For the tests.
 proc rio::syntax::tokenize {scan text} {
 	set out {}
 	lassign [start] state param
@@ -162,7 +133,7 @@ proc rio::syntax::tokenize {scan text} {
 	return $out
 }
 
-# Is a valid token type? (For an applier that wants to ignore stray types.)
+# Is `type` a token type?
 proc rio::syntax::is_token {type} {
 	return [expr {[lsearch -exact [tokens] $type] >= 0}]
 }

@@ -1,11 +1,8 @@
 # rio-gui/prefs.tcl — sessions, preferences and the Preferences window.
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
-# Mirror whether the core keeps recovery copies of changed buffers (D132). Read at attach,
-# never written then — the same rule as the agent's settings and the https switch, and for
-# the same reason: the policy is the core's, because the copies land on ITS disk and a
-# daemon autosaves buffers with no frontend attached at all. Quiet on failure, so a core
-# that predates autosave.settings just leaves the checkbox showing its default.
+# Read the core's autosave setting (D132). Read at attach, never written
+# then: the policy is the core's. Silent on failure.
 proc adopt_autosave_settings {} {
 	set r [rio_call autosave.settings {}]
 	if {![dict get $r ok]} return
@@ -13,9 +10,8 @@ proc adopt_autosave_settings {} {
 	set ::autosave_interval [dict get $r result interval]
 }
 
-# How often the core writes a copy, in words. The interval is hand-editable in autosave.conf
-# (D132), so the hint READS it rather than carrying a second copy of the number — which would
-# then be the one that goes stale (§7). Say it once and derive the rest.
+# The autosave interval in words: "30 seconds", "minute", "5 minutes". Read
+# from the core, so the hint holds no second copy of the number.
 proc autosave_every {} {
 	set secs [expr {$::autosave_interval / 1000}]
 	if {$secs >= 60 && $secs % 60 == 0} {
@@ -29,9 +25,8 @@ proc autosave_hint {} {
 	return "Every [autosave_every] rio writes a copy of each file you have\nchanged, so a crash or a power cut costs you at most that much.\nYour own file is never written until you save it: the copies live\nwith the core, outside your project, and rio offers them back the\nnext time you open the file."
 }
 
-# The applier behind the Preferences checkbox. Writes, then shows what the core ACCEPTED,
-# so a refusal leaves the control honest rather than claiming a state the core is not in
-# (tls_unchecked_set's shape).
+# The checkbox's command: write, then show what the core accepted. On a
+# refusal the box goes back.
 proc autosave_set {} {
 	set want $::autosave_on
 	set ::autosave_on [expr {!$want}]
@@ -44,9 +39,8 @@ proc autosave_set {} {
 	set ::autosave_interval [dict get $r result interval]
 }
 
-# Mirror the core's https switch (D114) and what its tcltls can check. Same rule as the
-# agent's settings: read at attach, never written then. Quiet on failure — a core that
-# predates tls.settings just leaves the Network pane showing its defaults.
+# Read the core's https switch (D114) and what its tcltls can check. Read at
+# attach, never written then. Silent on failure.
 proc adopt_tls_settings {} {
 	set r [rio_call tls.settings {}]
 	if {![dict get $r ok]} return
@@ -59,11 +53,9 @@ proc adopt_tls_settings {} {
 	}
 }
 
-# The writer behind Preferences ▸ Network ▸ "Allow https without host-name checks" (D110,
-# core-wide since D114: the agent and extension repositories alike). The choice is the
-# CORE's — its tcltls is the one in question, and every frontend attached to it shares the
-# answer — so the checkbutton only asks, and shows what the core stored. A refusal puts
-# the box back rather than leave it claiming a setting that isn't in force.
+# Preferences ▸ Network ▸ "Allow https without host-name checks" (D110,
+# D114). The choice is the core's: write, then show what it stored. On a
+# refusal the box goes back.
 proc tls_unchecked_set {} {
 	set want $::tls_unchecked
 	set ::tls_unchecked [expr {!$want}]
@@ -75,8 +67,7 @@ proc tls_unchecked_set {} {
 	set ::tls_unchecked [dict get $r result unchecked]
 }
 
-# The hint under that checkbox: what ticking it gives away, and whether it matters on the
-# core this GUI is attached to.
+# The hint under that checkbox, and whether it matters on this core.
 proc tls_unchecked_hint {} {
 	set what "Off: on a core whose tcltls is older than 1.8, the agent and https extension repositories refuse https — that tcltls accepts a valid certificate issued for any host, not just the server's. Turn on only on a network you trust, if tcltls can't be upgraded there. Plain http is never affected."
 	if {$::tls_checks_hostname} {
@@ -89,21 +80,16 @@ proc tls_unchecked_hint {} {
 }
 
 # ---------------------------------------------------------------------------
-# Sessions & preferences (D31). Two halves, split by owner:
+# Sessions and preferences (D31), by owner:
 #
-#   * PREFERENCES — how the editor looks: theme, wrap, dock side/pane, chat
-#     visibility. Pure view state the core knows nothing about, so the GUI owns it,
-#     in $XDG_CONFIG_HOME/rio/prefs.json (beside the user themes dir). Plain JSON
-#     data, parsed never executed (D21); loaded at startup, saved on each change.
+#   preferences   how the editor looks       the GUI: $XDG_CONFIG_HOME/rio/prefs.json
+#   workspace     the open files, the tab,   the core: workspace.* ops, per
+#                 the unfolded tree          project root (D30)
 #
-#   * WORKSPACE — which files were open in a project + the active tab. Document
-#     state, so the CORE owns it (workspace.* ops, keyed by project root, kept OUT
-#     OF TREE under its data dir). That is why a resume Just Works over a remote
-#     core: the session lives WITH the project, on the server (D30/D31).
-#
-# Neither ever holds a secret (the API key stays in the 0600 store, D26). Writes are
-# gated on ::rio_started so the appliers that also run during boot don't persist the
-# defaults back over what was just loaded.
+# - prefs.json is JSON data, parsed and never executed (D21).
+# - Neither holds a secret.
+# - Nothing is written before ::rio_started: boot must not save the defaults
+#   over what it just loaded.
 # ---------------------------------------------------------------------------
 proc prefs_path {} {
 	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
@@ -114,12 +100,8 @@ proc prefs_path {} {
 	return [file join $base rio prefs.json]
 }
 
-# Read a whole UTF-8 text file, ALWAYS closing the channel — the `finally` is the
-# point. Each config reader below parses inside a catch that tolerates a corrupt
-# file; written as one `open … ; parse ; close` chain, a throwing parse skips the
-# close and leaks the channel. That is invisible on POSIX but not on Windows, where
-# an open handle makes the file undeletable: one corrupt prefs.json or keys.json
-# locked it for the life of the process, so rio could never rewrite or reset it.
+# Read a whole UTF-8 file, always closing the channel. A leaked handle locks
+# the file on Windows, and rio could then not rewrite it.
 proc slurp_utf8 {path} {
 	set f [open $path r]
 	try {
@@ -130,9 +112,8 @@ proc slurp_utf8 {path} {
 	}
 }
 
-# Load saved preferences over the defaults. A missing or corrupt file leaves the
-# defaults intact — a bad prefs file must never stop the editor starting. Only known
-# keys with valid values are honoured; anything else is ignored.
+# Load saved preferences over the defaults. A missing or corrupt file leaves
+# the defaults. Unknown keys and invalid values are ignored.
 proc prefs_load {} {
 	set path [prefs_path]
 	if {$path eq "" || ![file exists $path]} return
@@ -152,33 +133,27 @@ proc prefs_load {} {
 		set tl [dict get $d tab_layout]
 		if {$tl eq "scroll" || $tl eq "multi"} { set ::tab_layout $tl }
 	}
-	# Editor font override (D56). Applied by the first apply_theme after boot, which
-	# overlays these onto the theme's font. A bad size is ignored, keeping the theme's.
+	# The editor font override (D56), laid over the theme's font.
 	if {[dict exists $d font_family]} { set ::editor_font_family [dict get $d font_family] }
 	if {[dict exists $d font_size]} {
 		set s [dict get $d font_size]
 		if {[string is integer -strict $s] && $s >= 5 && $s <= 72} { set ::editor_font_size $s }
 	}
-	# The dock layout (D35 step b): adopt a persisted `layout` object, or migrate the
-	# pre-step-(b) flat keys (dock_side/dock_pane/chat_shown) forward. normalize repairs
-	# either into a well-formed layout (and boots the Search strip hidden).
+	# The dock layout (D35): a saved `layout` object, or the older flat keys
+	# (dock_side, dock_pane, chat_shown) migrated.
 	if {[dict exists $d layout]} {
 		set ::layout [rio::layout::boot [dict get $d layout]]
 	} else {
 		set ::layout [rio::layout::boot [rio::layout::migrate $d]]
 	}
 	if {[dict exists $d editmode]} { set ::edit_mode [dict get $d editmode] }
-	# The last folder opened on a local core (D88). Stashed only — the project can't be
-	# reopened until the channel is up; reopen_last_project does that during boot.
+	# The last folder opened on a local core (D88); reopen_last_project opens it.
 	if {[dict exists $d project]} { set ::last_project [dict get $d project] }
 }
 
-# Persist the current preferences. Called from each view-state applier (do_theme,
-# apply_wrap, apply_layout, show_pane) — the single choke point per setting — so any
-# menu or keyboard toggle records itself. Scalars are flat strings (rio::wire::obj);
-# the dock arrangement rides as the nested `layout` object (D35 step b), which
-# replaced the old dock_side/dock_pane/chat_shown flags outright (clean cut,
-# decision 3). 0/1 flags read back cleanly through expr.
+# Save the preferences. Every applier calls it (do_theme, apply_wrap,
+# apply_layout, …), so any toggle is recorded. Scalars are flat strings; the
+# dock layout is the nested `layout` object (D35).
 proc prefs_save {} {
 	if {!$::rio_started} return
 	set path [prefs_path]
@@ -202,20 +177,17 @@ proc prefs_save {} {
 			font_size   $::editor_font_size \
 			editmode   $::edit_mode \
 			project    $::last_project]]
-		# scalars minus its trailing brace, then the layout member and a final closing
-		# brace (backslash-escaped so this literal brace does not end the catch body).
+		# The scalars without their closing brace, then `layout`, then a
+		# brace, escaped so it does not end the catch body.
 		set json "[string range $scalars 0 end-1],\"layout\":[rio::layout::json]\}"
 		set f [open $path {WRONLY CREAT TRUNC}] ; fconfigure $f -encoding utf-8
 		puts -nonewline $f $json ; close $f
 	}
 }
 
-# Save the open project's workspace: the paths of the open tabs (untitled/unsaved
-# tabs, which have no path, are omitted), the active tab's path, and the file tree's
-# unfolded-dir set (D89). The core keys it by the open project root and no-ops when
-# none is open, so this is safe to call unconditionally. `open` and `expanded` ride the
-# wire as newline-joined strings (workspace.*). Unlike D88's project pointer, the tree
-# shape lives in the core session, so it follows the project onto a remote host too.
+# Save the workspace: the open tabs' paths (a tab without a file is left
+# out), the active tab, the unfolded directories (D89). The core keys it by
+# the open project. `open` and `expanded` are newline-joined strings.
 proc session_save {} {
 	if {!$::rio_started} return
 	set paths {}
@@ -228,36 +200,27 @@ proc session_save {} {
 		expanded [join [dict keys $::nav_expanded] "\n"]]}
 }
 
-# Reopen the folder open at the last launch (D88), so a bare `rio` resumes where you
-# left off instead of a blank pane. The core keeps "which folder is open" in memory only
-# (rio::project — reset on a fresh process), so the GUI persists the path (prefs.json) and
-# reopens it here, which is also what points workspace.get at the right per-project session
-# below. Runs during boot before session_restore, only when nothing else already opened a
-# project (an argv folder or an adopted core project wins). Local cores only: ::last_project
-# is never set from a remote (server) root, and open_folder would report_error on a path the
-# local core can't see. A folder that has since vanished is skipped silently.
+# Reopen the folder of the last launch (D88). The core keeps the open folder
+# in memory only, so the GUI saves the path in prefs.json. During boot,
+# before session_restore, and only if no project is open yet. Local cores
+# only. A folder that is gone is skipped.
 proc reopen_last_project {} {
 	if {$::nav_root ne "" || $::core_remote} return
-	# The core owns "which folder is open": a persistent local daemon may already hold one,
-	# so adopt that rather than overriding it with the remembered path (this also fills the
-	# pane in the adopted-project case). Only when the core has none do we reopen last time's.
+	# A local daemon may already have a project open: adopt that one.
 	set root [dict get [rio_call project.get {}] result root]
 	if {$root ne ""} { on_project_opened [dict create root $root] ; return }
 	if {$::last_project eq ""} return
 	if {![file isdirectory $::last_project]} {
-		# The remembered folder is gone from disk (deleted since we last ran). Stop pointing
-		# launches at a dead path (D89) — the in-memory clear persists on the next prefs_save.
+		# The folder is gone: forget it (D89).
 		set ::last_project ""
 		return
 	}
 	open_folder $::last_project
 }
 
-# Restore the open project's workspace: reopen each saved file (the core has already
-# pruned any that vanished) and focus the saved active tab. do_open dedups against
-# open tabs and prunes the empty scratch buffer, so restoring onto a fresh launch
-# leaves exactly the saved set. Runs during boot only, while ::rio_started is still 0
-# — so the do_opens here don't each trigger a save.
+# Restore the workspace: reopen each saved file and focus the saved tab. The
+# core has dropped the files that are gone. Boot only, while ::rio_started is
+# 0, so these opens save nothing.
 proc session_restore {} {
 	set resp [rio_call workspace.get {}]
 	if {![dict get $resp ok]} return
@@ -269,10 +232,7 @@ proc session_restore {} {
 			if {[bufget $id path] eq $active} { activate $id ; break }
 		}
 	}
-	# Restore the file tree's unfolded shape (D89), now the project is open so this keys on
-	# the right session. The core pruned any dir that has since vanished. on_project_opened
-	# reset the set to empty when the folder opened; this refills it and repaints. Only with a
-	# project actually open — the anonymous (no-folder) session has no tree.
+	# The unfolded directories (D89). Only with a project open.
 	if {$::nav_root ne ""} {
 		set ::nav_expanded [dict create]
 		foreach d [dict get $res expanded] { dict set ::nav_expanded $d 1 }
@@ -281,19 +241,13 @@ proc session_restore {} {
 }
 
 # ---------------------------------------------------------------------------
-# Preferences window (D58). One place to find every stateful setting as the
-# count grows, so the top-level menus don't keep accreting checkbuttons. It does NOT own
-# any state: each control drives the SAME global the menu entry binds (::wrap_lines,
-# ::tab_layout, …) and calls the SAME applier, which persists via prefs_save. So it is
-# live-apply (no Save/Cancel — a toggle takes effect at once, like every view toggle in
-# rio), and the twin menu entry updates with it for free (Tk repaints a checkbutton the
-# instant its -variable changes), and vice-versa. Commands (Zoom, Split, Compare) are
-# actions, not preferences, and stay menu-only; keyboard shortcuts keep their own
-# recorder (its working-copy model suits a half-typed chord), reached from a button here.
+# The Preferences window (D58): every setting in one place.
+# - It owns no state. A control uses the same global and the same applier as
+#   its menu entry, so the two stay in step.
+# - No Save or Cancel: a change applies at once.
+# - Commands (Zoom, Split, Compare) are not preferences and stay in the menus.
 # ---------------------------------------------------------------------------
-# Themed control factories: the menu-matching palette (D31 named fonts, theme_colors) in
-# one place so each control is a single line. `args` passes extras through (e.g. the
-# Multi-Line Tabs checkbutton's -onvalue/-offvalue).
+# Themed controls, one line each. `args` passes extra options through.
 proc prefs_check {w label var cmd args} {
 	set c $::theme_colors
 	checkbutton $w -text $label -variable $var -command $cmd -font RioUIFont -anchor w \
@@ -317,8 +271,7 @@ proc prefs_label {w text} {
 	return $w
 }
 proc prefs_button {w text cmd} { button $w -text $text -font RioUIFont -command $cmd ; return $w }
-# A muted, greyed-out hint line (gutter.fg) — orientation text, styled apart from the
-# interactive controls so it never reads as one (D68). Wraps within the pane width.
+# A muted hint line: help text must not look like a control (D68).
 proc prefs_hint {w text {wrap 300}} {
 	set c $::theme_colors
 	label $w -text $text -anchor w -justify left -font RioUIFont -wraplength $wrap \
@@ -326,9 +279,7 @@ proc prefs_hint {w text {wrap 300}} {
 	return $w
 }
 
-# View category: the display cluster (the same controls as the View menu), the dock
-# side, the theme button (onto the shared picker, which enumerates from the core so
-# installed themes appear), and the Font… dialog button.
+# View: the View menu's toggles, the dock side, the theme, the font.
 proc prefs_fill_view {f} {
 	set r 0
 	grid [prefs_check $f.wrap    "Wrap Lines"           ::wrap_lines  apply_wrap]        -row [incr r] -column 0 -sticky w -pady 1
@@ -342,12 +293,8 @@ proc prefs_fill_view {f} {
 	grid [prefs_label $f.dockl "Dock side"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_radio $f.dl "Left"  ::dock_side left  {dock_set_side left}]  -row [incr r] -column 0 -sticky w -padx {12 0}
 	grid [prefs_radio $f.dr "Right" ::dock_side right {dock_set_side right}] -row [incr r] -column 0 -sticky w -padx {12 0}
-	# A button carrying the current theme's pretty label (::theme_choice_label, kept live
-	# by a trace) and opening the shared picker — the same door as View ▸ Theme…, so the
-	# two stay in sync for free and do_theme applies + persists the pick. It was a
-	# dropdown until D92; a menu can't bound its own height, and the theme list grows with
-	# every installed theme (D39). Keeping the *value* on the button (not a bare "Theme…")
-	# is what the dropdown was for: Preferences is the config home, so it shows what is set.
+	# The theme button shows the current theme and opens the picker, as
+	# View ▸ Theme… does (D92).
 	grid [prefs_label $f.thl "Theme"] -row [incr r] -column 0 -sticky w -pady {8 0}
 	grid [prefs_button $f.theme "" theme_pick_dialog] -row [incr r] -column 0 -sticky w -padx {12 0}
 	$f.theme configure -textvariable ::theme_choice_label -anchor w
@@ -355,8 +302,7 @@ proc prefs_fill_view {f} {
 	grid [prefs_button $f.font "Font…" editor_font_dialog] -row [incr r] -column 0 -sticky w -padx {12 0} -pady {0 2}
 }
 
-# Editor category: the editing mode (enumerated from the registry like modes_menu_fill,
-# so a mode extension shows up), and column editing.
+# Editor: the editing mode (from the registry), column editing, autosave.
 proc prefs_fill_editor {f} {
 	set r 0
 	grid [prefs_label $f.eml "Editing Mode"] -row [incr r] -column 0 -sticky w
@@ -369,8 +315,7 @@ proc prefs_fill_editor {f} {
 	}
 	grid [prefs_check $f.col "Column Editing (Ctrl+Shift+Drag)" ::col_on apply_column_edit] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
-	# The core's setting, not a pref of ours (D132) — adopted, then written only here. One
-	# door on purpose: a menu is for fast switches (D85) and this is set-once policy.
+	# Autosave is the core's setting (D132). This is its only control (D85).
 	adopt_autosave_settings
 	grid [prefs_check $f.as "Keep recovery files for unsaved changes" ::autosave_on autosave_set] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
@@ -378,14 +323,9 @@ proc prefs_fill_editor {f} {
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 }
 
-# Agent category: the provider picker (enumerated from the core like the theme
-# radios, so an installed provider appears), a muted hint when only the echo stub is
-# present, the two agent-edit toggles, and the doors to the agent's instructions and its
-# command allow-list (Agent Prompts…, D70/D79; Allowed commands…, D84).
-#
-# Everything here is RIO's — the concepts rio owns, whichever provider is running. What
-# belongs to one particular provider (its key, its endpoint, its model) is that
-# provider's own window, under the Extensions menu (D130).
+# Agent: the provider picker, the mode, the two edit toggles, Agent Prompts…
+# (D70, D79) and Allowed commands… (D84). These are rio's settings. A
+# provider's own (key, endpoint, model) are in its window (D130).
 proc prefs_fill_agent {f} {
 	agent_providers_refresh
 	set r 0
@@ -397,17 +337,12 @@ proc prefs_fill_agent {f} {
 			::agent_provider [dict get $p name] apply_provider] \
 			-row [incr r] -column 0 -sticky w -padx {12 0}
 	}
-	# Echo is only a stub: with no real provider installed the picker is a single
-	# offline option, so point the way to one — Extensions… is a button in this very
-	# window. Guidance, not a control, so it's muted (prefs_hint / D68); once a real
-	# provider is installed the pane is self-explanatory and the hint drops away.
+	# Only Echo: say where to get a real provider.
 	if {!$have_real} {
 		grid [prefs_hint $f.hint "Echo is a built-in stub. Install Claude or an OpenAI-compatible provider from Extensions… to use a real model."] \
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
 	}
-	# The mode: three exclusive states over the core's two flags (D102), the same
-	# ::agent_mode_ui and the same writer the chat header's control and the Settings
-	# cascade use — three doors, one answer.
+	# The mode (D102): the same variable and writer as the chat header's control.
 	grid [prefs_label $f.ml "Mode"] -row [incr r] -column 0 -sticky w -pady {8 1}
 	foreach {v lbl} {plan "Plan — read and plan, change nothing until you approve a plan" \
 			review "Review each edit" auto "Auto-accept edits"} {
@@ -415,37 +350,24 @@ proc prefs_fill_agent {f} {
 			-row [incr r] -column 0 -sticky w -padx {12 0} -pady 1
 	}
 	grid [prefs_check $f.cc "Compare complex edits" ::agent_compare_complex {}] -row [incr r] -column 0 -sticky w -pady 1
-	# The editor's one AI entry (D113). On by default, yet only ever seen with a real
-	# provider selected — so someone who never installs one never meets it, and someone
-	# who does can still keep their context menu to plain editing.
+	# The context menu's agent entry (D113). On by default; shown only with a
+	# real provider.
 	grid [prefs_check $f.selmenu "Show “Change with Agent…” in the editor's context menu" \
 		::agent_selection_menu prefs_save] -row [incr r] -column 0 -sticky w -pady {8 1}
 	grid [prefs_hint $f.selhint "Shown only while a provider other than Echo is selected. It asks the agent to change the selected text and nothing else."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
-	# What a provider lets you configure is the PROVIDER's business (D106), and since
-	# D130 it is configured in the PROVIDER's own window, reached from the Extensions
-	# menu — so this pane no longer grows a pair of buttons per installed provider, and
-	# rio's own agent settings above are no longer interleaved with somebody else's.
-	# A muted pointer rather than a second door: guidance, not a control (D68).
+	# A pointer to the providers' own windows (D130): a hint, not a control.
 	grid [prefs_hint $f.provhint "Each provider's own settings — its API key, and whatever else it declares, such as its endpoint and model — live in that provider's window, under the Extensions menu."] \
 		-row [incr r] -column 0 -sticky w -pady {8 1}
-	# The agent's instructions (system / project / per-provider prompts, D70/D79) are
-	# the third leg of its config alongside provider + key. This pane is their ONLY home
-	# now — the Settings menu keeps just the provider picker and the two quick toggles,
-	# so all of the agent's heavier configuration gathers here (jka, 2026-09-09).
+	# The prompts (D70, D79) and the allow-list (D84): reached only from here.
 	grid [prefs_button $f.prompts "Agent Prompts…" agent_prompts_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
-	# The command allow-list (D84) — the standing-approval companion to the gate. Its
-	# only door, beside the prompts button just above.
 	grid [prefs_button $f.allow "Allowed commands…" agent_allow_dialog] \
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 
-# Extensions category (D107): where the repositories are configured and where the
-# one durable decision about them lives — whether rio looks for new versions when
-# it starts. D85 puts it here rather than in the Extensions window: that window is
-# a browsing surface, this is the config home. The two buttons are doors to the
-# surfaces themselves, so the pane is not a dead end.
+# Extensions (D107): the update check at start-up, repositories rio cannot
+# check, and buttons to the Extensions window, the repositories and the keys.
 proc prefs_fill_extensions {f} {
 	set r 0
 	grid [prefs_check $f.chk "Check for extension updates at start-up" \
@@ -456,10 +378,7 @@ proc prefs_fill_extensions {f} {
 		::repo_allow_unverified ext_check_pref_save] -row [incr r] -column 0 -sticky w -pady {6 1}
 	grid [prefs_hint $f.unverhint "A repository can publish a signing key, and rio checks it by running ssh-keygen on the core's host (D118). Where that isn't installed, a repository whose key rio trusts is refused rather than used unchecked. Turn this on to use it anyway: it then lists and installs marked \"unverified\", never \"signed\". A signature that fails, a key that changed, or a file that doesn't match is refused either way."] \
 		-row [incr r] -column 0 -sticky w -padx {12 0} -pady {2 1}
-	# "Browse…" here for the same reason the menu entry says it: this button sits
-	# INSIDE the Extensions category, so "Extensions…" would name the noun twice.
-	# The window-level button beside Close is not under that heading and keeps the
-	# window's own name.
+	# "Browse…", as in the menu: the category is already called Extensions.
 	grid [prefs_button $f.ext "Browse…" extensions_window] \
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 	grid [prefs_button $f.repos "Repositories…" extw_sources_dialog] \
@@ -468,11 +387,9 @@ proc prefs_fill_extensions {f} {
 		-row [incr r] -column 0 -sticky w -pady {2 2}
 }
 
-# Network category (D114): how the core's https connections are verified — for the agent
-# and extension repositories alike, so neither of their panes owns it. The one security
-# trade-off (D110), off by default; it lives here, not in Settings: a fast switch it is
-# not. And the certificates accepted one by one (D111), which also apply to every https
-# connection the core makes.
+# Network (D114): how the core's https connections are verified, for the
+# agent and the repositories alike. The host-name switch (D110) and the
+# accepted certificates (D111).
 proc prefs_fill_network {f} {
 	adopt_tls_settings
 	set r 0
@@ -484,8 +401,7 @@ proc prefs_fill_network {f} {
 		-row [incr r] -column 0 -sticky w -pady {8 2}
 }
 
-# Keyboard category: app shortcuts keep their own recorder (D23) — reached, not
-# reimplemented, from here.
+# Keyboard: a button to the shortcut recorder (D23).
 proc prefs_fill_keyboard {f} {
 	grid [prefs_label $f.blurb "App shortcuts are edited in their own recorder — click a\ncommand, then press the keys. They always win over the editing mode's keys."] \
 		-row 0 -column 0 -sticky w -pady {0 8}
@@ -508,8 +424,8 @@ proc preferences_window {} {
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 
-	# Left: the category list. Right: one body frame per category, stacked at the same
-	# cell and raised on selection (a tab-like switch without a notebook widget).
+	# Left: the categories. Right: one frame per category in the same cell;
+	# the selected one is raised.
 	listbox $w.cats -width 12 -height 8 -exportselection 0 -font RioUIFont \
 		-activestyle none -highlightthickness 0 -borderwidth 1 -relief solid \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg] \
@@ -529,9 +445,7 @@ proc preferences_window {} {
 	prefs_fill_network    $w.body.network
 	prefs_fill_keyboard   $w.body.keyboard
 
-	# Extensions… mirrors the top-level Extensions menu, which it leads (D130): from here
-	# you jump to the installer for the providers/modes/themes/syntax the categories
-	# above pick from. Left of Close; a spacer column keeps them apart.
+	# Extensions… opens the installer (D130). Left of Close.
 	frame $w.btns -background [dict get $c ui.bg]
 	grid [prefs_button $w.btns.ext   "Extensions…" [list extensions_window]] -row 0 -column 0 -sticky w
 	grid [prefs_button $w.btns.close "Close"       [list destroy $w]]         -row 0 -column 2 -sticky e

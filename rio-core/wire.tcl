@@ -1,27 +1,22 @@
 # rio-core — JSON wire encoding for the socket transport (D11).
 #
-# The canonical internal form is plain Tcl dicts (D11: the in-process path uses
-# them with no serialization). JSON exists only at the socket boundary, and a
-# *generic* dict->JSON encoder is impossible — Tcl can't distinguish the string
-# "hi there" from the two-element list {hi there}. So encoding is SHAPE-AWARE:
+# Inside the core everything is a Tcl dict. JSON exists only on the channel.
+# Tcl cannot tell the string "hi there" from the list {hi there}, so no
+# generic encoder is possible. Encoding follows a declared shape:
 #
-#   - The envelope shape is fixed: id (wire string), ok (bare true/false),
-#     and either result (object) or error (a flat {code, message} object, O2).
-#   - result and event params are flat objects whose leaf values are emitted as
-#     JSON strings. That is exact for every current message (text, line.col
-#     indices, ids-as-opaque-strings, removed text).
+#   {"id":"7","ok":true,"result":{…}}
+#   {"id":"7","ok":false,"error":{"code":"…","message":"…"}}
+#   {"event":"buffer.changed","params":{…}}
 #
-# When an op eventually needs a non-string leaf (a number, a nested object, an
-# array), that op declares its shape — we do not guess types from Tcl values.
-# Inbound parsing uses tcllib's json::json2dict, which is unambiguous.
+# - A result or params object is flat, and every leaf is a JSON string.
+# - An op with an array or a nested object registers an encoder (D25). Types
+#   are never guessed from Tcl values.
+# - Inbound: tcllib's json::json2dict.
 
 namespace eval rio::wire {
-	# The JSON string-escape map: the two metachars, the short escapes, and a
-	# \uXXXX for every remaining C0 control — RFC 8259 requires ALL of 0x00-0x1F
-	# escaped. Rare in practice, but an editor meets them (an ESC in a log file, a
-	# US-separated data file), and while tcllib's parser happens to tolerate them
-	# raw, a strict parser rejects the whole line — and D2's promise is that any
-	# language can sit at the far end of the channel. Built once at source time.
+	# The string-escape map: \ and ", the short escapes, and \uXXXX for every
+	# other control below 0x20, as RFC 8259 requires. A strict parser at the
+	# far end rejects a raw one.
 	variable strmap [list \\ \\\\ \" \\\"]
 	for {set c 0} {$c < 32} {incr c} {
 		switch -- $c {
@@ -35,25 +30,11 @@ namespace eval rio::wire {
 	}
 	unset c
 
-	# The same map with the rare half taken out, and a character class that says when
-	# the rare half is needed.
-	#
-	# `string map` compares every character of the input against every pair's first
-	# character, so a 34-pair map is 34 comparisons per character of every value that
-	# crosses the wire — including a whole 256 KB `buffer.text` chunk (D126). Twenty-nine
-	# of those pairs are C0 controls that a document essentially never contains: they have
-	# to be ESCAPED correctly when they do occur (above), but they should not be PAID FOR
-	# when they do not.
-	#
-	# So `str` asks first, with one regexp, and then runs one of two maps. Either the
-	# original 34-pair map runs, byte for byte as before, or a five-pair one runs on a
-	# string the regexp has just proven contains none of the other twenty-nine — which is
-	# the whole correctness argument, and it needs no reasoning about escaping order
-	# because the two maps never both run. Both are DERIVED from `strmap` here rather than
-	# written out again, so they cannot drift from it.
-	#
-	# 56 -> 20 ms/MB for ordinary text; a 256 KB chunk, 13.9 -> 4.9 ms. A value that does
-	# contain a control pays the regexp and nothing else (56.1 -> 56.5 ms/MB, measured).
+	# The fast path (D126). `string map` costs one comparison per pair per
+	# character, and 29 of the 34 pairs are controls a document almost never
+	# holds. So: `strmap_common` is the map without them, and `rare_re`
+	# matches any of them. `str` runs the short map unless the regexp hits.
+	# Both are derived from `strmap`, so they cannot drift from it.
 	variable strmap_common {}
 	variable rare_re {}
 	foreach {from to} $strmap {
@@ -84,35 +65,28 @@ proc rio::wire::obj {d} {
 	return "{[join $parts ,]}"
 }
 
-# A JSON array from a list of already-encoded JSON fragments. The caller decides
-# how each element is shaped (with str/obj/arr) — keeping the "no guessing from
-# Tcl values" rule (D25): arr never inspects what it joins.
+# A JSON array from already-encoded fragments. The caller shapes each element.
 proc rio::wire::arr {items} {
 	return "\[[join $items ,]\]"
 }
 
-# A JSON array of strings — the common case of arr, where each element is a
-# string leaf (the caller declares it's strings, so str applies to each).
+# A JSON array of strings.
 proc rio::wire::strarr {items} {
 	set out {}
 	foreach s $items { lappend out [str $s] }
 	return [arr $out]
 }
 
-# A JSON object whose VALUES are each encoded by `cmd` (a command prefix taking
-# one value). Lets an op declare "object of <shape>" — e.g. an object of objects
-# — without the encoder guessing the shape from Tcl values (D25).
+# A JSON object whose values are each encoded by `cmd`, a command prefix
+# taking one value: `objmap $d rio::wire::obj` is an object of objects.
 proc rio::wire::objmap {d cmd} {
 	set parts {}
 	dict for {k v} $d { lappend parts "[str $k]:[{*}$cmd $v]" }
 	return "{[join $parts ,]}"
 }
 
-# Result-shape registry. Almost every result is a flat object (obj), which is
-# exact for string leaves. The few ops with a richer result — an array, a nested
-# object — register an encoder here, keyed by op name (D25: the op declares its
-# shape, the encoder is told it rather than inferring it). `response` consults
-# this and falls back to obj.
+# The result encoders, by op name (D25). An op whose result is not a flat
+# object registers one; `response` falls back to obj.
 namespace eval rio::wire { variable results {} }
 
 proc rio::wire::result_encoder {op cmd} {
@@ -152,16 +126,14 @@ proc rio::wire::_result_buffers_reload {result} {
 }
 rio::wire::result_encoder buffers.reload rio::wire::_result_buffers_reload
 
-# The two-level search result (project.search / buffers.search, D51/D52) — the
-# only two-level shape in the protocol, so the encoder spells BOTH levels out
-# rather than guessing them from Tcl values (D25). The envelope (count / files /
-# truncated string leaves + a `results` array) and each line-match object
-# {line, col, cols, text} are shared; the two ops differ only in the per-file
-# header keys, so each supplies its own header encoder.
+# The search result (project.search, buffers.search; D51/D52), two levels:
+#
+#   {count, files, truncated, results:[{<file keys>, matches:[<line-match>]}]}
+#
+# The two ops differ only in the file keys.
 
-# One line-match {line,col,cols,lens,text} object. `cols`/`lens` are parallel
-# arrays — each hit's 1-based start column and its char length (a variable-length
-# regex hit highlights correctly; D52 Phase C).
+# One line-match {line,col,cols,lens,text}. `cols` and `lens` are parallel:
+# each hit's 1-based start column and its char length.
 proc rio::wire::_linematch {m} {
 	set cols {} ; foreach c [dict get $m cols] { lappend cols [str $c] }
 	set lens {} ; foreach l [dict get $m lens] { lappend lens [str $l] }
@@ -216,11 +188,9 @@ proc rio::wire::_result_project_replace {result} {
 }
 rio::wire::result_encoder project.replace rio::wire::_result_project_replace
 
-# session.hello: {protocol, name, version, fsroot} are string leaves; `ops` is an
-# array of strings. Note that this encoder is an ALLOW-LIST — a key the op returns and
-# this proc does not name simply never reaches the wire. So "additive, no protocol
-# bump" (D55, D123) still means editing here; the greeting's own tests are what catch
-# forgetting to.
+# session.hello: {protocol, name, version, fsroot} are string leaves; `ops` is
+# an array of strings. An allow-list: a key not named here never reaches the
+# wire, so a new key in the greeting is added here too (D55, D123).
 proc rio::wire::_result_session_hello {result} {
 	set parts {}
 	lappend parts "\"protocol\":[str [dict get $result protocol]]"
@@ -305,9 +275,8 @@ proc rio::wire::_result_agent_prompt_list {result} {
 }
 rio::wire::result_encoder agent.prompt.list rio::wire::_result_agent_prompt_list
 
-# agent.options.list: `options` is an array of option objects, each carrying its own
-# `choices` array — the protocol's second two-level shape (D106), so like the search
-# results it spells BOTH levels out rather than guessing them from Tcl values (D25).
+# agent.options.list: `options` is an array of option objects, each with its
+# own `choices` array (D106).
 proc rio::wire::_option {o} {
 	set cs {}
 	foreach c [dict get $o choices] { lappend cs [obj $c] }

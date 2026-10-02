@@ -1,18 +1,15 @@
 # rio-core — the provider.* op namespace (D66, D39, D11).
 #
-# The channel face of the installable-provider store (rio::provider). A frontend's
-# Extensions window installs a `kind = provider` extension through these ops so the
-# code lands on the CORE's disk (a remote core stores on its own, D30) and loads on
-# the core's next start. Distinct from agent.providers (D65), which lists what is
-# REGISTERED/live this run: provider.list is what's ON DISK, including a provider
-# that is installed but not yet activated, or one too new for this core to load.
+# The provider store's ops (rio::provider). The Extensions window installs a
+# provider through them, onto the core's disk (D30).
+#
+#   provider.list     what is on disk, activated or not
+#   agent.providers   what is registered and live in this run (D65)
 
 # provider.list {} -> {providers:[{name, version, source, api, loadable}], api_max}
-# Every provider in the store, plus `api_max` — the highest provider-api this core
-# implements, so a frontend can grey a repo provider that needs a newer rio before
-# an install even reaches the core. `loadable` is whether this core can source an
-# installed one; a loadable-but-unregistered provider is one awaiting the restart
-# that activates it. A non-flat result — the wire layer shapes it (D25).
+#   api_max  — the highest provider-api this core implements
+#   loadable — can this core source it? A loadable provider that is not
+#              registered waits for the next core start.
 proc rio::ops::provider_list {params} {
 	set out {}
 	foreach p [rio::provider::installed] {
@@ -29,11 +26,9 @@ proc rio::ops::provider_list {params} {
 rio::dispatch::register provider.list rio::ops::provider_list
 
 # provider.put {name manifest files ?source?} -> {}
-# Install/replace a provider in the store. `files` is an object filename->content
-# (the payload .tcl files, incl. the entry file). The core validates the manifest
-# and every name before anything is written (bad_request on a name, an unparseable
-# or non-provider manifest, or a provider-api past this core). It does NOT source
-# the code — the provider activates on the next core start (restart-to-activate).
+# Install or replace a provider. `files` is an object filename -> content.
+# Manifest and names are validated before anything is written. The code is
+# not sourced: it activates on the next core start.
 proc rio::ops::provider_put {params} {
 	foreach k {name manifest files} {
 		if {![dict exists $params $k]} {

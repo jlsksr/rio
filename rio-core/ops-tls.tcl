@@ -1,13 +1,12 @@
 # rio-core — the tls.* op namespace: certificates the user accepts (D111), and the
 # core-wide https setting (D114).
 #
-# A certificate that does not verify is refused (rio::tls). These ops are the browser's
-# "Advanced…" path, for a client to offer: look at the certificate and what is wrong with
-# it, accept that exact certificate for its host:port, list what was accepted, take an
-# acceptance back. The file behind them is $XDG_CONFIG_HOME/rio/certificates.conf on the
-# CORE's host — the certificate in question is the one the core sees on its network (D30).
+# A certificate that does not verify is refused (rio::tls). These ops let a
+# client show it, accept exactly that one for its host:port, list what was
+# accepted, and take an acceptance back. The file is certificates.conf on the
+# core's host: the core sees the certificate (D30).
 #
-# Trust posture: like repo.fetch, as open as the channel it arrives on (D30).
+# As open as the channel it arrives on (D30).
 #
 #   tls.inspect  {url ?timeout?}       -> {host port subject issuer names not_before
 #                                          not_after sha256 problems reasons accepted}
@@ -17,9 +16,8 @@
 #   tls.settings {}                    -> {unchecked checks_hostname tcltls}
 #   tls.settings.set {unchecked}       -> {unchecked}
 #
-# tls.accept takes the fingerprint the user was SHOWN, never "whatever the server presents
-# now": fetching it afresh at accept time would let a server swap certificates between the
-# review and the click.
+# tls.accept takes the fingerprint the user was shown. Fetching it again
+# would let a server swap certificates between the review and the click.
 
 proc rio::ops::_tls_host_port {params op} {
 	foreach k {host port} {

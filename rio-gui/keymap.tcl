@@ -2,22 +2,19 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# Keymap (D23): ONE table maps a logical command -> {chord action}. It is
-# the single source of truth for the editor's keyboard shortcuts AND for the
-# accelerator labels shown in the menus, so a remap moves both together. Users remap
-# by dropping a keys.json in the config dir (D21) — {"command":"chord", ...} overrides
-# the default chord per command; "" unbinds one. Chords are Tk event syntax minus the
-# <>: modifiers Control/Shift/Alt (Command/Option on a Mac) joined by '-', then the key
-# (a letter, or a keysym like Tab/backslash/bracketright). A capital letter carries an
-# implicit Shift, the Tk convention: Control-S is Ctrl+Shift+S. New commands slot in here as one line each —
-# the binder and the menus pick them up with no further wiring.
+# The keymap (D23): one table, command -> {chord action label}. The editor's
+# shortcuts and the menus' accelerator labels both come from it.
+#
+# - A chord is Tk event syntax without the <>: Control-s, Control-Shift-Tab,
+#   F3. A capital letter implies Shift: Control-S is Ctrl+Shift+S.
+# - keys.json in the config dir (D21) overrides chords:
+#     {"save": "Control-F2", "quit": ""}        "" unbinds
+# - An override changes only the chord. `action` is what the key does;
+#   `label` is the name in the shortcuts editor.
+# - A new command is one line here.
 # ---------------------------------------------------------------------------
-# Each entry is {chord action label}: `action` is the KEY behaviour (a menu item may run
-# a different -command — split-editor's key toggles, its menu only splits — and just
-# borrows this chord for its accelerator); `label` is the human name the shortcuts editor
-# shows. An override changes only the chord; action and label are fixed in code here.
-# This is the table as written; ::keymap_default, below it, is the table as read on this
-# platform, and is what everything else consults.
+# The table as written. ::keymap_default, below, is the table for this
+# platform, and is what everything else reads.
 set ::keymap_base {
 	new            {Control-n            do_new                                                        "New tab"}
 	open           {Control-o            open_dialog                                                   "Open file…"}
@@ -46,26 +43,21 @@ set ::keymap_base {
 	preferences    {{}                   preferences_window                                            "Preferences…"}
 	help           {F1                   help_window                                                   "Help contents…"}
 }
-# On a Mac the table above is read with Command wherever it says Control (D136), which
-# is what every Mac application does and what leaves Control to the system's own text
-# keys. These are the exceptions: chords the application menu or the system already
-# owns, where a Command binding would fire twice or not at all.
-#   quit      unbound: rio ▸ Quit rio (⌘Q) already reaches do_quit (D134), and a binding
-#             of our own would ask about unsaved work twice
-#   replace   ⌥⌘F, the Mac's own Replace: ⌘H is rio ▸ Hide rio. Spelled with the
-#             keysym Tk DELIVERS, not the letter: Mac Tk looks a key up through the
-#             Option layer (STATE2INDEX, tkMacOSXPrivate.h), so ⌥F arrives as ƒ, keysym
-#             `function`, and a binding on Option-Command-f never fires. key_glyph shows
-#             it as F. (US and most Latin layouts; the recorder records it the same way.)
-#   next-tab, prev-tab   stay on Control: ⌘Tab is the system's application switcher
-# (No comments INSIDE the braces: there `;#` is data, not a comment.)
+# On a Mac, Control in the table above is read as Command (D136). The
+# exceptions:
+#   quit      unbound: the application menu's ⌘Q already calls do_quit (D134)
+#   replace   ⌥⌘F: ⌘H is Hide. Written with the keysym Tk delivers: ⌥F
+#             arrives as ƒ, keysym `function`. key_glyph shows it as F.
+#   next-tab, prev-tab   stay on Control: ⌘Tab switches applications
+# (No comments inside the braces: there `;#` is data.)
 set ::keymap_aqua {
 	quit     {}
 	replace  Option-Command-function
 	next-tab Control-Tab
 	prev-tab Control-Shift-Tab
 }
-# The defaults for windowing system `ws`. Pure, so the Mac's table is tested on any host.
+# The defaults for windowing system `ws`. No Tk state, so the Mac's table can
+# be tested on any host.
 proc keymap_for_platform {map ws} {
 	if {$ws ne "aqua"} { return $map }
 	dict for {cmd spec} $map {
@@ -93,12 +85,9 @@ proc keys_path {} {
 	return [file join $base rio keys.json]
 }
 
-# Is `chord` a usable binding? (An empty chord is a deliberate unbind.) Tk's `bind`
-# accepts almost any string — it treats unknown tokens as modifiers/keysyms that simply
-# never fire — so a probe-bind can't flag a typo. We instead check the shape ourselves:
-# every token before the key must be a known modifier. That catches the likely mistake
-# (a misspelled modifier); we don't try to enumerate every keysym, so a bogus *key*
-# still binds harmlessly and just never triggers.
+# Is `chord` usable? "" is: it unbinds. Tk's `bind` accepts almost anything,
+# so the check is on the shape: every part before the key must be a known
+# modifier. A misspelt key still binds, and never fires.
 proc keymap_valid {chord} {
 	if {$chord eq ""} { return 1 }
 	set mods {Control Ctrl Shift Alt Meta Command Option \
@@ -108,10 +97,9 @@ proc keymap_valid {chord} {
 	return [expr {[lindex $parts end] ne ""}]
 }
 
-# Merge user overrides (keys.json: command -> chord) over the defaults into ::keymap.
-# Only known commands with a Tk-valid chord are honoured; a missing/corrupt file, an
-# unknown command, or a bad chord is ignored (a broken keys.json must never stop the
-# editor). What was ignored is collected in ::keymap_bad for a single startup notice.
+# ::keymap = the defaults with keys.json's overrides. A corrupt file, an
+# unknown command or a bad chord is ignored and noted in ::keymap_bad, for
+# one notice at startup.
 proc keymap_resolve {} {
 	set ::keymap $::keymap_default
 	set ::keymap_bad {}
@@ -145,16 +133,14 @@ proc key_label {cmd} {
 	return [expr {$l eq "" ? $cmd : $l}]
 }
 
-# A human accelerator label for `cmd`, derived from its resolved chord so a remap
-# updates the menu automatically. "" when unbound (the menu then shows no accelerator).
+# The accelerator label for `cmd`, from its chord; "" when unbound.
 proc key_accel {cmd} { return [chord_label [key_chord $cmd]] }
 
-# Turn a Tk chord (Control-Shift-e, Control-backslash, Control-S) into a display label
-# (Ctrl+Shift+E, Ctrl+\, Ctrl+Shift+S). A lone capital letter carries an implicit Shift.
-# `ws` is the windowing system (default: this one), because Mod1 and Mod2 are Command and
-# Option on a Mac but Alt and nothing much elsewhere (D136). On a Mac the modifiers come
-# in the Mac's own order, Ctrl Opt Shift Cmd — the order its menus draw ⌃⌥⇧⌘ in — and
-# Tk's menus there parse exactly these words into native key equivalents.
+# A chord as a label:
+#   Control-Shift-e -> Ctrl+Shift+E    Control-backslash -> Ctrl+\
+#   Control-S -> Ctrl+Shift+S          Command-s -> Cmd+S
+# `ws` is the windowing system: on a Mac Mod1 is Command and Mod2 is Option
+# (D136). The modifier order is Ctrl Alt Opt Shift Cmd, the Mac menus' order.
 proc chord_label {chord {ws ""}} {
 	if {$chord eq ""} { return "" }
 	if {$ws eq ""} { set ws [tk windowingsystem] }
@@ -192,10 +178,8 @@ proc key_glyph {key} {
 	return $key   ;# Tab, Escape, Return, F5, … shown as-is
 }
 
-# Editor keyboard shortcuts, bound on a group's text widget with `break` so the
-# widget's own class bindings (Tk's built-in Ctrl+O/Ctrl+Z etc.) don't also fire.
-# Bound per group so a shortcut acts on whichever group has keyboard focus — driven
-# entirely by the resolved ::keymap, so nothing here changes when a command is added.
+# Bind the keymap on a group's text widget, with `break`, so Tk's own class
+# bindings (Ctrl+O, Ctrl+Z, …) do not fire too.
 proc editor_bindings {w} {
 	dict for {cmd spec} $::keymap {
 		lassign $spec chord action
@@ -204,13 +188,9 @@ proc editor_bindings {w} {
 	}
 }
 
-# Document-view zoom (D56): Ctrl+scroll and Ctrl +/- resize the editor font, Ctrl+0
-# resets it. These are fixed accelerators, not remappable keymap entries — like the
-# compare pane's Esc — so they bind directly here rather than through ::keymap. Bound
-# on the editor widget AND its gutter so a zoom works with the pointer over either.
-# `break` stops a Control-wheel from also plain-scrolling via the Text class binding.
-# Both the X11 (Button-4/5) and Windows/macOS (MouseWheel + %D) wheel idioms are wired,
-# matching the plain-scroll bindings the gutter already carries.
+# Zoom (D56): Ctrl+wheel and Ctrl +/- resize the editor font; Ctrl+0 resets.
+# Fixed keys, not keymap entries. Bound on the editor and on its gutter.
+# Both wheel idioms: X11's Button-4/5 and MouseWheel elsewhere.
 proc editor_zoom_bindings {w} {
 	bind $w <Control-MouseWheel> {editor_zoom [expr {%D > 0 ? 1 : -1}] ; break}
 	bind $w <Control-Button-4>   {editor_zoom 1 ; break}
@@ -222,8 +202,7 @@ proc editor_zoom_bindings {w} {
 	bind $w <Control-KP_Subtract> {editor_zoom -1 ; break}
 	bind $w <Control-Key-0>      {editor_zoom_reset ; break}
 	bind $w <Control-KP_0>       {editor_zoom_reset ; break}
-	# A Mac zooms with Command (D136). The Control forms above stay too: harmless, and
-	# the wheel ones are what a Mac mouse user may still reach for.
+	# A Mac zooms with Command too (D136).
 	if {$::primary_mod ne "Control"} {
 		foreach {seq script} {
 			MouseWheel {editor_zoom [expr {%D > 0 ? 1 : -1}] ; break}
@@ -240,10 +219,8 @@ proc keymap_chords {} {
 	return $out
 }
 
-# Re-apply the resolved keymap to every live editor group WITHOUT a restart: clear the
-# chords bound last time (so a changed/unbound chord actually goes away — `bind` never
-# removes, only overwrites), then bind the current set. ::keymap_live_chords tracks what
-# is on the widgets so we know what to clear next time.
+# Apply the keymap to every editor group: clear the chords bound last time
+# (::keymap_live_chords), then bind the current ones.
 proc keymap_rebind_all {} {
 	foreach g $::groups {
 		set w [gget $g path]
@@ -253,8 +230,7 @@ proc keymap_rebind_all {} {
 	set ::keymap_live_chords [keymap_chords]
 }
 
-# Re-derive every menu accelerator from the current keymap (so a remap updates the labels
-# shown in the menus, not just the bindings). Indexed by the exact menu labels.
+# Set every menu accelerator from the keymap. Entries are found by label.
 proc keymap_refresh_menus {} {
 	.m.file entryconfigure "New"          -accelerator [key_accel new]
 	.m.file entryconfigure "Open…"        -accelerator [key_accel open]
@@ -280,9 +256,7 @@ proc keymap_refresh_menus {} {
 	.m.help entryconfigure "Contents…"        -accelerator [key_accel help]
 }
 
-# One entry point after the keymap changes at runtime: re-read keys.json, then push the
-# new bindings and menu labels to the live UI. The shortcuts editor calls this after it
-# saves; everything routes through keymap_resolve so file and UI never diverge.
+# After keys.json changed: read it again, rebind, relabel the menus.
 proc keymap_apply_live {} {
 	keymap_resolve
 	keymap_rebind_all
@@ -291,13 +265,11 @@ proc keymap_apply_live {} {
 
 # ---- Pure helpers for the shortcuts editor (unit-tested; no widgets) --------------
 
-# Turn a key event (keysym + state bitmask, from %K/%s) into a chord string, or "" if it
-# isn't a usable shortcut: a bare modifier press, or a bare printable key with no modifier
-# (binding a lone letter would hijack typing — a named key like F5/Delete is allowed).
-# Modifiers are emitted Control/Alt/Shift; a letter is lower-cased with Shift kept explicit.
-# On a Mac (`ws` aqua) the state bits mean something else (D136): 0x8 (Mod1) is Command and
-# 0x10 (Mod2) is Option. Tk's `Alt` matches no key at all there, so recording Cmd+S as
-# Alt-s would have saved a shortcut that never fires.
+# A key event (keysym and state, from %K and %s) as a chord, or "" if it is
+# no shortcut: a lone modifier, or a lone printable key, which would hijack
+# typing. F5 alone is fine.
+#   s, Control|Shift -> Control-Shift-s
+# On a Mac (D136) state 0x8 is Command and 0x10 is Option.
 proc event_to_chord {keysym state {ws ""}} {
 	if {$ws eq ""} { set ws [tk windowingsystem] }
 	if {[string match *_L $keysym] || [string match *_R $keysym] \
@@ -315,8 +287,7 @@ proc event_to_chord {keysym state {ws ""}} {
 	return [join [concat $mods [list $key]] -]
 }
 
-# Which OTHER command in `chords` (a command -> chord dict) already uses `chord`, or "" if
-# none — the shortcuts editor's live conflict check. An empty chord never conflicts.
+# The other command in `chords` (command -> chord) that uses `chord`, or "".
 proc keys_conflict {chords cmd chord} {
 	if {$chord eq ""} { return "" }
 	dict for {c ch} $chords {
@@ -325,9 +296,8 @@ proc keys_conflict {chords cmd chord} {
 	return ""
 }
 
-# The minimal overrides to persist from a command -> chord dict: keep only commands whose
-# chord differs from its default (including "" for one the user unbound). Commands left at
-# their default are omitted, so keys.json stays a small diff, not a full copy.
+# The overrides to save: only the commands whose chord differs from the
+# default, "" for an unbound one.
 proc keymap_overrides {chords} {
 	set out {}
 	dict for {cmd chord} $chords {
@@ -337,8 +307,8 @@ proc keymap_overrides {chords} {
 	return $out
 }
 
-# Write the overrides dict to keys.json (deleting it when empty, so a full reset removes
-# the file). Returns 1 on success. Mirrors prefs_save: plain JSON, best-effort.
+# Write the overrides to keys.json; an empty dict deletes the file. Returns
+# 1 on success.
 proc keys_save {overrides} {
 	set path [keys_path]
 	if {$path eq ""} { return 0 }
@@ -352,11 +322,9 @@ proc keys_save {overrides} {
 }
 
 # ---------------------------------------------------------------------------
-# Keyboard-shortcuts editor (D23). A modal listing every command with its
-# current chord; the user re-records (press-to-capture, like a modern IDE), clears, or
-# resets. Editing happens in a working copy ::keys_work (command -> chord); Cancel
-# discards it, Save writes keys.json (overrides only) and applies live via
-# keymap_apply_live — no restart — so file and UI never diverge.
+# The shortcuts editor (D23): a modal list of every command and its chord.
+# Click, then press the keys; or clear, or reset. Edits go to a working copy,
+# ::keys_work. Cancel drops it; Save writes keys.json and applies it at once.
 # ---------------------------------------------------------------------------
 proc keys_refresh_buttons {} {
 	dict for {cmd chord} $::keys_work {

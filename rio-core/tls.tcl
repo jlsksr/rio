@@ -1,55 +1,39 @@
 # rio-core — the one place rio decides how an https connection is verified (D109).
 #
-# Two callers share it: the extension-repository fetch (rio::http, D39) and the LLM
-# providers' transport (rio::llm::http, plugins/lib, D8). Before D109 the transport kept
-# a private copy that only knew Unix CA-bundle paths, so on Windows it asked tcltls to
-# require a valid certificate while giving it nothing to validate against.
+# Two callers: the repository fetch (rio::http, D39) and the providers'
+# transport (rio::llm::http, plugins/lib, D8).
 #
-# TRUST COMES FROM THE HOST, never from rio. The first CA source that applies:
-#   1. SSL_CERT_FILE / SSL_CERT_DIR in the core's environment — OpenSSL's own override,
-#      the conventional way to trust a private CA. Passed explicitly as -cafile/-cadir
-#      rather than left for the library to find, so it means the same thing on every
-#      tcltls and on LibreSSL.
-#   2. The system bundle the package manager maintains: Debian/Alpine, RHEL-family, then
-#      OpenBSD (also macOS).
-#   3. On Windows, the Windows certificate store itself — tcltls 1.8 on OpenSSL 3.2+
-#      reaches it as a -castore URI.
-#   4. Nothing found: pass no CA at all and STILL require verification, so the handshake
-#      fails closed and `explain` says what to set. Never a silent downgrade to unverified.
-# rio ships no CA bundle of its own: one would go stale, ignore the roots an admin
-# installed, and make rio a certificate distributor.
+# Trust comes from the host. rio ships no CA bundle. The first that applies:
+#   1. SSL_CERT_FILE / SSL_CERT_DIR in the core's environment, passed as
+#      -cafile / -cadir.
+#   2. The system bundle: Debian/Alpine, RHEL, then OpenBSD and macOS.
+#   3. On Windows, the Windows certificate store (tcltls 1.8 on OpenSSL 3.2+).
+#   4. Nothing: no CA, verification still required. The handshake fails and
+#      `explain` says what to set. Never unverified.
 #
-# HOST NAMES. A trusted chain proves only that some CA vouched for some name; the check
-# that the name is the server's own is what tcltls 1.8 added (-servername → SSL_add1_host,
-# verified against 1.8.0: a trusted certificate for another name fails "hostname
-# mismatch"). tcltls 1.7 sends the name for SNI and never compares it. `checks_hostname`
-# reports which one this core has. On a 1.7 both callers — a repository fetch (rio::http)
-# and the agent (plugins/lib/transport.tcl) — refuse https unless the user allowed it with
-# the one core-wide switch, `unchecked_ok` (D110, widened to repositories by D114).
+# Host names. Only tcltls 1.8 checks that the certificate is for the host
+# dialled; 1.7 never compares the name. `checks_hostname` says which this
+# core has. On 1.7 both callers refuse https unless the user set the one
+# switch, `unchecked_ok` (D110, D114).
 #
-# EXCEPTIONS — a certificate the user accepted though it does not verify (D111). The
-# browser model: refuse by default, show why (`inspect`, a handshake that sends nothing),
-# and let the user accept THAT EXACT certificate for THAT host:port. An exception is the
-# leaf's SHA-256 fingerprint, kept in $XDG_CONFIG_HOME/rio/certificates.conf (D21 format,
-# parsed, never executed, read afresh each time it is needed). It covers every way that
-# one certificate fails — an untrusted issuer, expiry, another name — and nothing else:
-#   - a certificate that verifies never consults exceptions;
-#   - a different certificate on the same host:port is refused, and said to have changed;
-#   - a pin on one port says nothing about another.
-# It lives here, not in the repository code, because a pin is a statement about a server's
-# certificate, not about which feature dials it: every https connection the core makes
-# honours it. Only tcltls 1.8 can do this (-validatecommand is new there); on 1.7 nothing
-# changes.
+# Exceptions (D111): a certificate the user accepted though it does not
+# verify. An exception is the leaf's SHA-256 fingerprint for one host:port,
+# kept in $XDG_CONFIG_HOME/rio/certificates.conf (parsed, never executed, read
+# afresh each time). It needs tcltls 1.8.
+#   - A certificate that verifies never consults exceptions.
+#   - Another certificate on the same host:port is refused as changed.
+#   - An exception for one port says nothing about another.
 #
-# How `_verify` judges a chain (established against tcltls 1.8.0 / OpenSSL 3.4, by probe):
-# OpenSSL calls it once or more per certificate, top of the chain first, and ALWAYS ends
-# with a depth-0 call for the leaf. So a failure higher up passes provisionally — only if
-# the host has an exception at all — and the verdict is given at depth 0, where the leaf's
-# fingerprint is known. A callback that errors fails the handshake (also probed).
+# How `_verify` judges a chain. OpenSSL calls it per certificate, top first,
+# and always ends at depth 0, the leaf:
 #
-# tcltls is loaded LAZILY, by `ensure`, on the first https connection — a core without it
-# serves plain-http repositories exactly as before. Tk-free (D1); standalone (sourced by
-# plugins/lib/transport.tcl when the core has not loaded it, e.g. in that suite).
+#   depth 2  root   fails ──► passes for now, if the origin has an exception
+#   depth 1  inter.          (same)
+#   depth 0  leaf   verdict: fingerprint == the exception's?
+#
+# tcltls is loaded on the first https connection (`ensure`); a core without
+# it still serves plain http. No Tk. Can be sourced alone, as
+# plugins/lib/transport.tcl does.
 
 if {[llength [info commands rio::tls::socket]]} { return }
 
@@ -93,9 +77,7 @@ proc rio::tls::socket {args} {
 # Without a host (a caller that only wants to see the policy) there is no exception check.
 proc rio::tls::socket_opts {{host ""} {port ""}} {
 	set opts [_base_opts]
-	# 1.8 moved certificate verdicts out of -command, so a -command that returns nothing
-	# is harmless there — and on a 1.7, where -command still answers "verify", it would
-	# not be. The reasons are a 1.8 nicety; the verification itself is not.
+	# 1.8 only: on 1.7 -command still answers "verify", and _note returns nothing.
 	if {[checks_hostname]} {
 		lappend opts -command rio::tls::_note
 		if {$host ne ""} {
@@ -145,9 +127,9 @@ proc rio::tls::_token {} {
 	return $seq
 }
 
-# -validatecommand for every client connection on 1.8: OpenSSL's verdict stands, except
-# that a failing chain passes when its leaf is the certificate the user accepted for this
-# origin (the header explains the order it relies on). Any fault inside refuses.
+# -validatecommand on 1.8: OpenSSL's verdict stands, except that a failing
+# chain passes when its leaf is the certificate the user accepted for this
+# origin (see the header). An error inside refuses.
 proc rio::tls::_verify {origin token what args} {
 	if {$what ne "verify"} { return 1 }
 	if {[catch {_judge $origin $token {*}$args} verdict]} { return 0 }
@@ -178,9 +160,8 @@ proc rio::tls::_judge {origin token chan depth cert status err} {
 	return $ok
 }
 
-# The last certificate refusal recorded for an origin, consumed; "" when there was none.
-# rio::http asks after a failed https fetch, to tell "the certificate was refused" (which
-# the user can do something about) from every other way a connection fails.
+# The last certificate refusal for an origin, consumed; "" if none. rio::http
+# asks after a failed fetch: a refused certificate is one the user can accept.
 proc rio::tls::take_refusal {origin} {
 	variable refused
 	if {![dict exists $refused $origin]} { return "" }
@@ -216,10 +197,9 @@ proc rio::tls::fingerprint_show {s} {
 	return [join [regexp -all -inline .. $h] :]
 }
 
-# Every exception: origin -> {sha256 <normalized> subject <s> accepted <date>}. A missing,
-# unreadable or malformed file is no exceptions at all, and so is an entry without a valid
-# fingerprint — every way the file can be wrong falls to the refusing side. Without the
-# conf parser (tls.tcl sourced standalone) there are none either.
+# Every exception: origin -> {sha256 <normalized> subject <s> accepted <date>}.
+# A missing or malformed file, an entry without a valid fingerprint, or no
+# conf parser: no exception. Every fault refuses.
 proc rio::tls::exceptions {} {
 	set p [exceptions_path]
 	if {$p eq "" || ![file isfile $p] || ![llength [info commands ::rio::conf::read_file]]} {
@@ -292,13 +272,10 @@ proc rio::tls::_exceptions_write {all} {
 
 # --- settings: tls.conf (D114) -----------------------------------------------------------
 #
-# One choice today: whether https may go ahead on a tcltls that cannot check host names
-# (older than 1.8). Core-wide — the agent's transport and the repository fetch both ask it,
-# because the tcltls in question is the core's, whichever feature dials. Kept in
-# $XDG_CONFIG_HOME/rio/tls.conf beside certificates.conf (D21 format, top-level keys):
+# One choice: may https go ahead on a tcltls that cannot check host names
+# (older than 1.8)? Core-wide. In $XDG_CONFIG_HOME/rio/tls.conf:
 #     unchecked_hostnames = allow
-# Anything else — absent, another value, a malformed or unreadable file, no conf parser —
-# refuses. Read afresh on every call, so a hand edit counts without a restart.
+# Anything else refuses. Read on every call, so a hand edit needs no restart.
 
 proc rio::tls::settings_path {} {
 	variable settings_override
@@ -321,8 +298,7 @@ proc rio::tls::unchecked_ok {} {
 	return [expr {[dict get $conf "" unchecked_hostnames] eq "allow"}]
 }
 
-# Store the choice; returns it as 0|1. Raises when there is nowhere to write — a switch
-# that claims to be on while nothing remembers it would be a quiet lie.
+# Store the choice; returns it as 0|1. Raises when there is nowhere to write.
 proc rio::tls::set_unchecked {on} {
 	set on [expr {$on ? 1 : 0}]
 	set p [settings_path]
@@ -346,22 +322,22 @@ proc rio::tls::present {} {
 
 # --- inspect: what a server's certificate is, and what is wrong with it ----------------
 
-# Handshake with host:port and report its certificate, sending nothing after the handshake:
+# Handshake with host:port, send nothing more, and report its certificate:
 #   {host port subject issuer names not_before not_after sha256 problems reasons accepted}
-# `problems` are classes the user can read — untrusted, expired, not_yet_valid,
-# name_mismatch, other — plus `changed` when an exception exists for a different
-# certificate; `reasons` are OpenSSL's own words. An empty `problems` means it verifies.
-# Raises when the handshake cannot happen (unreachable, not TLS, timeout). Needs 1.8:
-# the caller checks `checks_hostname` first.
-#
-# Re-entrancy: like rio::http::get it waits in the event loop; it touches no document state.
+#   problems — untrusted, expired, not_yet_valid, name_mismatch, other, and
+#              `changed` when the exception is for another certificate.
+#              Empty means it verifies.
+#   reasons  — OpenSSL's own words
+# Raises when there is no handshake (unreachable, not TLS, timeout). Needs
+# tcltls 1.8; the caller checks `checks_hostname`.
+# Waits in the event loop, like rio::http::get.
 proc rio::tls::inspect {host port {timeout_ms 10000}} {
 	variable probes
 	ensure
 	set id [_token]
 	dict set probes $id [dict create reasons {} leaf {} state ""]
-	# A plain TCP connect first, TLS stacked on after: a tcltls socket opened -async never
-	# reports a refused connection (probed), so the probe would sit out its whole timeout.
+	# Plain TCP first, TLS stacked on after: an -async tcltls socket never
+	# reports a refused connection.
 	set host [string trim $host {[]}]
 	if {[catch {::socket -async $host $port} s]} {
 		dict unset probes $id
@@ -513,9 +489,9 @@ proc rio::tls::_note {what chan args} {
 	return
 }
 
-# Turn http's "failed to use socket" into the reason the certificate was refused, and
-# name the fix when there is one. Consumes the recorded reasons. `err` is returned
-# unchanged when no handshake failure was recorded.
+# Add to http's "failed to use socket" why the certificate was refused, and
+# the fix if there is one. Consumes the recorded reasons; without any, `err`
+# is returned unchanged.
 proc rio::tls::explain {err} {
 	variable last_reasons
 	if {![llength $last_reasons]} { return $err }
@@ -523,8 +499,7 @@ proc rio::tls::explain {err} {
 	set last_reasons {}
 	set msg "$err — the server's certificate was refused ($why)"
 	if {[regexp -nocase {local issuer|self-signed|unable to get} $why]} {
-		# SSL_CERT_FILE replaces the system bundle rather than adding to it, so a file holding
-		# only the private CA would cut off every public server, the agent's provider included.
+		# SSL_CERT_FILE replaces the system bundle, so it must hold the public CAs too.
 		append msg ". To trust a private CA, add it to the core host's certificate store (update-ca-certificates, trust anchor); or set SSL_CERT_FILE to a PEM bundle holding it and the public CAs, and restart the core"
 	}
 	return $msg

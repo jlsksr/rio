@@ -1,17 +1,9 @@
 # rio-gui/dialogs.tcl — shared dialogs: pick lists, file browsing, About.
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
-# The open-buffer picker (D74). One modal dialog (pick_dialog, below) serves both
-# "Compare With Another Tab…" and View ▸ "Switch to Tab…" — each is just "pick an open
-# buffer from a list". It replaces the old unbounded .m.tabs cascade (a menu could grow
-# screen-tall on X11; a dialog is bounded and scrolls), and unlike the cascade it can
-# show a path hint so two same-named tabs are told apart.
-#
-# The row list is built by a separate proc so it stays headless-testable the way
-# tabs_menu_fill was directly callable: walk every group's tab order (the same source),
-# skipping `exclude` (the current buffer, for compare). Each row is {id label}; the
-# label is the tab name + unsaved dot, plus the parent directory as a dim hint when the
-# buffer has a path.
+# The rows for the open-buffer picker (D74), used by "Compare With Another
+# Tab…" and "Switch to Tab…": every group's tabs but `exclude`, as {id label}.
+# The label is the tab name, its unsaved dot and its directory.
 proc buffer_pick_rows {{exclude ""}} {
 	set rows {}
 	foreach g $::groups {
@@ -26,19 +18,12 @@ proc buffer_pick_rows {{exclude ""}} {
 	return $rows
 }
 
-# The bounded list picker — "pick one row from a list", the shape D74 introduced for
-# buffers and D92 generalised. The dialog knows nothing about what a row *means*: each
-# row is {payload label}, and the return is the chosen payload, or "" on cancel or an
-# empty list. Modelled on remote_browse_dialog: themed toplevel, listbox + auto-hiding
-# scrollbar, Double-click/Return choose, Escape/Cancel abort, grab + tkwait. It exists
-# because a Tk menu has no size bound (an unbounded cascade can post taller than the
-# screen and misbehave on X11, see CAVEATS.md) while a listbox scrolls inside a fixed
-# frame — so every data-driven, unbounded list in rio comes here instead of to a menu.
-#
-# `initial` preselects the row carrying that payload (the theme in use, say) rather than
-# row 0, so the dialog opens on the current value the way a Windows chooser does. The box
-# is sized to its content within bounds — a 5-theme list isn't a 14-row well, and a long
-# one still stops well short of the screen.
+# The list picker (D74, D92): pick one row. A row is {payload label}. Returns
+# the chosen payload, or "" on cancel or an empty list.
+# - Every list in rio that can grow without bound comes here, not to a menu:
+#   a menu can post taller than the screen (CAVEATS.md); a listbox scrolls.
+# - `initial` preselects the row with that payload.
+# - Double-click or Return chooses; Escape cancels. Modal.
 proc pick_dialog {title rows {initial ""}} {
 	if {![llength $rows]} { bell ; return "" }   ;# nothing to pick — don't open an empty dialog
 
@@ -110,23 +95,15 @@ proc buffer_pick_dialog {title {exclude ""}} {
 	return [pick_dialog $title [buffer_pick_rows $exclude]]
 }
 
-# View ▸ Switch to Tab… (D74): the bounded replacement for the old top-level Tabs menu —
-# pick any open buffer and activate it (activate focuses the group that holds it).
+# View ▸ Switch to Tab… (D74): pick an open buffer and activate it.
 proc switch_tab_dialog {} {
 	set id [buffer_pick_dialog "Switch to tab"]
 	if {$id ne ""} { activate $id }
 }
 
-# rio's own build identity for Help ▸ About rio (D76). This is NOT rio's version — that
-# is $rio::version (D123), the row above it. The two answer different questions and both
-# are worth showing: Version says which RELEASE LINE this is, Build says which exact
-# COMMIT, and between releases Build is the precise one.
-# `git describe --tags --always` gives the *tag* once one exists and the abbreviated commit
-# otherwise, so at a release Build sharpens itself for free. Run against rio's OWN source dir
-# ([file dirname $::rio_self], the normalized script path) — not the user's project, and not
-# the core, which may be a different build on another machine. An installed copy with no git
-# metadata (or no git) falls back to "unknown". Computed once and cached; About is rare, so
-# there's no reason to shell out at startup.
+# rio's build id for About (D76): `git describe --tags --always` in rio's own
+# source dir. Version (D123) names the release; Build names the commit.
+# "unknown" without git. Computed once, on first use.
 proc rio_build_id {} {
 	if {![info exists ::rio_build]} {
 		if {[catch {exec git -C [file dirname $::rio_self] describe --tags --always} id]} {
@@ -138,9 +115,7 @@ proc rio_build_id {} {
 	return $::rio_build
 }
 
-# The date/time of that build's commit (committer date, local zone), so About can say not
-# just which rio but when it was cut. Same source dir and same "unknown" fallback + caching
-# as rio_build_id. --date=format gives a compact "YYYY-MM-DD HH:MM"; %cd honours it.
+# That commit's date, as "YYYY-MM-DD HH:MM". "unknown" without git.
 proc rio_build_date {} {
 	if {![info exists ::rio_build_date]} {
 		if {[catch {exec git -C [file dirname $::rio_self] show -s --format=%cd \
@@ -153,12 +128,8 @@ proc rio_build_date {} {
 	return $::rio_build_date
 }
 
-# What About's Version row says (D123). Normally just this checkout's release version —
-# a spawned core is the same tree, so naming it twice would be noise. But a core reached
-# over --connect (D29/D30) can be any build, and when it reports a DIFFERENT version that
-# is precisely the fact a bug report needs, so the row carries it: "0.1.0 (core 0.1.1)".
-# A core too old to report one leaves ::core_version empty and says nothing, which is the
-# D19 fallback rather than a claim that the versions match.
+# About's Version row (D123): this checkout's version, and the core's if it
+# differs: "0.4.0 (core 0.3.0)".
 proc about_version {} {
 	if {$::core_version ne "" && $::core_version ne $rio::version} {
 		return "$rio::version (core $::core_version)"
@@ -166,20 +137,9 @@ proc about_version {} {
 	return $rio::version
 }
 
-# Help ▸ About rio (D76): a small themed modal with rio's name, one-line description, and the
-# release version (D123), the build id, its commit date, the wire-protocol version (all handy
-# in a bug report — see ::rio_protocol) and the licence (D121) — the one fact here that is
-# about the copy in front of you rather than this build, and the reason it is legible without
-# going back to the repository.
-# The licence name is written here rather than read from LICENSE: the file need not sit beside a
-# deployed GUI, and smoke.tcl holds this string to it. Info is
-# static labels (muted), the lone control is Close; Esc/Return dismiss. Non-blocking (grab but
-# no tkwait) — it just informs, it returns nothing.
-#
-# Version comes FIRST: it is the coarsest and most quotable fact, and the one a bug report
-# leads with. It names the core too, but only when the core's differs (about_version) —
-# a second permanent row would repeat the same number on every local run, since a spawned
-# core is always this very tree.
+# Help ▸ About rio (D76): name, description, and the rows Version, Build,
+# Date, Protocol, License (D121). The licence name is a literal here;
+# smoke.tcl holds it to LICENSE. One control, Close; Esc and Return close too.
 proc about_dialog {} {
 	set w .about
 	destroy $w
@@ -190,8 +150,7 @@ proc about_dialog {} {
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
 	set fam [font actual RioUIFont -family]
-	# No dedicated "muted" UI role in the theme vocabulary — blend the fg halfway toward the
-	# bg for a dim label tone that reads on any theme (the restyle_group currentline pattern).
+	# A muted tone: the foreground blended toward the background.
 	set mute [blend_hex [dict get $c ui.fg] [dict get $c ui.bg] 45]
 
 	label $w.name -text "rio" -font [list $fam 20 bold] \
@@ -199,7 +158,7 @@ proc about_dialog {} {
 	label $w.tag -font RioUIFont -justify left -wraplength 340 \
 		-text "A small, cross-platform IDE, written from scratch in Tcl/Tk." \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
-	# The static facts, as a dim two-column block so they read as info, not controls.
+	# The facts, in two columns, muted: information, not controls.
 	frame $w.facts -background [dict get $c ui.bg]
 	set r 0
 	foreach {k v} [list Version [about_version] Build [rio_build_id] \
@@ -214,15 +173,8 @@ proc about_dialog {} {
 	}
 	button $w.ok -text "Close" -font RioUIFont -command {destroy .about}
 
-	# rio's own icon, to the left of the name — the Win2000/VSCode About-box shape. It
-	# reuses an image apply_window_icon (D117) already loaded for `wm iconphoto`, so
-	# nothing is read from disk here and the box always shows the icon rio is actually
-	# wearing. The PNG's transparency composites over the label's themed background.
-	#
-	# Column 0 is the icon's, column 1 the text's, ALWAYS — so when there is no icon to
-	# show (the D117 soft case: a checkout with icons/ removed) column 0 simply has no
-	# width and the box keeps its old single-column look, with no second layout to hold
-	# in step.
+	# rio's icon, left of the name: an image apply_window_icon already loaded
+	# (D117). Without one, column 0 is simply empty.
 	set icon ""
 	foreach n {64 48 32} {
 		if {[llength [info commands ::rio_icon_$n]]} { set icon ::rio_icon_$n ; break }
@@ -244,23 +196,18 @@ proc about_dialog {} {
 	focus $w.ok
 }
 
-# A protocol-native remote file/folder browser (D29/D30). In remote mode
-# the filesystem of record is the CORE's, but tk_getOpenFile / tk_getSaveFile /
-# tk_chooseDirectory browse the CLIENT's disk — wrong for a remote core. So those
-# choosers give way to this browser, which walks the REMOTE tree over `fs.list` —
-# the very op the docked file pane uses (populate_nav) — point-and-click, not typed.
-# An editable Location bar still lets you jump straight to a known path, so it also
-# subsumes the old typed-path prompt (remote_path_dialog).
+# The remote file browser (D29, D30). With a remote core, Tk's own choosers
+# would browse the client's disk. This one walks the core's tree with fs.list.
+# A Location bar jumps to a typed path.
 #
 #   mode = open -> pick an existing file    -> returns its abs path
 #          save -> pick a dir + type a name -> returns dir/name
-#          dir  -> pick a directory         -> returns the shown dir
+#          dir  -> pick a directory         -> returns it
 #
 # Returns the chosen absolute path, or "" if cancelled.
 
-# The row model for one remote directory: a ".." row (unless at "/"), then dirs,
-# then files — each {type abspath display}, already dictionary-sorted by the core.
-# Split out from the widget code so the fs.list walk is testable headlessly.
+# The rows for one remote directory: "../" (unless at a root), directories,
+# files; each {type abspath display}. No widgets, so it can be tested.
 proc rbrowse_rows_for {dir} {
 	set resp [rio_call fs.list [dict create path $dir]]
 	if {![dict get $resp ok]} {
@@ -268,11 +215,7 @@ proc rbrowse_rows_for {dir} {
 	}
 	set abs [dict get $resp result path]   ;# the core's normalized dir
 	set rows {}
-	# At a filesystem root there is no parent to offer. Asking whether the dirname is
-	# the path itself, rather than testing `$abs ne "/"`, is what makes this right off
-	# POSIX: a Windows root is "C:/", whose dirname is itself, so the literal put a
-	# "../" row there that navigated straight back to the same directory. $abs is the
-	# CORE's normalized path, so this holds for a remote core too.
+	# A root is a path whose dirname is itself: "/" and "C:/" alike.
 	if {[file dirname $abs] ne $abs} { lappend rows [list dir [file dirname $abs] "../"] }
 	foreach grp {dir file} {
 		foreach e [dict get $resp result entries] {
@@ -285,22 +228,15 @@ proc rbrowse_rows_for {dir} {
 	return [dict create ok 1 dir $abs rows $rows]
 }
 
-# Is $p absolute AS THE CORE SEES IT? `file pathtype` answers with the CLIENT's rules,
-# which is wrong the moment the two platforms differ: a Windows client calls the Linux
-# core's "/home/jka" *volumerelative*, not absolute — so a remote path typed into the
-# browser was treated as relative and joined onto the current directory, and a remote
-# seed never opened in its own folder. Judge by shape instead — a leading "/" (POSIX,
-# and UNC as "//") or an "X:" drive prefix — which reads correctly for either core from
-# either client. Deliberately NOT [file normalize]: on a Windows client that rewrites a
-# core path like "/home/jka" to "C:/home/jka".
+# Is $p absolute as the core sees it? Judged by shape: a leading "/" or an
+# "X:" prefix. `file pathtype` and `file normalize` use the client's rules,
+# which are wrong when client and core differ in platform.
 proc core_path_absolute {p} {
 	return [expr {[string match "/*" $p] || [regexp {^[A-Za-z]:[/\\]} $p]}]
 }
 
-# Where the browser opens: the seed's directory if it names an absolute path, else
-# the open project's root, else the CORE's filesystem root — which the core told us at
-# session.hello rather than the GUI assuming "/" (right for a POSIX core, unlistable on
-# a Windows one). The Location bar reaches anywhere from there.
+# Where the browser opens: the seed's directory, else the project root, else
+# the core's filesystem root (from session.hello).
 proc rbrowse_start {seed} {
 	if {$seed ne "" && [core_path_absolute $seed]} {
 		return [file dirname $seed]
@@ -309,14 +245,11 @@ proc rbrowse_start {seed} {
 	return [expr {$root ne "" ? $root : $::core_fsroot}]
 }
 
-# Re-list $dir into the browser: fill the Location bar and the listbox from
-# rbrowse_rows_for, dropping files in dir mode. A bad path just beeps (the old
-# listing stays), so a mistyped Location can't strand the dialog.
+# List $dir in the browser. In dir mode files are left out. A bad path beeps
+# and the old listing stays.
 proc rbrowse_go {dir} {
 	set info [rbrowse_rows_for $dir]
-	# rbrowse_rows_for pumps the event loop (an fs.list round-trip). If the dialog was
-	# cancelled meanwhile — Escape, WM close, a slow remote listing the user gave up on
-	# — its widgets are gone; bail rather than crash on a stale ".rbrowse.loc".
+	# The call ran the event loop: the dialog may be gone.
 	if {![winfo exists .rbrowse.loc]} return
 	if {![dict get $info ok]} { bell ; return }
 	set ::rbrowse_dir [dict get $info dir]
@@ -350,11 +283,7 @@ proc rbrowse_activate {} {
 proc rbrowse_choose {} {
 	switch -- $::rbrowse_mode {
 		dir {
-			# Open the HIGHLIGHTED folder if a row is selected — the intuitive "click a folder,
-			# press Open" that a bare tk_chooseDirectory denies (it returns only the folder you
-			# have entered, not the one clicked). With nothing selected, fall back to the folder
-			# currently shown, so you can still open a folder by navigating into it. In dir mode
-			# only dirs and the "../" parent are listed, so a selection is always a directory.
+			# The selected folder, else the folder shown.
 			set sel [.rbrowse.body.list curselection]
 			if {$sel ne ""} {
 				set ::rbrowse_result [lindex [lindex $::rbrowse_rows $sel] 1]
@@ -440,8 +369,7 @@ proc remote_browse_dialog {title mode {seed ""}} {
 	set ::rbrowse_rows   {}
 	rbrowse_go [rbrowse_start $seed]
 
-	# The first rbrowse_go may have been cancelled mid-flight (an Escape during its
-	# fs.list), taking the dialog with it — only grab/focus/wait if it's still here.
+	# The dialog may have been cancelled during the first listing.
 	if {[winfo exists $w]} {
 		catch {grab $w}
 		focus $w.body.list
@@ -451,19 +379,15 @@ proc remote_browse_dialog {title mode {seed ""}} {
 }
 
 # --- dialog wrappers ---------------------------------------------------------
-# Each picks a path then calls a do_* action. The native chooser browses the local
-# disk; when the core is remote (its FS isn't ours) it gives way to the remote file
-# browser (remote_browse_dialog), which walks the server's tree over fs.list.
+# Each picks a path and calls a do_* action: Tk's chooser for a local core,
+# the remote browser for a remote one.
 proc open_dialog {} {
 	if {$::core_remote} {
-		# The remote browser is a single-select tree (fs.list, one pick); open just it.
 		set p [remote_browse_dialog "Open file (remote)" open]
 		if {$p ne ""} { do_open $p }
 		return
 	}
-	# -multiple 1 lets the native chooser Ctrl/Shift-select several files; the result
-	# is then a LIST of paths (empty on cancel). Open each in order — do_open dedups
-	# and activates, so the last selected file ends up focused.
+	# -multiple 1: several files may be chosen; the last one ends up focused.
 	foreach p [tk_getOpenFile -title "Open file" -multiple 1] {
 		if {$p ne ""} { do_open $p }
 	}

@@ -2,14 +2,11 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# Find / Replace (D36). The bar is a thin view: the MATCHING runs in
-# the core (buffer.find / buffer.matches — the core owns the canonical text,
-# D3), and the bar carries only the frontend-local state those ops are
-# stateless about (D22): the needle, the options, and the caret it passes as
-# `from`. Replace is the existing edit path — a found range plus a
-# buffer.replace; Replace All is one op and ONE undo step. The bar always acts
-# on the FOCUSED group; matches are painted with the `findmatch` tag
-# (editor.findmatch role, D24), the current match with the native selection.
+# Find and Replace (D36). The core matches (buffer.find, buffer.matches); the
+# bar holds the needle, the options and the caret (D22). Replace is a
+# buffer.replace of the found range; Replace All is one op and one undo step.
+# The bar acts on the focused group. Matches carry the `findmatch` tag; the
+# current match is the selection.
 # ---------------------------------------------------------------------------
 set ::find_shown   0  ;# find bar visible? (Ctrl+F / Ctrl+H; Esc hides it)
 set ::find_case    0  ;# Match case checkbox (off = fold case, the familiar default)
@@ -18,10 +15,8 @@ set ::find_regex   0  ;# Regex checkbox (on = needle is a Tcl-ARE pattern, D52 P
 set ::find_starts  {} ;# match starts from the last find_update ("i of n" lookup)
 set ::find_pending 0  ;# a coalesced find_update is queued (see apply_change)
 
-# Show the bar (packing it above the status bar), with or without the Replace
-# row — Ctrl+F and Ctrl+H open the same bar in the two shapes. A single-line
-# editor selection pre-fills the needle (the 90s convention); the needle entry
-# gets focus with its text selected, so typing starts a fresh search.
+# Show the bar, with or without the Replace row (Ctrl+F, Ctrl+H). A
+# selection on one line becomes the needle. The entry gets the focus.
 proc find_open {withReplace} {
 	set ::find_shown 1
 	pack .find -after .status -side bottom -fill x
@@ -55,12 +50,9 @@ proc find_close {} {
 # The count/status label at the bar's right ("12 matches", "3 of 12", …).
 proc find_status {msg} { .find.count configure -text $msg }
 
-# Recompute the matches for the focused group's buffer: repaint the findmatch
-# tag and refresh the count. Runs on every needle keystroke, on the case
-# toggle, on a tab switch, and (coalesced) after any buffer change — one
-# buffer.matches round-trip, the same cost as one typed character. Painting is
-# capped so a one-letter needle in a huge file cannot stall the view; the
-# count stays exact.
+# Recompute the matches in the focused buffer: paint them and show the
+# count. On every keystroke in the needle, an option toggle, a tab switch and
+# a buffer change. At most 1000 matches are painted; the count is exact.
 proc find_update {} {
 	set ::find_pending 0
 	if {!$::find_shown} return
@@ -83,10 +75,8 @@ proc find_update {} {
 	find_status [expr {$n == 0 ? "No matches" : "$n match[expr {$n==1 ? "" : "es"}]"}]
 }
 
-# Jump to the next (or previous) match: ask the core for the match after the
-# current one — after the selection's edge, else the caret — select it, put
-# the caret on its far side, and scroll it into view. Search wraps around; the
-# label says so.
+# Go to the next or previous match, from the selection's edge or the caret:
+# select it and scroll to it. The search wraps; the label says so.
 proc find_step {backwards} {
 	if {!$::find_shown} { find_open 0 ; return }
 	set needle [.find.e get]
@@ -106,8 +96,7 @@ proc find_step {backwards} {
 	set s [dict get $r start] ; set e [dict get $r end]
 	$t tag remove sel 1.0 end
 	$t tag add sel $s $e
-	# No expr here: an index like 1.10 would coerce to the float 1.1 (see
-	# editor_proxy's delete arm for the original bite of this).
+	# No expr on an index: 1.10 would become the float 1.1.
 	if {$backwards} { $t mark set insert $s } else { $t mark set insert $e }
 	$t see $s
 	set i [lsearch -exact $::find_starts $s]
@@ -121,17 +110,15 @@ proc find_step {backwards} {
 proc find_next {} { find_step 0 }
 proc find_prev {} { find_step 1 }
 
-# Regex supersedes whole-word (a pattern writes its own boundaries), so grey the
-# Whole word box while Regex is on, then re-run the search with the new mode.
+# Regex replaces whole-word: grey that box while Regex is on, search again.
 proc find_regex_changed {} {
 	.find.word configure -state [expr {$::find_regex ? "disabled" : "normal"}]
 	find_update
 }
 
-# Replace the current match, then jump to the next: if the selection IS a
-# match of the needle, replace it through the ordinary edit op; otherwise this
-# first click just selects the next match and the next click replaces it (the
-# classic two-step, so a replace is always visible before it happens).
+# Replace the current match and go to the next. If the selection is not a
+# match, this click only selects the next match: a replace is seen before
+# it happens.
 proc find_replace_one {} {
 	if {!$::find_shown} return
 	set needle [.find.e get]
@@ -140,10 +127,9 @@ proc find_replace_one {} {
 	if {![catch {list [$t index sel.first] [$t index sel.last]} range]} {
 		lassign $range s e
 		set cur [$t get $s $e]
-		# Does the selection stand as a match? Literal: an exact (case-folded) equality.
-		# Regex: the whole selection matches the pattern — and the replacement is the
-		# regsub of the pattern over the selection, so backreferences resolve against
-		# this actual match (a client-side substitution of an already-matched string).
+		# Is the selection a match? Literal: equality. Regex: the whole
+		# selection matches, and the replacement is its regsub, so
+		# backreferences work.
 		set newtext [.find.re get]
 		if {$::find_regex} {
 			set flags {} ; if {!$::find_case} { lappend flags -nocase }
@@ -161,9 +147,8 @@ proc find_replace_one {} {
 	find_step 0
 }
 
-# Replace every match in one op (buffer.replace_all): one round-trip, one undo
-# step. The buffer.changed event repaints the widget before the reply lands
-# (events precede replies on the channel), so only the caret needs restoring.
+# Replace every match in one op (buffer.replace_all): one undo step. The
+# buffer.changed event repaints the widget; only the caret is restored here.
 proc find_replace_all {} {
 	if {!$::find_shown} return
 	set needle [.find.e get]
@@ -182,17 +167,12 @@ proc find_replace_all {} {
 }
 
 # ---------------------------------------------------------------------------
-# The Search panel (D52): the grown-up sibling of the inline find bar —
-# find across three SCOPES (Current doc / Open docs / Project) in one bottom tool
-# window, its results a grouped, navigable list. Two core engines sit behind the
-# scope selector, so buffer and project search can never disagree:
-#   Project    → project.search  (the on-disk tree; only the core sees it remotely)
-#   Open docs  → buffers.search  (every open buffer's LIVE text — unsaved edits too)
-#   Current doc→ buffers.search with `only` the focused buffer
-# It grew from the D51 find-in-files panel (the `.results` widget paths are kept),
-# and is the concrete bottom-site tenant D35 will re-home into its dock. Replace
-# (Phase B) and regex (Phase C) are later arcs; the query row leaves room. rl_*
-# draws the grouped list; the inline find bar stays the quick in-buffer path (D35 #5).
+# The Search panel (D52): search in one of three scopes; the results are a
+# list grouped by file.
+#   Project      project.search   the files on disk
+#   Open docs    buffers.search   every open buffer's live text
+#   Current doc  buffers.search, `only` the focused buffer
+# Its widgets are under `.results`.
 # ---------------------------------------------------------------------------
 set ::search_shown   0        ;# panel visible?
 set ::search_case    0        ;# "Match case" (off = case-insensitive, the friendlier first search)
@@ -200,11 +180,9 @@ set ::search_word    0        ;# "Whole word" (off = substring; on = word-bounde
 set ::search_scope   "Current doc" ;# default; one of: Project | Open docs | Current doc
 set ::search_replace 0        ;# the replace row shown? (Ctrl+H, like the find bar)
 
-# Show the panel (above the find bar / status). `seed` overrides the query text —
-# the sentinel __sel__ (the default) seeds from the editor selection like the find
-# bar; any other value is used verbatim (the bar handoff passes its needle). Search
-# at once if there is a needle. Project scope needs an open folder; the buffer
-# scopes search the open documents regardless, so only Project reports "no folder".
+# Show the panel. `seed` is the query text; the default __sel__ takes it from
+# the editor's selection. Searches at once if there is a needle. Project
+# scope needs an open folder.
 proc search_open {{seed __sel__}} {
 	set root ""
 	catch { set root [dict get [rio_result project.get {}] root] }
@@ -240,10 +218,8 @@ proc search_close {} {
 	focus [gget $::focus path]
 }
 
-# Run the query for the current scope and repaint the grouped result list. Empty
-# needle clears; the option toggles and the scope selector re-run (their -command).
-# One round-trip per Enter/toggle — search walks a tree or every buffer, so it is
-# not a per-keystroke live paint like the in-buffer find bar.
+# Run the query for the scope and repaint the list. On Enter and on a
+# toggle, not on every keystroke: a search walks a tree or every buffer.
 proc search_run {} {
 	if {!$::search_shown} return
 	set needle [.results.hdr.e get]
@@ -284,16 +260,15 @@ proc search_run {} {
 	.results.hdr.count configure -text $msg
 }
 
-# Repaint the rich-list: a non-selectable file-header row then one selectable row
-# per matching line ("<line>  <text>"), its payload the location to open. Mirrors
-# the git/files panes' rl_* rendering. A file object carries EITHER `rel` (a disk
-# path, from project.search) or `name` (an open buffer, from buffers.search) for
-# the header, and its rows a `path` (open via do_open) or a `buffer` id (switch via
-# activate) — so one render path serves every scope. Every occurrence on a row is
-# tinted with the `fimatch` band (D51): the core hands back each hit's 1-based start
-# column in `cols` and its char length in the parallel `lens` (so a variable-length
-# regex hit sizes correctly, D52 Phase C), offset here by the "<line>  " prefix. `L`
-# tracks the text-widget line as rows are appended (header rows count too).
+# Repaint the list: per file a header row, then one row per matching line.
+#
+#   src/main.tcl
+#      12  set x [foo $y]
+#      40  foo bar
+#
+# A file object has `rel` (a disk file) or `name` (a buffer); a row's payload
+# has `path` or `buffer`, so one painter serves every scope. Each hit is
+# tagged `fimatch`, from the core's `cols` and `lens`, shifted by the prefix.
 proc search_paint {results} {
 	set b .results.well.body
 	rl_begin $b
@@ -330,11 +305,8 @@ proc search_paint {results} {
 	rl_end $b
 }
 
-# Activate a result row: go to its location and move the caret to the match. A disk
-# hit (payload `path`) opens/switches via do_open; an open-buffer hit (payload
-# `buffer`) switches to that tab via activate. The index is built as a string, not
-# through expr, so a column like 10 isn't coerced to a float (the editor_proxy /
-# buffer.find float trap, met again).
+# Go to a result: open the file or switch to the buffer, and put the caret
+# on the match. The index is built as a string, never through expr.
 proc search_activate {payload} {
 	if {[dict exists $payload buffer]} {
 		set id [dict get $payload buffer]
@@ -352,10 +324,8 @@ proc search_activate {payload} {
 	focus [gget $::focus path]       ;# …but focus takes the window PATH (the gutter-bug trap)
 }
 
-# Escalate from the inline find bar into the Search panel (Ctrl+Shift+F while the
-# bar is focused): carry the bar's needle + options across and widen to Project
-# scope (the point of escalating). If the bar was in Replace mode, carry the
-# replacement text and open the panel's replace row too. The panel then owns the query.
+# From the find bar to the Search panel (Ctrl+Shift+F in the bar): the
+# needle, the options and the replacement come along; the scope is Project.
 proc search_from_bar {} {
 	set ::search_case  $::find_case
 	set ::search_word  $::find_word
@@ -369,18 +339,13 @@ proc search_from_bar {} {
 	search_open [.find.e get]
 }
 
-# Regex supersedes whole-word in the panel too: grey the panel's Whole word box
-# while Regex is on. `search_regex_changed` also re-runs the query (the checkbox's
-# -command); `search_regex_sync` only reflects the state (used on a handoff).
+# Regex replaces whole-word here too: grey that box while Regex is on.
 proc search_regex_sync {} {
 	.results.hdr.word configure -state [expr {$::search_regex ? "disabled" : "normal"}]
 }
 proc search_regex_changed {} { search_regex_sync ; search_run }
 
-# Show or hide the replace row (D52 Phase B) — the find bar's Ctrl+H, brought to the
-# panel. Packed -side bottom so it lands just ABOVE the bottom-anchored query row (a
-# later -side bottom slave stacks above the earlier one), keeping the query field
-# pinned to the bottom edge when the replace row appears/disappears.
+# Show or hide the replace row (D52), just above the query row.
 proc search_show_replace {on} {
 	set ::search_replace $on
 	if {$on} {
@@ -391,12 +356,11 @@ proc search_show_replace {on} {
 	}
 }
 
-# Replace every match for the current scope (D52 Phase B). Buffer scopes go through
-# buffer.replace_all — one undo step per buffer, the change UNSAVED — with each
-# touched buffer flagged modified. Project goes through the destructive, confirm-
-# gated project.replace: open files are edited in their buffers (undoable), closed
-# files rewritten on disk. The old hit locations are stale afterwards, so the list
-# is cleared and the count line reports what changed (mirroring the find bar).
+# Replace every match in the scope (D52).
+#   buffer scopes   buffer.replace_all: one undo step per buffer, unsaved
+#   Project         project.replace, after a confirmation: open files in
+#                   their buffers, closed files on disk
+# Afterwards the list is cleared and the count line says what changed.
 proc search_replace_all {} {
 	if {!$::search_shown} return
 	set needle [.results.hdr.e get]

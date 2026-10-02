@@ -1,21 +1,22 @@
 # rio-core — the document model (D12).
 #
-# A document is an ordered list of line strings. Positions are "line.col"
-# (1-based line, 0-based column) — the Tk text-widget index format (D12), so a
-# GUI view maps near-free. The one edit primitive is a range replacement:
-# replace [start, end) with text; insert and delete are degenerate cases.
+# A document is a list of line strings. A position is "line.col": 1-based line,
+# 0-based column, Tk's text index format. The one edit is a range replacement:
+# replace [start, end) with text. Insert and delete are special cases of it.
 #
-# This module is pure logic — no Tk, no I/O, no protocol — so it tests headless.
+#   insert "x" at 1.2    replace 1.2 1.2 "x"
+#   delete 1.2..1.5      replace 1.2 1.5 ""
+#
+# Pure logic: no Tk, no I/O, no protocol.
 
 namespace eval rio::doc {
 	variable buffers {}   ;# dict: id -> {lines name meta run seq undo undo_size redo redo_size}
 	variable nextid 0
 }
 
-# Create a buffer from text (a document always has at least one line) and return
-# its id. `meta` is an opaque per-buffer dict the model stores but never
-# interprets — fs.* uses it to carry file path / encoding / line-ending so a
-# save can preserve what an open detected (D22).
+# Create a buffer from text and return its id. A document has at least one line.
+# `meta` is stored, never interpreted: fs.* keeps path, encoding and line ending
+# there (D22).
 proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	variable buffers
 	variable nextid
@@ -28,7 +29,7 @@ proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	return $id
 }
 
-# Read or update a buffer's opaque metadata dict (see `new`).
+# Read or update a buffer's metadata dict (see `new`).
 proc rio::doc::meta {id} {
 	variable buffers
 	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
@@ -46,8 +47,8 @@ proc rio::doc::exists {id} {
 	return [dict exists $buffers $id]
 }
 
-# Forget a buffer entirely (its id is not reused). The doc model never calls the
-# builtin [close], so shadowing it here is safe.
+# Forget a buffer; its id is not reused. Shadows the builtin [close], which
+# this namespace never calls.
 proc rio::doc::close {id} {
 	variable buffers
 	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
@@ -68,24 +69,19 @@ proc rio::doc::linecount {id} {
 	return [llength [lines $id]]
 }
 
-# How many times this buffer's text has changed, ever. A monotonic counter bumped by
-# `replace` — the one mutation choke point, so every edit, undo, redo, whole-text
-# settext and replace_all is counted and nothing else is. It answers "has this document
-# changed since I last wrote it" WITHOUT a dirty flag: `modified` is a view's word for
-# whether it differs from disk (D22, above), which each frontend answers for itself,
-# while this is a fact about the document and belongs here. Autosave (D132) compares it
-# against the revision at its last write; undoing back to that state still reads as
-# changed, which costs one identical rewrite and can never wrongly skip one.
+# How many times this buffer's text has changed. `replace` bumps it, and every
+# change goes through `replace`. Autosave (D132) compares it with the revision
+# at its last write. Undoing back still counts as a change: one spare rewrite,
+# never a skipped one.
 proc rio::doc::revision {id} {
 	variable buffers
 	if {![dict exists $buffers $id]} { rio::error::raise no_buffer "no such buffer: $id" }
 	return [dict get $buffers $id seq]
 }
 
-# The text spanning [start, end). STRICT, unlike `replace`: an index past its line's
-# end or an end before start is a bad_index, not clamped — a caller asking for a
-# range it believes exists (the agent's selection scope, D113) must hear that it
-# doesn't, rather than be handed a different span.
+# The text spanning [start, end). Strict, unlike `replace`: an index past its
+# line's end is a bad_index, not clamped. The agent's selection scope (D113)
+# must hear that its range is gone, not get another span.
 proc rio::doc::range_text {id start end} {
 	set lines [lines $id]
 	lassign [_idx $start] sl sc
@@ -102,12 +98,9 @@ proc rio::doc::range_text {id start end} {
 	return [_range $lines [expr {$sl - 1}] $sc [expr {$el - 1}] $ec]
 }
 
-# A summary of every open buffer, in creation order — the registry's key order,
-# which Tcl dicts preserve. Each entry is a flat dict {buffer name path
-# linecount}; `path` is "" for a buffer not backed by a file. View-local state
-# (cursor, selection, tab order, modified) belongs to the frontend (D22), so it
-# is deliberately absent here. This is the model's first non-flat result: a list
-# of dicts, which the wire layer encodes as an array explicitly (D25).
+# Every open buffer in creation order, as {buffer name path linecount} dicts.
+# `path` is "" for a buffer without a file. Cursor, selection, tab order and
+# modified are the frontend's (D22), so they are not here.
 proc rio::doc::inventory {} {
 	variable buffers
 	set out {}
@@ -123,15 +116,11 @@ proc rio::doc::inventory {} {
 	return $out
 }
 
-# Replace [start, end) with text. Returns the text that was removed (so callers
-# can build change events, and undo keeps it). Mutates the buffer in place. This is
-# the RAW primitive: it does not touch the undo history, so undo/redo can use it
-# to reverse an edit without themselves being recorded.
+# Replace [start, end) with text. Returns the removed text. The raw primitive:
+# it records no undo step, so undo and redo can use it.
 #
-# `_splice` may CLAMP an out-of-range column to its line's end; the effective
-# range can therefore differ from the caller's start/end. Pass `clampedVar` to
-# receive that effective {start end} — `edit` records it so undo reverses the
-# span the text actually occupies, not the raw (possibly out-of-range) request.
+# A column past its line's end is clamped. `clampedVar` receives the range
+# actually replaced, which `edit` records for undo.
 proc rio::doc::replace {id start end text {clampedVar ""}} {
 	variable buffers
 	lassign [_splice [lines $id] $start $end $text] newlines removed cstart cend
@@ -157,9 +146,8 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 #   redo stack   the removed text     the inserted text
 #
 # Undo swaps the two halves and moves the step across; redo swaps them back. A text
-# is therefore stored once: a reload or a Replace All costs one copy of the file, not
-# two. A list, not a dict: 279 bytes a step against 985, measured (ADR-0146).
-# Applying a fresh edit invalidates the redo branch.
+# is therefore stored once. A list, not a dict: it is a third of the size (ADR-0146).
+# A fresh edit empties the redo stack.
 #
 # --- the budget (ADR-0146) ---------------------------------------------------
 #
@@ -169,29 +157,22 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 #
 # --- coalescing (D90) ----------------------------------------------
 #
-# Typing must not cost one undo step per keystroke. A run of single-character
-# edits that continues where the previous one left off is MERGED into the step
-# it extends, so one undo takes back the word just typed. The granularity is a
-# WORD: the run seals as soon as the character joining it is blank, so "the "
-# is one step and "quick " the next. A newline never joins a run at all — it is
-# always its own step, so undoing right after Enter takes back the line break
-# and nothing else.
+# One undo takes back a word, not a keystroke. A one-character edit that
+# continues the previous one is merged into its step:
 #
-# Only ONE character joins a run, and only in the direction the run is going:
-# typing forward, Backspace leftwards, or Delete repeatedly at one spot.
-# Everything else — a paste, a selection replaced, Replace All, an agent edit —
-# is its own step and closes the run behind it. `run` is the per-buffer flag for
-# "the step on top of the undo stack is still open"; undo and redo clear it,
-# since the step they moved is no longer the one being typed into.
+#   type "the quick "    two steps: "the " and "quick "
+#   Enter                always its own step
 #
-# The core cannot tell the Delete key pressed twice from vi's `x` pressed twice:
-# both arrive as two one-character deletions at the same spot, yet vim undoes
-# those separately. So a frontend dispatching a DISCRETE command passes
-# coalesce=0, meaning "begin a new step here" — the one piece of undo
-# granularity the core cannot infer from the edits alone (the vi mode does
-# exactly this, on every normal-state key). It breaks the run BEHIND the edit
-# only: the step it begins still grows, so vi's `i` followed by typing a word is
-# one step, not a lone first character and then the rest.
+# - A blank closes the run.
+# - One character joins at a time, in the run's direction: typing forward,
+#   Backspace leftwards, Delete at one spot.
+# - Anything else (a paste, Replace All, an agent edit) is its own step.
+# - `run` says the top undo step is still open. Undo and redo clear it.
+#
+# coalesce=0 means "begin a new step here". The core cannot tell Delete pressed
+# twice from vi's `x` twice, so the vi mode passes it on every normal-state key.
+# It closes the run behind the edit only: vi's `i` and the word typed after it
+# are one step.
 
 namespace eval rio::doc {
 	variable undo_budget 4194304   ;# per stack, per buffer: 4 MB of ASCII
@@ -236,9 +217,8 @@ proc rio::doc::_pop {id stack} {
 	return $step
 }
 
-# A recording edit — what user-facing ops call. Returns the removed text.
-# The step keeps the CLAMPED start/end (see `replace`): a client may send a
-# column past the line's end, and undo must reverse where the edit landed.
+# A recorded edit, which is what the ops call. Returns the removed text.
+# The step keeps the clamped range (see `replace`), where the edit landed.
 proc rio::doc::edit {id start end text {coalesce 1}} {
 	variable buffers
 	set removed [replace $id $start $end $text applied]
@@ -262,12 +242,9 @@ proc rio::doc::edit {id start end text {coalesce 1}} {
 	return $removed
 }
 
-# Replace a buffer's whole text — what a reload from disk does (D94). ONE undo step, so
-# Ctrl+Z after a reload gets the old text back: the file changing under you is an event
-# you can take back like any other edit, not a hole in the history. coalesce=0 also seals
-# the typing run behind it, so the reload can never merge into a word someone was typing.
-# Returns the {start end text removed} change record, exactly the shape buffer.changed
-# carries — a reload announces itself to frontends as the edit it is.
+# Replace a buffer's whole text: a reload from disk (D94). One undo step, so
+# Ctrl+Z gets the old text back. coalesce=0 keeps it out of a typing run.
+# Returns the change {start end text removed}, the shape of buffer.changed.
 proc rio::doc::settext {id text} {
 	set lines [lines $id]
 	set endpos "[llength $lines].[string length [lindex $lines end]]"
@@ -304,28 +281,22 @@ proc rio::doc::_merge {top step ch} {
 	return ""
 }
 
-# May a following edit extend the step just recorded? Only while the run is
-# mid-word: a blank (space, tab, newline) closes it, and so does anything that
-# is not a single character (`ch` is "" then). Note this does not consult
-# `coalesce`: that flag breaks the run BEFORE this edit, it does not stop the new
-# step from growing — which is what makes vi's `i` followed by typing one step and
-# not two.
+# May a following edit extend the step just recorded? Only mid-word: a blank
+# closes the run, and so does anything but a single character (`ch` is "").
+# `coalesce` is not asked: it breaks the run before this edit, not after.
 proc rio::doc::_run_open {ch} {
 	return [expr {$ch ne "" && ![string is space -strict $ch]}]
 }
 
-# The single character an edit inserts or deletes, or "" if it is neither a
-# one-character insert nor a one-character delete (a replacement that both
-# removes and inserts is neither, and never joins a run).
+# The single character an edit inserts or deletes, or "" for any other edit.
 proc rio::doc::_solo {text removed} {
 	if {$removed eq "" && [string length $text] == 1}    { return $text }
 	if {$text eq ""    && [string length $removed] == 1} { return $removed }
 	return ""
 }
 
-# Undo the most recent recorded edit. Returns a change dict {start end text
-# removed} describing the replacement applied (for a buffer.changed event), or ""
-# if there is nothing to undo.
+# Undo the newest recorded edit. Returns the change applied, {start end text
+# removed}, for a buffer.changed event; "" if there is nothing to undo.
 proc rio::doc::undo {id} {
 	variable buffers
 	set step [_pop $id undo]
@@ -363,17 +334,13 @@ proc rio::doc::_advance {start text} {
 
 # --- search (D36) ---------------------------------------------------
 #
-# Literal text search, computed HERE because the core owns the canonical text
-# (D3): every frontend gets the same engine over the protocol instead of each
-# re-implementing it against its own mirror. The queries are STATELESS — where
-# the caret is, what was last searched, which match is highlighted are all
-# frontend-local (D22) — so the caller passes a position in and gets a match
-# back; no find state lives in the core. Matching works on character offsets
+# Search runs in the core, which owns the text (D3), so every frontend gets one
+# engine. It is stateless: the caller passes a position and gets a match. Caret
+# and last query are the frontend's (D22). Matching is on character offsets
 # over the joined text, so a needle may span lines.
 
-# The char offset of line.col `idx` in a line list (a newline counts 1). A
-# search is a query, not an edit, so an out-of-range position CLAMPS rather
-# than raises: past the end means "the end".
+# The char offset of line.col `idx` in a line list (a newline counts 1).
+# Out of range clamps: past the end means "the end".
 proc rio::doc::_offset {lines idx} {
 	lassign [_idx $idx] l c
 	set n [llength $lines]
@@ -400,10 +367,8 @@ proc rio::doc::_at {lines off} {
 }
 
 # --- whole-word matching (D51) ----------------------------------------------
-# A word char is a letter, digit, or underscore (Unicode letters included). A hit
-# is "whole-word" when neither flank is a word char — the `\m…\M` feel without a
-# regex. `hay` is the joined document, so a line break (a non-word char) bounds a
-# hit at a line edge for free. The same rule the core-side find-in-files uses.
+# A word char is a letter, digit or underscore. A hit is whole-word when neither
+# neighbour is a word char. A line break is not one, so it bounds a hit.
 proc rio::doc::_wordchar {ch} { expr {$ch eq "_" || [string is alnum -strict $ch]} }
 proc rio::doc::_bounded {hay i len} {
 	set b [expr {$i - 1}]
@@ -412,9 +377,8 @@ proc rio::doc::_bounded {hay i len} {
 	if {$a < [string length $hay] && [_wordchar [string index $hay $a]]} { return 0 }
 	return 1
 }
-# The first occurrence of `ndl` (length `len`) at or after `start` that passes the
-# whole-word test (or the first at all, when `ww` is 0), or -1. Rejected embedded
-# hits are stepped over one char at a time so none in between is skipped.
+# The first occurrence of `ndl` (length `len`) at or after `start`, or -1.
+# With `ww`, the first whole-word one.
 proc rio::doc::_scan_fwd {hay ndl start len ww} {
 	set i [string first $ndl $hay $start]
 	while {$i >= 0} {
@@ -435,15 +399,11 @@ proc rio::doc::_scan_bwd {hay ndl last len ww} {
 }
 
 # --- regex matching (D52 Phase C) ---------------------------------------------
-# Every match of the Tcl-ARE pattern `pat` in `hay`, as a list of {start end}
-# exclusive-end CHAR offsets (empty for none). `-line` makes the match
-# line-oriented — `^`/`$` anchor at each line boundary and `.`/negated classes do
-# not cross a newline — the predictable editor default, matching the line-grouped
-# panel; `nocase` maps to `-nocase`. An INVALID pattern (a half-typed regex under a
-# live search) is caught and treated as "matches nothing" rather than an error, so
-# the UI just shows no hits while you type. Whole-match spans only: `-about` gives
-# the capture-group count so submatches (which `-all -inline -indices` interleaves)
-# are strided over. A zero-width match reports start == end.
+# Every match of the Tcl-ARE pattern `pat` in `hay`, as {start end} char
+# offsets, end exclusive. A zero-width match has start == end.
+# - `-line`: `^` and `$` anchor at each line, `.` does not cross a newline.
+# - An invalid pattern matches nothing: a half-typed regex is not an error.
+# - `-about` counts the capture groups, to step over their submatches.
 proc rio::doc::_regex_spans {hay pat nocase} {
 	if {[catch {regexp -about -- $pat} about]} { return {} }
 	set groups [lindex $about 0]
@@ -459,13 +419,12 @@ proc rio::doc::_regex_spans {hay pat nocase} {
 	return $spans
 }
 
-# The next match of `needle` starting at or after `from` — or, with `backwards`,
-# the nearest match starting before it — wrapping around the document. Returns
-# {start end wrapped} or "" when the needle occurs nowhere. `nocase` folds case
-# (Tcl's simple one-to-one mapping, so offsets are stable); `wholeword` keeps only
-# word-bounded hits (D51); with `regex`, `needle` is a Tcl-ARE pattern
-# (line-oriented, `-nocase`; whole-word is ignored — a regex writes its own
-# boundaries). Regex navigation computes the match set once and picks from it.
+# The next match of `needle` at or after `from`, or with `backwards` the
+# nearest one before it. Wraps around. Returns {start end wrapped}, or "" for
+# no match.
+# - `nocase` folds case.
+# - `wholeword` keeps only word-bounded hits (D51).
+# - `regex`: `needle` is a Tcl-ARE pattern, and `wholeword` is ignored.
 proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
@@ -507,10 +466,8 @@ proc rio::doc::find {id needle from {nocase 0} {backwards 0} {wholeword 0} {rege
 		wrapped $wrapped]
 }
 
-# Every match of `needle`, first to last, non-overlapping: a list of
-# {start end} dicts (empty for none) — a frontend paints and counts them.
-# `wholeword` drops hits flanked by a word char (D51); with `regex`, `needle` is a
-# Tcl-ARE pattern (whole-word ignored).
+# Every match of `needle`, first to last, non-overlapping, as {start end}
+# dicts. Flags as in `find`.
 proc rio::doc::matches {id needle {nocase 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return {} }
@@ -539,22 +496,17 @@ proc rio::doc::matches {id needle {nocase 0} {wholeword 0} {regex 0}} {
 }
 
 # --- line-grouped search (D52) ------------------------------------------------
-# The shared engine behind BOTH find-in-files (project.search, D51) and
-# open-buffer search (buffers.search): given a list of line strings, return every
-# LINE that contains `needle`, grouped so each row names the line and every hit on
-# it. This is where the "one row per matching line, cols for each occurrence"
-# shape lives — extracted here so the disk walk and the buffer walk share one
-# matcher and can never disagree (the D36 "matching is core-side" discipline).
+# One matcher for find-in-files (project.search, D51) and open-buffer search
+# (buffers.search): every line that contains `needle`, one row per line.
 #
-# Returns {matches occurrences}: `matches` is a list of {line col cols lens text}
-# dicts — `line` is 1-based, `cols` holds the 1-based start column of EVERY
-# occurrence on the line and `lens` the matching char length of each (parallel to
-# `cols`, so a variable-length regex hit highlights correctly), `col` is the first
-# start (the jump target), `text` is the raw line capped to `textcap` chars for the
-# view. `occurrences` totals every hit (a line with two counts twice). No row cap
-# here — the caller, which knows its budget, truncates; a buffer needs no cap at
-# all. `nocase` folds case; `wholeword` keeps only word-bounded hits (D51); `regex`
-# treats `needle` as a Tcl-ARE pattern (whole-word ignored).
+# Returns {matches occurrences}. A match is a dict:
+#   line  — 1-based line number
+#   cols  — 1-based start column of every hit on the line
+#   lens  — char length of each hit, parallel to `cols`
+#   col   — the first start, the jump target
+#   text  — the line, capped to `textcap` chars
+# `occurrences` counts every hit. No row cap: the caller truncates.
+# Flags as in `find`.
 proc rio::doc::grep_lines {lines needle nocase wholeword {textcap 200} {regex 0}} {
 	set matches {}
 	set occ 0
@@ -570,10 +522,8 @@ proc rio::doc::grep_lines {lines needle nocase wholeword {textcap 200} {regex 0}
 	return [list $matches $occ]
 }
 
-# The occurrences of `needle` on a single line, as parallel {cols lens} lists: 1-based
-# start columns and matching char lengths. Literal (default), folding case under
-# `nocase` and, with `wholeword`, keeping only word-bounded hits; or, with `regex`, a
-# Tcl-ARE pattern (line = the whole string here, so `^`/`$` bound it naturally).
+# The hits of `needle` on one line, as parallel {cols lens} lists: 1-based
+# start columns and char lengths. Flags as in `find`.
 proc rio::doc::_line_hits {line needle nocase wholeword regex} {
 	set cols {} ; set lens {}
 	if {$regex} {
@@ -596,12 +546,9 @@ proc rio::doc::_line_hits {line needle nocase wholeword regex} {
 	return [list $cols $lens]
 }
 
-# Replace every match of `needle` with `text`, as ONE recorded edit: Replace All
-# is one user action, so it is one undo step and one buffer.changed. The
-# replacement segments come from the ORIGINAL text, so case outside the matches
-# is untouched under `nocase`. Returns "" when nothing matched (no edit
-# recorded), else a change dict {count start end text removed} spanning the
-# whole document, ready to shape an event.
+# Replace every match of `needle` with `text` as one recorded edit: one undo
+# step, one buffer.changed. Returns "" when nothing matched, else the change
+# {count start end text removed} over the whole document.
 proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0} {regex 0}} {
 	set lines [lines $id]
 	if {$needle eq ""} { return "" }
@@ -613,17 +560,13 @@ proc rio::doc::replace_all {id needle text {nocase 0} {wholeword 0} {regex 0}} {
 	return [dict create count $count start 1.0 end $endpos text $out removed $old]
 }
 
-# Replace every match of `needle` with `text` in the string `old`, returning
-# {newtext count}. The search engine as a pure string function (no buffer, no undo),
-# so it serves both `replace_all` (an open buffer) and the on-disk arm of
-# project.replace (a closed file, D52 Phase B) — one matcher for both, the same way
-# grep_lines unified the search side. Literal by default: replacement segments come
-# from the ORIGINAL text, so case outside the matches is untouched under `nocase`;
-# in whole-word mode an embedded hit is left in place (not appended, `pos` not
-# advanced) so the next accepted match carries it through. With `regex`, `needle` is
-# a Tcl-ARE pattern and `text` a regsub replacement (line-oriented, `-nocase`,
-# backreferences `\1`/`&` honoured; whole-word ignored); an invalid pattern yields
-# {<old> 0}. Zero matches yields {<old> 0}.
+# Replace every match of `needle` with `text` in the string `old`. Returns
+# {newtext count}; no match, or an invalid pattern, gives {<old> 0}.
+# A pure string function, so `replace_all` (an open buffer) and project.replace
+# (a closed file, D52) share it.
+# - Literal: the text between matches is copied from `old`, so `nocase` leaves
+#   its case alone. A hit that is not a whole word stays in place.
+# - `regex`: `text` is a regsub replacement; `\1` and `&` work.
 proc rio::doc::_replace_text {old needle text nocase wholeword {regex 0}} {
 	if {$regex} {
 		set flags {-all -line}
@@ -649,9 +592,10 @@ proc rio::doc::_replace_text {old needle text nocase wholeword {regex 0}} {
 	return [list $out $count]
 }
 
-# --- pure helpers (no buffer registry; unit-testable on a bare line list) ----
+# --- pure helpers: they take a line list, not a buffer ----------------------
 
-# Apply a range replacement to a line list. Returns {newlines removed}.
+# Apply a range replacement to a line list.
+# Returns {newlines removed start end}, the range as clamped.
 proc rio::doc::_splice {lines start end text} {
 	lassign [_idx $start] sl sc
 	lassign [_idx $end]   el ec
@@ -671,8 +615,7 @@ proc rio::doc::_splice {lines start end text} {
 	set prefix  [string range $startLine 0 [expr {$sc - 1}]]
 	set suffix  [string range $endLine $ec end]
 	set removed [_range $lines $sli $sc $eli $ec]
-	# split "" yields an empty list, not one empty segment — normalize so an
-	# empty replacement (every delete) stays single-segment and inserts no line.
+	# split "" gives an empty list; a delete needs one empty segment.
 	set segs [split $text "\n"]
 	if {$segs eq ""} { set segs [list ""] }
 	if {[llength $segs] == 1} {
@@ -687,8 +630,6 @@ proc rio::doc::_splice {lines start end text} {
 		[lrange $lines 0 [expr {$sli - 1}]] \
 		$block \
 		[lrange $lines [expr {$eli + 1}] end]]
-	# Report the CLAMPED range alongside the result: sc/ec were pinned to their
-	# lines' bounds above, so "$sl.$sc"/"$el.$ec" is where the edit truly applied.
 	return [list $newlines $removed "$sl.$sc" "$el.$ec"]
 }
 

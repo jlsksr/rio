@@ -1,41 +1,38 @@
-# rio-core — the agent's command allow-list: standing approval for trusted commands
-# (D84). D83 landed run_command ALWAYS gated — every command waits for a
-# human. This adds a human-authored allow-list so a command the user has marked
-# trusted runs without re-raising the bar. It is standing approval, not autonomy: a
-# person still authored every rule (D53 / [[llm-integration-scope]]). The allow-list
-# skips ONLY the approval bar — an allowed command still passes the full prepare_exec
-# gauntlet (redirection guard, project-confined cwd, timeout clamp).
+# rio-core — the agent's command allow-list (D84).
 #
-# A rule is an argv PREFIX: a Tcl list of leading tokens. A command matches when its
-# argv starts with a rule's tokens (exact string per token). A one-token rule
-# (`pytest`) trusts the program with any arguments; a full-argv rule trusts only that
-# exact command. There is no shell and no globbing — matching is plain token compare.
+# run_command always waits for the user (D83). A rule the user wrote lets a
+# trusted command run without asking. Only the confirmation is skipped:
+# prepare_exec's guards still apply.
 #
-# THREE SCOPES, mirroring the system-prompt layers (D79/D70) one-to-one:
-#   global   — `allow.list` in the XDG agent dir; every project, always active.
-#   provider — `providers/<name>.allow.list` in the XDG agent dir; active only while
-#              that provider is the running one (echo excluded, as it ignores tools).
-#   project  — `.rio/allow.list` at the open project root; active only in that project.
-# Each file is one rule per line, a Tcl list; `#` lines and blanks ignored, so all
-# three stay hand-editable. `matches` is the UNION of the currently-active layers: a
-# command is trusted if ANY active layer allows it (the allow-list analog of how the
-# prompt layers all apply together). There is no precedence — a match anywhere is enough.
+# A rule is an argv prefix, compared token by token. No shell, no globbing.
+#
+#   rule {pytest}       allows  pytest, pytest -q tests/
+#   rule {git status}   allows  git status, git status -s    not  git push
+#
+# Three scopes, as for the prompt layers (D70, D79):
+#
+#   global    <xdg>/allow.list                    always
+#   provider  <xdg>/providers/<name>.allow.list   while that provider runs; not echo
+#   project   <root>/.rio/allow.list              while that project is open
+#
+#   <xdg> is $XDG_CONFIG_HOME/rio/agent.
+#
+# A file holds one rule per line, a Tcl list; blank and `#` lines are ignored.
+# A command is trusted if any active scope allows it.
 
 namespace eval rio::agent::allow {
 	variable override_dir ""   ;# tests pin the XDG agent dir here; "" = real search
 }
 
-# Let a test point the XDG agent dir at a sandbox (mirrors rio::agent::prompt's
-# override). Covers the global + provider layers; the project layer follows the open
-# project root. "" restores the real XDG-then-HOME resolution.
+# Let a test point the agent dir at a sandbox (global and provider scopes).
+# "" restores the real one.
 proc rio::agent::allow::override_dir {dir} {
 	variable override_dir
 	set override_dir $dir
 }
 
-# The user's agent dir — $XDG_CONFIG_HOME/rio/agent (or ~/.config/rio/agent). "" only
-# if neither XDG_CONFIG_HOME nor HOME is set. Mirrors rio::agent::prompt::_userdir so
-# the allow-list files sit beside system.md / providers/<name>.md.
+# The user's agent dir: $XDG_CONFIG_HOME/rio/agent, or ~/.config/rio/agent.
+# "" if neither variable is set.
 proc rio::agent::allow::_dir {} {
 	variable override_dir
 	if {$override_dir ne ""} { return $override_dir }
@@ -47,9 +44,7 @@ proc rio::agent::allow::_dir {} {
 	return ""
 }
 
-# Whether a provider name is safe as a filename component: non-empty, only [A-Za-z0-9_-]
-# (no path separators, no `..`). Mirrors rio::agent::prompt::_safe_provider; duplicated
-# to keep this module self-contained.
+# Is a provider name safe in a filename? Only [A-Za-z0-9_-].
 proc rio::agent::allow::_safe_provider {name} {
 	return [expr {$name ne "" && [regexp {^[A-Za-z0-9_-]+$} $name]}]
 }
@@ -63,9 +58,7 @@ proc rio::agent::allow::_global_file {} {
 	return [file join $d allow.list]
 }
 
-# A provider layer's file (`providers/<name>.allow.list` in the XDG agent dir), or ""
-# when the name is empty/echo/unsafe or there is no user dir. echo is excluded — it
-# ignores the tool surface, like the prompt layers exclude it.
+# A provider scope's file, or "" (echo, an unsafe name, no user dir).
 proc rio::agent::allow::_provider_file {name} {
 	if {$name eq "echo" || ![_safe_provider $name]} { return "" }
 	set d [_dir]
@@ -73,8 +66,7 @@ proc rio::agent::allow::_provider_file {name} {
 	return [file join $d providers $name.allow.list]
 }
 
-# The project layer's file (`.rio/allow.list` at the open project root), or "" when no
-# project is open.
+# The project scope's file, or "" when no project is open.
 proc rio::agent::allow::_project_file {} {
 	set root [rio::project::root]
 	if {$root eq ""} { return "" }
@@ -93,11 +85,9 @@ proc rio::agent::allow::_scope_file {scope name} {
 
 # --- reading -----------------------------------------------------------------
 
-# Parse a rules file at $path: a list of rules, each a list of argv-prefix tokens.
-# Reads on demand — no caching, so a hand-edit or another frontend's change is seen at
-# once. Blank / `#` lines are skipped; a line that is not a well-formed Tcl list, or an
-# empty rule, is skipped safely (a broken line never becomes an allow-everything rule).
-# A missing file / read failure yields {}.
+# The rules in the file at $path. Read on every call, so a hand edit counts
+# at once. A line that is not a Tcl list, or is an empty rule, is skipped: a
+# broken line must never allow everything. A missing file gives {}.
 proc rio::agent::allow::_read {path} {
 	if {$path eq "" || ![file isfile $path]} { return {} }
 	if {[catch {
@@ -124,10 +114,8 @@ proc rio::agent::allow::rules {{scope global} {name ""}} {
 	return [_read [_scope_file $scope $name]]
 }
 
-# The files backing the CURRENTLY-ACTIVE scopes, in check order: global always; the
-# project file when a project is open; the active provider's file when a provider runs
-# (echo/unsafe excluded). Empty resolutions are dropped. This is the set `matches`
-# unions over.
+# The files of the scopes active now: global, the open project's, the active
+# provider's.
 proc rio::agent::allow::_active_files {} {
 	set files {}
 	foreach f [list [_global_file] [_project_file] [_provider_file [rio::agent::provider_name]]] {
@@ -136,9 +124,7 @@ proc rio::agent::allow::_active_files {} {
 	return $files
 }
 
-# Is $argv trusted by ANY active layer? Prefix-checks argv against every active file's
-# rules; 1 on the first hit. An empty rule never matches (it would trust everything —
-# defended here as well as in `add`).
+# Does any active scope allow $argv? An empty rule never matches.
 proc rio::agent::allow::matches {argv} {
 	foreach f [_active_files] {
 		foreach rule [_read $f] {
@@ -152,10 +138,8 @@ proc rio::agent::allow::matches {argv} {
 
 # --- writing -----------------------------------------------------------------
 
-# Add a rule (a list of argv-prefix tokens) to one scope, persisting it. An empty rule
-# is refused. An exact-equal rule already in that scope is a no-op (dedup). Creates the
-# scope's dir on first write. Returns 1 on success, 0 if the rule is empty or the scope
-# has no file (no user dir, no open project, or an echo/unsafe provider).
+# Add a rule to one scope and write the file. A rule already there is a
+# no-op. Returns 1 on success, 0 if the rule is empty or the scope has no file.
 proc rio::agent::allow::add {scope name rule} {
 	if {[llength $rule] == 0} { return 0 }
 	if {$scope eq "provider" && $name eq ""} { set name [rio::agent::provider_name] }
@@ -167,8 +151,8 @@ proc rio::agent::allow::add {scope name rule} {
 	return [_write $p $cur]
 }
 
-# Remove an exact-equal rule from one scope, persisting the result. A rule not present
-# is a no-op. Returns 1 on success (or nothing to do), 0 if the scope has no file.
+# Remove a rule from one scope and write the file. A rule not there is a
+# no-op. Returns 1 on success, 0 if the scope has no file.
 proc rio::agent::allow::remove {scope name rule} {
 	if {$scope eq "provider" && $name eq ""} { set name [rio::agent::provider_name] }
 	set p [_scope_file $scope $name]
@@ -184,9 +168,8 @@ proc rio::agent::allow::remove {scope name rule} {
 	return [_write $p $out]
 }
 
-# Write a rules list to $path (one rule per line, each a canonical Tcl list so it
-# round-trips through `_read`). Creates the parent dir if needed. Returns 1 on success,
-# 0 when the write fails.
+# Write a rules list to $path, one canonical Tcl list per line. Returns 1 on
+# success, 0 when the write fails.
 proc rio::agent::allow::_write {path ruleslist} {
 	if {$path eq ""} { return 0 }
 	set lines {}

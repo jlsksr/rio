@@ -13,16 +13,12 @@ proc mark_modified {m} {
 }
 proc clear_modified {} { bufset $::cur modified 0 ; refresh_all }
 
-# The bare display name of a buffer — no modified marker. The unsaved-changes
-# dot (●, D27) is a rendering concern added by the tab strip and the title only;
-# keeping it out of here means the compare picker and the save prompt show a
-# clean filename.
+# A buffer's display name, without the unsaved marker.
 proc tab_name {id} {
 	set p [bufget $id path]
 	return [expr {$p eq "" ? "untitled" : [file tail $p]}]
 }
-# The ● (U+25CF) unsaved marker, or "" — appended after the name in the tab and
-# the window title (D27).
+# " ●" for an unsaved buffer, else "" (D27). For the tab and the title.
 proc tab_dot {id} {
 	return [expr {[bufget $id modified] ? " ●" : ""}]
 }
@@ -43,38 +39,29 @@ proc refresh_status {} {
 	.status configure -text [format "%s      %s  %s%s      %s      %s      %d buffer(s)%s" \
 		$name $enc $eol [expr {[bufget $::cur modified] ? {      modified} : {}}] \
 		$lang [cursor_status] [dict size $::buffers] $mode]
-	# The focused group's caret may have moved by a route with no KeyRelease (open /
-	# tab switch / goto / reload all land here via refresh_all) — re-band it too.
+	# The caret may have moved without a key (open, tab switch, reload).
 	if {$::focus ne "" && [dict exists $::grp $::focus]} { curline_update $::focus }
 }
-# The compact cursor-position segment for the status bar: "Ln 12, Col 5" for the
-# focused group's insert mark. Tk indexes columns from 0, so Col is char+1 to match
-# the 1-based feel VSCode/editors show. Guarded so an early or focus-less call is a
-# harmless "" rather than an error.
+# The status bar's caret position: "Ln 12, Col 5". Col is 1-based.
 proc cursor_status {} {
 	if {$::focus eq "" || ![dict exists $::grp $::focus]} { return "" }
 	if {[catch {[fgw] index insert} idx]} { return "" }
 	lassign [split $idx .] line char
 	return [format "Ln %d, Col %d" $line [expr {$char + 1}]]
 }
-# Put text on the clipboard (a no-op for empty text). The one clipboard idiom the
-# context menus share.
+# Put text on the clipboard; nothing for empty text.
 proc rio_copy_clip {text} {
 	if {$text eq ""} return
 	clipboard clear
 	clipboard append $text
 }
-# Copy a tab's file path to the clipboard (context menu). A no-op for an untitled
-# buffer, which has no path — the menu disables the item in that case.
+# Copy a tab's file path to the clipboard.
 proc tab_copy_path {id} {
 	rio_copy_clip [bufget $id path]
 }
 
-# Right-click a tab handle: a context menu of actions ABOUT THIS TAB (id, g) — nothing
-# about other tabs or regions (D33; the UI-design bar: a tab's menu stays scoped to
-# that tab). Rebuilt on each popup so Copy Path reflects the current state. "Move to
-# Other Group" is one label in both states: with one group the move creates the other
-# group, so the label still describes what happens — no context-sensitive wording.
+# Right-click a tab: actions about that tab only (D33). "Move to Other
+# Group" creates the other group if there is none.
 proc tab_context_menu {g id X Y} {
 	catch {destroy .tabmenu}
 	menu .tabmenu -tearoff 0
@@ -89,19 +76,15 @@ proc tab_context_menu {g id X Y} {
 	tk_popup .tabmenu $X $Y
 }
 
-# The tab strips (D33): each group draws its OWN tabs into its own strip
-# (.eg<g>.tabs). A tab's group is where it lives, so clicking it activates that buffer
-# IN that group and focuses the group. The focused group's active tab is emphasised
-# with the accent colour, so which pane has focus is visible at a glance. Right-click
-# a tab for a context menu (move to the other group / close).
-# Drag a tab (D33 follow-on) — a second input gesture onto the move/reorder
-# paths. Press a tab and drag it: onto the OTHER group's pane it moves across (the same
-# path as the context menu's "Move to Other Group"); back onto its OWN pane it reorders,
-# dropping into the slot under the pointer. Below a ~5px threshold it stays a plain click
-# (activate). Tk's implicit pointer grab keeps motion/release flowing to the origin tab
-# while the button is down, so `winfo containing` sees across both panes. Feedback while
-# dragging: the held tab gets a pressed accent look (mark_dragged) and the cursor becomes
-# a hand, and a cross-group drag also tints the OTHER group's tab strip.
+# The tab strips (D33): each group draws its own tabs. The focused group's
+# active tab has the accent colour.
+#
+# Dragging a tab:
+#   under 5 px             a click: activate
+#   onto its own group     reorder, to the slot under the pointer
+#   onto the other group   move across
+# While dragging, the tab looks pressed, the cursor is a hand, and the other
+# group's strip is tinted when the pointer is over it.
 proc tab_drag_start {id g X Y} {
 	set ::tabdrag [dict create id $id g $g x $X y $Y active 0 tint ""]
 }
@@ -139,9 +122,7 @@ proc tab_drag_end {id g X Y} {
 	}
 	refresh_tabs                                 ;# clear the drag mark (no-op if a drop already repainted)
 }
-# Give the dragged tab a clear "held" look — a pressed (sunken) handle tinted with the
-# accent — so an in-group reorder has feedback too (a between-groups drag also tints the
-# target strip). One-way styling: the refresh_tabs at drag-end repaints it back to normal.
+# Give the dragged tab a pressed look. refresh_tabs at drag end undoes it.
 proc mark_dragged {g id} {
 	set w [gget $g tabs].b$id
 	if {![winfo exists $w]} return
@@ -157,11 +138,8 @@ proc tint_strip {g on} {
 	catch {[gget $g tabs] configure -background $bg}
 }
 
-# Reorder tab `id` within its own group `g` to the slot under pointer-x `X`. The new
-# index is "how many OTHER tabs have their centre left of X" — drop-where-the-cursor-is.
-# `tab_reorder` does the pure list splice (unit-tested: no geometry); this reads the live
-# tab centres and applies. Order is a view concern, so only the strip repaints — the
-# active buffer and its text are untouched.
+# Move tab `id` within group `g` to the slot under pointer-x `X`. Only the
+# strip repaints.
 proc reorder_tab {g id X} {
 	set centers [dict create]
 	foreach t [gorder $g] {
@@ -174,8 +152,8 @@ proc reorder_tab {g id X} {
 	refresh_tabs
 	prefs_save
 }
-# Pure splice: move `id` within `order` to the slot implied by `X` against tab `centers`
-# (a dict id->centre-x). Insertion index = count of OTHER tabs whose centre is left of X.
+# Move `id` within `order`: its new index is the number of other tabs whose
+# centre (`centers`, id -> x) is left of `X`. No geometry, so it can be tested.
 proc tab_reorder {order id centers X} {
 	set k 0
 	foreach t $order {
@@ -203,8 +181,7 @@ proc refresh_tabs {} {
 				-font RioUIFont -padx 6 -pady 1
 			label $f.x -text "×" -background $bg -foreground $fg \
 				-font RioUIFont -padx 3
-			# Press/drag/release on the handle body: a plain click activates, a
-			# drag past the threshold moves the tab to the group under the pointer.
+			# Press, drag, release: a click activates, a drag moves the tab.
 			foreach w [list $f $f.l] {
 				bind $w <ButtonPress-1>   [list tab_drag_start $id $g %X %Y]
 				bind $w <B1-Motion>       [list tab_drag_motion %X %Y]
@@ -216,34 +193,32 @@ proc refresh_tabs {} {
 				bind $w <<ContextMenu>> [list tab_context_menu $g $id %X %Y]
 			}
 			pack $f.l -side left ; pack $f.x -side right
-			# The handle FRAME is left unmanaged here — tabstrip_layout decides which
-			# tabs are placed, and how (one scrolled row, or wrapped onto many).
+			# tabstrip_layout places the handle.
 		}
 		tabstrip_layout $g
 	}
 }
 
 # ---------------------------------------------------------------------------
-# Tab-strip overflow layout (D57). refresh_tabs builds each group's tab
-# HANDLES (the b<id> frames) but leaves them unmanaged; this proc places them, in one
-# of two modes the user picks (::tab_layout). It also runs on the strip's <Configure>
-# so a window resize re-flows the tabs. Widths are measured analytically from the tab
-# text (font measure), not from winfo reqwidth, so the layout is correct synchronously
-# — before the handles have been mapped — which keeps it testable without an event loop.
+# Tab-strip layout (D57). refresh_tabs builds the tab handles; this places
+# them, in the mode ::tab_layout:
+#
+#   scroll   one row; on overflow ◂ ▸ arrows and a window of tabs
+#   multi    wrapped onto as many rows as needed
+#
+# It also runs on the strip's <Configure>. Widths come from `font measure`,
+# not from mapped widgets, so the layout works before anything is mapped.
 # ---------------------------------------------------------------------------
 
-# The on-screen width of tab handle <id>, mirroring refresh_tabs' construction: frame
-# border (bd 1 → 2) + the name label (RioUIFont, -padx 6 → +12) + the × label (-padx 3
-# → +6) + the tab's own pack -padx 1 (→ +2). Kept in one place so a padding change here
-# and in refresh_tabs stay in step.
+# The width of tab handle <id>: name and × in RioUIFont, plus 22 px of
+# borders and padding (2 + 12 + 6 + 2), as refresh_tabs builds it.
 proc tab_pixwidth {id} {
 	return [expr {[font measure RioUIFont "[tab_name $id][tab_dot $id]"] \
 		+ [font measure RioUIFont "×"] + 22}]
 }
 
-# The last tab index that still fits when the visible window starts at `off` and has
-# `avail` pixels. The first tab (at `off`) always counts, so at least one tab shows even
-# in a sliver of space — otherwise a very narrow group could strand every tab.
+# The last tab index that fits when the window starts at `off` and has
+# `avail` pixels. The first tab always counts: at least one tab shows.
 proc tabstrip_fit_last {ids off avail} {
 	set x 0 ; set last $off
 	for {set i $off} {$i < [llength $ids]} {incr i} {
@@ -254,9 +229,7 @@ proc tabstrip_fit_last {ids off avail} {
 	return $last
 }
 
-# Create (once) group `g`'s two scroll arrows in its strip and (re)colour them to the
-# theme. refresh_tabs destroys the strip's children each pass, so these are recreated
-# on demand; a <Configure>-only layout finds the ones the last refresh_tabs left.
+# Make sure group `g`'s two scroll arrows exist, and colour them.
 proc tabstrip_ensure_arrows {strip g} {
 	set c $::theme_colors
 	foreach {name dir glyph} [list al -1 "◂" ar 1 "▸"] {
@@ -270,13 +243,9 @@ proc tabstrip_ensure_arrows {strip g} {
 	}
 }
 
-# Create and pack one row container for `multi` mode, spanning the strip width and themed
-# to the bar background. The tab handles pack into it left-to-right (`pack -in`), so each
-# row huddles at natural widths; tabstrip_layout destroys these `r<n>` frames each pass.
-# `pack -in` places the handles geometrically but does NOT reparent them — they stay
-# children of the strip, i.e. SIBLINGS of this frame. This frame is created after them, so
-# it would stack on top and its background would paint over the tabs (an empty bar); lower
-# it beneath them so the handles show. (Re-lowered every pass, since we recreate it.)
+# One row frame for `multi` mode. Handles are packed into it with -in, which
+# does not reparent them: they stay siblings of this frame. It is created
+# after them and would cover them, so it is lowered.
 proc tabstrip_row {strip row} {
 	set w $strip.r$row
 	frame $w -background [dict get $::theme_colors tab.bar.bg]
@@ -285,21 +254,15 @@ proc tabstrip_row {strip row} {
 	return $w
 }
 
-# Place group `g`'s tab handles. In `multi` mode they wrap across packed per-row frames; in
-# `scroll` mode they sit on one row (pack), and when they overflow the strip's width the
-# ◂ ▸ arrows appear and only a window of them is shown. `reveal` (default on) pulls that
-# window so the active tab is visible — wanted when the active tab changed, suppressed
-# by tab_scroll so the arrows can page PAST the active tab to reach a hidden one.
+# Place group `g`'s tab handles. `reveal` moves the scroll window so the
+# active tab shows; tab_scroll passes 0, so the arrows can page past it.
 proc tabstrip_layout {g {reveal 1}} {
 	set strip [gget $g tabs]
 	if {$strip eq "" || ![winfo exists $strip]} return
 	tabstrip_ensure_arrows $strip $g
 	set ids {}
 	foreach id [gorder $g] { if {[winfo exists $strip.b$id]} { lappend ids $id } }
-	# Unmanage the arrows and tab handles (they're rebuilt/re-placed below); DESTROY any
-	# leftover row containers from a previous multi-mode pass so a re-flow or a mode switch
-	# leaves no empty rows behind. `-in` never reparents, so a tab handle survives its
-	# row-frame's destruction (it stays a child of the strip) — see the multi branch.
+	# Unmanage arrows and handles; destroy the row frames of the last pass.
 	foreach w [winfo children $strip] {
 		if {[string match $strip.r* $w]} { destroy $w ; continue }
 		catch {pack forget $w} ; catch {grid forget $w}
@@ -308,10 +271,8 @@ proc tabstrip_layout {g {reveal 1}} {
 	set avail [winfo width $strip]
 
 	if {$::tab_layout eq "multi"} {
-		# Flow the handles into one packed row-frame per visual row. Pass 1 assigns tabs to
-		# rows, wrapping BEFORE a tab would overrun `avail` (so a row never clips) and keeping
-		# at least one tab per row. Not yet realized (width 1 during boot): one row; the
-		# <Configure> that arrives with the real width re-flows it.
+		# Pass 1: assign tabs to rows, wrapping before a tab would overrun.
+		# Width 1 (not mapped yet): one row; <Configure> lays it out again.
 		set A [expr {$avail <= 1 ? 1000000 : $avail}]
 		set rows {} ; set cur {} ; set x 0
 		foreach id $ids {
@@ -320,10 +281,8 @@ proc tabstrip_layout {g {reveal 1}} {
 			lappend cur $id ; incr x $need
 		}
 		if {[llength $cur]} { lappend rows $cur }
-		# Pass 2 places them, JUSTIFIED like a paragraph: every row but the last expands its
-		# tabs to fill the strip width (closing the ragged right gap); the last row stays
-		# natural/left-aligned (a justified paragraph's last line isn't stretched). pack
-		# divides the leftover pixels equally among a row's tabs, and -fill x grows each.
+		# Pass 2: place them, justified like a paragraph: every row but the
+		# last fills the width.
 		set nrows [llength $rows]
 		for {set r 0} {$r < $nrows} {incr r} {
 			set rf [tabstrip_row $strip $r]
@@ -344,7 +303,7 @@ proc tabstrip_layout {g {reveal 1}} {
 	set n [llength $ids]
 	set total 0 ; foreach id $ids { incr total [tab_pixwidth $id] }
 	if {$avail <= 1 || $total <= $avail} {
-		# Fits (or not realized yet): show them all, no arrows, window reset to the start.
+		# They fit, or nothing is mapped yet: show all, no arrows.
 		gset $g taboff 0
 		foreach id $ids { pack $strip.b$id -side left -padx 1 -pady 1 }
 		return
@@ -372,8 +331,7 @@ proc tabstrip_layout {g {reveal 1}} {
 	}
 }
 
-# Page the visible tab window of group `g` by `dir` (-1 left, +1 right). Bound to the
-# arrows; suppresses reveal so paging can move past the active tab to a hidden one.
+# Move group `g`'s tab window by `dir` (-1 left, +1 right): the arrows.
 proc tab_scroll {g dir} {
 	set n [llength [gorder $g]]
 	set off [expr {[gget $g taboff] + $dir}]
@@ -382,9 +340,8 @@ proc tab_scroll {g dir} {
 	tabstrip_layout $g 0
 }
 
-# A group's strip changed size (window resize, dock drag): re-flow, but only on an
-# actual WIDTH change — multi-mode alters the strip's height as rows come and go, and
-# reacting to that would loop. reveal keeps the active tab in view after a resize.
+# A strip changed size: lay it out again, but only if its width changed.
+# multi mode changes the height, and reacting to that would loop.
 proc tabstrip_on_configure {g} {
 	set strip [gget $g tabs]
 	if {$strip eq "" || ![winfo exists $strip]} return
@@ -394,13 +351,7 @@ proc tabstrip_on_configure {g} {
 	tabstrip_layout $g 1
 }
 
-# The former top-level Tabs menu (a -postcommand cascade listing every open buffer) was
-# retired in D74: reaching a buffer by name is now View ▸ Switch to Tab…, which opens the
-# bounded buffer-picker dialog (buffer_pick_rows / buffer_pick_dialog, near compare_open).
-# A dialog can't outgrow the screen the way that cascade could on X11, and it shows a path
-# hint so same-named tabs are distinguishable.
-
-# The View menu's multi-line toggle changed ::tab_layout: re-flow every group and persist.
+# Apply ::tab_layout: lay out every group's strip, then save.
 proc tab_layout_apply {} {
 	foreach g $::groups { tabstrip_layout $g }
 	prefs_save

@@ -1,22 +1,14 @@
 # rio-core — the command-execution primitive (D15).
 #
-# Run an external command to completion and capture its stdout, stderr, and exit
-# code. This is the headless plumbing git (D7) and the agent (D20) build on. rio
-# has NO terminal pane (D15), so this never renders — output surfaces in whatever
-# flow asked for it (e.g. the agent reacting to a failed test in `chat`).
+# Run an external command and capture its stdout, stderr and exit code. git
+# (D7) and the agent (D20) build on it. rio has no terminal pane (D15).
 #
-# The command is an ARGUMENT VECTOR (argv), never a shell string: rio spawns the
-# program directly with no shell, so there is no quoting or injection surface and
-# the call behaves the same on Windows (no /bin/sh). That argv discipline is the
-# baseline guardrail; richer policy — allow-lists, agent confirmation, and
-# removing the residual exec redirection-token surface (an argv element literally
-# ">" is still reserved by Tcl's exec) — is the agent-era work deferred under
-# O4/D20.
-#
-# Synchronous: it blocks until the child exits. That suits short commands (git
-# status / diff / log) — the pre-spike need. Streaming a long-running command's
-# output as events over time needs the event-loop / coroutine model (D10) and
-# lands with the rendering-heavy era; see O2's exec note.
+# - The command is an argv, never a shell string: no shell, no quoting, no
+#   injection, and the same on Windows.
+# - Tcl's exec still reads an argv element like ">" as a redirection. The
+#   agent's path refuses those (rio::agent::tools::_is_redirection).
+# - `run` blocks until the child exits: for short commands such as git's.
+#   `start` does not block: for the agent's run_command.
 
 namespace eval rio::exec {
 	variable _tok  0    ;# monotonic token source for start/cancel (D83)
@@ -25,8 +17,7 @@ namespace eval rio::exec {
 }
 
 proc rio::exec::_slurp {path} {
-	# Faithful bytes: no EOL translation, no re-encoding (matches the D22 ethos).
-	# An encoding policy (like rio::fs's detection) can refine this later.
+	# The bytes as they are: no EOL translation, no decoding.
 	set f [open $path rb]
 	set d [::read $f]
 	close $f
@@ -35,10 +26,9 @@ proc rio::exec::_slurp {path} {
 
 # rio::exec::run argv ?cwd? ?stdin? -> {exitcode <int> stdout <s> stderr <s>}
 #
-# A command that runs and exits non-zero is a SUCCESS here (it ran); the exit
-# code is data. Only a failure to LAUNCH (no such executable, unreadable cwd)
-# raises — the op layer maps that to io_error. A child killed by a signal reports
-# exitcode -1 (its message, if any, is on stderr).
+# A non-zero exit is not an error: the code is data. Only a failed launch
+# (no such program, bad cwd) raises io_error. A child killed by a signal
+# reports exitcode -1.
 proc rio::exec::run {argv {cwd ""} {stdin ""}} {
 	if {[llength $argv] == 0} {
 		rio::error::raise bad_request "exec.run requires a non-empty argv"
@@ -50,10 +40,9 @@ proc rio::exec::run {argv {cwd ""} {stdin ""}} {
 		}
 		set restore [pwd]
 	}
-	# Redirect BOTH streams to temp files so exec's own return value is unused:
-	# the exit code comes solely from -errorcode, and redirecting stderr also
-	# stops exec from treating stderr output as an error (its NONE case). Tcl is
-	# single-threaded, so cd/restore around the spawn is safe.
+	# Both streams go to temp files: the exit code then comes from -errorcode
+	# alone, and stderr output is not taken for an error. Single-threaded, so
+	# cd and back around the spawn is safe.
 	set outf [file tempfile outpath] ; close $outf
 	set errf [file tempfile errpath] ; close $errf
 	set exitcode 0
@@ -83,21 +72,13 @@ proc rio::exec::run {argv {cwd ""} {stdin ""}} {
 #
 # rio::exec::start {argv cwd stdin timeout_ms donecmd} -> token
 #
-# The NON-BLOCKING sibling of run, for the agent's run-command tool. run blocks
-# the whole (single-threaded) core until the child exits — fine for git's short
-# commands, but the agent may run anything, so a long child would freeze the core
-# and every frontend on it, and an `after`-based timeout could never fire while the
-# interpreter sat blocked in `exec`. start spawns the child, returns immediately,
-# reads its stdout off a pipe as it arrives, and calls `donecmd` with
-#   {exitcode <int> stdout <s> stderr <s> timedout <0|1> ?error <msg>?}
-# when the child exits (or the watchdog kills it). The event loop stays live
-# throughout. Same argv discipline as run (NO shell); stderr is captured to a temp
-# file and the exit code comes from close's -errorcode, exactly as run does.
+# `run` without blocking: a long child must not freeze the core. Spawns the
+# child, returns at once, reads its stdout off a pipe, and when it exits calls
+#   {*}$donecmd {exitcode <int> stdout <s> stderr <s> timedout <0|1> ?error <msg>?}
+# No shell, as in run.
 #
-# timeout_ms > 0 arms a watchdog that kills the child and marks `timedout`; a
-# normal exit cancels it. A signal-killed child reports exitcode -1 (as run).
-# The returned token feeds cancel, which tears the job down silently (no donecmd) —
-# used when a turn is reset/sealed while its command is still running.
+# - timeout_ms > 0: a watchdog kills the child and sets `timedout`.
+# - The token is for `cancel`, which kills the job without calling donecmd.
 proc rio::exec::start {argv cwd stdin timeout_ms donecmd} {
 	variable _tok
 	variable _jobs
@@ -114,9 +95,8 @@ proc rio::exec::start {argv cwd stdin timeout_ms donecmd} {
 	if {$save ne ""} { cd $save }
 	set tok [incr _tok]
 	if {$rc} {
-		# Rare: the pipe failed to open (most launch failures surface at close).
-		# Report it asynchronously so the contract holds — donecmd always fires
-		# on the event loop, never inline.
+		# The pipe failed to open. Report it with `after 0`: donecmd is never
+		# called inline.
 		file delete $errpath
 		after 0 [list {*}$donecmd [dict create exitcode -1 stdout "" stderr "" \
 			timedout 0 error $chan]]
@@ -131,8 +111,7 @@ proc rio::exec::start {argv cwd stdin timeout_ms donecmd} {
 	return $tok
 }
 
-# Pipe became readable: drain what's available; finish on EOF. Non-blocking read
-# returns "" at EOF with eof set (so we never block the loop).
+# The pipe is readable: take what is there; finish on EOF.
 proc rio::exec::_readable {tok} {
 	variable _jobs
 	if {![info exists _jobs($tok)]} return
@@ -142,8 +121,8 @@ proc rio::exec::_readable {tok} {
 	if {[eof $chan]} { _finish $tok }
 }
 
-# The watchdog: the child overran its timeout. Mark it and kill it; the ensuing
-# EOF drives _finish (which reports exitcode -1 for the killed child).
+# The child overran its timeout: mark it and kill it. The EOF that follows
+# runs _finish.
 proc rio::exec::_watchdog {tok} {
 	variable _jobs
 	if {![info exists _jobs($tok)]} return
@@ -151,9 +130,8 @@ proc rio::exec::_watchdog {tok} {
 	catch {_kill [pid [dict get $_jobs($tok) chan]]}
 }
 
-# Child exited: cancel the watchdog, read the exit code off close (same mapping as
-# run), slurp stderr, and hand the capture to donecmd. Idempotent via the _jobs
-# guard (a late readable after finish is a no-op).
+# The child exited: cancel the watchdog, take the exit code from close, read
+# stderr, call donecmd. A second call is a no-op.
 proc rio::exec::_finish {tok} {
 	variable _jobs
 	if {![info exists _jobs($tok)]} return
@@ -162,9 +140,8 @@ proc rio::exec::_finish {tok} {
 	if {[dict get $st watchdog] ne ""} { after cancel [dict get $st watchdog] }
 	set chan [dict get $st chan]
 	fileevent $chan readable {}
-	# Back to blocking so close reaps the child and reports its exit status via
-	# -errorcode; a non-blocking close returns early with no status. The child has
-	# already reached EOF on stdout, so this doesn't actually block.
+	# Blocking again: only a blocking close reports the exit status. The child
+	# is at EOF, so it does not wait.
 	fconfigure $chan -blocking 1
 	set exitcode 0 ; set error ""
 	set rc [catch {close $chan} msg opts]
@@ -185,8 +162,8 @@ proc rio::exec::_finish {tok} {
 	{*}[dict get $st done] $res
 }
 
-# Tear a running job down silently — kill the child, drop the watchdog and the
-# channel, invoke NO donecmd. For reset/seal aborting a turn mid-command.
+# Kill a running job and forget it. donecmd is not called. For a turn
+# aborted while its command runs.
 proc rio::exec::cancel {tok} {
 	variable _jobs
 	if {![info exists _jobs($tok)]} return
@@ -199,10 +176,8 @@ proc rio::exec::cancel {tok} {
 	catch {file delete [dict get $st errpath]}
 }
 
-# Kill a child by pid. No portable Tcl primitive (8.6), so shell out: SIGTERM on
-# unix, taskkill on Windows (/T so a process tree goes too). Best-effort — a child
-# that already exited is a harmless error we swallow. (Windows kill fidelity: log
-# any quirk in CAVEATS.)
+# Kill children by pid. Tcl 8.6 has no kill: `kill -TERM` on unix, `taskkill
+# /T` (the whole tree) on Windows. A child already gone is ignored.
 proc rio::exec::_kill {pids} {
 	foreach p $pids {
 		if {$::tcl_platform(platform) eq "windows"} {

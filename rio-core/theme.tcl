@@ -1,39 +1,30 @@
 # rio-core — the theme role table (D24).
 #
-# A theme is DATA: a table of semantic ROLES — colours by role, fonts by named
-# font — never widget paths, never code. The core owns the role vocabulary and
-# the built-in default so the value set is shared (a future TUI maps the same
-# colour roles onto a terminal palette); the *applier* that pokes Tk lives in the
-# GUI frontend (D1 — fonts/colours are a GUI concern). A theme FILE (D21 format,
-# parsed by rio::conf, never executed) overrides roles over a base theme.
+# A theme is data: colours by role, fonts by named font. Never a widget path,
+# never code. The core owns the roles and the default; the frontend applies
+# them. A theme file (rio::conf format, never executed) overrides roles of a
+# base theme.
 #
-# The table shape (the third non-flat protocol result; see rio::wire):
+# The table:
 #   {colors {<role> <value> ...}
 #    fonts  {<NamedFont> {family <s> size <n>} ...}}
 #
-# Pure data: no Tk here.
+# No Tk.
 
 namespace eval rio::theme {
-	# Tests point this at a fixture dir; empty means "use the real search path".
+	# Tests point this at a fixture dir; empty means the real search path.
 	variable override_dirs ""
-	# Captured at SOURCE time: [info script] is this file here, but empty/wrong
-	# once load runs from a dispatch call. The shipped example themes sit beside
-	# this file's parent (repo-root themes/).
+	# Set at source time: the shipped themes are in `themes/`, one level up.
 	variable srcdir [file dirname [file normalize [info script]]]
 }
 
-# The built-in default: the plain white-bg / black-fg "90s productivity" look
-# (D24), and the full role vocabulary every theme inherits and the GUI applies.
-# Fonts are NAMED fonts the GUI references by name, so a size change is live. The
-# `syntax.*` roles colour the highlighter token types (D32): they live in the same
-# role table (data) so themes harmonise highlighting to their palette, and any
-# theme predating D32 inherits this default set rather than showing no colour. The
-# `error` and `diff.*` roles colour the chat's error text and edit diffs and the
-# compare pane's add/removed bands: they belong to the vocabulary for the same
-# reason — a dark theme can retint them instead of being stuck with light pastels
-# (a theme that omits them inherits these defaults). `editor.findmatch` tints the
-# find bar's match highlight (D36) and `editor.currentline` the caret-line band
-# (D60), same treatment.
+# The built-in default (D24): white background, black text, and every role
+# there is. A theme that omits a role inherits it from here.
+#   syntax.*             the highlighter's token types (D32)
+#   error, diff.*        chat errors, diffs, the compare pane's bands
+#   editor.findmatch     the find bar's matches (D36)
+#   editor.currentline   the caret line (D60)
+# Fonts are named fonts, so a size change is live.
 proc rio::theme::default {} {
 	return [dict create \
 		colors [dict create \
@@ -84,10 +75,7 @@ proc rio::theme::load {name} {
 	if {$name eq "" || $name eq "default"} { return [default] }
 	set path [_find $name]
 	if {$path eq ""} { rio::error::raise bad_request "no such theme: $name" }
-	# A theme file is data on disk: a parse failure (or an unreadable file) is the
-	# client asking for a theme that can't be honoured, not a core bug — code it
-	# bad_request like "no such theme", with the parser's reason for context. conf
-	# stays a generic parser that knows nothing of the protocol's error taxonomy.
+	# A file that does not parse is a bad_request, with the parser's reason.
 	if {[catch {from_conf [rio::conf::read_file $path]} part]} {
 		rio::error::raise bad_request "theme $name is malformed: $part"
 	}
@@ -153,14 +141,12 @@ proc rio::theme::_find {name} {
 
 # --- the theme STORE (D39) ----------------------------------------------------
 #
-# Extension repositories install themes CORE-side (the core reads theme files;
-# a remote core reads its own disk, not the frontend's). The store is the
-# user's writable themes dir — the FIRST search dir, so an installed theme
-# shadows a shipped one of the same name, exactly like a hand-copied file.
+# A repository installs a theme on the core's disk. The store is the user's
+# themes dir, the first search dir, so an installed theme shadows a shipped
+# one of the same name.
 
-# A theme name that is safe to join into a path and a URL (D39's safe-name
-# rule). "default" is excluded: it names the built-in, which load never reads
-# from disk — a default.theme file would be dead weight pretending otherwise.
+# Is a theme name safe in a path and a URL (D39)? "default" is not: it names
+# the built-in, which is never read from disk.
 proc rio::theme::valid_name {name} {
 	if {$name eq "default"} { return 0 }
 	return [regexp {^[A-Za-z0-9][A-Za-z0-9._-]*$} $name]
@@ -171,9 +157,8 @@ proc rio::theme::userdir {} {
 	return [lindex [searchdirs] 0]
 }
 
-# Every loadable theme name: the built-in first, then the *.theme files across
-# the search path, each name once (the user dir shadows shipped by load order,
-# so a duplicate name is still ONE theme to a chooser).
+# Every loadable theme name: `default` first, then the *.theme files on the
+# search path, each name once.
 proc rio::theme::names {} {
 	set seen [dict create]
 	foreach d [searchdirs] {
@@ -184,11 +169,9 @@ proc rio::theme::names {} {
 	return [concat default [lsort [dict keys $seen]]]
 }
 
-# Write a theme file into the user dir. The text is VALIDATED first — parsed
-# as conf and shaped as a theme — so the store never holds a file theme.list
-# advertises but load then rejects. The `base` it names is deliberately NOT
-# resolved here: the base may be installed after the child (install order is
-# the user's), and load reports a missing base cleanly when the theme is used.
+# Write a theme file into the user dir. The text is parsed first, so the
+# store holds no file that load would reject. Its `base` is not resolved
+# here: the base may be installed later.
 proc rio::theme::put {name text} {
 	if {![valid_name $name]} {
 		rio::error::raise bad_request "bad theme name: $name"
@@ -207,8 +190,7 @@ proc rio::theme::put {name text} {
 	}
 }
 
-# Remove a theme from the user dir — and only from there: a shipped example is
-# part of the installation, not something a protocol call may delete.
+# Remove a theme from the user dir. A shipped theme is not removable.
 proc rio::theme::delete {name} {
 	if {![valid_name $name]} {
 		rio::error::raise bad_request "bad theme name: $name"
