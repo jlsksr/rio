@@ -14,7 +14,7 @@
 #     One per seam between two parties that can be updated independently:
 #       protocol      GUI <-> core           rio-core/ops-session.tcl
 #       provider-api  core <-> provider ext  rio-core/provider.tcl
-#       mode-api      GUI  <-> mode ext      rio-gui/rio-gui.tcl
+#       mode-api      GUI  <-> mode ext      rio-gui/repos.tcl
 #     These ARE branched on, by an equality or a ceiling test.
 #
 # Why the seams are not semver. A client asks a contract one question — do I speak

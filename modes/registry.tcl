@@ -41,7 +41,7 @@
 #   1  everything above: rio::modes::register {name label attach detach}, the attach /
 #      detach duties and their idempotence, the RioMode tag's fixed precedence, and the
 #      rule that every edit reaches the core through the group proxy (%W) like any other
-#      keystroke. ::mode_api_max in rio-gui.tcl is the ceiling this rio implements.
+#      keystroke. ::mode_api_max in rio-gui/repos.tcl is the ceiling this rio implements.
 #
 # A manifest with NO `mode-api` is read as 1 — modes have shipped without the key since
 # D38, so absence is the D19 fallback rather than a refusal (D123). A new level is added

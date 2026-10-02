@@ -50,7 +50,7 @@ proc .ed.t        {args} { [gget $::focus path] {*}$args } ;# the focused edit p
 # first, then delete. A plain `file delete -force` leaves buffers pointing at files that no
 # longer exist, and rio rightly asks the user about each one at the next stale check (D94) —
 # which in a test is a modal with nobody to answer it. close_buffers_under is the app's own
-# answer to the same situation (rio-gui.tcl, the fs Delete path); it clears `modified`
+# answer to the same situation (files.tcl, the fs Delete path); it clears `modified`
 # first, so there is no save-before-closing prompt either. Bodies run at call time, like the
 # two procs above, so this may be defined before rio-gui.tcl has loaded.
 proc sandbox_drop_fixture {dir} {

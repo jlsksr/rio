@@ -194,3 +194,4 @@ status, date) and the D numbers gap-free. Files only: no Tk, no display, no netw
 | [0142](0142-aqua-theme-appearance-and-font-floor.md) | On Aqua, the theme reaches the native controls, and chrome text has a floor | Accepted | 2026-09-29 |
 | [0143](0143-mac-keys-and-right-button.md) | On a Mac, rio uses the Mac's keys and its right mouse button | Accepted | 2026-09-29 |
 | [0144](0144-decisions-live-in-adr-only.md) | Decisions live in adr/ only; AGENTS.md is instructions | Accepted | 2026-10-02 |
+| [0145](0145-gui-one-file-per-concern.md) | The GUI is one file per concern; rio-gui.tcl is the entry | Accepted | 2026-10-02 |

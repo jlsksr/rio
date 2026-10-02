@@ -46,6 +46,16 @@ your code belongs:
 **Rule of thumb:** if you're writing actual logic, it almost certainly belongs in
 the core. Keep the frontends dumb.
 
+**Finding your way in the GUI.** `rio-gui/` is one file per concern (`git.tcl`,
+`find.tcl`, `keymap.tcl`, …); each opens with a line saying what it holds.
+`rio-gui.tcl` is the entry: it reaches the core, sources the others, boots.
+
+- A new proc goes in its concern's file.
+- Code that runs at start-up goes in `build.tcl` (widgets), `menubar.tcl`, or the
+  boot at the foot of `rio-gui.tcl`. Nowhere else: only those three run in a set order.
+
+Why: [ADR-0145](adr/0145-gui-one-file-per-concern.md).
+
 ### The application icon
 
 `rio-gui/icons/` holds the window and taskbar icon: the candidate artworks under

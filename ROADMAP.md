@@ -202,7 +202,7 @@ Each entry notes its state:
   which guarded `file.open` — the door a person actually walks through). Three callers
   still read a whole file unbounded: the **agent's `read` tool**
   (`rio-core/agent-tools.tcl`, both the `fs.read` primitive and `_current_text`), and the
-  **compare/diff view** (`rio-gui/rio-gui.tcl`, `fs.read` at the side-by-side load). The
+  **compare/diff view** (`rio-gui/views.tcl`, `fs.read` at the side-by-side load). The
   agent case is the sharper one — its 100 KB cap is applied to the *result*, after the
   whole file has already been read and decoded, so pointing it at a build log stalls the
   core for the full read and then returns 100 KB anyway. What makes this its own decision
