@@ -1,4 +1,4 @@
-# Tests for the hard-dependency gate (rio-core/deps.tcl, AGENTS.md D116): a missing
+# Tests for the hard-dependency gate (rio-core/deps.tcl, D116): a missing
 # tcllib must arrive as a sentence naming the OS package, not as a Tcl stack trace.
 #
 # Two halves. `message` is pure, so most of it is read directly. The half that matters
@@ -7,7 +7,7 @@
 # on stderr. No network, no files written outside the temp dir.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]
@@ -52,7 +52,7 @@ test deps-message-is-ascii {deps.tcl is sourced ABOVE the D54 encoding guard, so
 	regexp {[^\x00-\x7f]} $bytes
 } -result 0
 
-# --- the derived fact: INSTALL.md §1 names the same OS packages (AGENTS §7) ------------
+# --- the derived fact: INSTALL.md §1 names the same OS packages (ADR-0117) ------------
 #
 # The `provides` table restates INSTALL.md §1's operating-system package names, so the two
 # can drift — and the drift is the bad kind: rio would tell someone to install a package

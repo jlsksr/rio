@@ -1,4 +1,4 @@
-# rio-core — the tls.* op namespace: certificates the user accepts (AGENTS.md D111), and the
+# rio-core — the tls.* op namespace: certificates the user accepts (D111), and the
 # core-wide https setting (D114).
 #
 # A certificate that does not verify is refused (rio::tls). These ops are the browser's

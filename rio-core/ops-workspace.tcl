@@ -1,4 +1,4 @@
-# rio-core — the workspace.* op namespace (AGENTS.md D31).
+# rio-core — the workspace.* op namespace (D31).
 #
 # Persist/restore "which files were open" per project, so a frontend can resume a
 # working space. Keyed by the OPEN PROJECT ROOT (rio::project) — the frontend never

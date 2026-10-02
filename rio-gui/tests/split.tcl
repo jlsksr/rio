@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the split editor (AGENTS.md D33): two editor groups side by side,
+# Headless test for the split editor (D33): two editor groups side by side,
 # each with its own tab strip, active buffer, and highlight cache. Drives the real
 # frontend's group procs directly (split_editor, do_open, move_tab_other,
 # unsplit_editor, do_close) and inspects ::groups / ::grp / the group widgets. Like

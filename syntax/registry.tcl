@@ -1,4 +1,4 @@
-# rio — the syntax-highlighting registry (AGENTS.md D32).
+# rio — the syntax-highlighting registry (D32).
 #
 # Syntax highlighting is PRESENTATION, not document state — like the cursor and
 # selection (D22) and the theme *applier* (D24), it is a frontend concern. So the

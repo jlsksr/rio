@@ -1,4 +1,4 @@
-# rio-core — the buffer.* op namespace (AGENTS.md D11, D12).
+# rio-core — the buffer.* op namespace (D11, D12).
 #
 # Thin handlers that bridge the protocol to the document model. They hold no
 # logic of their own beyond picking a target buffer and shaping events; the
@@ -131,7 +131,7 @@ proc rio::ops::buffer_replace {params} {
 }
 rio::dispatch::register buffer.replace rio::ops::buffer_replace
 
-# --- search (AGENTS.md D36) ---------------------------------------------------
+# --- search (D36) ---------------------------------------------------
 # Stateless queries over the canonical text (D3): the caller carries the caret
 # and the options (D22), the core computes the matches. See rio::doc.
 
@@ -236,7 +236,7 @@ proc rio::ops::buffers_search {params} {
 }
 rio::dispatch::register buffers.search rio::ops::buffers_search
 
-# --- staleness: a buffer notices the file changed under it (AGENTS.md D94) ---
+# --- staleness: a buffer notices the file changed under it (D94) ---
 #
 # Detection is CORE-side, and has to be: over a remote core the file lives on the server,
 # so a frontend's own [file mtime] answers about the wrong machine (D29). The core holds

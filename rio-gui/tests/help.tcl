@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the in-app help viewer (AGENTS.md D99): Help ▸ Contents… / F1 opens
+# Headless test for the in-app help viewer (D99): Help ▸ Contents… / F1 opens
 # rio's own manual — the contents parsed from docs/index.md on the left, the selected
 # topic's text on the right. docs.tcl (check 8) holds the DATA path — the resolver points
 # at the real docs/ and offers exactly the pages index.md lists. This file holds the

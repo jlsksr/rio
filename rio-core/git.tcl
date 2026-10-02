@@ -1,4 +1,4 @@
-# rio-core — git, by shelling out to `git` and parsing porcelain (AGENTS.md D7).
+# rio-core — git, by shelling out to `git` and parsing porcelain (D7).
 #
 # No libgit2: we run the installed `git` through the command-execution primitive
 # (rio::exec, D15) and parse its machine-readable output. Portable and

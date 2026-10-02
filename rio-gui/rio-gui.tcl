@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# rio-gui — the Tk frontend (AGENTS.md D1). A *thin view* (D3): it never edits
+# rio-gui — the Tk frontend (D1). A *thin view* (D3): it never edits
 # its own text widget. Keystrokes become buffer.replace requests; the widget only
 # changes when the core echoes a buffer.changed event back. Open/save go through
 # the fs.* ops, undo/redo through edit.*, and buffers (tabs) through buffer.new /
@@ -51,7 +51,7 @@ set ::have_tkdnd [expr {![catch {package require tkdnd}]}]
 if {[info exists ::env(RIO_GUI_HEADLESS)]} { wm withdraw . }
 
 # ---------------------------------------------------------------------------
-# Transport (AGENTS.md D30): the GUI is ALWAYS a client to a core at the far end of
+# Transport (D30): the GUI is ALWAYS a client to a core at the far end of
 # a channel — it never embeds the core. Two channel kinds, one client code path:
 #   default        spawn a private core as a child and talk over its stdio pipe.
 #                  Local: its filesystem is ours, and its agent runs as us (D30).
@@ -146,7 +146,7 @@ fileevent $::core_chan readable core_reader
 # order and the active buffer are per-GROUP — see ::grp below.
 set ::buffers {} ;# id -> {path <s> meta <dict> modified <0|1> cursor <idx> yview <frac>}
 
-# Editor groups (AGENTS.md D33). The center holds one or two editor groups side by
+# Editor groups (D33). The center holds one or two editor groups side by
 # side; each is an independent text widget with its own tab strip, active buffer,
 # and highlight cache. In v1 a buffer belongs to exactly one group. Phase 2 runs a
 # SINGLE group (group 0), so the behaviour is identical to the pre-split editor;
@@ -352,7 +352,7 @@ set ::hl_states {}
 set ::hl_states_max 256
 
 # ---------------------------------------------------------------------------
-# Tool-panel registry (AGENTS.md D35, incremental path step (a)). The four tool
+# Tool-panel registry (D35, incremental path step (a)). The four tool
 # panes rio ships — files, git, the agent chat, and the Search results strip — are
 # *declared as data* here rather than hand-wired at their call sites: same idiom as
 # the core's highlighter/mode/rich-list registries. Each panel is {title, site,
@@ -392,7 +392,7 @@ proc rio::panel::refresh {id} {
 }
 
 # ---------------------------------------------------------------------------
-# The dock layout (AGENTS.md D35, incremental path step (b)). One persisted
+# The dock layout (D35, incremental path step (b)). One persisted
 # `layout` object (::layout) is the single source of truth for all non-document
 # placement: three sites (left|right|bottom), each with an ordered `panels` list,
 # an `active` panel, `visible`, and `size` (width for the side sites, height for
@@ -579,7 +579,7 @@ proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
 # ---------------------------------------------------------------------------
-# Editor-group accessors (AGENTS.md D33). A group is a dict in ::grp; these keep the
+# Editor-group accessors (D33). A group is a dict in ::grp; these keep the
 # editor procs terse — most take a group id defaulting to the focused one, resolve
 # its widget/cache through here, and never touch ::grp directly.
 # ---------------------------------------------------------------------------
@@ -607,7 +607,7 @@ proc new_group_state {} {
 }
 
 # ---------------------------------------------------------------------------
-# The single seam to the core (AGENTS.md D2/D30). One op call, one response; any
+# The single seam to the core (D2/D30). One op call, one response; any
 # events the op produced arrive asynchronously on the channel and are fed to
 # dispatch_event. The core is always at the far end of ::core_chan (a pipe to a
 # spawned core, or a daemon socket) — there is no in-process path, so local and
@@ -772,7 +772,7 @@ proc core_lost {{why eof}} {
 }
 
 # ---------------------------------------------------------------------------
-# Stale-link watchdog (AGENTS.md D37). A half-open socket — the classic stale
+# Stale-link watchdog (D37). A half-open socket — the classic stale
 # `ssh -L` forward — accepts writes and never EOFs, so without this the GUI only
 # learns the link is dead when TCP gives up, minutes later. hello_core already
 # bounds the FIRST exchange for exactly that reason; this extends the same idea
@@ -820,7 +820,7 @@ proc watch_tick {} {
 	}
 }
 
-# Surface a core error to the user (the {code, message} taxonomy, AGENTS.md O2).
+# Surface a core error to the user (the {code, message} taxonomy, ADR-0113).
 # One seam, so every failed op shows a dialog instead of crashing a caller that
 # assumed success — and the headless smoke can override it to capture errors
 # without a modal blocking the run.
@@ -842,7 +842,7 @@ proc rio_result {op params} {
 	return ""
 }
 
-# The wire protocol version this GUI speaks (AGENTS.md O2: the integer
+# The wire protocol version this GUI speaks (D123: the integer
 # session.hello reports; it bumps on a breaking change). Checked against every
 # core we attach to — a spawned child can't realistically mismatch (same repo),
 # but a daemon reached over --connect or an in-place reconnect (D30) can be any
@@ -975,7 +975,7 @@ proc load_buffer {g} {
 
 # A buffer's whole text via the protocol (buffer.text), so the frontend never reads
 # the core's document model directly — the one path that works the same in-process
-# and remote (AGENTS.md D29). "" on failure (a vanished buffer): callers only use
+# and remote (D29). "" on failure (a vanished buffer): callers only use
 # this to test emptiness or seed a compare, where "" is a safe miss.
 proc buf_text {id} {
 	set resp [rio_call buffer.text [dict create buffer $id]]
@@ -1066,7 +1066,7 @@ proc do_new {} {
 
 # Adopt whatever buffers the core already has — its startup default in-process, or
 # the server's open buffers in remote mode — via buffer.list, activating the first
-# (AGENTS.md D29). Replaces reaching into $::rio::ops::default, which exists only in
+# (D29). Replaces reaching into $::rio::ops::default, which exists only in
 # the embedded core. If the core reports none, mint one so there is always a tab.
 proc adopt_initial_buffers {} {
 	set resp [rio_call buffer.list {}]
@@ -1204,7 +1204,7 @@ proc dnd_open_files {paths} {
 }
 
 # ---------------------------------------------------------------------------
-# The file pane (AGENTS.md: the file-tree pane; D9 a later reflow concern). A
+# The file pane. A
 # lazy tree over the core's project root (D87): it lists ONE directory per fs.list
 # call, and unfolds a directory in place on demand rather than the core walking a
 # whole repo. The core owns "which folder is open" (project.*); this pane is a dumb
@@ -1278,7 +1278,7 @@ proc note_app_focus {has} {
 }
 
 # ---------------------------------------------------------------------------
-# Stale buffers: the file changed under an open tab (AGENTS.md D94).
+# Stale buffers: the file changed under an open tab (D94).
 #
 # Two triggers, and between them they cover both kinds of change. fs.changed is the write
 # rio's own core made — an agent's fs.write, a discard, a rename; regaining OS focus is
@@ -1568,7 +1568,7 @@ proc rl_set_hover {b row} {
 }
 
 # ---------------------------------------------------------------------------
-# The menu Tk leaves bare (AGENTS.md D115) — the half D108 named and deferred.
+# The menu Tk leaves bare (D115) — the half D108 named and deferred.
 #
 # D108 gave the editor text its context menu and stopped there, deliberately: the
 # READ-ONLY views (agent log, compare panes, git diff, the manual, a plan) and every
@@ -2220,7 +2220,7 @@ proc open_folder_dialog {} {
 }
 
 # ---------------------------------------------------------------------------
-# The git pane (AGENTS.md D7 read layer in a view). Shares the dock with the
+# The git pane (D7 read layer in a view). Shares the dock with the
 # file pane — only one shows at a time. A dumb view of the core's git.* against
 # the open project (git.* now defaults its cwd to the project root): git.status
 # fills the branch + changed-file list, selecting a file fetches git.diff into a
@@ -3187,7 +3187,7 @@ proc restyle_tabs {} {
 }
 
 # ---------------------------------------------------------------------------
-# The agent chat pane (AGENTS.md D14 `chat` column; D20/D26/D30). A dumb view (D3)
+# The agent chat pane (D14 `chat` column; D20/D26/D30). A dumb view (D3)
 # over the agent.* event stream: a read-only transcript, a composer, and Send.
 # agent.send is a STREAMING op — its reply is an ack, and the turn's content arrives
 # as agent.delta events the core broadcasts over the channel (D30), routed here by
@@ -3620,7 +3620,7 @@ proc clamp_input_height {} {
 }
 
 # ---------------------------------------------------------------------------
-# The compare / diff view (AGENTS.md D28; D13/D14 anticipated it). Two read-only
+# The compare / diff view (D28; D13/D14 anticipated it). Two read-only
 # panes side by side with line-level diff coloring, shown in the center INSTEAD
 # of the editor while comparing (apply_layout swaps .ed <-> .cmp). A dumb view
 # (D3): the line alignment comes from the core diff.lines op; this only renders
@@ -3719,7 +3719,7 @@ proc compare_with_file_dialog {} {
 }
 
 # ---------------------------------------------------------------------------
-# The plan view (AGENTS.md D101). In plan mode the agent may not change anything; what
+# The plan view (D101). In plan mode the agent may not change anything; what
 # it may do is say what it WOULD do, through the core's `present_plan` tool. The plan
 # arrives as an `agent.propose` of kind `plan` carrying Markdown, and lands here — in the
 # center, instead of the editor, exactly as a complex proposed edit lands in the compare
@@ -4096,7 +4096,7 @@ proc about_dialog {} {
 }
 
 # ---------------------------------------------------------------------------
-# The help viewer — Help ▸ Contents…, F1 (AGENTS.md D99, D100). rio showing its own manual.
+# The help viewer — Help ▸ Contents…, F1 (D99, D100). rio showing its own manual.
 #
 # The manual is `docs/`, one Markdown topic per file, and the filename IS the topic id
 # (D91) — which is why this needs no index of its own: index.md is the contents, and the
@@ -4817,7 +4817,7 @@ proc help_style {t} {
 
 
 # ---------------------------------------------------------------------------
-# Agent provider selection + the Claude API key (AGENTS.md D26). The agent runs
+# Agent provider selection + the Claude API key (D26). The agent runs
 # one provider at a time: the offline `echo` stub (the default — proves the
 # streaming path with no network or credentials) or `claude`, the claude-api
 # provider, which needs a stored Anthropic API key. Which one is live is a
@@ -6481,7 +6481,7 @@ proc do_redo {} {
 }
 
 # ---------------------------------------------------------------------------
-# Find / Replace (AGENTS.md D36). The bar is a thin view: the MATCHING runs in
+# Find / Replace (D36). The bar is a thin view: the MATCHING runs in
 # the core (buffer.find / buffer.matches — the core owns the canonical text,
 # D3), and the bar carries only the frontend-local state those ops are
 # stateless about (D22): the needle, the options, and the caret it passes as
@@ -6661,7 +6661,7 @@ proc find_replace_all {} {
 }
 
 # ---------------------------------------------------------------------------
-# The Search panel (AGENTS.md D52): the grown-up sibling of the inline find bar —
+# The Search panel (D52): the grown-up sibling of the inline find bar —
 # find across three SCOPES (Current doc / Open docs / Project) in one bottom tool
 # window, its results a grouped, navigable list. Two core engines sit behind the
 # scope selector, so buffer and project search can never disagree:
@@ -6963,7 +6963,7 @@ proc cycle {dir} {
 }
 
 # ---------------------------------------------------------------------------
-# Editor split (AGENTS.md D33): create/destroy the second group and move tabs across.
+# Editor split (D33): create/destroy the second group and move tabs across.
 # v1 is at most two groups; ids are the free slot in {0,1} so a collapsed group's slot
 # is reused on the next split.
 # ---------------------------------------------------------------------------
@@ -7083,7 +7083,7 @@ proc move_tab_other {} {
 	if {[gcur $::focus] ne ""} { move_buffer_to_other [gcur $::focus] $::focus }
 }
 
-# A protocol-native remote file/folder browser (AGENTS.md D29/D30). In remote mode
+# A protocol-native remote file/folder browser (D29/D30). In remote mode
 # the filesystem of record is the CORE's, but tk_getOpenFile / tk_getSaveFile /
 # tk_chooseDirectory browse the CLIENT's disk — wrong for a remote core. So those
 # choosers give way to this browser, which walks the REMOTE tree over `fs.list` —
@@ -7367,7 +7367,7 @@ proc do_quit {} {
 
 # ---------------------------------------------------------------------------
 # Connect to a remote (listening) rio-core over a socket — the daemon mode of the
-# one channel transport (AGENTS.md D30). The core there is loopback-bound, so this
+# one channel transport (D30). The core there is loopback-bound, so this
 # is normally the local end of an `ssh -L` tunnel. Reached from File ▸ Connect to
 # Remote Core…. By default THIS window rewires to the remote core; ticking "Open in
 # a new window" launches a second rio-gui instead, leaving this session untouched.
@@ -7700,7 +7700,7 @@ proc tab_context_menu {g id X Y} {
 # IN that group and focuses the group. The focused group's active tab is emphasised
 # with the accent colour, so which pane has focus is visible at a glance. Right-click
 # a tab for a context menu (move to the other group / close).
-# Drag a tab (AGENTS.md D33 follow-on) — a second input gesture onto the move/reorder
+# Drag a tab (D33 follow-on) — a second input gesture onto the move/reorder
 # paths. Press a tab and drag it: onto the OTHER group's pane it moves across (the same
 # path as the context menu's "Move to Other Group"); back onto its OWN pane it reorders,
 # dropping into the slot under the pointer. Below a ~5px threshold it stays a plain click
@@ -7830,7 +7830,7 @@ proc refresh_tabs {} {
 }
 
 # ---------------------------------------------------------------------------
-# Tab-strip overflow layout (AGENTS.md D57). refresh_tabs builds each group's tab
+# Tab-strip overflow layout (D57). refresh_tabs builds each group's tab
 # HANDLES (the b<id> frames) but leaves them unmanaged; this proc places them, in one
 # of two modes the user picks (::tab_layout). It also runs on the strip's <Configure>
 # so a window resize re-flows the tabs. Widths are measured analytically from the tab
@@ -8013,7 +8013,7 @@ proc tab_layout_apply {} {
 }
 
 # ---------------------------------------------------------------------------
-# Theme applier (AGENTS.md D24). The core serves the theme as a role table
+# Theme applier (D24). The core serves the theme as a role table
 # (theme.get); here we map roles onto Tk. NAMED fonts are referenced by name by
 # every widget, so reconfiguring one updates them all live; explicit per-widget
 # config makes a colour switch live too (the option DB only reaches widgets
@@ -8398,7 +8398,7 @@ proc theme_label {name} {
 }
 
 # ---------------------------------------------------------------------------
-# Syntax highlighting (AGENTS.md D32). Highlighting is PRESENTATION, so the GUI
+# Syntax highlighting (D32). Highlighting is PRESENTATION, so the GUI
 # owns it: pure, swappable per-line scanner modules live in syntax/ (Tk-free — a
 # future TUI reuses them), and the GUI is the *applier*. It maps each token TYPE
 # onto the theme's syntax.* colour role as a text tag (apply_theme), and re-tokenises
@@ -8474,7 +8474,7 @@ proc hl_user_dir {} {
 }
 
 # ---------------------------------------------------------------------------
-# Editing modes (AGENTS.md D38, D41): the core ships the Windows mode only; emacs
+# Editing modes (D38, D41): the core ships the Windows mode only; emacs
 # and vi install as extensions into the user drop-in dir. Loaded exactly like the
 # syntax highlighters — registry first, shipped modules, then user drop-ins that
 # shadow by re-registering. The active mode lives on the shared RioMode bind tag,
@@ -8923,7 +8923,7 @@ proc hl_schedule {g} {
 }
 
 # ---------------------------------------------------------------------------
-# Sessions & preferences (AGENTS.md D31). Two halves, split by owner:
+# Sessions & preferences (D31). Two halves, split by owner:
 #
 #   * PREFERENCES — how the editor looks: theme, wrap, dock side/pane, chat
 #     visibility. Pure view state the core knows nothing about, so the GUI owns it,
@@ -9115,7 +9115,7 @@ proc session_restore {} {
 }
 
 # ---------------------------------------------------------------------------
-# Extension repositories (AGENTS.md D39). The apt-sources model, over plain
+# Extension repositories (D39). The apt-sources model, over plain
 # HTTP: sources.list holds base URLs, each pointing at a webdir that hosts
 # rio-repository.conf (the marker+manifest), an optional `index`, and one
 # subdirectory per extension carrying rio-extension.conf + its payload files.
@@ -9154,7 +9154,7 @@ proc ext_safe_name {s} {
 	return [regexp {^[A-Za-z0-9][A-Za-z0-9._-]*$} $s]
 }
 
-# --- versions: semver, and compared (AGENTS.md D107) ---------------------------
+# --- versions: semver, and compared (D107) ---------------------------
 # D39 froze `version` as an opaque string rio never compares, which left the user
 # to eyeball "is mine still current?". D107 replaces that with a published rule —
 # an extension version is semver (semver.org) — and this comparator.
@@ -9291,7 +9291,7 @@ proc sources_seed_default {} {
 	sources_save [list $::default_repo]
 }
 
-# --- signing: which key speaks for a repository (AGENTS.md D118, D119) ---------
+# --- signing: which key speaks for a repository (D118, D119) ---------
 #
 # D39 keeps plain http first-class, which means anyone on the path between a user
 # and a repository can rewrite a payload in flight. A signature over the repository
@@ -9856,7 +9856,7 @@ proc repo_scan_all {{progress ""}} {
 	ext_updates_compute
 }
 
-# --- what is installed, and what is an update (AGENTS.md D107) -----------------
+# --- what is installed, and what is an update (D107) -----------------
 
 # The installed view: "kind/name" -> {version source}. The ledger is the base —
 # but for a PROVIDER the core wins, because a provider installs core-side and
@@ -10288,7 +10288,7 @@ proc ext_reload {kind} {
 	}
 }
 
-# Update everything ::ext_updates lists, under ONE consent (AGENTS.md D107) —
+# Update everything ::ext_updates lists, under ONE consent (D107) —
 # apt's shape, and the reasoning is apt's too: you already trusted each of these
 # source+extension pairs when you installed them, so an update is not a fresh
 # trust decision, and N dialogs for N updates is a prompt people click through.
@@ -10338,7 +10338,7 @@ proc ext_update_all {} {
 }
 
 # ---------------------------------------------------------------------------
-# The Extensions window (AGENTS.md D39; Settings in D67, its own top-level menu since
+# The Extensions window (D39; Settings in D67, its own top-level menu since
 # D130): Extensions ▸ Extensions… — where the user
 # browses every configured repository, chooses BETWEEN same-name extensions
 # (different authors, different versions — each variant its own line with its
@@ -10838,7 +10838,7 @@ proc extw_remove {kind name} {
 }
 
 # ---------------------------------------------------------------------------
-# The start-up check (AGENTS.md D107) — rio's `apt update` at boot, OFF by
+# The start-up check (D107) — rio's `apt update` at boot, OFF by
 # default: a fresh rio makes no network request it was not asked to make, and
 # the request is the CORE's anyway (repo.fetch), which on a remote core means
 # someone else's machine.
@@ -10948,7 +10948,7 @@ proc extw_sources_dialog {} {
 	$w configure -background [dict get $c ui.bg]
 	# Hint text is muted (gutter.fg), so static help never reads as an interactive
 	# element; the list below carries a solid border for the same reason — the
-	# selectable repository URLs must look distinct from this sentence (AGENTS D68).
+	# selectable repository URLs must look distinct from this sentence (D68).
 	label $w.hint -anchor w -justify left -font RioUIFont \
 		-text "Each repository is a plain directory served over http:// or https:// (see CONTRIBUTING.md to host one)." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
@@ -11015,7 +11015,7 @@ proc extw_source_remove {} {
 	.extsrc.body.list delete $sel
 }
 
-# --- a certificate that doesn't verify (AGENTS.md D111) ------------------------------------
+# --- a certificate that doesn't verify (D111) ------------------------------------
 #
 # The browser's "Your connection is not private … Advanced" path. A repository whose
 # certificate the core refused lists as "certificate not trusted"; its detail pane offers
@@ -11162,7 +11162,7 @@ proc extw_cert_review {url {fetch_error ""}} {
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
-# --- confirming a signing key (AGENTS.md D118, D119) ---------------------------------
+# --- confirming a signing key (D118, D119) ---------------------------------
 #
 # The same act as accepting a certificate, for the other half of the trust model, in
 # the two situations that call for it: a repository rio has never had a key for, and
@@ -11509,7 +11509,7 @@ proc repo_keys_forget {} {
 # ---------------------------------------------------------------------------
 # (Tabs are no longer a single top bar; each editor group draws its own strip, D33.)
 
-# The dock sites (AGENTS.md D35 step c1b). Three tabbed tool-window containers —
+# The dock sites (D35 step c1b). Three tabbed tool-window containers —
 # left / right / bottom — each a host-owned tab strip (.tabs) above a body area
 # (.body) into which the active panel's body widget is packed via -in. This is the
 # Visual-Studio docked-tool-window model: every visible site shows its own tab
@@ -11734,7 +11734,7 @@ frame .bsash -height 5 -cursor sb_v_double_arrow -background "#bbbbbb"
 bind .bsash <B1-Motion> bsash_drag
 bind .bsash <ButtonRelease-1> { rio::layout::put bottom size [winfo height .sitebottom] ; prefs_save }
 
-# The editor region (AGENTS.md D33). The center is a .groups panedwindow that holds one
+# The editor region (D33). The center is a .groups panedwindow that holds one
 # or two editor GROUPS side by side with a draggable divider; each group is an
 # independent text widget (with its own tab strip, scrollbars, and highlight cache)
 # built by make_editor_group. Each text widget is renamed to a real command (::real<g>)
@@ -11858,7 +11858,7 @@ proc editor_paste {{w ""}} {
 }
 
 # ---------------------------------------------------------------------------
-# The editor's context menu (AGENTS.md D108), and the table it shares with the
+# The editor's context menu (D108), and the table it shares with the
 # Edit menu.
 #
 # D38's rule — one implementation behind the menu and the mode keys, so they
@@ -12161,7 +12161,7 @@ proc editor_dedent_one {ln} {
 }
 
 # ---------------------------------------------------------------------------
-# Column / block editing (AGENTS.md D40). Ctrl+Shift+drag makes a vertical,
+# Column / block editing (D40). Ctrl+Shift+drag makes a vertical,
 # multi-line cursor. Its zero-width form is a CARET COLUMN: typing / Backspace /
 # Delete / Tab act at one column on EVERY spanned line; drag a width and typing
 # overwrites that rectangular slice per line. Off by default (::col_on), a
@@ -12392,7 +12392,7 @@ proc apply_column_edit {} {
 }
 
 # ---------------------------------------------------------------------------
-# Keymap (AGENTS.md D23): ONE table maps a logical command -> {chord action}. It is
+# Keymap (D23): ONE table maps a logical command -> {chord action}. It is
 # the single source of truth for the editor's keyboard shortcuts AND for the
 # accelerator labels shown in the menus, so a remap moves both together. Users remap
 # by dropping a keys.json in the config dir (D21) — {"command":"chord", ...} overrides
@@ -12742,7 +12742,7 @@ proc keys_save {overrides} {
 }
 
 # ---------------------------------------------------------------------------
-# Preferences window (AGENTS.md D58). One place to find every stateful setting as the
+# Preferences window (D58). One place to find every stateful setting as the
 # count grows, so the top-level menus don't keep accreting checkbuttons. It does NOT own
 # any state: each control drives the SAME global the menu entry binds (::wrap_lines,
 # ::tab_layout, …) and calls the SAME applier, which persists via prefs_save. So it is
@@ -13011,7 +13011,7 @@ proc preferences_window {} {
 }
 
 # ---------------------------------------------------------------------------
-# Keyboard-shortcuts editor (AGENTS.md D23). A modal listing every command with its
+# Keyboard-shortcuts editor (D23). A modal listing every command with its
 # current chord; the user re-records (press-to-capture, like a modern IDE), clears, or
 # resets. Editing happens in a working copy ::keys_work (command -> chord); Cancel
 # discards it, Save writes keys.json (overrides only) and applies live via
@@ -13243,7 +13243,7 @@ set ::groups {0}
 set ::focus 0
 relayout_groups
 
-# The compare / diff view (AGENTS.md D28): two read-only text panes side by side
+# The compare / diff view (D28): two read-only text panes side by side
 # with a single shared vertical scrollbar, packed in the center INSTEAD of .ed
 # while comparing (apply_layout). Built here with bootstrap colours; apply_theme
 # recolours them and configures the del/add/filler row tags. cmp_fill renders the
@@ -13278,7 +13278,7 @@ foreach w {.cmp.l.t .cmp.r.t} {
 	bind $w <Escape>     {compare_close ; break}
 }
 
-# The plan view (AGENTS.md D101): one read-only pane in the center, rendering the agent's
+# The plan view (D101): one read-only pane in the center, rendering the agent's
 # plan with the manual's renderer (plan_open). Same chrome as the compare view — a titled
 # header and a bottom bar whose button names the Esc shortcut — because it is the same kind
 # of thing: a proposal being read before it is decided. Wrapped, not scrolled sideways:
@@ -13488,7 +13488,7 @@ unset _w
 # accumulates above — the type-here/output-above idiom, and the input lands in the same
 # place when switching between them. (Files/Git differ: their chrome is a *thin* caption
 # — a name + a glyph button — so it sits at the top. The split is by control weight, not
-# by pane; see AGENTS.md D35.) So the sunken well of results fills the top and the query
+# by pane; see D35.) So the sunken well of results fills the top and the query
 # row (needle + scope + Match case + Whole word + count + ×) is pinned to the bottom;
 # Ctrl+H toggles the replace row in just ABOVE it, so the query field never moves. The
 # scope option menu picks the engine (Project vs Open docs vs Current doc). Colours are
@@ -13559,7 +13559,7 @@ bind .results.rep.e    <Return>    {search_replace_all ; break}
 bind .results.rep.e    <Escape>    {search_close ; break}
 bind .results.hdr.close <Button-1> search_close
 
-# Register the four tool panes now that their body widgets exist (AGENTS.md D35 step
+# Register the four tool panes now that their body widgets exist (D35 step
 # (a)). Placement is still owned by apply_layout / show_pane — this only
 # declares each pane as data and gives its refresh a name. Files and git are separate
 # panels sharing today's side dock; chat is event-driven (no batch refresh hook).
@@ -13575,7 +13575,7 @@ pack .status -side bottom -fill x
 # each editor group's tab strip lives inside its own frame (D33), not a global top bar.
 focus [gget 0 path]
 
-# Menus use stock Tk behaviour. An earlier tweak (AGENTS.md D59, reverted) rebound the Menu
+# Menus use stock Tk behaviour. An earlier tweak (D59, reverted) rebound the Menu
 # class's <ButtonRelease> and renamed tk::MenuFirstEntry so a click wouldn't pre-highlight a
 # dropdown's first entry (to match a hover-slide). It reached into Tk's menu grab/post state
 # machine and caused intermittent misfires — a click invoking the first item, or a post that
@@ -13783,7 +13783,7 @@ if {[tk windowingsystem] eq "aqua"} {
 	proc ::tkAboutDialog {} { about_dialog }
 }
 
-# The window / taskbar icon (AGENTS.md D117). Without one the window manager and the
+# The window / taskbar icon (D117). Without one the window manager and the
 # taskbar each fall back to their OWN default, so rio showed two different generic
 # icons in the two places.
 #
@@ -13801,7 +13801,7 @@ if {[tk windowingsystem] eq "aqua"} {
 # dialogs and the help window inherit it without each repeating this.
 #
 # The sizes are a VARIABLE, not a literal in the loop, so the guard in smoke.tcl can ask
-# what was asked for rather than reading this proc's source text (AGENTS §7: assert
+# what was asked for rather than reading this proc's source text (ADR-0117: assert
 # against behaviour). `icons/make-icons.sh` cuts exactly this set.
 set ::icon_sizes {16 24 32 48 64 128 256}
 # macOS (D134) is the exception to "the WM picks". Tk's Aqua `wm iconphoto` uses ONLY

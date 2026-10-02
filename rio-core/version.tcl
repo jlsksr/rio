@@ -1,5 +1,5 @@
 # rio-core — rio's own release version, and the doctrine behind every version
-# number in the tree (AGENTS.md D123).
+# number in the tree (D123).
 #
 # rio carries TWO kinds of number, and they answer different questions. Reaching for
 # the wrong one is the mistake this file exists to prevent.

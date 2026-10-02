@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-11
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D31, D39, D95, D109; project policy
+- **Decision:** D31, D39, D95, D109; project policy
 
 ## Context
 

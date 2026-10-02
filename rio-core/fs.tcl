@@ -1,4 +1,4 @@
-# rio-core — file I/O with encoding and line-ending preservation (AGENTS.md D22).
+# rio-core — file I/O with encoding and line-ending preservation (D22).
 #
 # Reading a file is lossy if you guess wrong, so this module DETECTS and the
 # document carries the result so a later save can REPRODUCE the original form
@@ -101,7 +101,7 @@ proc rio::fs::stamp {path} {
 	return [dict create mtime $mt size $sz]
 }
 
-# Judge a file BEFORE reading it whole (AGENTS.md D125). `rio::fs::read` above reads
+# Judge a file BEFORE reading it whole (D125). `rio::fs::read` above reads
 # and decodes the WHOLE file — right for source, ruinous for a 400 MB log or an ELF
 # binary: the read costs ~44 ms per MB even now that well-formedness is a C-level
 # round-trip rather than a byte walk (D126 cut that step from ~164 to ~7 ms/MB), and

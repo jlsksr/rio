@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0140](0140-macos-platform-facts-from-tk.md)
 - **Date:** 2026-09-21
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D127
+- **Decision:** D127
 
 ## Context
 

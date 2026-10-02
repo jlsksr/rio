@@ -3,7 +3,7 @@
 - **Status:** Accepted; extended by [ADR-0135](0135-provider-declares-its-own-settings.md) and [ADR-0138](0138-provider-profiles-and-file-options.md)
 - **Date:** 2026-09-12
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D106, D106a–D106e
+- **Decision:** D106, D106a, D106b, D106c, D106d, D106e
 
 ## Context
 

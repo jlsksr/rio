@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for stale buffers (AGENTS.md D94): an open tab noticing the file changed
+# Headless test for stale buffers (D94): an open tab noticing the file changed
 # under it. Drives the real loop — the core's buffers.stale/reload/stamp behind a socket,
 # the GUI's check_stale_buffers deciding what to do with the answer — with only the two
 # tk_messageBox prompts stubbed, since a modal has no one to answer it headless.

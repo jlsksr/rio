@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-26
 - **Deciders:** jka
-- **Decision log:** AGENTS.md §6, O2 ("Error taxonomy")
+- **Decision:** no D number
 
 ## Context
 

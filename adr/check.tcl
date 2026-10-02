@@ -5,7 +5,7 @@
 #
 #   - each record's title, status and date, and the row for it in README.md's index;
 #   - the set of records, and the set of rows;
-#   - AGENTS.md's D numbers, and the record numbers, which are one series up to D111.
+#   - the D numbers the records carry: no gaps, and D1-D111 match the record number.
 #
 # It reads files and nothing else: no Tk, no display, no network.
 #
@@ -72,7 +72,7 @@ foreach path [lsort [glob -nocomplain -directory $::adr {[0-9][0-9][0-9][0-9]-*.
 	regexp -line {^- \*\*Status:\*\* (.+)$} $text -> status
 	regexp -line {^- \*\*Date:\*\* (.+)$} $text -> date
 	regexp -line {^- \*\*Deciders:\*\* (.+)$} $text -> deciders
-	regexp -line {^- \*\*Decision log:\*\* (.+)$} $text -> log
+	regexp -line {^- \*\*Decision:\*\* (.+)$} $text -> log
 	lappend ::numbers $num
 	set ::rec($num,file) $name
 	set ::rec($num,hnum) $hnum
@@ -96,11 +96,11 @@ ok "every record's heading number matches its filename" $bad {}
 
 set bad {}
 foreach n $::numbers {
-	foreach field {title status date deciders log} {
+	foreach field {title status date deciders} {
 		if {$::rec($n,$field) eq ""} { lappend bad "$::rec($n,file) ($field)" }
 	}
 }
-ok "every record has a title, Status, Date, Deciders and a decision-log line" $bad {}
+ok "every record has a title, Status, Date and Deciders" $bad {}
 
 set bad {}
 foreach n $::numbers {
@@ -220,43 +220,35 @@ foreach n $rownums {
 }
 ok "every index row's date is the record's own" $bad {}
 
-# --- 7. the D numbers and the record numbers are one series ----------------
+# --- 7. the D numbers ---------------------------------------------------
+#
+# D1-D136 are the names the old decision log gave its entries. Source comments and
+# the changelog still cite them, so each must lead to a record:
+#
+#   D30  -> the record whose **Decision:** line says D30
+#
+# Records after 0143 have no D number; they are cited as ADR-NNNN.
 
-set agents [slurp [file join $::repo AGENTS.md]]
-set dnums {}
-foreach {_ d} [regexp -all -inline -line {^### D([0-9]+) } $agents] { lappend dnums $d }
-set dnums [lsort -integer -unique $dnums]
-
-ok "AGENTS.md has D entries" [expr {[llength $dnums] > 0}] 1
-
-# Which record cites which D number, from the decision-log line alone.
 array set ::byd {}
 foreach n $::numbers {
-	foreach {_ d} [regexp -all -inline {D([0-9]+)} $::rec($n,log)] {
+	foreach {_ d} [regexp -all -inline {\mD([0-9]+)} $::rec($n,log)] {
 		lappend ::byd($d) $n
 	}
 }
+set dnums [lsort -integer [array names ::byd]]
 
-set missing {}
-foreach d $dnums {
-	if {![info exists ::byd($d)]} { lappend missing "D$d" }
+ok "the records carry D numbers" [expr {[llength $dnums] > 0}] 1
+
+set gaps {}
+for {set d 1} {$d <= [lindex $dnums end]} {incr d} {
+	if {![info exists ::byd($d)]} { lappend gaps "D$d" }
 }
-ok "every D entry in AGENTS.md has a record" $missing {}
+ok "the D numbers run from D1 with no gaps" $gaps {}
 
-set bogus {}
-foreach d [lsort -integer [array names ::byd]] {
-	if {[lsearch -exact $dnums $d] < 0} {
-		lappend bogus "D$d (cited by [join $::byd($d) {, }])"
-	}
-}
-ok "no record cites a D number AGENTS.md does not have" $bogus {}
-
-# D1-D111 predate the records and are cited by number all over the source; those two
-# series must stay aligned or a "D30" in a comment points at the wrong record.
+# D1-D111 share their record's number, so "D30" can be looked up by filename.
 set bad {}
 foreach d $dnums {
 	if {$d > 111} continue
-	if {![info exists ::byd($d)]} continue
 	set want [format %04d $d]
 	if {[lsearch -exact $::byd($d) $want] < 0} {
 		lappend bad "D$d -> [join $::byd($d) {, }] (want $want)"

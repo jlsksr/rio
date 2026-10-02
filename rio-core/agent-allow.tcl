@@ -1,5 +1,5 @@
 # rio-core — the agent's command allow-list: standing approval for trusted commands
-# (AGENTS.md D84). D83 landed run_command ALWAYS gated — every command waits for a
+# (D84). D83 landed run_command ALWAYS gated — every command waits for a
 # human. This adds a human-authored allow-list so a command the user has marked
 # trusted runs without re-raising the bar. It is standing approval, not autonomy: a
 # person still authored every rule (D53 / [[llm-integration-scope]]). The allow-list

@@ -1,4 +1,4 @@
-# rio — a C++ syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no external
+# rio — a C++ syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no external
 # packages — a linear, per-line state machine (see rio::syntax for the contract). It
 # carries scan state across lines, so block comments and raw string literals colour as
 # one unit. It is C's highlighter (see c.tcl) grown up: the C++ keyword/type set, plus

@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless hover-tooltip test for rio-gui (AGENTS.md D63). rio's little header controls are
+# Headless hover-tooltip test for rio-gui (D63). rio's little header controls are
 # bare glyphs (⟳ refresh, ◉/◌ hidden toggle) with no text label; `tooltip $w $text` names
 # them on hover via one shared borderless toplevel (.tt), shown after a delay and hidden on
 # leave. Checks: attaching stashes the text and binds <Enter>/<Leave>; re-calling updates

@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0143](0143-mac-keys-and-right-button.md)
 - **Date:** 2026-09-03
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D56
+- **Decision:** D56
 
 ## Context
 

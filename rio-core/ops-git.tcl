@@ -1,4 +1,4 @@
-# rio-core — the git.* op namespace (AGENTS.md D11, D7).
+# rio-core — the git.* op namespace (D11, D7).
 #
 # Thin handlers over rio::git's read layer. No logic of their own beyond reading
 # params and shaping the result; the porcelain parsing lives in rio::git.

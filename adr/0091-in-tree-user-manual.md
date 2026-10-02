@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-10
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D91
+- **Decision:** D91
 
 ## Context
 

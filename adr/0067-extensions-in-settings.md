@@ -3,7 +3,7 @@
 - **Status:** Accepted; the item moved once more in [ADR-0137](0137-extensions-configure-themselves.md)
 - **Date:** 2026-09-04
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D67
+- **Decision:** D67
 
 ## Context
 

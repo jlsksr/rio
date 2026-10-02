@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0030](0030-always-a-channel-client.md)
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D2
+- **Decision:** D2
 
 ## Context
 

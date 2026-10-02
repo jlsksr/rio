@@ -1,5 +1,5 @@
 # rio-core — the agent's system prompt: a core-owned, provider-agnostic "soul"
-# (AGENTS.md D34, D70).
+# (D34, D70).
 #
 # How the agent behaves — how it uses rio's tools and how it writes code — is a
 # CORE concern, not a provider's: the same instructions should shape a turn

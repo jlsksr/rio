@@ -4,8 +4,8 @@ A running list of candidate work: things rio could grow into next. It is a
 *shortlist of possibilities, not a set of promises* — items here are ideas and
 deferrals we want to keep in view, in no strict priority order. Some are planned
 features, some are known gaps, some are refinements deliberately deferred with a
-reason. Anything that turns into a real decision (why, and how) gets written up in
-[AGENTS.md](AGENTS.md); the short user-facing teaser stays in the README's *Still to
+reason. Anything that turns into a real decision (why, and how) gets a record in
+[adr/](adr/README.md); the short user-facing teaser stays in the README's *Still to
 come*. Items get struck out and removed here as they land.
 
 Each entry notes its state:
@@ -17,7 +17,7 @@ Each entry notes its state:
 
 ## Editor & UI
 
-- **Live file-watching in the core** — *deferred* (AGENTS.md D47). The file pane now
+- **Live file-watching in the core** — *deferred* (D47). The file pane now
   refreshes on rio's own core writes (`fs.changed`), on regaining OS focus, and on a
   manual ⟳ — which covers external changes at the "alt-tab back" moment without a poll.
   The *proper* answer for truly live updates (a file appearing while rio is focused, from
@@ -26,7 +26,7 @@ Each entry notes its state:
   its cost: Tcl has no built-in inotify, so it means a C extension or shelling to
   per-platform watchers — a dependency plus a platform matrix — against the no-heavy-deps
   grain. The focus-return refresh is the cheap 90% stand-in until then.
-- **A buffer notices the file changed under it** — *landed* (AGENTS.md D94). `file.open` /
+- **A buffer notices the file changed under it** — *landed* (D94). `file.open` /
   `file.save` stamp mtime+size into buffer meta; `buffers.stale` / `buffers.reload` /
   `buffers.stamp` answer core-side (in remote mode the file is on the server, D29) and take
   **lists**, so a bulk change is one round trip. A clean buffer reloads silently, a modified
@@ -34,7 +34,7 @@ Each entry notes its state:
   a later Save recreates it. `git.discard` / `git.discard_all` emit `fs.changed` now too.
   Still missing: **live** watching — the triggers remain `fs.changed` and focus return, so
   this rides on the watcher above when it lands.
-- **Autosave: what it deliberately does not cover** — *landed* (AGENTS.md D132). rio keeps a
+- **Autosave: what it deliberately does not cover** — *landed* (D132). rio keeps a
   recovery copy of every changed buffer under `$XDG_DATA_HOME/rio/autosave/`, drops it on save
   / close / reload / rename, and offers it back on the next open. Four things were left out on
   purpose, each with a reason rather than by omission:
@@ -51,19 +51,19 @@ Each entry notes its state:
     that near 20 ms per megabyte, so a megabyte is imperceptible and sixty are not. The
     hand-editable `interval_ms` is the escape hatch until someone measures a case that
     warrants a cap, which would otherwise silently drop protection for the biggest files.
-- **File-management refinements** — *deferred* (builds on AGENTS.md D48, which shipped
+- **File-management refinements** — *deferred* (builds on D48, which shipped
   New File / New Folder / Rename / Delete as core `fs.*` write ops off the row menu).
   Consciously left: **inline in-pane rename** (v1 uses a modal name prompt — the D45
   commit bar is the reusable inline primitive when this is wanted); move via
   drag-and-drop; multi-select delete; duplicate/copy; and nested-path creation from one
   prompt (v1 validates a single path component). None are structural — each is an added
   verb or an alternative input on the same `fs.*` ops.
-- **Line-number gutter extras** — *deferred* (builds on AGENTS.md D49, which shipped the
+- **Line-number gutter extras** — *deferred* (builds on D49, which shipped the
   VSCode-style gutter, on by default, per editor group; **click a number to select its
   line** landed as D61, and **relative line numbers** — vim's hybrid — as D71).
   Consciously left: gutter numbers in the side-by-side **compare panes** — the same
   `gutter_redraw` seam at a second call site, not a structural change.
-- **A theme picker that shows the themes** — *deferred* (builds on AGENTS.md **D92**, which
+- **A theme picker that shows the themes** — *deferred* (builds on **D92**, which
   retired the unbounded Theme cascade into the bounded `pick_dialog`). Today the picker lists
   theme *names*; the richer variant previews them — either a **swatch per row** (each row drawn
   in the colours of the theme it names) or **live preview** (moving the selection re-themes the
@@ -76,7 +76,7 @@ Each entry notes its state:
   foreground/background pair, but cannot vary colour *within* a row — which would put a second
   dialog idiom in the tree. Any of this would want a way to fetch several themes in one call
   before it's worth doing.
-- **Window / taskbar icon** — *landed* (AGENTS.md **D117**). `wm iconphoto . -default` with
+- **Window / taskbar icon** — *landed* (**D117**). `wm iconphoto . -default` with
   seven sizes (16–256) plus a Windows `.ico`; soft, so a checkout without `icons/` still
   starts. The artwork is Christ the Redeemer, a pun on the name. Confirmed as a *raster*
   asset distinct from the mono-Unicode in-UI rule (D27). The early 16px light-chrome
@@ -86,7 +86,7 @@ Each entry notes its state:
   requires attribution says too little about redistributing the file itself, and the icon
   travels with every copy of rio. Artwork lives in `icons/sources/` with `icons/active`
   naming the current one, so switching is `make-icons.sh <name>`.
-- **Files pane — richer view, later** — *partly landed* (builds on AGENTS.md D42/D43: the
+- **Files pane — richer view, later** — *partly landed* (builds on D42/D43: the
   pane is a rich-list drawn with a read-only text widget, now a shared `rl_*`
   component the git pane also uses, and file rows carry git-status flags). The
   **expandable Explorer-style tree** — the big structural candidate here — landed as
@@ -96,7 +96,7 @@ Each entry notes its state:
   read-only "view buffers"** (emacs-like modes for dired/git/log, re-backing the
   rich-list widget with the core) — is noted but *not taken*; today the pane is
   deliberately GUI-local chrome, not a buffer.
-- **Undo-coalescing in the doc model** — *landed* (AGENTS.md **D90**). A run of
+- **Undo-coalescing in the doc model** — *landed* (**D90**). A run of
   single-character edits now merges into one undo step in `rio::doc::edit`, sealed at
   each blank, so undo takes back a word at a time (Enter always stands alone); vi's
   insert-state typing is covered too, while each normal-state command stays separately
@@ -104,19 +104,19 @@ Each entry notes its state:
   an **idle-timeout** break (a pause in typing seals the run) — deliberately left out to
   keep the model free of a clock; adjacency and blanks cover the common cases, and it can
   be added later without a protocol change.
-- **Editing-mode extensions** — *deferred* (AGENTS.md D38, D41). The core ships the
+- **Editing-mode extensions** — *deferred* (D38, D41). The core ships the
   Windows mode; emacs and vi now ship as installable extensions (`extensions/`,
   D41) so they can grow on their own cadence. Consciously left for later: vi ex
   commands (`:w` `:q`), named registers, `.` repeat, macros, marks, visual-line —
   and a kill ring (`C-y` yank) for the emacs mode. Each is an isolated addition to
   its `modes/*.tcl` module (now the extension's payload).
-- **Column-editing extras** — *deferred* (AGENTS.md D40). Column/block editing
+- **Column-editing extras** — *deferred* (D40). Column/block editing
   shipped (Ctrl+Shift+drag a vertical cursor; type/Backspace/Delete/Tab down the
   column, one undo). Consciously left: rectangular clipboard (Ctrl+C/X/V carrying
   the block), keyboard-built columns (Alt/Ctrl+Shift+arrows), tab/pixel-accurate
   visual columns (v1 uses character columns), and arbitrary multi-caret
   (Ctrl+click) — a straight generalisation of the same one-span-replace model.
-- **Search extensions** — *in progress* (AGENTS.md D36, D51, D52). In-buffer Find/Replace
+- **Search extensions** — *in progress* (D36, D51, D52). In-buffer Find/Replace
   shipped (bar + core-side `buffer.find`/`buffer.matches`/`buffer.replace_all`); **Find in
   Files** landed (D51: core-side `project.search`, a bottom results panel with per-hit
   highlighting); and the panel **grew into a unified Search panel** (D52, Phase A): three
@@ -132,7 +132,7 @@ Each entry notes its state:
   `rio::doc::_bounded` rule). The panel is now a normal **D35 bottom dock-site tenant** carrying
   its query row in its own in-body header (`.results.hdr`), like Files/Git/Agent. Still wanted:
   one **row per match** rather than per line, and richer scope filters (globs, honour `.gitignore`).
-- **Dock-site system for tool windows** — *complete (a+b+c1+c2+c3; the search-fold was tried and rejected)* (AGENTS.md D35 +
+- **Dock-site system for tool windows** — *complete (a+b+c1+c2+c3; the search-fold was tried and rejected)* (D35 +
   its Refinement). Tool panels (the agent chat today; a git log, search results, a REPL,
   extension panels later) become first-class views hosted by a small set of dock sites
   (left/right/bottom), each a tabbed container the user can move panels between — the Visual
@@ -198,7 +198,7 @@ Each entry notes its state:
   This entry previously also carried *"`docs/` installing"* — a leftover from D91, written
   against a packaging path that does not exist. rio is deployed by cloning it, so `docs/` is
   already beside the code wherever it runs; there was nothing to install. Dropped, not done.
-- **`fs.read`'s doors have no guard yet** — *gap* (the other half of AGENTS.md **D125**,
+- **`fs.read`'s doors have no guard yet** — *gap* (the other half of **D125**,
   which guarded `file.open` — the door a person actually walks through). Three callers
   still read a whole file unbounded: the **agent's `read` tool**
   (`rio-core/agent-tools.tcl`, both the `fs.read` primitive and `_current_text`), and the
@@ -211,8 +211,7 @@ Each entry notes its state:
   as today but without paying for the rest — which needs a bounded-read primitive beside
   `rio::fs::read`, while the compare view probably wants D125's question. One rule, two
   answers, so it wants thinking through rather than pattern-matching.
-- **Opening a very large file is still slow once you say yes** — *landed* (AGENTS.md
-  **D126**). Three whole-file passes were removed and the budget followed the measurement
+- **Opening a very large file is still slow once you say yes** — *landed* (**D126**). Three whole-file passes were removed and the budget followed the measurement
   up, from 8 MB to 64 MB: `rio::fs::_valid_utf8` now decides by a C-level encode/decode
   round trip instead of walking a Tcl byte list (164 → ~7 ms/MB), highlighting paints the
   visible window instead of the file (~1350 ms/MB → flat), and `buffer.text` is pulled in
@@ -248,7 +247,7 @@ Each entry notes its state:
   than one freshly allocated list per line (a 4 MB Tcl file has exactly **two** distinct
   ones across 131,072 lines), which cut `hl_enter` on an 8 MB read-through from **36.5 MB
   to 8.7 MB**.
-- **A right-click menu in the editor** — *landed* (AGENTS.md D108). Right-clicking the text
+- **A right-click menu in the editor** — *landed* (D108). Right-clicking the text
   did nothing, while the file pane, the git pane and every tab handle had a menu. It carries
   the *Edit* menu's actions plus the find cluster, and needed **no new verbs**: one shared
   `editor_menu_items` table feeds both the menubar and the popup (so they cannot drift), and
@@ -271,7 +270,7 @@ Each entry notes its state:
 ## Syntax highlighting
 
 - **More languages** — *ongoing.* Each highlighter is one self-contained
-  `syntax/<lang>.tcl` file (per-line `scan` contract, AGENTS.md D32), so adding a
+  `syntax/<lang>.tcl` file (per-line `scan` contract, D32), so adding a
   language is isolated work — good first contributions. Shipped: (X)HTML, XML, CSS,
   JavaScript, TypeScript, Perl, Tcl, shell, Batch/cmd, PowerShell, awk, sed, Makefile,
   Dockerfile, Markdown, PHP, Python, Lua, C, C#, C++, Go, Rust, JSON, YAML, TOML, INI,
@@ -280,13 +279,13 @@ Each entry notes its state:
   built-ins — further ones are whatever a contributor reaches for next (R, Haskell,
   CMake, Diff, …), an isolated drop-in each. Diff would want added/removed roles the
   fixed token vocabulary doesn't have yet — a small vocabulary question, not a drop-in.
-- **Viewport scoping** — *landed* (AGENTS.md D126, amending D32). The one-time
+- **Viewport scoping** — *landed* (D126, amending D32). The one-time
   whole-file paint turned out to be 81% of the cost of opening a large file, which is
   what warranted it. `hl_enter` became an exact *prefix* rather than an exact whole,
   `hl_lo`/`hl_hi` record what actually carries tags, and the scroll machinery it needed
   was one line in `edscroll`, since Tk's `-yscrollcommand` is already where the wheel,
   the scrollbar, `see`, vi's jumps and find's step all arrive.
-- **Language from the shebang** — *deferred* (AGENTS.md D112). Detection is by file
+- **Language from the shebang** — *deferred* (D112). Detection is by file
   name only; an extension-less script (`bin/foo` starting `#!/usr/bin/env perl`) stays
   plain unless picked by hand (View ▸ Language…). A first-line fallback, used only when
   the name matches nothing, would need modules to register interpreter names
@@ -297,11 +296,11 @@ Each entry notes its state:
 
 ## Extensions & distribution
 
-Repositories shipped (AGENTS.md D39): plain-HTTP sources, the Extensions
+Repositories shipped (D39): plain-HTTP sources, the Extensions
 window, provenance-marked installs for syntax/modes/themes. Consciously left
 for later:
 
-- **https repositories** — *landed* (AGENTS.md D109). `https://` sources beside
+- **https repositories** — *landed* (D109). `https://` sources beside
   `http://`, which stays first-class; verified against the core host's own CA
   store (system bundle, the Windows store, or `SSL_CERT_FILE`), needing tcltls
   1.8+ for host-name checks (the agent too, unless the user allows otherwise —
@@ -315,7 +314,7 @@ for later:
   file is specced (CONTRIBUTING) and costs publishers one line; consuming it —
   a "host-validated" badge in the Extensions window, and an official-approval
   marking on top — is not built.
-- **Signing** — *landed* (AGENTS.md D118 and D119; designed with jka 2026-09-16, built
+- **Signing** — *landed* (D118 and D119; designed with jka 2026-09-16, built
   2026-09-19 once rio.skylm.org/extensions was publishing signatures). It extends
   D39's apt-style trust model (the sources list is the trust list) without a central
   authority, the way D109/D111 did for transport. A publisher signs one root
@@ -339,7 +338,7 @@ for later:
     look like it trusts nothing. Forget means what it says: the repository is refused
     again until a key is confirmed for it. Forgetting the built-in row withdraws even
     that. Nothing open here now.
-- **Provider as an installable `kind`** — *landed* (AGENTS.md D66; D65's "milestone
+- **Provider as an installable `kind`** — *landed* (D66; D65's "milestone
   B", successor to D19). `provider` is a `kind` in the **same** repositories — one
   infrastructure, a publisher adds `kind = provider` (plus `provider-api` and
   `entry`) to a manifest. It installs **core-side** (`provider.put`, mirroring
@@ -352,7 +351,7 @@ for later:
   and **Claude followed (D69)** — the core now carries **no** provider payload, only the
   `echo` stub, with every real provider installed. Still open here: `provider-api 2` and a
   core-side ledger (below).
-- **Update checking** — *landed* (AGENTS.md D107). It went further than the
+- **Update checking** — *landed* (D107). It went further than the
   "newer version available marker" deferred here, because the marker needed the
   thing D39 had refused: an **ordering over versions**. `version` is now
   **semver** — a published rule for authors, leniently parsed, and anything that
@@ -368,7 +367,7 @@ for later:
 
 ## Git
 
-- **Write operations** — *in progress* (AGENTS.md D44, D45, D80, D81, D93, D97, D98). Stage / unstage /
+- **Write operations** — *in progress* (D44, D45, D80, D81, D93, D97, D98). Stage / unstage /
   track landed as `git.add` / `git.unstage` (D44); **commit** landed as `git.commit` (D45),
   driven from an auto-showing commit bar in the git pane — rio's first inline pane
   text-input — now with an optional **multi-line description body** behind a `＋` toggle
@@ -388,7 +387,7 @@ for later:
 
 ## Agent
 
-- **Providers** — *landed* (AGENTS.md D26, D65, D66, D69). The core now ships **only** the
+- **Providers** — *landed* (D26, D65, D66, D69). The core now ships **only** the
   offline **`echo`** stub built in (D69); every real provider is an **installable**
   `provider` extension. **Claude** (Anthropic API, [extensions/claude/](extensions/claude/))
   and the **OpenAI-compatible** provider ([extensions/openai/](extensions/openai/)) — hosted
@@ -398,7 +397,7 @@ for later:
   from the core (`agent.providers`). A first-party provider is a plugin mirroring these two;
   **anyone** can now publish one to a repository (see Extensions ▸ "Provider as an
   installable `kind`").
-- **A server of your own** — *landed* (AGENTS.md D128). The OpenAI-compatible provider is
+- **A server of your own** — *landed* (D128). The OpenAI-compatible provider is
   configured entirely from the GUI: ***Preferences ▸ Agent ▸ `<provider>` settings…*** takes
   the server's URL, lists what that machine actually offers (⟳ Refresh), and holds the
   caps, the token-cap field and a free-form **extra request JSON** for whatever a given
@@ -408,13 +407,13 @@ for later:
   The settings window renders whatever a provider *declares* (`kind` / `group` / `quick` on
   an option descriptor, `provider-api = 4`), so a provider that grows a knob needs no GUI
   change. Verified live against llama-swap + llama.cpp.
-- **Run-command tool** — *landed* (AGENTS.md D83). The agent runs commands
+- **Run-command tool** — *landed* (D83). The agent runs commands
   (`run_command`) through the same propose/approve gate as an edit, but **always
   gated** (auto-accept is edits-only), **argv-only** (no shell) with a redirection-
   token guard, **cwd-confined** to the project, run **asynchronously** so the core
   stays responsive, and **timeout-bounded** (default 120 s, max 600 s). Verified
   live against ChatGPT.
-- **Trusted-command allow-list** — *landed* (AGENTS.md D84). An **opt-in**,
+- **Trusted-command allow-list** — *landed* (D84). An **opt-in**,
   human-authored list of commands that run **without** the approval bar — standing
   approval, not autonomy (a person authors every rule; refines D53). A rule is an
   **argv prefix**: a one-word rule (`pytest`) trusts every run of that program, more
@@ -428,7 +427,7 @@ for later:
   Still wanted: **streaming** a command's output as it runs and a per-command
   **Stop/cancel** (both need the D10 event-over-time model); command output in its
   **own dock panel** rather than inline in the chat; a richer rules editor.
-- **Plan mode** — *landed* (AGENTS.md D101). ***Settings ▸ Agent Mode ▸ Plan*** withholds
+- **Plan mode** — *landed* (D101). ***Settings ▸ Agent Mode ▸ Plan*** withholds
   every changing tool from the provider — reads plus one new gated built-in,
   **`present_plan`** — and adds a shipped **plan prompt layer**. The plan arrives as an
   `agent.propose` of kind `plan` carrying Markdown and takes the **center**, rendered with
@@ -441,7 +440,7 @@ for later:
   Still wanted: a browser over `.rio/plans/`; a **keyboard chord** for the mode (the keymap
   is D23 data, so one can be added without touching this).
 - **The mode as one control, and the plan as the place you choose** — *landed*
-  (AGENTS.md D102). The agent's three states — **Plan / Review / Auto** — are one menubutton
+  (D102). The agent's three states — **Plan / Review / Auto** — are one menubutton
   in the chat header (twinned as a Settings cascade and Preferences radios), derived from the
   core's two flags so the UI can no longer show "plan mode" over an armed auto-accept. A
   plan's bar carries **`Approve ▾`** with the two ways to say yes (*review each edit* /
@@ -449,18 +448,18 @@ for later:
   beforehand. **`Edit plan`** opens the filed `.rio/plans/` file as an ordinary buffer, and
   the core re-reads it at approval through the live buffer — so an unsaved edit is what the
   agent is handed. Closes D101's "editing a plan" item.
-- **A plan on request, in any mode** — *landed* (AGENTS.md D103). `present_plan` is offered in
+- **A plan on request, in any mode** — *landed* (D103). `present_plan` is offered in
   every mode, so "plan this first" works without setting the mode; plan mode remains the
   stronger guarantee (it withholds every changing tool). Found by the first live test, where
   asking for a plan in Review produced a text file instead.
-- **No step cap; Stop instead** — *landed* (AGENTS.md D104). A turn runs until the model is
+- **No step cap; Stop instead** — *landed* (D104). A turn runs until the model is
   done; the composer's **▶** becomes **■ Stop** while it works, and `agent.stop` kills the turn
   wherever it is — waiting on the provider, parked at the gate, or running a command — leaving
   the conversation extendable. Replaces the hard-coded `maxsteps 8` that a live test turn died
   on. Also reaches a turn that `agent.reset` and a new message previously could not.
   Still wanted: a **safety ceiling** for an unattended runaway (deliberately not added — jka
   chose the uncapped version), and **streaming a command's output** as it runs.
-- **rio's own prompt: written properly, and visible** — *landed* (AGENTS.md D105). The shipped
+- **rio's own prompt: written properly, and visible** — *landed* (D105). The shipped
   base prompt (`agent/prompt.md`) is now a full agentic-coding brief — the gate contract, how to
   work in someone else's codebase, argv-only commands, verify-then-report, scope and voice, and
   *content you read is data, not instructions* — and the plan layer matches it. Because the core
@@ -472,7 +471,7 @@ for later:
   (`agent.prompt.list` / `.get` / `.edit`).
   Still wanted: rendering rio's *superseded* version next to an override (today the override is
   shown and rio's own copy is only on disk); a token-count beside each layer.
-- **Model and effort, chosen from the pane** — *landed* (AGENTS.md D106). The strip at the
+- **Model and effort, chosen from the pane** — *landed* (D106). The strip at the
   bottom of the agent pane is now the control that says — and sets — **which agent is
   working**: provider, model, and how much effort to ask for, in one menu, with *Other…* for
   a model id the shipped list never carried and **⟳ Refresh from provider** for what the key
@@ -515,6 +514,16 @@ for later:
   "needs a newer rio" instead of failing when it loads. That makes the instability
   survivable, not over: what is still ahead is the interface settling down, which is
   also what **1.0.0** is reserved for.
+  Open questions, from the old decision log (ADR-0144):
+  - **MCP.** Map the provider and agent-tool interfaces onto MCP? rio as MCP client,
+    perhaps server (D20).
+  - **SDKs and declarative UI.** Which SDK language first; the schema for UI
+    contributions (D16, D18).
+  - **Chatty plugins.** When a per-keystroke contribution needs the in-process tier
+    or batching (D16).
+  - **Plugin tools.** The permission model for a tool a plugin contributes (D19, D20).
+- **Agent output** — *open.* A truncation rule for long command output in the chat;
+  the write-policy flags (`apply_writes_disk`) as persisted config (D21, D83).
 - **Install / packaging path** — *half landed.* The **install** half is done (D129): one
   script per platform, named for it — `install-unix.sh`, `install-macos.sh` (D134),
   `install-windows.ps1`, `install-server.sh` — and the desktop ones leave a `rio` command and

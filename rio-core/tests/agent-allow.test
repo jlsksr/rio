@@ -1,4 +1,4 @@
-# Tests for the agent command allow-list (rio::agent::allow, AGENTS.md D84): standing
+# Tests for the agent command allow-list (rio::agent::allow, D84): standing
 # approval for trusted commands, across THREE SCOPES (global / provider / project) that
 # mirror the system-prompt layers. Covers argv-prefix matching, the scope UNION (a rule
 # in any active layer trusts the command), scope isolation (a provider rule is inert
@@ -6,7 +6,7 @@
 # add/remove per scope, and the scope-aware ops. Pure filesystem — no network, no loop.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

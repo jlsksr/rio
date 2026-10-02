@@ -1,4 +1,4 @@
-# rio-core — the installable-provider store + loader (AGENTS.md D66, D39, D30).
+# rio-core — the installable-provider store + loader (D66, D39, D30).
 #
 # An agent provider (D26/D65) is executable Tcl that runs in the CORE process and
 # can be handed the user's API key (D21) to make network calls with it. Milestone B

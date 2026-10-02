@@ -1,4 +1,4 @@
-# rio — a sed syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no external
+# rio — a sed syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no external
 # packages — a per-line scanner (see rio::syntax for the contract). sed is command-
 # oriented, not free-form; this walks a line command-by-command (they may be `;`-separated
 # or `{ }`-grouped) and colours the structure. No scan state is carried.

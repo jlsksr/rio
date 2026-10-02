@@ -1,10 +1,10 @@
-# Tests for the OpenAI-compatible face (rio::openai::api, AGENTS.md D8/D26): Bearer
+# Tests for the OpenAI-compatible face (rio::openai::api, D8/D26): Bearer
 # auth, config-as-data (endpoint/model/token param), key storage, registration with
 # the agent registry (with label + signup), and end-to-end streaming through the
 # real agent loop. Network stays a seam (a fake SSE transport), so it runs offline.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]
@@ -1063,7 +1063,7 @@ test openai-dangling-pointer-falls-back {a pointer at a profile that is gone lan
 	rio::agent::profile_name openai
 } -cleanup { reset_openai_opts } -result ChatGPT
 
-# --- what the manual promises about this file (AGENTS.md §7's register) ------
+# --- what the manual promises about this file (AGENTS.md's register) ------
 #
 # docs/agent.md states the extra-request file's rules — which fields are refused, how a
 # name is picked, what a fresh one contains. Those are the EXTENSION's, and the GUI's own

@@ -4,9 +4,8 @@ Every notable change to rio — features, improvements and fixes. It is **not** 
 commit.
 
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and rio's version
-is [semver](https://semver.org/) (AGENTS.md **D123**). Each entry cites the design
-decision behind it — *Dnn*, written up in [AGENTS.md](AGENTS.md) and filed as a record in
-[adr/](adr/) — a representative commit, and the date it landed.
+is [semver](https://semver.org/) (**D123**). Each entry cites the design
+decision behind it — *Dnn* or *ADR-NNNN*, a record in [adr/](adr/README.md) — a representative commit, and the date it landed.
 
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.

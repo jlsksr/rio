@@ -1,4 +1,4 @@
-# rio-core — the document model (AGENTS.md D12).
+# rio-core — the document model (D12).
 #
 # A document is an ordered list of line strings. Positions are "line.col"
 # (1-based line, 0-based column) — the Tk text-widget index format (D12), so a
@@ -143,7 +143,7 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 	return $removed
 }
 
-# --- undo/redo (AGENTS.md O3) -----------------------------------------------
+# --- undo/redo ---------------------------------------------------------------
 #
 # A recorded edit is a replace that remembers enough to reverse itself: the range
 # {start,end} and `text` it applied, plus the `removed` text it displaced. To
@@ -152,7 +152,7 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 # undo restored the pre-edit state exactly. Applying a fresh edit invalidates the
 # redo branch.
 #
-# --- coalescing (AGENTS.md D90) ----------------------------------------------
+# --- coalescing (D90) ----------------------------------------------
 #
 # Typing must not cost one undo step per keystroke. A run of single-character
 # edits that continues where the previous one left off is MERGED into the record
@@ -321,7 +321,7 @@ proc rio::doc::_advance {start text} {
 	return "$line.[string length [lindex $segs end]]"
 }
 
-# --- search (AGENTS.md D36) ---------------------------------------------------
+# --- search (D36) ---------------------------------------------------
 #
 # Literal text search, computed HERE because the core owns the canonical text
 # (D3): every frontend gets the same engine over the protocol instead of each

@@ -1,4 +1,4 @@
-# rio-core — the agent orchestration loop (AGENTS.md D20, D26).
+# rio-core — the agent orchestration loop (D20, D26).
 #
 # The durable, core-owned half of the agent: it owns the conversation state and
 # the orchestration loop, and drives a *provider* (D8) which absorbs one LLM

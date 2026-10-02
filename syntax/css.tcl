@@ -1,4 +1,4 @@
-# rio — a CSS syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
+# rio — a CSS syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a linear, per-line state machine (see rio::syntax for the
 # contract). It carries its scan state across lines, so multi-line /* */ comments
 # and quoted strings colour correctly.

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-10
 - **Deciders:** jka
-- **Decision log:** AGENTS.md §7, "The derived-facts register"
+- **Decision:** no D number; the register is in AGENTS.md
 
 ## Context
 

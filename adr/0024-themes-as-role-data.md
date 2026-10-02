@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by 0142
 - **Date:** 2026-06-25
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D24
+- **Decision:** D24
 
 ## Context
 

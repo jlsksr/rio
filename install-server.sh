@@ -4,7 +4,7 @@
 #
 # Use this when you want to edit files on ANOTHER machine — a VPS, a build box, a
 # NAS — from rio running on your own. That far machine needs only the core; the
-# GUI stays where you are and drives it over an SSH tunnel (AGENTS.md D29). Install
+# GUI stays where you are and drives it over an SSH tunnel (D29). Install
 # rio itself with install-unix.sh; this is its slim, screen-less counterpart.
 #
 # The core is Tk-FREE (D1) — no GUI, no X, nothing to display — but since the agent

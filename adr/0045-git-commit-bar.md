@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0081](0081-commit-message-body.md)
 - **Date:** 2026-08-07
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D45
+- **Decision:** D45
 
 ## Context
 

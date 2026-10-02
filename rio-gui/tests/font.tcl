@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless editor-font test for rio-gui (AGENTS.md D56): the document view's font is a
+# Headless editor-font test for rio-gui (D56): the document view's font is a
 # user preference layered over the theme's named font. Checks that with no override the
 # font follows the theme, that zoom steps/clamps/resets an absolute size override, that
 # a family override applies live, that both persist through prefs.json, and that a theme

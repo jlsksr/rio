@@ -3,7 +3,7 @@
 - **Status:** Accepted; session storage amended by [ADR-0031](0031-sessions-and-preferences.md)
 - **Date:** 2026-06-25
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D21
+- **Decision:** D21
 
 ## Context
 

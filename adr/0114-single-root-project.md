@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-27
 - **Deciders:** jka
-- **Decision log:** AGENTS.md §6, O2 ("`project.*` — the workspace root")
+- **Decision:** no D number
 
 ## Context
 

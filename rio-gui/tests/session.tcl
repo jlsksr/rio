@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for sessions & preferences (AGENTS.md D31). Two halves, split by
+# Headless test for sessions & preferences (D31). Two halves, split by
 # owner (see the "Sessions & preferences" block in rio-gui.tcl):
 #
 #   * PREFERENCES — theme/wrap/dock/chat — are GUI-owned, in a plain JSON file under

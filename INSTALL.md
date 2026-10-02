@@ -1,7 +1,7 @@
 # Installing & deploying rio
 
 The canonical home for how to get rio running — local GUI, remote/server mode, and
-the agent. For *why* it's built this way, see [AGENTS.md](AGENTS.md); for hacking on
+the agent. For *why* it's built this way, see [adr/](adr/README.md); for hacking on
 rio, [CONTRIBUTING.md](CONTRIBUTING.md).
 
 rio is two thin frontends over one UI-less **core**. The GUI is **always a client**
@@ -35,7 +35,7 @@ need `tcltls` — all of rio's HTTPS happens wherever the *core* runs.
 
 The `tclsh` Apple ships is an old 8.5 without Tk or tcllib, and Homebrew's plain `tcl-tk` is
 Tcl 9, which rio has never run on; the script refuses both and says why. rio runs on macOS 27
-on Apple Silicon with the full test suite passing (AGENTS.md D133, D134).
+on Apple Silicon with the full test suite passing (D133, D134).
 
 By hand, if you'd rather: build Tcl and Tk 8.6 (Tk with `--enable-aqua`), tcllib and
 tcltls 1.8 against an OpenSSL with headers, such as Homebrew's `openssl@3`. Put that `bin`
@@ -184,7 +184,7 @@ There is also a well-known **terminal emulator** called rio — if one is alread
 installed, the script says that too, and whichever comes first on `PATH` wins.
 
 `--with-ck` additionally pulls a C toolchain + ncurses headers and builds the
-`vzvca/ck8.6` fork (distros don't package it) — the deferred TUI path (AGENTS.md O1),
+`vzvca/ck8.6` fork (distros don't package it) — the deferred TUI path (ADR-0112),
 for contributors, not needed to run rio. On a shared-build error finding
 `libck8.6.so`, run `ldconfig` or set `LD_LIBRARY_PATH` to the install libdir.
 
@@ -315,7 +315,7 @@ Notes:
   dials: it only ever sees the `host:port` at your end, so tailscale, WireGuard, a
   corporate VPN or a trusted LAN all work with no support from rio and no flag of
   their own. SSH is documented here because it needs nothing installed, not because
-  it is privileged (AGENTS.md D96).
+  it is privileged (D96).
 - `RIO_CONNECT=host:port` is an alternative to `--connect`.
 - You can also connect from an **already-running GUI**: **File ▸ Connect to Remote
   Core…**, enter the `host:port`. By default it rewires that window to the remote
@@ -452,4 +452,4 @@ either is still worth filing. The BSDs remain a design
 target that nobody has run.
 
 The TUI (Ck) frontend is **deferred** — present only behind `--with-ck` for
-development, not a supported runtime yet (AGENTS.md O1).
+development, not a supported runtime yet (ADR-0112).

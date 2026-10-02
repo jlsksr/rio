@@ -182,7 +182,7 @@ a feature that no longer exists is worse, and it is the direction a reader never
 notices, because invented facts read exactly like true ones.
 
 **If a fact lives in both code and docs and has no guard, write the guard.** That is
-the rule of the derived-facts register in [AGENTS.md](AGENTS.md) §7 and it applies
+the rule of the derived-facts register in [AGENTS.md](AGENTS.md) and it applies
 here: a row without a guard is a backlog item, and the fix is to write the guard, not
 to schedule a re-read. Adding a check to `docs.tcl` is welcome and is the highest-value
 thing you can do in this directory.
@@ -230,7 +230,7 @@ house rules:
   point", no "deliberately", no sentence whose job is to admire the design. Em
   dashes are for a genuine aside, and rarely: a colon or a full stop is usually
   better.
-- **The essays belong in `AGENTS.md`**, which is where a reader who wants the
+- **The essays belong in `adr/`**, which is where a reader who wants the
   reasoning is sent.
 
 If a paragraph would not survive being read aloud to someone in a hurry, cut it.
@@ -249,7 +249,8 @@ and a fact in the wrong document is drift waiting to happen.
 | `INSTALL.md` | Installing, deploying, running — every deployment detail |
 | `WINDOWS.md` | Running on Windows 11 |
 | `CAVEATS.md` | Known rough edges; anything that works on one OS or WM but not another |
-| `AGENTS.md` | The design log — *why* rio is the way it is. Numbered decisions |
+| `adr/` | The decisions — *why* rio is the way it is |
+| `AGENTS.md` | Instructions for coding agents, and the derived-facts register |
 | `CONTRIBUTING.md` | Hacking on rio itself |
 | `ROADMAP.md` | Candidate next steps |
 | `CHANGELOG.md` | The user-visible history, newest first |

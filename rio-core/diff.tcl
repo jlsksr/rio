@@ -1,4 +1,4 @@
-# rio-core — line-level diff (AGENTS.md D28).
+# rio-core — line-level diff (D28).
 #
 # A pure-logic LCS line diff: given two texts, produce the ordered list of
 # operations that turns A into B, line by line. No Tk, no I/O, no protocol — it

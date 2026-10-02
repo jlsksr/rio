@@ -216,7 +216,7 @@ unsuitable() {
 	[ -n "$P_JSON" ] || { echo "has no tcllib (the json package)"; return; }
 }
 
-# 1 if a tcltls version checks certificate names (1.8+, AGENTS.md D109).
+# 1 if a tcltls version checks certificate names (1.8+, D109).
 tls_ok() {
 	[ -n "$1" ] || return 1
 	major=${1%%.*} rest=${1#*.}; minor=${rest%%.*}

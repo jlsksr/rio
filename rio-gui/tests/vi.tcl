@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless vi-mode test for rio-gui (AGENTS.md D38): the modal engine — state
+# Headless vi-mode test for rio-gui (D38): the modal engine — state
 # transitions and their chrome (block cursor, status segment), counts, motions,
 # the operators d/c/y with motion targets and doubled forms, x/p/u/i/a/o/O,
 # visual state, aborts, and a clean detach with an operator pending. Every edit

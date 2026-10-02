@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless tab-strip overflow test for rio-gui (AGENTS.md D57). When a group has more
+# Headless tab-strip overflow test for rio-gui (D57). When a group has more
 # tabs than fit its width, `scroll` mode (default) keeps them on one line behind ◂ ▸
 # arrows that page the visible window, and `multi` mode wraps them onto several rows.
 # The buffer picker lists every open buffer regardless. Checks the width math, that a wide

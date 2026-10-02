@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for File ▸ Connect to Remote Core… (AGENTS.md D30). The GUI starts
+# Headless test for File ▸ Connect to Remote Core… (D30). The GUI starts
 # in the DEFAULT transport (a spawned local child core, "A"), then reconnect_remote
 # rewires THIS window onto a SECOND, real daemon core ("B") over a socket — proving
 # the in-place transport swap. Also checks the safety property: a failed connect

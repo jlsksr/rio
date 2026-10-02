@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for syntax highlighting (AGENTS.md D32): opens (X)HTML in the real
+# Headless test for syntax highlighting (D32): opens (X)HTML in the real
 # frontend (window withdrawn) and checks that the GUI applier paints the right
 # `syn:*` text tags from the pure tokeniser, that plain files get none, that a live
 # edit re-highlights, and that a theme switch recolours the tags. Needs a DISPLAY

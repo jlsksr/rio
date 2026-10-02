@@ -1,4 +1,4 @@
-# rio — a Dockerfile syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
+# rio — a Dockerfile syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a per-line scanner (see rio::syntax for the contract). Dockerfiles
 # are line-oriented (instructions continue with a trailing `\`, but colouring is
 # line-local), so this carries no scan state. Registered by whole basename (`Dockerfile`,

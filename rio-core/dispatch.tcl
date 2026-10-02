@@ -1,4 +1,4 @@
-# rio-core — request dispatch (AGENTS.md D11, D2).
+# rio-core — request dispatch (D11, D2).
 #
 # The transport-independent heart of the protocol. A request is a dict
 # {id, op, params}; dispatch routes op to a registered handler and shapes the

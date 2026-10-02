@@ -1,4 +1,4 @@
-# rio — the editing-mode registry (AGENTS.md D38).
+# rio — the editing-mode registry (D38).
 #
 # An EDITING MODE decides what the keyboard does inside the text area: Windows-style
 # (Notepad: Ctrl+A selects all, Ctrl+V pastes), Emacs-style (readline: Ctrl+A is

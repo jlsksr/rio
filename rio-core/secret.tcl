@@ -1,4 +1,4 @@
-# rio-core — the secrets store (AGENTS.md D21, D26).
+# rio-core — the secrets store (D21, D26).
 #
 # Tokens and credentials (e.g. the Claude API key, D26) are kept OUT of both the
 # plain-text settings file and the synced session JSON, in their own files under

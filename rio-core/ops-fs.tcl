@@ -1,4 +1,4 @@
-# rio-core — the fs.* op namespace (AGENTS.md D11, D22).
+# rio-core — the fs.* op namespace (D11, D22).
 #
 # Thin handlers bridging the protocol to file I/O. file.open reads a file into a
 # NEW buffer, recording the detected encoding/BOM/line-ending as buffer metadata

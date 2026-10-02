@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the editor's right-click menu (AGENTS.md D108). Right-clicking the
+# Headless test for the editor's right-click menu (D108). Right-clicking the
 # text places the caret or keeps the selection (the Win98/VSCode convention), focuses the
 # group that was clicked, and posts a menu built from ONE table — the same one the Edit
 # menu is built from, so the two doors cannot drift — plus the find group that acts on the

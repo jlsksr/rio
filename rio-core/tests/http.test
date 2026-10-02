@@ -1,4 +1,4 @@
-# Tests for the bounded HTTP GET (rio::http, AGENTS.md D39, D109) and the
+# Tests for the bounded HTTP GET (rio::http, D39, D109) and the
 # repo.fetch op over it. NO network, not even loopback: only the pure logic is
 # tested here — Location resolution, scheme refusal, parameter validation, the
 # dispatch registration. The wire-level behaviour (redirect chains, the 2 MB
@@ -7,7 +7,7 @@
 # stubs repo.fetch entirely.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]
@@ -87,7 +87,7 @@ test http-scheme {the scheme, case-folded; "" for anything else} -body {
 # the top of this file re-reads it as UTF-8, so a literal is decoded correctly on a cp1252
 # host too — but an escape names the codepoint outright, which earns its keep where the
 # expected value is a hash of exactly those bytes and the mangling would otherwise be
-# invisible in the source. See AGENTS.md D54 and WINDOWS.md §8.
+# invisible in the source. See D54 and WINDOWS.md §8.
 set mangled "a\u00E2\u0080\u0094b"
 
 test http-decode-undeclared-charset-is-utf8 {no charset means UTF-8, not latin-1} -body {
@@ -144,7 +144,7 @@ test http-decode-keeps-crlf {line endings are NOT translated (D118): a signature
 		[rio::http::_decode "a\r\nb\r\n" "text/plain; charset=utf-8"]
 } -result [list "a\r\nb\r\n" "a\r\nb\r\n"]
 
-# --- the hash of what arrived (AGENTS.md D118) --------------------------------
+# --- the hash of what arrived (D118) --------------------------------
 test http-sha256-of-bytes {the hash is over BYTES, and is the one sha256sum prints
 		for the same input — checked against `printf abc | sha256sum`} -body {
 	list [rio::http::_sha256 "abc"] \

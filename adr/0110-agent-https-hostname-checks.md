@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0120](0120-core-wide-unchecked-https-switch.md)
 - **Date:** 2026-09-15
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D110
+- **Decision:** D110
 
 ## Context
 

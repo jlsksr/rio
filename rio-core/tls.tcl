@@ -1,4 +1,4 @@
-# rio-core — the one place rio decides how an https connection is verified (AGENTS.md D109).
+# rio-core — the one place rio decides how an https connection is verified (D109).
 #
 # Two callers share it: the extension-repository fetch (rio::http, D39) and the LLM
 # providers' transport (rio::llm::http, plugins/lib, D8). Before D109 the transport kept
@@ -274,7 +274,7 @@ proc rio::tls::_exceptions_write {all} {
 	file mkdir [file dirname $p]
 	set fh [open $p w]
 	fconfigure $fh -encoding utf-8
-	puts $fh "# rio — certificates you accepted although they did not verify (AGENTS.md D111)."
+	puts $fh "# rio — certificates you accepted although they did not verify (D111)."
 	puts $fh "# One section per host:port; rio trusts exactly the certificate with this SHA-256"
 	puts $fh "# fingerprint there, and asks again if the server's certificate changes."
 	puts $fh "# Delete a section to take an exception back."
@@ -330,7 +330,7 @@ proc rio::tls::set_unchecked {on} {
 	file mkdir [file dirname $p]
 	set fh [open $p w]
 	fconfigure $fh -encoding utf-8
-	puts $fh "# rio — how the core's https connections are verified (AGENTS.md D114)."
+	puts $fh "# rio — how the core's https connections are verified (D114)."
 	puts $fh "# unchecked_hostnames = allow lets https go ahead on a tcltls older than 1.8, which"
 	puts $fh "# checks a certificate's chain but not that it belongs to the host. Anything else refuses."
 	puts $fh "unchecked_hostnames = [expr {$on ? "allow" : "refuse"}]"

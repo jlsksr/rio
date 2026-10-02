@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0074](0074-buffer-picker.md), [ADR-0078](0078-multi-line-tab-rows.md)
 - **Date:** 2026-09-03
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D57
+- **Decision:** D57
 
 ## Context
 

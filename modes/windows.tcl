@@ -1,4 +1,4 @@
-# rio — the Windows editing mode (AGENTS.md D38). The default.
+# rio — the Windows editing mode (D38). The default.
 #
 # The text area behaves like Notepad / Notepad++: Ctrl+A selects all, Ctrl+C/X/V
 # are the clipboard, Ctrl+Backspace/Delete eat a word, and Tk's emacs-flavoured

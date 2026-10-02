@@ -1,4 +1,4 @@
-# rio — a PowerShell syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
+# rio — a PowerShell syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a per-line scanner (see rio::syntax for the contract). It carries
 # scan state across lines, so block comments (`<# … #>`) and multi-line strings colour
 # correctly. Keyword lookup is case-INSENSITIVE (PowerShell is).

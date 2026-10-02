@@ -1,4 +1,4 @@
-# rio-core — automatic recovery files (AGENTS.md D132).
+# rio-core — automatic recovery files (D132).
 #
 # A buffer's edits live only in this process until someone saves: kill the core, lose the
 # tunnel or pull the plug, and everything typed since the last save is gone. So every so
@@ -155,7 +155,7 @@ proc rio::autosave::set_enabled {on} {
 	file mkdir [file dirname $p]
 	set fh [open $p w]
 	fconfigure $fh -encoding utf-8
-	puts $fh "# rio — automatic recovery files for unsaved changes (AGENTS.md D132)."
+	puts $fh "# rio — automatic recovery files for unsaved changes (D132)."
 	puts $fh "# rio NEVER writes the file you are editing without a save: this is about the"
 	puts $fh "# separate copy it keeps under \$XDG_DATA_HOME/rio/autosave/ so a crash costs you"
 	puts $fh "# at most one interval, and offers back the next time you open that file."

@@ -3,7 +3,7 @@
 Notes for taking rio public in an early/alpha form. Not a promise of dates — a
 checklist of what has to be true before rio is handed to people who didn't write
 it. Ordered by what to hit first. The *why* behind anything structural still goes
-in [AGENTS.md](AGENTS.md); this file is the release-prep counterpart to
+in [adr/](adr/README.md); this file is the release-prep counterpart to
 [CONTRIBUTING.md](CONTRIBUTING.md) (which is for people hacking *on* rio).
 
 The feature set is already past an alpha bar. The risk in going live is not
@@ -546,7 +546,7 @@ though the interactive behaviour is right.
 
 - [x] Add a `LICENSE` file. With no license, nobody may legally use, fork, or
       redistribute rio. *Nothing in the tree needs carving out: the window icon
-      was the only third-party asset, and since AGENTS.md **D120** the artwork is
+      was the only third-party asset, and since **D120** the artwork is
       the project's own — one licence covers the whole tree.* **Done (D121).**
       **MIT**, chosen over the ISC and BSD-2 candidates for recognition: a reader
       should be able to tell what it permits without reading it. `LICENSE` holds
@@ -576,7 +576,7 @@ though the interactive behaviour is right.
       message, the icon, signing and key trust, the artwork, the licence, the version)
       got the entries they never had. PITCH's own frozen copy, and PITCH itself, are gone
       as of 2026-09-23 (see Gate 4). The file cannot fall behind quietly:
-      `rio-core/tests/changelog.test` holds every decision in AGENTS.md against it both
+      `rio-core/tests/changelog.test` holds every decision in `adr/` against it both
       ways — an entry, or an exemption with a written reason — and looks every commit id
       and date up in git rather than proofreading them.
 - [x] Choose a version, so a tester can say exactly which rio they're running.
@@ -592,7 +592,7 @@ though the interactive behaviour is right.
       and an extension's semver stays its own.
 - [x] **git-tag the release `v0.1.0`** when the other gates close. **Done 2026-09-23**,
       an annotated tag on `5d2f6d6`. Both promised effects landed with no code change
-      (AGENTS.md D76): `git describe` now answers `v0.1.0`, so **About**'s *Build* row is a
+      (D76): `git describe` now answers `v0.1.0`, so **About**'s *Build* row is a
       release name rather than a short commit, and `CHANGELOG.md`'s heading is dated with a
       `[0.1.0]:` link target that finally has somewhere to point. Both entry points answer
       `0.1.0`. The full sweep was green at the tagged commit and again after the release
@@ -721,7 +721,7 @@ Both are one-way-ish once the history is public, so they are here rather than in
       door, and its relative links (`docs/index.md`, `LICENSE`, `CODE_OF_CONDUCT.md`)
       resolve on GitHub but are worth one click each. Set the repo description and
       topics; GitHub will detect the language as Tcl on its own.
-- [x] **Delete `PITCH.md`** before the tag. AGENTS.md §7 and D124 both already planned
+- [x] **Delete `PITCH.md`** before the tag. D124 already planned
       this — its changelog had moved to `CHANGELOG.md` and the rest was the landing-page
       playground. **Done 2026-09-23**, ahead of the tag rather than at it: it was
       `export-ignore`d from the release tarball as of `3406db4`, but that only kept it

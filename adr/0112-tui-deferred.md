@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-27
 - **Deciders:** jka
-- **Decision log:** AGENTS.md §6, O1; `spike/probes/VERDICT.md`
+- **Decision:** no D number; see `spike/probes/VERDICT.md`
 
 ## Context
 

@@ -1,4 +1,4 @@
-# rio-core — the exec.* op namespace (AGENTS.md D11, D15).
+# rio-core — the exec.* op namespace (D11, D15).
 #
 # A thin handler over rio::exec::run: the command-execution primitive surfaced on
 # the protocol so any frontend, git (D7), or the agent (D20) can run a command

@@ -3,7 +3,7 @@
 - **Status:** Accepted, not implemented (the TUI is deferred, [ADR-0112](0112-tui-deferred.md))
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D14
+- **Decision:** D14
 
 ## Context
 

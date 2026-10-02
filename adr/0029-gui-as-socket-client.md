@@ -3,7 +3,7 @@
 - **Status:** Superseded by [ADR-0030](0030-always-a-channel-client.md)
 - **Date:** 2026-06-30
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D29
+- **Decision:** D29
 
 ## Context
 

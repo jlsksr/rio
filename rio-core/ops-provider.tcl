@@ -1,4 +1,4 @@
-# rio-core — the provider.* op namespace (AGENTS.md D66, D39, D11).
+# rio-core — the provider.* op namespace (D66, D39, D11).
 #
 # The channel face of the installable-provider store (rio::provider). A frontend's
 # Extensions window installs a `kind = provider` extension through these ops so the

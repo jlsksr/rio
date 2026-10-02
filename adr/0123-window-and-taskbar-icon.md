@@ -3,7 +3,7 @@
 - **Status:** Accepted; the artworks it compares were removed by [ADR-0127](0127-artwork-rio-can-pass-on.md)
 - **Date:** 2026-09-18
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D117
+- **Decision:** D117
 
 ## Context
 

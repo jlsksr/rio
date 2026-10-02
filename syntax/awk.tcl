@@ -1,4 +1,4 @@
-# rio — an awk syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no external
+# rio — an awk syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no external
 # packages — a per-line scanner (see rio::syntax for the contract). awk strings do not
 # span lines, so this carries no scan state.
 #

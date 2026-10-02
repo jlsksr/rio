@@ -1,4 +1,4 @@
-# rio — a Go syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no external
+# rio — a Go syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no external
 # packages — a linear, per-line state machine (see rio::syntax for the contract). It
 # carries scan state across lines, so block comments and back-quoted raw strings colour
 # as one unit.

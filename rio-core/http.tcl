@@ -1,4 +1,4 @@
-# rio-core — a bounded HTTP GET, http:// or https:// (AGENTS.md D39, D109).
+# rio-core — a bounded HTTP GET, http:// or https:// (D39, D109).
 #
 # The fetch primitive behind extension repositories: repo.fetch (ops-repo.tcl)
 # retrieves repository manifests, indexes, and payload files from plain

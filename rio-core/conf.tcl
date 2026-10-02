@@ -1,4 +1,4 @@
-# rio-core — the flat config/theme file format (AGENTS.md D21, D24).
+# rio-core — the flat config/theme file format (D21, D24).
 #
 # One parser for the plain "[section] / key = value" data format that both config
 # (D21) and themes (D24) use: `#` comments, blank lines, UTF-8. The whole point

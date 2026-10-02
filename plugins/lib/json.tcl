@@ -1,4 +1,4 @@
-# plugins/lib — shared JSON serialisation for LLM providers (AGENTS.md D8/D26).
+# plugins/lib — shared JSON serialisation for LLM providers (D8/D26).
 #
 # The request-body serialisers a provider needs are identical whichever LLM it
 # targets: an ASCII-safe JSON *string* literal, and a flat-dict -> JSON *object*

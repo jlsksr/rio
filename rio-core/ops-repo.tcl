@@ -1,4 +1,4 @@
-# rio-core — the repo.* op namespace (AGENTS.md D39, D11).
+# rio-core — the repo.* op namespace (D39, D11).
 #
 # One op: the fetch primitive extension repositories are built on. The GUI
 # does all the interpreting (manifests, indexes, install targets); the core

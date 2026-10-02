@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0034](0034-agent-system-prompt.md), [ADR-0069](0069-claude-as-extension.md), [ADR-0083](0083-agent-run-command.md), [ADR-0104](0104-stop-instead-of-step-cap.md)
 - **Date:** 2026-06-27
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D26
+- **Decision:** D26
 
 ## Context
 

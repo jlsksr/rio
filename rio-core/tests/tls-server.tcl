@@ -1,4 +1,4 @@
-# A loopback https + http server for tls.test (AGENTS.md D109) — run as a CHILD process,
+# A loopback https + http server for tls.test (D109) — run as a CHILD process,
 # never sourced: rio::http::get is synchronous, so a server sharing its event loop would
 # never get to answer.
 #
@@ -19,7 +19,7 @@
 #   /up    302 to https://localhost:<https-good>/ok — http → https, which rio follows
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tls.test
-# runs it as a child process of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a child process of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for Find/Replace (AGENTS.md D36): the find bar over the core's
+# Headless test for Find/Replace (D36): the find bar over the core's
 # stateless search ops (buffer.find / buffer.matches / buffer.replace_all).
 # Drives the real frontend procs (find_open, find_step, find_replace_one,
 # find_replace_all, find_close) and inspects the focused group's widget. Like

@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0126](0126-signing-key-confirmed-by-the-user.md)
 - **Date:** 2026-09-19
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D118 (amendment of 2026-09-19)
+- **Decision:** D118 (amendment of 2026-09-19)
 
 ## Context
 

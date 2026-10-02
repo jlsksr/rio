@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the stale-link watchdog (AGENTS.md D37): a half-open socket —
+# Headless test for the stale-link watchdog (D37): a half-open socket —
 # the classic stale `ssh -L` forward — accepts writes but never answers and never
 # EOFs, so the GUI must notice at the protocol layer, not wait minutes for TCP.
 # A pure-Tcl black-hole server (accepts, reads, never replies) plays the stale

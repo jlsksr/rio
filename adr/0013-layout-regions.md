@@ -3,7 +3,7 @@
 - **Status:** Accepted; amended by [ADR-0035](0035-tool-windows-dock-sites.md)
 - **Date:** 2026-06-24
 - **Deciders:** jka
-- **Decision log:** AGENTS.md D13
+- **Decision:** D13
 
 ## Context
 

@@ -1,4 +1,4 @@
-# plugins/lib — the shared HTTPS streaming transport (AGENTS.md D8/D26, D10).
+# plugins/lib — the shared HTTPS streaming transport (D8/D26, D10).
 #
 # The network layer every LLM provider plugs into. Two command-prefix seams, both
 # async via the http package + tcltls (event loop, D10), both taking
