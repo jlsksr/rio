@@ -12,7 +12,7 @@
 
 ## Status
 
-Alpha. Release **0.3.0**, 2 October 2026. Used daily by its author.
+Alpha. Release **0.4.0**, 2 October 2026. Used daily by its author.
 
 | Platform | State |
 | -------- | ----- |
