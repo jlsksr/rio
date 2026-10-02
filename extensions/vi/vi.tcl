@@ -1,8 +1,7 @@
-# rio — the vi editing mode (AGENTS.md D38).
+# rio — the vi editing mode (D38).
 #
-# MIT-licensed, like rio itself (D121). The notice is IN this file because an installed
-# extension travels alone: rio writes the payload into your extension directory, and there
-# is no LICENSE beside it there (D122).
+# MIT, like rio (D121). The notice is in this file because an installed
+# extension has no LICENSE beside it (D122).
 #
 # Copyright (c) 2026 Julius Kaiser <jkdata@mailbox.org>
 #
@@ -23,24 +22,22 @@
 # CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 # OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-# Modal editing, lean but real: normal / insert / visual states, counts, the core
-# motions (h j k l w b e 0 $ gg G, arrows aliased), the operators d c y taking a
-# motion (dw, d$, 2dd, yy, cw, …), and x p u i a o O v Escape. Deliberately NOT in
-# v1 (see ROADMAP): ex commands, registers (the yank buffer is the X clipboard, so
-# dd + p round-trips and even reaches other apps), macros, '.' repeat, marks,
-# visual-line. Insert state IS Tk's Text editing — every key falls through to the
-# class bindings, so typing, Backspace and arrows behave exactly like the other
-# modes; only Escape is intercepted.
+# Modal editing, small but real:
 #
-# All per-state data lives per EDITOR GROUP (like the highlight cache, D33): each
-# split half has its own normal/insert state, pending operator and count — a vi
-# "window". Positions are computed exclusively with Tk index arithmetic
-# ($w index/compare, the tk::Text* helpers) — never through expr, which corrupts
-# line.col values ("1.10" -> 1.1). Every edit calls the group proxy (%W), so it
-# reaches the core as a buffer.replace like any other keystroke; one operator is
-# one replace, hence one undo step — and every normal-state key arms an undo
-# break (D90) so the core's keystroke coalescing never runs two commands, or a
-# command and the typing before it, into a single step.
+#   states     normal, insert, visual
+#   motions    h j k l w b e 0 $ gg G, and the arrows
+#   operators  d c y, with a motion and a count (dw, d$, 2dd, yy, cw)
+#   also       x p u i a o O v Escape
+#
+# Not here (see ROADMAP): ex commands, registers, macros, `.`, marks,
+# visual-line. The yank buffer is the clipboard, so dd then p works, in
+# other apps too. Insert state is Tk's own Text editing; only Escape is
+# caught.
+#
+# State is per editor group (as the highlight cache, D33): each split half
+# is its own vi window. Positions are Tk indices, never expr, which turns
+# "1.10" into 1.1. Every edit goes through the group proxy (%W), so through
+# the core: one operator is one buffer.replace, so one undo step.
 
 namespace eval rio::modes::vi {
 	variable S {}   ;# group id -> {state normal|insert|visual, count "", op "", opcount "", pendg 0}
@@ -122,8 +119,8 @@ proc rio::modes::vi::to_insert {g w} {
 	show_state $g
 }
 
-# Leave insert for normal: vi puts the caret on the character LEFT of where
-# insertion ended (unless already at the line start).
+# Insert to normal. As in vi, the caret steps one character left, unless it
+# is at the line start.
 proc rio::modes::vi::to_normal {g w} {
 	stset $g state normal
 	clear_pending $g
@@ -132,7 +129,8 @@ proc rio::modes::vi::to_normal {g w} {
 	show_state $g
 }
 
-# Escape in normal/visual: drop any pending count/operator; leave visual.
+# Escape in normal or visual: drop the pending count and operator, leave
+# visual.
 proc rio::modes::vi::cancel {g w} {
 	clear_pending $g
 	if {[st $g state] eq "visual"} { leave_visual $g $w }
@@ -145,7 +143,7 @@ proc rio::modes::vi::leave_visual {g w} {
 	$w tag remove sel 1.0 end
 }
 
-# The normal-mode caret sits ON a character, never past the last one.
+# In normal state the caret sits on a character, never past the last one.
 proc rio::modes::vi::clamp_caret {w} {
 	if {[$w compare insert == "insert lineend"] && [$w compare insert != "insert linestart"]} {
 		$w mark set insert "insert -1c"
@@ -153,15 +151,14 @@ proc rio::modes::vi::clamp_caret {w} {
 }
 
 # --- the dispatcher -----------------------------------------------------------
-# Bound as:  bind <tag> <KeyPress> {if {[rio::modes::vi::key %W %K %A %s]} break}
-# Returns 1 to swallow the key (break: Tk's Text class never sees it), 0 to let it
-# fall through. `w` is the group's PROXY path; edits made through it reach the core.
+# Returns 1 to swallow the key, 0 to let Tk's Text class have it. `w` is the
+# group's proxy.
 
 proc rio::modes::vi::key {w keysym char kstate} {
 	set g [group_of_widget $w]
 	if {$g eq ""} { return 0 }
-	init_group $g   ;# a group created after attach (a split) self-registers here
-	# Bare modifiers never mean anything by themselves.
+	init_group $g   ;# a split made after attach
+	# A bare modifier means nothing.
 	if {$keysym in {Shift_L Shift_R Control_L Control_R Alt_L Alt_R Meta_L Meta_R
 	                Super_L Super_R Hyper_L Hyper_R Caps_Lock Num_Lock
 	                ISO_Level3_Shift Mode_switch}} { return 0 }
@@ -170,19 +167,16 @@ proc rio::modes::vi::key {w keysym char kstate} {
 		return 0   ;# insert state is Tk's Text editing, untouched
 	}
 	# --- normal / visual ---
-	# Each command is its own undo step. The core coalesces a run of one-character
-	# edits into one step (D90) — right for typing, wrong here: three x's are three
-	# deletions it cannot tell from three presses of Delete. Arming the break on
-	# every normal/visual key covers both ends: a repeated x / dd / p undoes one
-	# repetition at a time, and i / a / o start a fresh step instead of extending
-	# whatever was typed into the buffer before.
+	# Each command is its own undo step (D90). The core merges a run of
+	# one-character edits: right for typing, wrong for x x x. The break
+	# also makes i, a and o start a fresh step.
 	undo_break
 	if {$keysym eq "Escape"} { cancel $g $w ; return 1 }
-	# Control/Alt combos: the app chords already fired on the path tag; whatever
-	# reaches us is swallowed inertly so Tk's C-k/C-d/… can't fire in normal state.
+	# Control and Alt chords: the app's have already run. Swallow the rest,
+	# so Tk's Ctrl+K and Ctrl+D do nothing in normal state.
 	if {$kstate & 0x4 || $kstate & 0x8} { clear_pending $g ; return 1 }
-	# Plain navigation keys Tk handles well; arrows become vi motions (they then
-	# respect counts and pending operators).
+	# Tk does Page Up/Down, Home and End. The arrows become h j k l, so
+	# they take counts and operators.
 	if {$keysym in {Prior Next Home End}} { clear_pending $g ; return 0 }
 	switch -- $keysym {
 		Left  { set char h }
@@ -199,13 +193,13 @@ proc rio::modes::vi::key {w keysym char kstate} {
 proc rio::modes::vi::normal_key {g w ch} {
 	set vis  [expr {[st $g state] eq "visual"}]
 	set op   [st $g op]
-	# A pending g only combines with a second g (the gg motion).
+	# g waits for a second g (gg); any other key cancels.
 	if {[st $g pendg]} {
 		stset $g pendg 0
 		if {$ch eq "g"} { do_motion $g $w gg } else { clear_pending $g }
 		return
 	}
-	# Count digits accumulate ("0" only continues a count — alone it is a motion).
+	# Digits build the count. A lone 0 is a motion.
 	if {[string is digit -strict $ch] && !($ch eq "0" && [st $g count] eq "")} {
 		stset $g count "[st $g count]$ch"
 		return
@@ -257,8 +251,8 @@ proc rio::modes::vi::normal_key {g w ch} {
 }
 
 # --- counts -------------------------------------------------------------------
-# Counts multiply vim-style: 2d3w operates over six words. These are plain integer
-# counts — expr is safe HERE (and only here: never on a line.col index).
+# Counts multiply: 2d3w is six words. They are plain integers, so expr is
+# safe here, and only here.
 
 proc rio::modes::vi::effcount {g} {
 	set c [st $g count]   ; if {$c eq ""} { set c 1 }
@@ -267,9 +261,12 @@ proc rio::modes::vi::effcount {g} {
 }
 
 # --- motions --------------------------------------------------------------------
-# motion_target returns {index class} from the caret: class is how an OPERATOR
-# treats the span — exclusive (up to the target), inclusive (through the target's
-# character), or linewise (whole lines). A plain move just goes to the index.
+# motion_target returns {index class} from the caret. A plain move goes to
+# the index. The class says how an operator takes the span:
+#
+#   exclusive  up to the target
+#   inclusive  through the target's character
+#   linewise   whole lines
 
 proc rio::modes::vi::motion_target {w m n} {
 	switch -exact -- $m {
@@ -342,8 +339,8 @@ proc rio::modes::vi::motion_target {w m n} {
 	return [list [$w index insert] exclusive]
 }
 
-# gg / G take their count as a LINE NUMBER (5G = line 5), not a repeat — resolved
-# here from the raw digits, clamped to the last line.
+# gg and G read their count as a line number (5G is line 5), clamped to the
+# last line.
 proc rio::modes::vi::line_target {w m count} {
 	if {$count ne ""} {
 		set tgt "$count.0"
@@ -354,7 +351,8 @@ proc rio::modes::vi::line_target {w m count} {
 	return [$w index "end -1c linestart"]
 }
 
-# Run motion `m`: as a plain caret move, a visual stretch, or an operator target.
+# Run motion `m`: move the caret, stretch the visual selection, or feed an
+# operator.
 proc rio::modes::vi::do_motion {g w m} {
 	set op [st $g op]
 	set from [$w index insert]
@@ -362,11 +360,11 @@ proc rio::modes::vi::do_motion {g w m} {
 		set tgt [line_target $w $m [st $g count]]
 		set class linewise
 	} else {
-		# cw on a non-blank acts like ce (the classic vim exception).
+		# cw on a non-blank acts like ce, as in vim.
 		if {$op eq "c" && $m eq "w" && ![string is space [$w get insert]]} { set m e }
 		lassign [motion_target $w $m [effcount $g]] tgt class
-		# dw/yw never eat past the line end when the line has content (the other
-		# classic exception; without it, dw on the last word swallows the newline).
+		# dw and yw stop at the line end, as in vim: dw on the last word
+		# keeps the newline.
 		if {$op ne "" && $m eq "w" && [$w compare $tgt > "$from lineend"] \
 				&& [$w compare $from < "$from lineend"]} {
 			set tgt [$w index "$from lineend"]
@@ -386,25 +384,24 @@ proc rio::modes::vi::do_motion {g w m} {
 
 # --- operators ------------------------------------------------------------------
 
-# Apply operator `op` over from..to (unordered) with the motion's class. The span
-# text goes to the clipboard (linewise spans in canonical trailing-\n form, so `p`
-# can tell them apart); d/c delete it through the proxy -> core in ONE replace.
+# Apply `op` over from..to, in either order, with the motion's class. The
+# text goes to the clipboard; a linewise span ends in \n, which is how `p`
+# knows it. d and c delete it in one replace.
 proc rio::modes::vi::apply_op {g w op from to class} {
 	if {[$w compare $to < $from]} { set t $from ; set from $to ; set to $t }
 	if {$class eq "inclusive"} { set to [$w index "$to +1c"] }
 	if {$class eq "linewise"} {
 		set ytext "[$w get "$from linestart" "$to lineend"]\n"
 		if {$op eq "c"} {
-			# cc: clear the lines' content, keep the trailing newline.
+			# cc empties the lines and keeps the last newline.
 			set from [$w index "$from linestart"]
 			set to   [$w index "$to lineend"]
 		} else {
 			set lstart [$w index "$from linestart"]
 			set lend   [$w index "$to +1 lines linestart"]
 			if {[$w compare $lend >= end]} {
-				# The span includes the last line: there is no following newline
-				# to take, so eat the PRECEDING one instead (vim's dd on the
-				# final line), unless the span starts at the top of the buffer.
+				# The span holds the last line, which has no newline after it.
+				# Take the one before instead, unless the span starts at the top.
 				set lend [$w index "end -1c"]
 				if {[$w compare $lstart > 1.0]} { set lstart [$w index "$lstart -1c"] }
 			}
@@ -425,7 +422,7 @@ proc rio::modes::vi::apply_op {g w op from to class} {
 	$w see insert
 }
 
-# dd / cc / yy — the doubled operator works on whole lines, count included (2dd).
+# dd, cc, yy: the doubled operator takes whole lines, count included (2dd).
 proc rio::modes::vi::do_line_op {g w op} {
 	set n [effcount $g]
 	clear_pending $g
@@ -434,8 +431,8 @@ proc rio::modes::vi::do_line_op {g w op} {
 	apply_op $g $w $op [$w index insert] $to linewise
 }
 
-# x — delete N characters, never past the line end. The cut lands on the clipboard
-# (so xp swaps characters, as in vi).
+# x: delete N characters, never past the line end. They go to the
+# clipboard, so xp swaps two.
 proc rio::modes::vi::do_x {g w} {
 	set n [effcount $g]
 	clear_pending $g
@@ -450,9 +447,9 @@ proc rio::modes::vi::do_x {g w} {
 	clamp_caret $w
 }
 
-# p — put the clipboard after the caret. Text ending in a newline is a LINEWISE
-# yank (dd/yy write that form): it opens below the current line; anything else
-# goes in charwise after the cursor. A count repeats the text.
+# p: put the clipboard after the caret. Text ending in a newline is
+# linewise (dd and yy write it so) and opens below the line; other text
+# goes in after the caret. A count repeats it.
 proc rio::modes::vi::do_put {g w} {
 	set n [effcount $g]
 	clear_pending $g
@@ -460,7 +457,7 @@ proc rio::modes::vi::do_put {g w} {
 	set txt [string repeat $txt $n]
 	if {[string index $txt end] eq "\n"} {
 		if {[$w compare "insert +1 lines linestart" >= end]} {
-			# Last line: open below it by leading with the newline instead.
+			# On the last line, lead with the newline instead.
 			set at [$w index "insert lineend"]
 			$w insert $at "\n[string range $txt 0 end-1]"
 			$w mark set insert [$w index "$at +1c linestart"]
@@ -479,7 +476,7 @@ proc rio::modes::vi::do_put {g w} {
 	$w see insert
 }
 
-# i a o O — the ways into insert state.
+# i a o O: the ways into insert state.
 proc rio::modes::vi::enter_insert {g w ch} {
 	switch -exact -- $ch {
 		a {
@@ -501,8 +498,8 @@ proc rio::modes::vi::enter_insert {g w ch} {
 
 # --- visual state -----------------------------------------------------------------
 
-# Keep `sel` spanning anchor..caret INCLUSIVELY (vi selects the character under
-# the caret; Tk ranges are half-open, hence the +1c on the far end).
+# Keep `sel` over anchor..caret, both included. Tk ranges are half-open,
+# hence the +1c.
 proc rio::modes::vi::stretch_sel {g w} {
 	$w tag remove sel 1.0 end
 	if {[$w compare vianchor <= insert]} {
@@ -512,7 +509,7 @@ proc rio::modes::vi::stretch_sel {g w} {
 	}
 }
 
-# d/x, y or c on the visual selection, then back to normal (c: into insert).
+# d, x, y or c on the selection, then back to normal; c goes to insert.
 proc rio::modes::vi::visual_op {g w op} {
 	clear_pending $g
 	set ranges [$w tag ranges sel]

@@ -1,8 +1,7 @@
-# extensions/openai — the OpenAI-compatible API face (AGENTS.md D8, D26).
+# extensions/openai — the OpenAI-compatible API face (D8, D26).
 #
-# MIT-licensed, like rio itself (D121). The notice is IN this file because an installed
-# extension travels alone: rio writes the payload into your extension directory, and there
-# is no LICENSE beside it there (D122).
+# MIT, like rio (D121). The notice is in this file because an installed
+# extension has no LICENSE beside it (D122).
 #
 # Copyright (c) 2026 Julius Kaiser <jkdata@mailbox.org>
 #
@@ -23,49 +22,38 @@
 # CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 # OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-# An OpenAI-compatible agent provider: it authenticates with a Bearer API key and
-# drives the shared inference core (rio::openai::infer). Hosted ChatGPT is the
-# default endpoint, but because the endpoint is config-as-data the same face drives
-# any OpenAI-compatible server — Ollama, llama-server, LM Studio, vLLM — which is
-# the in-box local-LLM provider AGENTS.md D8 names. The face owns only its auth
-# strategy (the `Authorization: Bearer` header), a config block, and the key's
-# storage; the durable inference code is shared.
+# An OpenAI-compatible provider. It authenticates with a Bearer key and
+# drives rio::openai::infer. The default endpoint is hosted ChatGPT; the
+# endpoint is data, so the same face drives Ollama, llama-server, LM Studio
+# and vLLM (D8). This face owns the auth header, the config and the key's
+# storage, nothing else.
 #
-# Resilience (D26): every volatile detail — endpoint, model, the token-cap param
-# name, the timeout budget — lives in `config` as DATA, overridable at runtime, so
-# a model or server change is a one-line edit, not a rebuild. Network is a SEAM
-# (the shared transport), so the whole flow is testable offline.
+# Whatever may change (endpoint, model, token-cap field, timeout) is data in
+# `config`, settable at runtime (D26). The network is a seam, so the tests
+# run offline.
 
 package require json
 
 namespace eval rio::openai::api {
-	# The hosted endpoint, as a named constant: `base_url` still standing at this value
-	# is what "the user has not pointed rio anywhere else" means, and that is the one
-	# case where a missing key is worth saying something about rather than letting the
-	# server answer. A named constant, not a hostname test — this face has no opinion
-	# about which hosts are OpenAI's.
+	# The hosted endpoint. `base_url` still at this value means the user has
+	# pointed rio nowhere else: the one case where a missing key is reported
+	# here, before the server is asked. A constant, not a hostname test.
 	variable default_base_url https://api.openai.com/v1
 
-	# Config-as-data. `base_url` is the single source for both endpoints — this face
-	# speaks to anything that answers the OpenAI protocol, and for a self-hosted server
-	# (Ollama, llama-server, llama-swap, vLLM, LM Studio) the URL is the first thing a
-	# user has to set, so it is a declared option rather than a line in this file.
-	# `messages_url` / `models_url` stay as overrides for a server whose paths sit
-	# somewhere else; blank means "derive from base_url".
+	#   base_url         both endpoints derive from it; the first thing to
+	#                    set for a server of your own
+	#   messages_url,    overrides, for a server whose paths differ;
+	#   models_url       blank = derive from base_url
+	#   token_param      the field that carries the output cap. Newer hosted
+	#                    models want max_completion_tokens; older ones and
+	#                    most local servers max_tokens. A server names the
+	#                    other in its 400, which fills token_models (D106c)
+	#   secret_name      per profile (D131), so a switch to a local server
+	#                    does not send a hosted vendor's key to localhost
+	#   extra_json_file  a file, not the JSON: a settings value is one line,
+	#                    and chat_template_kwargs is a nested object
 	#
-	# `token_param` is the request key for the output cap: hosted newer OpenAI models
-	# require `max_completion_tokens`, while older models and most local servers take
-	# `max_tokens` — and a server that refuses one names the other in its 400, which is
-	# how `token_models` gets filled (D106c). The `system` prompt is not static config:
-	# the core composes it per turn and the provider merges it in (D34).
-	# `secret_name` is an ordinary setting and therefore per PROFILE (D131), which is
-	# what stops a switch to your own box sending a hosted vendor's key to localhost:
-	# the local profiles name a store of their own, which is simply empty.
-	#
-	# `extra_json_file` names a FILE rather than holding the JSON, because a settings
-	# value is one line (the format has no continuation) and the interesting extras —
-	# llama.cpp's and vLLM's chat_template_kwargs — are a nested object nobody wants
-	# flattened onto one.
+	# The system prompt is not here: the core composes it per turn (D34).
 	variable config [dict create \
 		base_url        https://api.openai.com/v1 \
 		messages_url    "" \
@@ -82,23 +70,20 @@ namespace eval rio::openai::api {
 		request_timeout 600000 \
 		secret_name     openai-api]
 
-	# The shipped values, kept so a profile SWITCH can reset to them before adopting the
-	# new profile's file — otherwise a key the new profile happens to omit would keep
-	# whatever the old one set, which is the one way profiles leak into each other.
+	# The shipped values. A profile switch resets to them first, or a key
+	# the new profile omits would keep the old profile's value.
 	variable defaults $config
 
-	# The active profile, "" only before the first adopt (and on a host with nowhere to
-	# persist, where settings degrade to in-memory-only as they always have).
+	# The active profile. "" before the first adopt, and on a host with
+	# nowhere to save.
 	variable profile ""
 
-	# How an effort choice is spelled on the wire, %v standing for the value (D106).
-	# Config-as-data like the rest: a server that wants a different key is one line.
+	# How an effort is spelled in the request; %v is the value (D106). Data:
+	# a server that wants another key is a one-line change.
 	variable effort_json {"reasoning_effort":"%v"}
 
-	# The models offered in the picker. Short and shipped: the option is `free` (type
-	# any id) and `refresh` re-lists from the server itself — which is the only
-	# sensible answer for a local Ollama / llama-server / LM Studio, whose models are
-	# whatever that machine happens to have pulled.
+	# The models in the picker. Short: any id can be typed, and refresh asks
+	# the server, the only answer that fits a local one.
 	variable models_default {
 		{value gpt-4o      label "GPT-4o"}
 		{value gpt-4o-mini label "GPT-4o mini"}
@@ -111,21 +96,18 @@ namespace eval rio::openai::api {
 		{value high    label "High"}
 	}
 
-	# Network seams: the shared tcltls streaming transport for a turn and the plain
-	# GET for a models listing (plugins/lib/transport.tcl); tests inject fakes.
+	# Network seams: the streaming transport for a turn, a plain GET for the
+	# model list (plugins/lib/transport.tcl). Tests put fakes here.
 	variable transport rio::llm::http::stream
 	variable fetcher   rio::llm::http::get
 
-	# The profiles a first run starts with — one per kind of server this face talks to,
-	# so "switch between named presets" has something to switch between before the user
-	# has built any. Written ONCE, on a true first run (the D39 seed rule): delete one
-	# and it stays deleted, edit one and an upgrade will not undo it.
+	# The profiles a first run starts with, one per kind of server. Written
+	# once (the D39 seed rule): a deleted one stays deleted, an edited one
+	# survives an upgrade.
 	#
-	# The two local ones are EXAMPLES, and point at llama-swap's usual port. Anyone
-	# without a server there edits the URL or deletes them; what they are really for is
-	# to show the shape — a local server, no key, a bigger token cap, and its thinking
-	# configured through the extra-JSON file rather than through `effort`, which llama.cpp
-	# and most compatible servers refuse.
+	# The two local ones are examples, on llama-swap's usual port. They show
+	# the shape: no key, a bigger token cap, and thinking set in the
+	# extra-JSON file, since most compatible servers refuse `effort`.
 	variable seeds {
 		{ChatGPT {
 			base_url    https://api.openai.com/v1
@@ -150,8 +132,8 @@ namespace eval rio::openai::api {
 		}}
 	}
 
-	# The extra-request JSON each seeded profile starts with, by profile name. Absent =
-	# no file at all, which is right for hosted ChatGPT: it wants none of this.
+	# The extra-request JSON of each seeded profile, by name. None for
+	# ChatGPT: it wants none.
 	variable seed_extra {
 		{"Qwen3.8 27B (local)" {{
   "chat_template_kwargs": {
@@ -168,7 +150,7 @@ namespace eval rio::openai::api {
 	}
 }
 
-# Override one config key (a user setting, a test, a model or endpoint choice).
+# Set one config key: a user setting, a test, a model or endpoint choice.
 proc rio::openai::api::configure {key val} {
 	variable config
 	dict set config $key $val
@@ -185,11 +167,10 @@ proc rio::openai::api::provider {conversation tools system post} {
 	variable default_base_url
 	set key [_api_key]
 	set url [_messages_url]
-	# A key is OPTIONAL: most self-hosted servers want none, and inventing a placeholder
-	# to get past a check was the old advice. So the request simply goes out without an
-	# Authorization header and the server decides. The one case still worth naming is a
-	# user who has not pointed rio anywhere — then this really is hosted OpenAI, which
-	# really does need a key, and a 401 would be a worse way to learn it.
+	# A key is optional: most self-hosted servers want none, so the request
+	# goes without an Authorization header and the server decides. Only
+	# hosted OpenAI, the untouched default, is refused here: it does need a
+	# key, and a 401 says so worse.
 	if {$key eq "" && $url eq "$default_base_url/chat/completions"} {
 		{*}$post error not_configured \
 			"No OpenAI API key — add one in Extensions ▸ OpenAI-compatible…, or set a server URL there if you are running your own (most need no key)"
@@ -197,24 +178,23 @@ proc rio::openai::api::provider {conversation tools system post} {
 	}
 	set auth {}
 	if {$key ne ""} { set auth [list Authorization "Bearer $key"] }
-	# The user's own request fields come from their file, read and CHECKED per turn —
-	# the file is theirs to edit at any moment, so the request is the only place the
-	# answer is authoritative. A file that no longer parses, or that sets a field rio
-	# sends itself, stops the turn and says which: silently dropping request fields
-	# someone deliberately wrote would be the worse failure (D26's classified errors).
+	# The user's own request fields, read and checked each turn: the file
+	# may change at any time. A file that does not parse, or sets a field
+	# rio sends, stops the turn and says which. Dropping fields someone
+	# wrote would be worse (D26).
 	if {[catch {_extra_text} extra]} {
 		{*}$post error bad_request "Your extra request JSON couldn't be used: $extra"
 		return
 	}
-	# The core owns the system prompt (D34); merge it into a LOCAL config copy so the
-	# persistent config dict stays clean. infer skips an empty `system`.
+	# The core owns the system prompt (D34). It goes into a copy, so
+	# `config` stays clean; infer skips an empty one.
 	set conf $config
 	dict set conf messages_url $url
 	dict set conf extra_json $extra
 	dict set conf system $system
 	dict set conf effort_json [_effort_json]
-	# Which token-cap parameter this model wants, and where to record the answer if
-	# the server corrects us (D106c).
+	# The token-cap field this model wants, and the procs that record a
+	# server's correction (D106c, D106d).
 	dict set conf token_param [_token_param]
 	dict set conf token_learn rio::openai::api::_token_learned
 	dict set conf effort_learn rio::openai::api::_effort_learned
@@ -223,11 +203,10 @@ proc rio::openai::api::provider {conversation tools system post} {
 
 # --- the extra-request-JSON file (D131) --------------------------------------
 #
-# The value is a bare FILENAME, resolved in this provider's own directory beside the
-# profiles. Not a path: a name with no separators cannot point anywhere rio did not
-# mean, which is the same discipline D39 applies to every remote-supplied name, and it
-# spares the user a question ("relative to what?") with no good answer over a remote
-# core (D30). Anyone who wants a file elsewhere can symlink to it.
+# The value is a bare file name, in this provider's directory beside the
+# profiles. Not a path: a name without separators cannot point outside (as
+# D39 treats a remote name), and "relative to what?" has no good answer
+# over a remote core (D30). For a file elsewhere, symlink.
 proc rio::openai::api::_extra_name_ok {n} {
 	if {$n in {"" . ..}} { return 0 }
 	if {[string index $n 0] eq "."} { return 0 }
@@ -245,16 +224,15 @@ proc rio::openai::api::_extra_path {n} {
 	return [file join $d $n]
 }
 
-# The file this profile would use if it had none named yet. Per profile, so a Duplicate
-# does not leave two profiles editing one file.
+# The file name a profile gets when it names none. Per profile, so a
+# Duplicate does not share one file.
 proc rio::openai::api::_extra_default_name {} {
 	variable profile
 	return [expr {$profile eq "" ? "openai.extra.json" : "$profile.extra.json"}]
 }
 
-# The text to splice into a request: the file's contents, validated. Missing file =
-# nothing, the same as naming none — the button that creates it is right there, and a
-# file someone deleted is a decision, not a fault worth stopping a turn over.
+# The text to splice into a request: the file's contents, checked. A
+# missing file is the same as naming none.
 proc rio::openai::api::_extra_text {} {
 	variable config
 	set n [dict get $config extra_json_file]
@@ -270,11 +248,9 @@ proc rio::openai::api::_extra_text {} {
 
 # --- the token cap's parameter name, learned per model (D106c) ----------------
 
-# `token_models` is the list of model ids this provider has been TOLD want
-# `max_completion_tokens` — by the server, in a 400. Everything else gets the
-# configured default (`max_tokens`, which is what local OpenAI-compatible servers
-# and the older hosted models take). Config-as-data still: the list is an ordinary
-# settings key a user can read, edit or empty by hand.
+# `token_models` lists the models a server's 400 said want
+# max_completion_tokens. Every other model gets `token_param`. An ordinary
+# setting: read it, edit it or empty it by hand.
 proc rio::openai::api::_token_param {} {
 	variable config
 	if {[lsearch -exact [dict get $config token_models] [dict get $config model]] >= 0} {
@@ -283,8 +259,8 @@ proc rio::openai::api::_token_param {} {
 	return [dict get $config token_param]
 }
 
-# Remember what the refusal taught us, so the retry happens once per model ever and
-# not once per turn. Persisted beside the model and effort choices (D106).
+# Remember what the 400 taught, so the retry happens once per model, not
+# once per turn. Saved beside the model and effort (D106).
 proc rio::openai::api::_token_learned {model param} {
 	variable config
 	if {$param ne "max_completion_tokens" || $model eq ""} return
@@ -295,9 +271,9 @@ proc rio::openai::api::_token_learned {model param} {
 	catch {_store token_models $l}
 }
 
-# Persist one key into the ACTIVE profile (D131) — or into the flat file when there is
-# none, which is where a pre-profiles install's settings already are and where they stay
-# until the first adopt moves them.
+# Save one key into the active profile (D131). With none, into the flat
+# file, where a pre-profiles install keeps its settings until the first
+# adopt.
 proc rio::openai::api::_store {key value} {
 	variable profile
 	return [rio::agent::settings::store openai $key $value $profile]
@@ -305,25 +281,23 @@ proc rio::openai::api::_store {key value} {
 
 # --- the options a frontend may offer (D106) ---------------------------------
 
-# The effort fragment for the live choice, or "" for `default`. Default matters more
-# here than anywhere: `reasoning_effort` is REJECTED by a non-reasoning model (gpt-4o)
-# and by most local servers, so rio keeps sending exactly what it always sent until
-# the user picks otherwise.
+# The effort fragment for the request, or "" for `default`. gpt-4o and most
+# local servers reject `reasoning_effort`, so nothing is sent until the user
+# chooses.
 proc rio::openai::api::_effort_json {} {
 	variable config
 	variable effort_json
 	set e [dict get $config effort]
 	if {$e eq "" || $e eq "default"} { return "" }
-	# A model the server has already refused the field for (D106d) sends nothing. The
-	# stored choice is deliberately NOT rewritten: support is per model while the
-	# choice is per provider, so switching back to a reasoning model restores it —
-	# the rule D106a settled for Claude, reached here by being told instead of asking.
+	# Nothing for a model the server refused it for (D106d). The stored
+	# choice stays: support is per model, the choice per provider, so a
+	# reasoning model gets it back (D106a).
 	if {[_effort_refused [dict get $config model]]} { return "" }
 	return [string map [list %v $e] $effort_json]
 }
 
-# The models this provider has been TOLD refuse `reasoning_effort` — gpt-4o and most
-# local servers. Learned from the 400, never guessed from the model's name.
+# Whether a 400 said this model refuses `reasoning_effort`. Learned, never
+# guessed from a name.
 proc rio::openai::api::_effort_refused {model} {
 	variable config
 	return [expr {[lsearch -exact [dict get $config effort_models] $model] >= 0}]
@@ -344,11 +318,10 @@ proc rio::openai::api::options {} {
 	variable models
 	variable efforts
 	set m [dict get $config model]
-	# Once the server has refused the field for this model, say so with the model's
-	# own name and offer only the default — the same honesty D106a gives Claude, but
-	# learned from a refusal rather than read from a capabilities listing, because
-	# OpenAI's /v1/models carries none. The stored choice still shows, and comes back
-	# when a model that takes an effort is chosen again.
+	# After a refusal, say so by the model's name and offer only the
+	# default. Learned from the 400: /v1/models lists no capabilities. The
+	# stored choice still shows, and applies again with a model that takes
+	# one.
 	if {[_effort_refused $m]} {
 		set ehint "Reasoning effort. $m does not accept one — the server said so — and rio sends none. Choose a reasoning model (o3, o4-mini, gpt-5…) to use this."
 		set echoices [list [lindex $efforts 0]]
@@ -356,9 +329,8 @@ proc rio::openai::api::options {} {
 		set ehint "Reasoning effort. Provider default sends nothing — gpt-4o and most local servers refuse the field."
 		set echoices $efforts
 	}
-	# `quick` says which of these belong in the chat strip's menu as well as the
-	# settings window: the two you change between turns, and not the six you set once
-	# when you point rio at a server.
+	# `quick 0` keeps an option out of the chat strip's menu. The strip
+	# gets the two you change between turns: model and effort.
 	set tokhint "Which request field carries the output cap. Most servers want max_tokens; newer hosted OpenAI models want max_completion_tokens and say so in a 400, which rio then remembers per model — a model in that list keeps its learned answer whatever is chosen here."
 	return [list \
 		[dict create name model label Model group Model \
@@ -423,9 +395,8 @@ proc rio::openai::api::option_set {name value} {
 			dict set config reasoning $value
 		}
 		base_url {
-			# Canonicalized so the window shows what will actually be used: a trailing
-			# slash, and the completions path a user pastes straight out of the server's
-			# own documentation, both come off.
+			# Canonical, so the window shows what is used: a trailing slash
+			# and a pasted /chat/completions both come off.
 			set v [string trim $value]
 			if {$v eq ""} { rio::error::raise bad_request "the server URL must not be empty" }
 			if {![regexp -nocase {^https?://} $v]} {
@@ -455,8 +426,8 @@ proc rio::openai::api::option_set {name value} {
 			dict set config token_param $value
 		}
 		extra_json_file {
-			# The NAME is checked here; what is inside the file is checked when a turn
-			# reads it, because the file goes on being editable after this.
+			# Only the name is checked here. The contents are checked each
+			# turn: the file stays editable.
 			set v [string trim $value]
 			if {$v ne ""} { _extra_path $v }
 			dict set config extra_json_file $v
@@ -467,9 +438,9 @@ proc rio::openai::api::option_set {name value} {
 	return
 }
 
-# Resolve and create the file an option names (the `file` capability, D131). Naming none
-# yet is the ordinary case — the button is how most people will ever set this — so it
-# picks this profile's own default name and records it rather than refusing.
+# Resolve and create the file an option names (the `file` capability,
+# D131). With none named, the usual case, pick this profile's default name
+# and record it.
 proc rio::openai::api::option_file {name} {
 	variable config
 	if {$name ne "extra_json_file"} {
@@ -486,8 +457,8 @@ proc rio::openai::api::option_file {name} {
 		file mkdir [file dirname $p]
 		set fh [open $p w 0600]
 		fconfigure $fh -encoding utf-8
-		# An empty object, not an empty file: it is valid, it sends nothing, and it shows
-		# the shape of what belongs here without putting words in the user's request.
+		# An empty object, not an empty file: valid, sends nothing, shows
+		# the shape.
 		puts $fh "{}"
 		close $fh
 		set created 1
@@ -495,15 +466,13 @@ proc rio::openai::api::option_file {name} {
 	return [dict create path $p created $created]
 }
 
-# Validate the user's own request fields, and return what to store.
+# Check the user's own request fields; return the text to splice.
 #
-# It is checked but never rebuilt. tcllib flattens every JSON leaf to a string, so
-# re-serialising would send "true" where the user wrote true — a type change nobody
-# asked for. The body therefore splices this text RAW, and the way to be sure that
-# cannot produce a duplicate key (which every server resolves differently, none of them
-# documented) is to refuse the keys rio emits itself. The forbidden set is COMPUTED, not
-# written out: the token-cap field is a live setting and the effort field is spelled in
-# one config-as-data fragment, so an upstream rename stays the one-line edit D106 made it.
+# Checked, never rebuilt: tcllib turns every JSON leaf into a string, so a
+# rebuilt `true` would go out as "true". The text is spliced raw, so the
+# keys rio sends itself are refused: a duplicate key means something
+# different on every server. That set is computed from the live settings,
+# not listed, so an upstream rename stays a one-line edit (D106).
 proc rio::openai::api::_check_extra {v} {
 	variable config
 	variable effort_json
@@ -519,17 +488,14 @@ proc rio::openai::api::_check_extra {v} {
 				"rio sends \"$k\" itself — set it with the option above rather than here"
 		}
 	}
-	# One line, because a settings value is one line (rio::agent::settings). Safe rather
-	# than lossy: RFC 8259 forbids a raw control character inside a JSON string, so in a
-	# document that has already parsed, every raw newline is whitespace between tokens.
-	# Normalising beats refusing a pretty-printed paste.
+	# Onto one line. Lossless: a JSON string holds no raw control
+	# character (RFC 8259), so in a document that parsed, every newline
+	# is whitespace between tokens.
 	return [string map [list \n " " \r " " \t " "] $v]
 }
 
-# The two endpoints, both derived from `base_url` unless explicitly overridden. Every
-# server this face targets — hosted OpenAI, Ollama, llama-server, llama-swap, LM Studio,
-# vLLM — publishes the same two paths under one base, so a user sets one URL and both
-# follow. The override exists for the server that does not.
+# The two endpoints, derived from `base_url` unless overridden. Every
+# server this face targets serves both paths under one base.
 proc rio::openai::api::_messages_url {} {
 	variable config
 	set u [dict get $config messages_url]
@@ -543,24 +509,25 @@ proc rio::openai::api::_models_url {} {
 	return "[dict get $config base_url]/models"
 }
 
-# Re-list what this server offers. Asynchronous (D10); a failure leaves the choices
-# alone and says why.
+# List what this server offers. Asynchronous (D10). A failure keeps the
+# choices and says why.
 proc rio::openai::api::option_refresh {name announce} {
 	variable fetcher
 	if {$name ne "model"} { rio::error::raise bad_request "cannot refresh: $name" }
 	set key [_api_key]
 	set headers {}
-	# A local server usually needs no key; the hosted API always does. Send one when
-	# we have one, and let the server say no when we don't.
+	# Send a key if there is one; a local server usually needs none.
 	if {$key ne ""} { set headers [list Authorization "Bearer $key"] }
 	{*}$fetcher [dict create url [_models_url] headers $headers] \
 		[list rio::openai::api::_models_done $announce]
 	return
 }
 
-# The listing -> the picker's choices. The OpenAI shape is {"data":[{"id":…}, …]},
-# which every compatible server copies; the id is both value and label (these servers
-# publish no display name).
+# The listing -> the picker's choices:
+#
+#   {"data":[{"id":...}, ...]}
+#
+# The id is value and label: these servers publish no display name.
 proc rio::openai::api::_models_done {announce status err body} {
 	variable models
 	if {$status == 0} {
@@ -580,9 +547,9 @@ proc rio::openai::api::_models_done {announce status err body} {
 		if {![dict exists $m id]} continue
 		lappend out [dict create value [dict get $m id] label [dict get $m id]]
 	}
-	# Remembered per profile: the list belongs to the SERVER it came from, so switching
-	# to another profile must not leave that server's models sitting in the picker, and
-	# switching back should not need a second refresh (D131).
+	# Saved per profile (D131): the list belongs to its server. A switch
+	# must not show another server's models; a switch back needs no
+	# refresh.
 	if {[llength $out]} {
 		set models [lsort -index 1 $out]
 		catch {_store models_cached $models}
@@ -591,13 +558,13 @@ proc rio::openai::api::_models_done {announce status err body} {
 	return
 }
 
-# Whether a key is stored (the GUI offers Set / Clear accordingly).
+# Whether a key is stored: the GUI offers Set or Clear.
 proc rio::openai::api::configured {} {
 	variable config
 	return [rio::secret::has [dict get $config secret_name]]
 }
 
-# Store / replace the API key (a 0600 secret, apart from settings; D21).
+# Store the API key: a 0600 secret, apart from settings (D21).
 proc rio::openai::api::set_key {key} {
 	variable config
 	rio::secret::save [dict get $config secret_name] [dict create api_key $key]
@@ -615,10 +582,10 @@ proc rio::openai::api::_api_key {} {
 	return [expr {[dict exists $s api_key] ? [dict get $s api_key] : ""}]
 }
 
-# Register with the agent's named-provider registry (D26/D30) so a frontend can
-# select this face by name over the channel (agent.provider.set openai) and render
-# its picker/key dialog from the declared label + signup. The key capability routes
-# agent.key.* to this face's own 0600 store — its key coexists with Claude's.
+# Register by name (D26, D30), so a frontend can select this face over the
+# channel (agent.provider.set openai) and build its picker and key dialog
+# from the label and signup. agent.key.* reaches this face's own 0600
+# store.
 rio::agent::register_provider openai rio::openai::api::provider \
 	-label  "OpenAI-compatible" \
 	-signup "platform.openai.com/api-keys (hosted OpenAI; a server of your own usually needs no key)" \
@@ -640,10 +607,9 @@ rio::agent::register_provider openai rio::openai::api::provider \
 
 # --- profiles (D131) ---------------------------------------------------------
 #
-# Everything above is ONE configuration; a profile is a named set of it. The storage is
-# the core's (rio::agent::settings), the meaning is this face's: which keys a profile
-# carries, that switching re-adopts them, and that the extra-JSON file travels with the
-# profile that owns it.
+# A profile is a named configuration. The core stores it
+# (rio::agent::settings); this face gives it meaning: which keys it holds,
+# that a switch adopts them, that the extra-JSON file goes with its profile.
 
 proc rio::openai::api::profiles_list {} {
 	variable profile
@@ -652,9 +618,8 @@ proc rio::openai::api::profiles_list {} {
 		active   $profile]
 }
 
-# Switch. The pointer is a key in the FLAT file — it is the one thing that is not per
-# profile — and re-adopting from the shipped defaults up is what keeps a key the new
-# profile omits from inheriting the old one's value.
+# Switch. The pointer to the active profile is a key in the flat file, the
+# one thing not per profile.
 proc rio::openai::api::profile_switch {name} {
 	variable profile
 	if {![rio::agent::settings::profile_exists openai $name]} {
@@ -666,18 +631,16 @@ proc rio::openai::api::profile_switch {name} {
 	return $name
 }
 
-# Create. A Duplicate copies the source's extra-JSON file too, under the new profile's
-# own name: sharing one file between two profiles would make editing "the copy" change
-# the original, which is not what Duplicate means anywhere else.
+# Create. A Duplicate copies the source's extra-JSON file under the new
+# name, or editing the copy would change the original.
 proc rio::openai::api::profile_add {name {from ""}} {
 	rio::agent::settings::profile_add openai $name $from
 	if {$from ne ""} { _copy_extra $from $name }
 	return $name
 }
 
-# Remove — but never the last one. Settings live IN a profile, so a provider with none
-# would have nowhere to keep them; refusing here is what lets everything else assume
-# there is always exactly one active profile.
+# Remove, but never the last one: settings live in a profile, and the rest
+# assumes one is always active.
 proc rio::openai::api::profile_remove {name} {
 	variable profile
 	if {[llength [rio::agent::settings::profiles openai]] <= 1} {
@@ -686,8 +649,8 @@ proc rio::openai::api::profile_remove {name} {
 	}
 	set own [_owned_extra $name]
 	rio::agent::settings::profile_remove openai $name
-	# Its extra-JSON file goes too, but ONLY the one named after it: a file the user
-	# pointed at from somewhere else may still be in use by another profile.
+	# Its extra-JSON file goes too, but only the one named after it: any
+	# other may serve another profile.
 	if {$own ne ""} { catch {file delete -- $own} }
 	if {$name eq $profile} {
 		profile_switch [lindex [rio::agent::settings::profiles openai] 0]
@@ -700,7 +663,7 @@ proc rio::openai::api::profile_rename {name to} {
 	variable config
 	set own [_owned_extra $name]
 	rio::agent::settings::profile_rename openai $name $to
-	# The conventionally-named extra file follows, so the pair stays recognisable.
+	# The extra file named after the profile follows it.
 	if {$own ne ""} {
 		set dst [file join [file dirname $own] "$to.extra.json"]
 		if {![file exists $dst]} {
@@ -716,8 +679,8 @@ proc rio::openai::api::profile_rename {name to} {
 	return $to
 }
 
-# The extra-JSON file a profile OWNS — the one named after it — or "" if it names
-# another file, names none, or the file is not there.
+# The extra-JSON file a profile owns, the one named after it. "" if it
+# names another, names none, or the file is gone.
 proc rio::openai::api::_owned_extra {name} {
 	set n [rio::agent::settings::get openai extra_json_file "" $name]
 	if {$n ne "$name.extra.json"} { return "" }
@@ -736,9 +699,9 @@ proc rio::openai::api::_copy_extra {from to} {
 
 # --- adopting what the user chose last time (D106, D131) ---------------------
 
-# Every key this face persists. `token_models` / `effort_models` are not user CHOICES
-# but things a server TAUGHT this provider (D106c/d); they persist the same way, per
-# profile, because what a server accepts is a fact about that server.
+# Every key this face saves. `token_models` and `effort_models` are not
+# choices but what a server taught (D106c, D106d); they are per profile
+# too, being facts about that server.
 namespace eval rio::openai::api {
 	variable persisted {
 		model effort reasoning base_url messages_url models_url
@@ -747,9 +710,8 @@ namespace eval rio::openai::api {
 	}
 }
 
-# Reset to the shipped values, then read the active profile over them. Resetting first
-# is the whole point: without it a switch would keep whichever keys the new profile
-# happens not to mention.
+# Reset to the shipped values, then read the active profile over them.
+# Without the reset, a switch would keep the keys the new profile omits.
 proc rio::openai::api::_adopt {} {
 	variable config ; variable defaults ; variable persisted ; variable profile
 	variable models ; variable models_default
@@ -763,19 +725,16 @@ proc rio::openai::api::_adopt {} {
 	if {[llength $cached]} { set models $cached }
 }
 
-# The first run of a given install: seed the shipped profiles, carry a pre-profiles
-# configuration forward, and settle on an active one.
-#
-# Seeded ONCE, keyed on the profile directory not yet existing — the D39 rule, so a
-# deleted example stays deleted and an edited one is never overwritten by an upgrade.
+# First run: seed the shipped profiles, carry a pre-profiles configuration
+# forward, pick the active one. Runs once, while the profile directory does
+# not exist (the D39 rule).
 proc rio::openai::api::_seed {} {
 	variable seeds ; variable seed_extra ; variable persisted
 	set dir [rio::agent::settings::profile_dir openai]
 	if {$dir eq "" || [file isdirectory $dir]} { return }
 
-	# What a pre-D131 install left in the flat file. Anything there is a configuration
-	# someone is USING — jka's own points at a local server — so it becomes a profile and
-	# becomes the active one, rather than being replaced by a shipped default.
+	# What a pre-D131 install left in the flat file is a configuration in
+	# use. It becomes a profile, and the active one.
 	set old [rio::agent::settings::load openai]
 	dict unset old profile
 
@@ -801,9 +760,8 @@ proc rio::openai::api::_seed {} {
 	catch {rio::agent::settings::store openai profile $active}
 }
 
-# Carry a pre-profiles configuration into a profile of its own and return its name. Its
-# inline `extra_json` — which the settings format forced onto one line — becomes a real
-# file, which is the shape it should have had all along.
+# Carry a pre-profiles configuration into a profile of its own; return its
+# name. Its one-line `extra_json` becomes a file.
 proc rio::openai::api::_migrate {old} {
 	variable persisted
 	set name "Current settings"
@@ -830,9 +788,8 @@ proc rio::openai::api::_migrate {old} {
 	return $name
 }
 
-# Seed if this is a first run, then run the profile the pointer names — falling back to
-# whichever exists if it names one that has been deleted by hand, because a dangling
-# pointer should cost a user nothing.
+# Seed on a first run, then adopt the profile the pointer names. A pointer
+# to a deleted profile falls back to the first that exists.
 proc rio::openai::api::_adopt_settings {} {
 	variable profile
 	catch {_seed}

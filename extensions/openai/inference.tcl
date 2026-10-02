@@ -1,8 +1,7 @@
-# extensions/openai — the OpenAI Chat Completions inference core (AGENTS.md D8, D26).
+# extensions/openai — the Chat Completions inference core (D8, D26).
 #
-# MIT-licensed, like rio itself (D121). The notice is IN this file because an installed
-# extension travels alone: rio writes the payload into your extension directory, and there
-# is no LICENSE beside it there (D122).
+# MIT, like rio (D121). The notice is in this file because an installed
+# extension has no LICENSE beside it (D122).
 #
 # Copyright (c) 2026 Julius Kaiser <jkdata@mailbox.org>
 #
@@ -23,26 +22,25 @@
 # CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 # OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-# The provider-specific half of an OpenAI-compatible provider: shaping the
-# /v1/chat/completions request, parsing its streaming SSE response, and mapping it
-# onto the agent provider vocabulary (post delta/tool/done/error — the same
-# contract the Claude core targets, see rio-core/agent.tcl). The auth face
-# (api-face.tcl) calls infer with its own Bearer header + config; nothing here
-# knows how the credential was obtained, and — because the endpoint is config-as-
-# data — the SAME code drives hosted ChatGPT and a local OpenAI-compatible server
-# (Ollama / llama-server / LM Studio / vLLM).
+# The wire half of an OpenAI-compatible provider: shape the
+# /v1/chat/completions request, parse its SSE stream, post delta / tool /
+# done / error (rio-core/agent.tcl), as the Claude core does. The face
+# (api-face.tcl) calls infer with its Bearer header and config. The
+# endpoint is data, so this code drives hosted ChatGPT and a local server
+# alike.
 #
-# OpenAI's wire shape differs from Anthropic's, so the mapping is its own:
-#   - the system prompt is a leading {role:"system"} MESSAGE (no top-level field);
-#   - an assistant tool call is a `tool_calls` entry whose `arguments` is a JSON
-#     STRING; a tool result is a separate {role:"tool", tool_call_id} message;
-#   - the stream is `data:` lines of choice deltas, terminated by `data: [DONE]`,
-#     with tool-call fragments accumulated per `.index` and the turn's outcome in
-#     `finish_reason` ("tool_calls" -> run tools; else stop).
+# Where OpenAI's wire differs from Anthropic's:
 #
-# The network is a seam (a `transport` command), so this is fully testable against
-# canned SSE bytes with no HTTPS. Event-loop driven (D10), Tk-free (D1). Shares the
-# JSON serialisers and the HTTPS transport with the Claude plugin (rio::llm::*).
+#   system prompt  a leading {role:"system"} message, no top-level field
+#   tool call      a `tool_calls` entry; its `arguments` is a JSON string
+#   tool result    its own {role:"tool", tool_call_id} message
+#   stream         `data:` lines of choice deltas, ended by `data: [DONE]`;
+#                  tool-call fragments collect by `.index`; the outcome is
+#                  `finish_reason` ("tool_calls" = run the tools)
+#
+# The network is a seam (a `transport` command), so the tests feed it
+# canned SSE bytes. Event-loop driven (D10), Tk-free (D1). JSON and HTTPS
+# are rio::llm::*, shared with the Claude extension.
 
 package require json
 
@@ -58,33 +56,31 @@ namespace eval rio::openai {
 	variable think   ;# sid -> 1 if this stream's reasoning is shown (the face's setting)
 }
 
-# tcllib's json decodes a JSON `null` to the STRING "null" (indistinguishable from
-# the JSON string "null"). OpenAI sends content:null on role/tool-call chunks and
-# finish_reason:null until the end, so we treat "null" as absent. The only cost is
-# a content fragment that is literally the four characters "null" — vanishingly
-# rare, and worth it to keep every tool turn from leaking a stray "null".
+# tcllib's json decodes JSON null to the string "null". OpenAI sends
+# content:null and finish_reason:null all the time, so "null" counts as
+# absent. The cost: a content fragment that is exactly "null" is dropped.
 proc rio::openai::_nn {v} { return [expr {$v eq "null" ? "" : $v}] }
 
-# Start one streaming completion. `conf` carries the config-as-data (D26):
-# messages_url, model, token_param, max_tokens, ?system?, ?effort_json? (the face's
-# already-spelled effort fragment, D106), ?request_timeout?, ?extra_json? (the user's
-# own request fields, already validated by the face), ?reasoning? (show|hide).
-# `auth` is a {header value} pair the face supplies (Authorization "Bearer <key>").
-# `transport` is `{*}$transport request on_chunk on_done` (the shared rio::llm
-# transport, or a test fake). `post` is the agent provider callback. Returns
-# immediately; the turn completes asynchronously as the transport drives back.
+# Start one streaming completion and return at once; the transport's
+# callbacks finish the turn.
+#
+#   conf       messages_url, model, token_param, max_tokens, ?system?,
+#              ?effort_json? (D106), ?request_timeout?, ?extra_json? (the
+#              user's fields, checked by the face), ?reasoning? (show|hide)
+#   auth       {header value}: Authorization "Bearer <key>", or empty
+#   transport  called as {*}$transport request on_chunk on_done
+#   post       the agent's provider callback
 proc rio::openai::infer {conf conversation tools auth transport post} {
 	variable seq ; variable buf ; variable raw ; variable cb ; variable fin
 	variable finish ; variable tcalls ; variable retry ; variable think
 	set sid [incr seq]
 	set buf($sid) "" ; set raw($sid) "" ; set cb($sid) $post ; set fin($sid) 0
 	set finish($sid) "" ; set tcalls($sid) [dict create]
-	# Absent means SHOW. Until this existed the reasoning was dropped on the floor, so
-	# a caller that says nothing gets the fix rather than the old silence.
+	# Absent means show.
 	set think($sid) [expr {![dict exists $conf reasoning]
 		|| [dict get $conf reasoning] ne "hide"}]
-	# Everything needed to send this turn again, for the one retry _done may make
-	# when the server tells us the token-cap parameter is the other one (D106c).
+	# All it takes to send this turn again: _done retries a 400 it can
+	# repair (D106c).
 	set retry($sid) [list $conf $conversation $tools $auth $transport]
 	set headers [list Content-Type application/json]
 	lappend headers {*}$auth
@@ -101,19 +97,16 @@ proc rio::openai::infer {conf conversation tools auth transport post} {
 
 # --- request shaping ---------------------------------------------------------
 
-# The conversation (agent.tcl's {role, content-block} list) -> OpenAI messages. The
-# token-cap key is config-as-data (`token_param`): hosted newer models want
-# `max_completion_tokens`, older ones and most local servers want `max_tokens`, so
-# a model change is a one-line config edit, not a rebuild (D26).
+# The conversation -> the request body. The token-cap key is data
+# (`token_param`, D26); the face says which a model wants.
 proc rio::openai::_request_json {conf conversation tools} {
 	set parts {}
 	lappend parts "\"model\":[rio::llm::jstr [dict get $conf model]]"
 	lappend parts "\"[dict get $conf token_param]\":[dict get $conf max_tokens]"
 	lappend parts "\"stream\":true"
 	lappend parts "\"messages\":\[[join [_messages_json $conf $conversation] ,]\]"
-	# The effort choice (D106), already spelled by the face — empty by default, so the
-	# request stays the one rio has always sent (and that gpt-4o and local servers,
-	# which reject `reasoning_effort`, have always accepted).
+	# The effort (D106), spelled by the face. Empty by default: gpt-4o and
+	# local servers reject `reasoning_effort`.
 	if {[dict exists $conf effort_json] && [dict get $conf effort_json] ne ""} {
 		lappend parts [dict get $conf effort_json]
 	}
@@ -124,30 +117,28 @@ proc rio::openai::_request_json {conf conversation tools} {
 		}
 		lappend parts "\"tools\":\[[join $tj ,]\]"
 	}
-	# The user's own request fields (temperature, top_p, a server's chat_template_kwargs
-	# — whatever this endpoint understands that rio has never heard of). Spliced RAW and
-	# last: the face has already checked it parses as an object and refused any key rio
-	# emits itself, so there is no duplicate key here and so no merge question. Parsing
-	# and re-serialising it would be worse than useless — tcllib flattens every leaf to a
-	# string, and `true` would go back out as "true".
+	# The user's own fields (temperature, chat_template_kwargs, ...),
+	# spliced raw and last. The face checked that it is an object with no
+	# key rio sends, so no key appears twice.
 	if {[dict exists $conf extra_json]} {
 		set x [string trim [dict get $conf extra_json]]
 		set inner [string trim [string range $x 1 end-1]]
 		if {$inner ne ""} { lappend parts $inner }
 	}
-	# jascii is the last word on the body, because not every part of it came through
-	# jstr: a tool's `input_schema` is spliced raw (it is already JSON), and so is
-	# extra_json. The HTTP layer is handed a pure-ASCII body or it mangles what it
-	# doesn't expect — see rio::llm::jascii for the failure this cost live.
+	# jascii last, over the whole body: input_schema and extra_json are
+	# spliced raw, not through jstr. The HTTP layer needs pure ASCII; see
+	# rio::llm::jascii.
 	return [rio::llm::jascii "{[join $parts ,]}"]
 }
 
-# One rio conversation entry can expand to SEVERAL OpenAI messages: an assistant
-# turn is a single message carrying its text as `content` and its tool_use blocks
-# as `tool_calls`; a user turn's tool_result blocks each become their own
-# {role:"tool"} message (emitted first, so they immediately follow the assistant
-# tool_calls they answer), and its text becomes a {role:"user"} message. The
-# system prompt (D34) leads as a {role:"system"} message.
+# One rio entry can become several OpenAI messages:
+#
+#   system prompt (D34)      {role:"system"}, first
+#   assistant turn           one message: text as `content`, tool_use
+#                            blocks as `tool_calls`
+#   user turn, tool_results  one {role:"tool"} each, emitted first, so they
+#                            follow the tool_calls they answer
+#   user turn, text          {role:"user"}
 proc rio::openai::_messages_json {conf conversation} {
 	set msgs {}
 	if {[dict exists $conf system] && [dict get $conf system] ne ""} {
@@ -166,11 +157,9 @@ proc rio::openai::_messages_json {conf conversation} {
 			switch -- [dict get $b type] {
 				text { append text [dict get $b text] }
 				tool_use {
-					# `arguments` is a JSON *string*: serialize the parsed input to a
-					# JSON object, then escape that whole object as a string value. (Re-
-					# serialize rather than splice the raw streamed fragments, for the
-					# same reason the Claude core does — the fragments carry already-
-					# unescaped values.)
+					# `arguments` is a JSON string: serialise the parsed input to
+					# an object, then escape that as a string. The parsed input,
+					# not the streamed fragments, as in the Claude core.
 					lappend toolcalls "{\"id\":[rio::llm::jstr [dict get $b id]],\"type\":\"function\",\"function\":{\"name\":[rio::llm::jstr [dict get $b name]],\"arguments\":[rio::llm::jstr [rio::llm::obj_json [dict get $b input]]]}}"
 				}
 				tool_result {
@@ -181,8 +170,7 @@ proc rio::openai::_messages_json {conf conversation} {
 		foreach tr $toolresults { lappend msgs $tr }
 		if {$role eq "assistant"} {
 			set p "\"role\":\"assistant\""
-			# content is null when the assistant turn is tool_calls only (OpenAI wants
-			# a present content field; null is its "no prose" value).
+			# Tool calls only: content is null. OpenAI wants the field present.
 			if {$text eq "" && [llength $toolcalls]} {
 				append p ",\"content\":null"
 			} else {
@@ -191,8 +179,7 @@ proc rio::openai::_messages_json {conf conversation} {
 			if {[llength $toolcalls]} { append p ",\"tool_calls\":\[[join $toolcalls ,]\]" }
 			lappend msgs "{$p}"
 		} elseif {$text ne "" || ![llength $toolresults]} {
-			# A user turn that is PURE tool_result adds no user message (the tool
-			# messages already carry it); otherwise emit the user text.
+			# A user turn of tool_results only adds no user message.
 			lappend msgs "{\"role\":[rio::llm::jstr $role],\"content\":[rio::llm::jstr $text]}"
 		}
 	}
@@ -200,8 +187,7 @@ proc rio::openai::_messages_json {conf conversation} {
 }
 
 # --- streaming SSE -> agent events -------------------------------------------
-# Each response chunk: buffer it (and the raw body), split into complete lines,
-# and act on each `data:` line (OpenAI SSE carries only data lines).
+# Buffer each chunk, split it into lines, act on each `data:` line.
 proc rio::openai::_chunk {sid bytes} {
 	variable buf ; variable raw ; variable cb
 	if {![info exists cb($sid)]} return
@@ -225,8 +211,7 @@ proc rio::openai::_line {sid line postcmd} {
 		{*}$postcmd error bad_response "The LLM sent a stream event rio couldn't parse — the integration may need an update"
 		return
 	}
-	# An in-band error object (some OpenAI-compatible servers stream one instead of
-	# a non-2xx) — classify and finish.
+	# Some compatible servers stream an error object instead of a non-2xx.
 	if {[dict exists $d error]} {
 		lassign [_classify_error [dict get $d error]] code msg
 		set fin($sid) 1
@@ -242,11 +227,11 @@ proc rio::openai::_line {sid line postcmd} {
 			set c [_nn [dict get $delta content]]
 			if {$c ne ""} { {*}$postcmd delta $c }
 		}
-		# Reasoning, which a thinking model streams beside (or instead of) its content.
-		# `reasoning_content` is the llama.cpp / vLLM / DeepSeek spelling and `reasoning`
-		# the other one in the wild; a server sending both means the same thing twice, so
-		# the first wins. It posts `thinking`, never `delta`: the core shows it but does
-		# not record it, so it is not re-sent on a later step of the turn (provider-api 4).
+		# Reasoning, streamed beside or instead of content. llama.cpp, vLLM
+		# and DeepSeek say `reasoning_content`, others `reasoning`; the first
+		# non-empty wins. Posted as `thinking`, never `delta`: the core shows
+		# it and does not record it, so it is never sent back
+		# (provider-api 4).
 		if {$think($sid)} {
 			set r ""
 			foreach k {reasoning_content reasoning} {
@@ -267,9 +252,9 @@ proc rio::openai::_line {sid line postcmd} {
 	}
 }
 
-# Fold one streamed tool_call fragment into the accumulator keyed by its `.index`
-# (the first fragment for an index carries `.id` + `.function.name`; later
-# fragments append `.function.arguments`).
+# Fold one tool_call fragment into the collector, by its `.index`. The
+# first fragment has `.id` and `.function.name`; later ones append
+# `.function.arguments`.
 proc rio::openai::_accumulate {sid tc} {
 	variable tcalls
 	set idx [expr {[dict exists $tc index] ? [dict get $tc index] : 0}]
@@ -283,10 +268,9 @@ proc rio::openai::_accumulate {sid tc} {
 	dict set tcalls($sid) $idx $cur
 }
 
-# The end of the stream ([DONE], or a clean transport close): surface any
-# accumulated tool calls as `tool` posts (parsed input + raw args), then the
-# terminal `done` — `done tool_use` when the model asked to run tools (so the loop
-# executes them and continues), a bare `done` otherwise. Idempotent via fin.
+# The stream ended ([DONE], or a clean close): post each collected tool
+# call, then `done tool_use` if tools were asked for, else `done`. Runs
+# once per stream (fin).
 proc rio::openai::_flush_terminal {sid postcmd} {
 	variable fin ; variable finish ; variable tcalls
 	if {![info exists fin($sid)] || $fin($sid)} return
@@ -307,18 +291,17 @@ proc rio::openai::_flush_terminal {sid postcmd} {
 	}
 }
 
-# Transport finished. If the stream already produced a terminal event we are done;
-# a clean 2xx that ended without an explicit [DONE] still finishes the turn;
-# otherwise classify by HTTP status into an actionable agent.error (D26).
+# The transport finished. With no terminal event yet: a clean 2xx still
+# ends the turn; anything else becomes an agent.error that names the next
+# step (D26).
 proc rio::openai::_done {sid status err} {
 	variable buf ; variable raw ; variable cb ; variable fin ; variable finish
 	variable tcalls ; variable retry ; variable think
 	if {![info exists cb($sid)]} return
 	set postcmd $cb($sid)
 	if {!$fin($sid) && $status == 400 && [_repair_400 $sid $postcmd]} {
-		# The turn was re-sent with the other token-cap parameter; its own _done will
-		# report the outcome. Nothing is posted for this attempt — the user never sees
-		# a failure rio knew how to answer.
+		# The turn was sent again, repaired; its own _done reports. Nothing
+		# is posted for this attempt.
 		unset -nocomplain buf($sid) raw($sid) cb($sid) fin($sid) finish($sid) \
 			tcalls($sid) retry($sid) think($sid)
 		return
@@ -329,8 +312,7 @@ proc rio::openai::_done {sid status err} {
 				{*}$postcmd error tls_unavailable \
 					"The core can't load the TLS library the LLM's HTTPS needs — install tcltls where the core runs (apt/apk: tcl-tls; OpenBSD: tcltls) and restart it. This is the core's host, not yours, when it's remote ($err)"
 			} elseif {[string match {*the agent refused https to*} $err]} {
-				# The transport's own refusal (D110): nothing was dialled, so the connection
-				# is not what to check — the message already says what is.
+				# The transport refused to dial (D110). Its message says why.
 				{*}$postcmd error tls_unchecked $err
 			} else {
 				{*}$postcmd error network "Couldn't reach the LLM — check your connection, or the server URL for a local model ($err)"
@@ -346,21 +328,19 @@ proc rio::openai::_done {sid status err} {
 		retry($sid) think($sid)
 }
 
-# Two request fields are per MODEL while rio's choice of them is per PROVIDER, and
-# OpenAI's /v1/models describes neither — unlike Anthropic's capabilities (D106a),
-# there is nothing to ask. But the 400 says it outright, so rio lets the refusal
-# teach it (D106c/D106d, jka's call): re-send the turn with the field repaired, and
-# hand the answer to the face to remember for that model.
+# Two request fields are per model, while rio's choice is per provider, and
+# /v1/models describes neither. The 400 does, so rio learns from it
+# (D106c, D106d): send the turn again, repaired, and tell the face.
 #
-#   token cap — "Unsupported parameter: 'max_tokens' is not supported with this
-#               model. Use 'max_completion_tokens' instead."   (reasoning models)
-#   effort    — "Unrecognized request argument supplied: reasoning_effort"
-#                                                    (gpt-4o, most local servers)
+#   token cap  "Unsupported parameter: 'max_tokens' is not supported with
+#              this model. Use 'max_completion_tokens' instead."
+#              (reasoning models)
+#   effort     "Unrecognized request argument supplied: reasoning_effort"
+#              (gpt-4o, most local servers)
 #
-# No vendor table to rot; a server that is happy with what we sent never gets here;
-# and a 400 is refused before any generation, so a repair costs no tokens. Each
-# repair is attempted at most ONCE per turn (`repaired` records which have been
-# applied), so a server that refuses everything reports its 400 rather than looping.
+# A 400 comes before any generation, so a repair costs no tokens. Each
+# repair runs at most once per turn (`repaired`), so a server that refuses
+# everything gets its 400 reported, not a loop.
 proc rio::openai::_repair_400 {sid postcmd} {
 	variable raw ; variable retry
 	if {![info exists retry($sid)]} { return 0 }
@@ -385,9 +365,8 @@ proc rio::openai::_repair_400 {sid postcmd} {
 			_learned $conf token_learn [dict get $conf model] max_completion_tokens
 		}
 		effort {
-			# Drop the field for this turn. The user's CHOICE is left alone — support is
-			# per model, so switching back to a model that takes an effort restores it
-			# (the rule D106a settled for Claude).
+			# Drop the field for this turn. The user's choice stays: support
+			# is per model, and another model may take it (D106a).
 			dict set conf effort_json ""
 			_learned $conf effort_learn [dict get $conf model] ""
 		}
@@ -396,16 +375,16 @@ proc rio::openai::_repair_400 {sid postcmd} {
 	return 1
 }
 
-# Tell the face what the server taught us; persistence is its business, not the
-# wire's. Never fatal — a turn that works must not fail on a bookkeeping error.
+# Tell the face what the server taught; saving is the face's business.
+# Never fatal: a working turn must not fail on bookkeeping.
 proc rio::openai::_learned {conf key model value} {
 	if {![dict exists $conf $key] || [dict get $conf $key] eq ""} return
 	catch {{*}[dict get $conf $key] $model $value}
 }
 
-# Map an HTTP status (+ optional JSON error body) to {code, message}. Messages
-# name the user's next action, and stay generic about the service ("the LLM") so a
-# local-server user isn't told to check an OpenAI key (D26).
+# An HTTP status, and the JSON error body if any -> {code message}. Each
+# message names the next step and says "the LLM": a local-server user has
+# no OpenAI key to check (D26).
 proc rio::openai::_classify {status raw} {
 	set detail ""
 	catch {
@@ -422,8 +401,7 @@ proc rio::openai::_classify {status raw} {
 	return [list unexpected "The LLM replied in a way rio didn't expect (HTTP $status) — the integration may need an update$detail"]
 }
 
-# An in-band {error {...}} streamed object -> {code, message} (some compatible
-# servers report failures this way rather than via HTTP status).
+# A streamed {error {...}} object -> {code message}.
 proc rio::openai::_classify_error {err} {
 	set msg "The LLM reported an error"
 	catch {set msg [dict get $err message]}
