@@ -2,25 +2,20 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# The Extensions menu (D130): the installer, then one door per installed extension that
-# has something to configure. An extension's own settings are ITS business and live in
-# ITS window — rio's Preferences holds only what rio itself owns, including its settings
-# ABOUT extensions (update checking, repositories, signing keys), which stay in
-# Preferences ▸ Extensions.
+# The Extensions menu (D130): the installer, then one entry per installed
+# extension that has settings. An extension configures itself in its own
+# window. Preferences ▸ Extensions holds rio's settings about extensions.
 # ---------------------------------------------------------------------------
-# Extensions that are GUI-side rather than core-side register here at load time, in the
-# rio::modes::register idiom: {id label command}. Empty today — every current door comes
-# from the provider list below — but the merge is the point: the menu takes rows from
-# wherever they come from, so a mode or a theme growing settings later needs no new
-# mechanism, only a row.
+# A GUI-side extension registers its settings door here: {id label command}.
+# Providers get theirs from the provider list (ext_settings_rows).
 set ::ext_settings_extra {}
 
 proc ext_settings_register {id label command} {
 	dict set ::ext_settings_extra $id [list $label $command]
 }
 
-# Every extension with a settings door, as {id label command}, sorted by label. Read
-# from the cached provider list, so building the menu costs no round-trip.
+# Every extension with a settings door, as {id label command}, sorted by
+# label. From the cached provider list: no round trip.
 proc ext_settings_rows {} {
 	set rows {}
 	foreach p $::agent_providers {
@@ -34,22 +29,19 @@ proc ext_settings_rows {} {
 	return [lsort -index 1 -dictionary $rows]
 }
 
-# Past this many doors the menu would be a list rather than a menu, so it becomes one:
-# D92 holds that no menu in rio is data-driven and unbounded, and this menu is
-# data-driven. Keeping that true by construction beats assuming nobody installs many.
+# Past this many doors the menu shows one entry that opens a picker: no menu
+# in rio grows without bound (D92).
 set ::ext_settings_menu_max 12
 
 proc extensions_menu_fill {} {
 	if {![winfo exists .m.extensions]} return
 	.m.extensions delete 0 end
-	# "Browse…", not "Extensions…": the menu is already called Extensions and the window
-	# it opens is titled Extensions, so the entry names the act instead of stuttering
-	# the noun twice on one path.
+	# "Browse…": the menu is already called Extensions.
 	.m.extensions add command -label "Browse…" -command extensions_window
 	.m.extensions add separator
 	set rows [ext_settings_rows]
 	if {![llength $rows]} {
-		# Never an empty menu: say why there is nothing here rather than look broken.
+		# Never an empty menu.
 		.m.extensions add command -label "(no extension settings)" -state disabled
 	} elseif {[llength $rows] > $::ext_settings_menu_max} {
 		.m.extensions add command -label "Extension settings…" -command ext_settings_pick
@@ -72,45 +64,37 @@ proc ext_settings_pick {} {
 }
 
 # ---------------------------------------------------------------------------
-# The Extensions window (D39; Settings in D67, its own top-level menu since
-# D130): Extensions ▸ Extensions… — where the user
-# browses every configured repository, chooses BETWEEN same-name extensions
-# (different authors, different versions — each variant its own line with its
-# provenance), installs, and removes. Naming: the WINDOW is "Extensions" (what
-# you browse); the SOURCES are "Repositories" (where they come from) — the
-# header's `Repositories…` button edits sources.list.
+# The Extensions window (D39, D130): Extensions ▸ Browse…. Browse every
+# repository, choose between extensions of the same name, install, remove.
 #
-# Deliberately a NON-MODAL toplevel (no grab, no tkwait): browsing repositories
-# is a side activity, not a question blocking the editor — and this is rio's
-# first D35-style tool window, to be re-hosted into a dock site when D35 lands.
-# Non-modal means re-entry is real: ::repo_busy guards it — one scan or install
-# at a time, action buttons disabled meanwhile (the sequential core_calls pump
-# the event loop, so the editor itself stays live throughout).
+#   ┌ Repositories…  ⟳  Update All (n)          Filter: [      ] ┐
+#   │ one row per (kind, name)                                    │
+#   │ !! one row per dead source                                  │
+#   ├─────────────────────────────────────────────────────────────┤
+#   │ the selected row: one line per variant, Install / Remove    │
+#   ├─────────────────────────────────────────────────────────────┤
+#   │                                                      Close  │
+#   └ status ──────────────────────────────────────────────────────┘
 #
-# The list aggregates ONE row per (kind, name); the detail below it lists every
-# VARIANT of the selected row. Unknown kinds are listed greyed ("needs a newer
-# rio" — the forward-compat contract), dead sources get one honest `!!` row
-# each, and an installed extension whose source vanished is synthesized from
-# the ledger so Remove always works.
+# - Not modal. ::repo_busy allows one scan or install at a time and disables
+#   the action buttons meanwhile.
+# - A kind this rio does not know is listed greyed: "needs a newer rio".
+# - An installed extension whose source is gone is listed from the ledger, so
+#   Remove always works.
 # ---------------------------------------------------------------------------
 
 set ::repo_busy 0     ;# a scan or install is running: action buttons disabled
 set ::extw_rows {}    ;# row dicts, index-aligned with the window's listbox
 
-# The host, for PROSE about a repository ("rio.skylm.org signs its extensions") and for
-# a columnar summary where one source is the only one on the line. Anywhere the user is
-# CHOOSING or CONSENTING between sources — a variant line, the Update All consent, the
-# start-up notice — print the whole URL instead: two sources can share a domain and
-# differ only in scheme or path, and the host alone hides exactly what tells them apart.
+# A URL's host, for prose and summaries. Where the user chooses between
+# sources, print the whole URL: two sources can share a host.
 proc host_of {url} {
 	if {[regexp -nocase {^https?://([^/]+)} $url -> h]} { return $h }
 	return $url
 }
 
-# Are two source URLs the same repository? The scheme is only how it is reached (D109):
-# a user who moves http://host/rio to https://host/rio keeps their updates, the
-# [installed] mark and the "from the repository it was installed from" grouping,
-# instead of every installed extension turning foreign overnight.
+# Are two source URLs the same repository? The scheme is ignored (D109):
+# http://host/rio and https://host/rio are one.
 proc source_same {a b} {
 	regsub -nocase {^https?://} $a {} a
 	regsub -nocase {^https?://} $b {} b
@@ -129,9 +113,7 @@ proc extensions_window {} {
 	frame $w.hdr -background [dict get $c ui.bg]
 	button $w.hdr.repos   -text "Repositories…" -font RioUIFont -command extw_sources_dialog
 	button $w.hdr.refresh -text "⟳" -font RioUIFont -command extw_refresh  ;# ⟳ rescan (D27)
-	# Update All (D107): apt's `upgrade` beside its `update`. Its label carries the
-	# count, and it is disabled at zero — the button itself is the answer to "is
-	# anything out of date?", so it must never look clickable when nothing is.
+	# Update All (D107). Its label carries the count; disabled at zero.
 	button $w.hdr.upall -text "Update All" -font RioUIFont -command extw_update_all
 	label $w.hdr.flbl -text "Filter:" -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -141,7 +123,7 @@ proc extensions_window {} {
 	pack $w.hdr.filter $w.hdr.flbl -side right
 	bind $w.hdr.filter <KeyRelease> extw_fill
 
-	# The aggregated list: one row per (kind, name), plus the honest failures.
+	# The list: one row per (kind, name), plus the dead sources.
 	frame $w.body -background [dict get $c ui.bg]
 	scrollbar $w.body.sb -command {.extw.body.list yview}
 	listbox $w.body.list -height 12 -width 72 -activestyle none -exportselection 0 \
@@ -153,19 +135,15 @@ proc extensions_window {} {
 	pack $w.body.list -side left -fill both -expand 1
 	bind $w.body.list <<ListboxSelect>> extw_select
 
-	# The detail section: every variant of the selected row, with its own
-	# Install/Remove — where the user CHOOSES between authors and versions.
+	# The detail: every variant of the selected row.
 	frame $w.det -background [dict get $c ui.bg]
 
 	frame $w.foot -background [dict get $c ui.bg]
 	button $w.foot.close -text Close -font RioUIFont -command [list destroy $w]
 	pack $w.foot.close -side right
 
-	# A real status bar, not a label sharing the button row: what the window last DID
-	# (scanned, installed, removed) is a report, and inline on the window's own
-	# background it read as one more line of the detail pane above it. So it takes the
-	# Win2000/VS6 form — a sunken strip across the whole bottom edge, below the buttons,
-	# always present (empty is a state, a bar that comes and goes jumps the layout).
+	# A status bar as Win2000 has it: a sunken strip along the bottom edge,
+	# always there. It says what the window last did.
 	label $w.status -anchor w -font RioUIFont -padx 4 -pady 1 \
 		-relief sunken -borderwidth 1 \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -187,9 +165,8 @@ proc extw_status {text} {
 	if {[winfo exists .extw.status]} { .extw.status configure -text $text }
 }
 
-# Toggle the busy guard: while a scan or install runs, every action button in
-# the window is disabled — re-entry through a second click is the non-modal
-# window's real hazard, and this is its one gate.
+# Set the busy guard: while a scan or install runs, every action button is
+# disabled, so a second click cannot re-enter.
 proc extw_busy {on} {
 	set ::repo_busy $on
 	if {![winfo exists .extw]} return
@@ -197,8 +174,8 @@ proc extw_busy {on} {
 	foreach b {.extw.hdr.repos .extw.hdr.refresh} { $b configure -state $st }
 	extw_upall_sync
 	foreach f [winfo children .extw.det] {
-		# The cross-source checkbutton sits directly in the detail frame; the
-		# Install/Update/Remove buttons sit one level deeper, in a variant's row.
+		# The checkbutton is in the detail frame; the buttons are one level
+		# deeper, in a variant's row.
 		if {[winfo class $f] eq "Checkbutton"} { $f configure -state $st ; continue }
 		foreach ch [winfo children $f] {
 			if {[winfo class $ch] eq "Button"} { $ch configure -state $st }
@@ -206,8 +183,7 @@ proc extw_busy {on} {
 	}
 }
 
-# The Update All button's label and state: the count is part of the label, so the
-# window answers "anything out of date?" without a selection or a click.
+# The Update All button's label and state.
 proc extw_upall_sync {} {
 	if {![winfo exists .extw.hdr.upall]} return
 	set n [dict size $::ext_updates]
@@ -219,15 +195,10 @@ proc extw_upall_sync {} {
 proc extw_refresh {} {
 	if {$::repo_busy} return
 	extw_busy 1
-	# What the core holds: its provider-api ceiling (D66) — so a repo provider that
-	# needs a newer rio greys before an install even reaches the core — and the
-	# installed version of each provider in its store, which for a provider outranks
-	# this GUI's ledger (D107). Best-effort: an old core with no provider.list leaves
-	# the default, and every provider then lists as api 1 (what such a core could
-	# load anyway).
+	# What the core's store holds: its provider-api ceiling (D66) and each
+	# provider's installed version (D107).
 	ext_core_providers_refresh
-	# Which providers this core has actually LOADED, which is a different question from
-	# which are in its store — and the one the detail pane's settings button turns on.
+	# Which providers the core has loaded: the settings button depends on it.
 	agent_providers_refresh
 	repo_scan_all {apply {{src n total} {
 		extw_status "fetching [host_of $src] ($n/$total)…"
@@ -240,10 +211,8 @@ proc extw_refresh {} {
 	extw_fill
 }
 
-# Update All from the window: one consent for the batch (ext_update_all), then a
-# rescan — an update can change what a source offers next (a payload list, a
-# provider's api), and the row marks must come from fresh manifests, not from the
-# ones that were on screen when the button was pressed.
+# Update All: one consent for the batch (ext_update_all), then a rescan, so
+# the rows show fresh manifests.
 proc extw_update_all {} {
 	if {$::repo_busy} return
 	if {![dict size $::ext_updates]} return
@@ -256,16 +225,15 @@ proc extw_update_all {} {
 	if {$done} { extw_refresh } else { extw_fill }
 }
 
-# Aggregate the scan + ledger into display rows: one per (kind, name), sorted;
-# ledger-only entries (source offline or de-configured) synthesized so Remove
-# still works; one `!!` row per dead source at the bottom.
+# The display rows from scan and ledger: one per (kind, name), sorted; then
+# one per dead source.
 proc extw_rows_build {} {
 	set bykey {}
 	foreach v $::repo_variants {
 		dict lappend bykey "[dict get $v kind]/[dict get $v name]" $v
 	}
-	# Installed, but no source lists it: the ledger (or, for a provider, the core —
-	# D107) speaks for it, so Remove always works even when the repository is gone.
+	# Installed, but no source lists it: a row from the ledger, or for a
+	# provider from the core (D107).
 	dict for {key cur} $::ext_installed {
 		if {[dict exists $bykey $key]} continue
 		lassign [split $key /] kind name
@@ -295,10 +263,8 @@ proc extw_rows_build {} {
 	return $rows
 }
 
-# Why a source produced no extensions, in the few words a list row has. Everything
-# past `unreachable` is a signature refusal (D118) — the detail pane below carries
-# the sentence, and for a key waiting to be confirmed or one that changed (D119) the
-# way to act on it.
+# Why a source gave no extensions, in a few words for its row. The detail
+# pane has the full sentence.
 proc dead_phrase {code} {
 	switch -- $code {
 		untrusted_cert  { return "certificate not trusted" }
@@ -344,9 +310,8 @@ proc extw_fill {} {
 			set from [host_of [dict get [lindex $vars 0] source]]
 			if {[dict exists [lindex $vars 0] offline]} { append from " (offline)" }
 		}
-		# The installed mark carries the version comparison (D107): what you have, and
-		# what a repository now offers instead. A version that doesn't follow the semver
-		# rule says so rather than being silently left out of the comparison.
+		# The installed mark (D107): [1.0 → 1.1], [installed 1.0], or
+		# "version not comparable" for a version that is not semver.
 		set marks ""
 		set key [dict get $row key]
 		set update [dict exists $::ext_updates $key]
@@ -382,17 +347,15 @@ proc extw_fill {} {
 	extw_select
 }
 
-# Rebuild the detail section for the selected row: the extension's header line,
-# then one line per variant — `version by author — source-host` with Install,
-# or [installed] + Remove on the variant that is in place. An installed version
-# no longer listed by its source gets its own honest line.
+# Rebuild the detail for the selected row: a header, then one line per variant.
 #
-# D107 adds the version comparison to each variant line: the one that would
-# UPDATE what is installed says so and its button reads Update; one that is
-# behind says so and keeps a plain Install (a downgrade stays possible, it just
-# never happens by accident). Below the header, an installed row carries the
-# cross-source checkbutton — the per-extension opt-in that lets a repository
-# OTHER than the one it came from count as an update at all.
+#   1.1 by jka — http://host/repo — signed            [Update]
+#   1.0 by jka — http://host/repo — signed   [installed] [Remove]
+#   0.9 by jka — …  (older than the installed 1.0)    [Install]
+#
+# - An installed version its source no longer lists gets a line of its own.
+# - An installed row has the checkbutton that lets other repositories count
+#   as updates (D107).
 proc extw_select {} {
 	set det .extw.det
 	if {![winfo exists $det]} return
@@ -401,10 +364,8 @@ proc extw_select {} {
 	set sel [.extw.body.list curselection]
 	if {$sel eq "" || $sel >= [llength $::extw_rows]} return
 	set row [lindex $::extw_rows $sel]
-	# Bound long text to the list's width so a wordy description word-wraps rather
-	# than stretching this auto-sized window. reqwidth is the list's requested pixel
-	# width (from -width 72), stable even before the window is mapped; `wrapb` leaves
-	# room for a variant row's Install/Remove button.
+	# Wrap long text at the list's width, so it does not stretch the window.
+	# `wrapb` leaves room for a variant's button.
 	set wrap  [expr {[winfo reqwidth .extw.body.list] - 12}]
 	set wrapb [expr {$wrap - 90}]
 	if {[dict exists $row dead]} {
@@ -412,19 +373,15 @@ proc extw_select {} {
 			-text "[dict get $row url]\n[dict get $row error]" \
 			-background [dict get $c ui.bg] -foreground [dict get $c error]
 		pack $det.err -fill x
-		# A refused certificate is the one dead source the user can do something about
-		# here: look at it, and accept it if it is theirs (D111). Offered for an https
-		# source only — an http one refused on a redirect has no certificate of its own
-		# to show, and its message already names the certificate that was refused.
+		# A refused certificate can be reviewed and accepted (D111). For an
+		# https source only.
 		if {[dict get $row code] eq "untrusted_cert" && [regexp -nocase {^https://} [dict get $row url]]} {
 			button $det.review -text "Review certificate…" -font RioUIFont \
 				-state [expr {$::repo_busy ? "disabled" : "normal"}] \
 				-command [list extw_cert_review [dict get $row url] [dict get $row error]]
 			pack $det.review -anchor w -pady {4 0}
 		}
-		# A signing key waiting to be confirmed (D119) or a rotated one (D118) is the
-		# other dead source the user can act on, and the act is the same shape: look at
-		# what is being asked for, then say yes to that one thing.
+		# So can a signing key that is new (D119) or changed (D118).
 		if {[dict get $row code] in {key_unconfirmed key_changed} && [dict get $row newkey] ne ""} {
 			button $det.keyreview -text "Review signing key…" -font RioUIFont \
 				-state [expr {$::repo_busy ? "disabled" : "normal"}] \
@@ -442,15 +399,9 @@ proc extw_select {} {
 	set entry ""
 	if {[dict exists $::ext_installed $key]} { set entry [dict get $::ext_installed $key] }
 	set st [expr {$::repo_busy ? "disabled" : "normal"}]
-	# An installed provider: say whether it is actually running, and if it is, offer its
-	# own settings window from here as well as from the Extensions menu (D130) — the
-	# window that just installed it is the likeliest place to want it. Same predicate as
-	# the menu's, so the two can never disagree about who has a window: a keyed provider
-	# earns one on its key alone, even declaring no options. A provider installs
-	# core-side and is sourced only at the next core start (D66), so "installed" and
-	# "live" are genuinely different states — and the window that just installed it is
-	# where saying so is most use. The test is the REGISTERED list, never the ledger:
-	# asking a core about a provider it has not loaded gets nothing to show.
+	# An installed provider. Loaded: offer its settings window (D130), by the
+	# menu's own test, provider_has_settings. Installed but not loaded: it
+	# starts with the next core start (D66), so say "Restart rio".
 	if {$entry ne "" && [dict get $row kind] eq "provider"} {
 		set pname [dict get $row name]
 		if {[provider_has_settings $pname]} {
@@ -465,9 +416,7 @@ proc extw_select {} {
 			pack $det.restart -fill x -pady {2 2}
 		}
 	}
-	# The cross-source opt-in, on installed rows only: it is a statement about THIS
-	# extension's identity across repositories, so it belongs on the extension, not in
-	# Preferences. Off by default (D107).
+	# The cross-source opt-in, per installed extension. Off by default (D107).
 	if {$entry ne "" && [dict exists $::ext_ledger $key]} {
 		set ::extw_anysource [ext_anysource $key]
 		checkbutton $det.anysrc -variable ::extw_anysource -state $st \
@@ -486,17 +435,15 @@ proc extw_select {} {
 		set line "  [dict get $v version]"
 		if {[dict get $v author] ne ""} { append line " by [dict get $v author]" }
 		append line " — [dict get $v source]"
-		# Where the choice between two sources is actually made, so the thing that
-		# distinguishes them is stated here (D118). An offline row has no source to
-		# say anything about.
+		# The signature mark (D118): this is where sources are compared.
 		if {![dict exists $v offline]} {
 			append line " — [sig_mark [expr {[dict exists $v sig] ? [dict get $v sig] : "unsigned"}]]"
 		}
 		set this_installed [expr {$entry ne "" \
 			&& [source_same [dict get $v source] [dict get $entry source]] \
 			&& [dict get $v version] eq [dict get $entry version]}]
-		# How this variant relates to what is installed. Only ever stated when both
-		# versions follow the semver rule — otherwise rio makes no claim (D107).
+		# Newer or older than the installed one: said only when both versions
+		# are semver (D107).
 		set is_update [expr {[ext_variant_update $v] ne ""}]
 		if {!$this_installed && !$is_update && $entry ne "" && ![dict exists $v offline]
 				&& [source_same [dict get $v source] [dict get $entry source]]
@@ -517,8 +464,7 @@ proc extw_select {} {
 				-command [list extw_remove [dict get $row kind] [dict get $row name]]
 			pack $f.rm -side right -padx 2
 		} elseif {[ext_variant_installable $v]} {
-			# Update, not Install, when this is the newer version of what you already
-			# have — same act, but the button says which act it is.
+			# "Update" when it is newer than the installed one.
 			button $f.in -text [expr {$is_update ? "Update" : "Install"}] \
 				-font RioUIFont -state $st -command [list extw_install $sel $i]
 			pack $f.in -side right -padx 2
@@ -552,9 +498,7 @@ proc extw_install {rowidx vidx} {
 	extw_fill
 }
 
-# Flip one extension's cross-source flag and repaint: the count in Update All and
-# the row's mark both change with it, so the effect of the checkbutton is visible
-# in the same window without a rescan (the variants are already in hand).
+# Set one extension's cross-source flag and repaint. No rescan is needed.
 set ::extw_anysource 0   ;# the detail checkbutton's variable, per selected row
 proc extw_anysource_toggle {key} {
 	ext_anysource_set $key $::extw_anysource
@@ -572,16 +516,11 @@ proc extw_remove {kind name} {
 }
 
 # ---------------------------------------------------------------------------
-# The start-up check (D107) — rio's `apt update` at boot, OFF by
-# default: a fresh rio makes no network request it was not asked to make, and
-# the request is the CORE's anyway (repo.fetch), which on a remote core means
-# someone else's machine.
-#
-# Deferred on a timer, and deferred again while an op is in flight or the
-# Extensions window is scanning — the rule fs_changed_settle follows: never
-# start a core call from a timer inside another op's round trip. Every failure
-# is silent (a dead source is already one honest row in the window); the only
-# thing this is allowed to interrupt the user with is a genuine finding.
+# The start-up check for updates (D107). Off by default: rio makes no network
+# request it was not asked to make.
+# - On a timer, and put off again while an op is in flight or the window is
+#   scanning: no core call starts inside another op's round trip.
+# - A failure is silent. Only a found update shows a dialog.
 # ---------------------------------------------------------------------------
 set ::ext_check_updates 0    ;# the preference (prefs.json `check_updates`)
 set ::ext_check_delay 1500   ;# ms after boot; long enough for the window to settle
@@ -610,14 +549,9 @@ proc ext_startup_check {} {
 	if {[dict size $::ext_updates]} { ext_update_dialog }
 }
 
-# What the check found. A plain toplevel rather than a tk_messageBox because it
-# carries a checkbutton — and "don't ask again" is the honest escape from a
-# start-up notification: it turns the preference off, which means checking
-# becomes the user's own business in the Extensions window, and says so.
-#
-# NO grab and no tkwait: this reports, it does not ask. Boot must not block on
-# it, and a modal a headless run can reach is exactly the hazard the dialog
-# guard at the foot of rio-gui.tcl exists to prevent.
+# What the check found. A toplevel, because it has a checkbutton: "Don't
+# check for updates at start-up" turns the preference off. No grab, no
+# tkwait: it reports, and boot must not block on it.
 proc ext_update_dialog {} {
 	set w .extupd
 	destroy $w
@@ -660,29 +594,23 @@ proc ext_update_dialog {} {
 	focus $w.btns.close
 }
 
-# The preference is one flag, written through the same prefs.json as every other
-# view setting — so both of its doors (this dialog's checkbutton and the
-# Preferences pane) record the same thing.
+# The preference is one flag in prefs.json, for this dialog and for Preferences.
 proc ext_check_pref_save {} { prefs_save }
 
-# The compact sources editor behind `Repositories…`: the URLs of sources.list
-# in a listbox, Remove for the selected one, an entry + Add below. Writes
-# sources.list on every change (it IS the hand-editable file — this dialog is
-# just a convenience over it). Modal is fine here: it's a small focused edit,
-# not a browsing surface. Closing refreshes the Extensions window's scan.
+# The editor behind `Repositories…`: sources.list as a listbox, with Add and
+# Remove. Every change is written at once. Modal. Closing it rescans, if the
+# Extensions window is open.
 proc extw_sources_dialog {} {
 	set w .extsrc
 	destroy $w
 	toplevel $w
 	wm title $w "Repositories"
-	# Reachable from the Extensions window and from Preferences ▸ Extensions (D107),
-	# so the master is whichever is actually there.
+	# Opened from the Extensions window or from Preferences (D107).
 	wm transient $w [expr {[winfo exists .extw] ? ".extw" : "."}]
 	set c $::theme_colors
 	$w configure -background [dict get $c ui.bg]
-	# Hint text is muted (gutter.fg), so static help never reads as an interactive
-	# element; the list below carries a solid border for the same reason — the
-	# selectable repository URLs must look distinct from this sentence (D68).
+	# Help text is muted and the list has a border, so help does not look
+	# like a control (D68).
 	label $w.hint -anchor w -justify left -font RioUIFont \
 		-text "Each repository is a plain directory served over http:// or https:// (see CONTRIBUTING.md to host one)." \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
@@ -718,16 +646,14 @@ proc extw_sources_dialog {} {
 	catch {grab $w}
 	focus $w.add.url
 	tkwait window $w
-	# Only rescan when there is a window to repaint: opened from Preferences, this
-	# dialog is a plain edit of sources.list and must not reach for the network.
+	# Rescan only if there is a window to repaint.
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
 proc extw_source_add {} {
 	set url [string trim [.extsrc.add.url get]]
 	if {$url eq ""} return
-	# http and https are both first-class (D109): the scheme is the user's choice, and
-	# nothing here nudges one over the other.
+	# http or https: the user's choice (D109).
 	if {![regexp -nocase {^https?://} $url]} {
 		report_error "A repository URL starts with http:// or https:// — got: $url"
 		return

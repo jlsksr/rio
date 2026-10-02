@@ -3,18 +3,14 @@
 
 # --- a certificate that doesn't verify (D111) ------------------------------------
 #
-# The browser's "Your connection is not private … Advanced" path. A repository whose
-# certificate the core refused lists as "certificate not trusted"; its detail pane offers
-# Review certificate…, which asks the CORE for the certificate (tls.inspect — the core's
-# network is the one that matters, D30) and shows what is wrong with it in plain words, its
-# details, and two buttons: Go Back, the default, and Accept the Risk and Continue.
-#
-# Accept sends the fingerprint THIS DIALOG SHOWED, never a fresh one: a server that swapped
-# certificates between the look and the click would otherwise get the second one accepted.
-# Modal, because it asks a question; opened only by the user's click, never by a scan or
-# the start-up check — one dialog per refused source is the cumbersome part avoided.
+# As a browser does. A repository whose certificate the core refused lists as
+# "certificate not trusted". Review certificate… asks the core for it
+# (tls.inspect) and shows what is wrong, the details, and two buttons:
+# Go Back (the default) and Accept the Risk and Continue.
+# - Accept sends the fingerprint this dialog showed, never a fresh one.
+# - Modal. Opened only by the user's click, never by a scan.
 
-# The inspect seam: tls.inspect through the core, never throwing. Tests stub THIS.
+# tls.inspect through the core; never raises. Tests stub this proc.
 proc tls_inspect {url} {
 	set resp [rio_call tls.inspect [dict create url $url]]
 	if {[dict get $resp ok]} { return [dict create ok 1 cert [dict get $resp result]] }
@@ -87,8 +83,7 @@ proc extw_cert_review {url {fetch_error ""}} {
 			pack $w.p$i -fill x -padx 8 -pady 1
 			incr i
 		}
-		# The details are data to read and compare, so they sit in a bordered box, apart
-		# from the sentences around them (D68); selectable, so a fingerprint can be copied.
+		# The details are data: a bordered box (D68), selectable for copying.
 		text $w.det -height 6 -width 64 -wrap word -font RioUIFont -relief solid \
 			-borderwidth 1 -highlightthickness 0 \
 			-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -150,18 +145,12 @@ proc extw_cert_review {url {fetch_error ""}} {
 
 # --- confirming a signing key (D118, D119) ---------------------------------
 #
-# The same act as accepting a certificate, for the other half of the trust model, in
-# the two situations that call for it: a repository rio has never had a key for, and
-# one whose key is now different. Both are what a legitimate publisher looks like (the
-# publisher's own SIGNING.md tells them to expect this dialog on their users' machines)
-# and equally what an impersonation looks like, and rio cannot tell them apart — so it
-# shows the fingerprints and asks. It never trusts a key because it arrived first.
-#
-# Trusts the key THIS DIALOG SHOWED, never a freshly fetched one, for the reason
-# extw_cert_review gives: a server that swapped keys between the look and the click
-# would otherwise get the second one trusted.
+# For a repository rio has no key for, and for one whose key changed. Either
+# may be the publisher or an impostor, and rio cannot tell: it shows the
+# fingerprints and asks. It trusts the key this dialog showed, never a fresh
+# one.
 
-# The fingerprint seam: sig.fingerprint through the core, "" when it can't be had.
+# sig.fingerprint through the core; "" when there is none.
 proc sig_fingerprint {key} {
 	set resp [rio_call sig.fingerprint [dict create key $key]]
 	if {![dict get $resp ok]} { return "" }
@@ -171,10 +160,7 @@ proc sig_fingerprint {key} {
 proc extw_key_review {url newkey} {
 	if {$::repo_busy} return
 	set old [repo_key_of $url]
-	# First sight (D119): there is no trusted key to compare against, so this is the
-	# same dialog with one fingerprint instead of two. Not a second window — the act is
-	# identical, and the one thing that matters is said in both: confirm it somewhere
-	# other than the connection that just offered it.
+	# First sight (D119): the same dialog with one fingerprint, not two.
 	set first [expr {$old eq ""}]
 	set oldfp [expr {$first ? "" : [sig_fingerprint $old]}]
 	set newfp [sig_fingerprint $newkey]
@@ -201,9 +187,7 @@ proc extw_key_review {url newkey} {
 		-text $headtext \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
 	pack $w.head -fill x -padx 8 -pady {8 4}
-	# The two fingerprints are data to compare, so they sit in a bordered box, apart
-	# from the sentences around them (D68); selectable, because comparing one by eye
-	# against a publisher's web page is exactly the intended use.
+	# The fingerprints are data: a bordered box (D68), selectable for copying.
 	text $w.det -height 5 -width 64 -wrap word -font RioUIFont -relief solid \
 		-borderwidth 1 -highlightthickness 0 \
 		-background [dict get $c ui.bg] -foreground [dict get $c ui.fg]
@@ -246,9 +230,8 @@ proc extw_key_review {url newkey} {
 	if {[winfo exists .extw]} { extw_refresh }
 }
 
-# Preferences ▸ Network ▸ Accepted certificates…: every exception the core holds, and a
-# way to take one back — a browser always offers that, and so does rio (D111). The list is
-# the core's certificates.conf, read through tls.accepted each time it is filled.
+# Preferences ▸ Network ▸ Accepted certificates…: every exception the core
+# holds (tls.accepted), and a way to remove one (D111).
 proc certs_dialog {} {
 	set w .certs
 	destroy $w
@@ -325,21 +308,12 @@ proc certs_remove {} {
 	certs_fill
 }
 
-# Preferences ▸ Extensions ▸ Repository signing keys…: every key the user has
-# confirmed, and a way to take one back (D118; deferred with jka when D118 landed,
-# built once the mechanism had settled). certs_dialog's counterpart for repositories,
-# and deliberately the same window: a list, one line per trust decision, Forget.
-#
-# One thing differs from the certificates, and it is said in the window rather than
-# assumed: the keys are the GUI's own — repository-keys.conf beside sources.list,
-# because the sources list IS the trust list (D39) and a key is a property of an entry
-# in it, not of a host the core dialled.
-#
-# Forget means what it says (D119). Since no scan trusts a key by itself, taking one
-# back really does put that repository behind the question again — it is refused until
-# the user confirms a key for it, which is the same thing deleting the section by hand
-# has always done. The built-in row is the exception and writes rather than deletes;
-# repo_keys_forget says why there.
+# Preferences ▸ Extensions ▸ Repository signing keys…: every key the user
+# confirmed, and a way to forget one (D118). Built like certs_dialog.
+# - The keys are the GUI's: repository-keys.conf beside sources.list.
+# - Forget puts the repository back behind the question: it is refused until
+#   a key is confirmed (D119). The built-in key is withdrawn, not deleted;
+#   see repo_keys_forget.
 proc repo_keys_dialog {} {
 	set w .repokeys
 	destroy $w
@@ -360,8 +334,7 @@ proc repo_keys_dialog {} {
 		-yscrollcommand {autoscroll .repokeys.body.sb .repokeys.body.list}
 	pack $w.body.list -side left -fill both -expand 1
 	bind $w.body.list <<ListboxSelect>> repo_keys_sel
-	# Muted, not the error colour: what lands here explains a row or reports what
-	# Forget just did — the row vanishing is otherwise the only feedback there is.
+	# Muted, not the error colour: it explains a row or reports a Forget.
 	label $w.status -anchor w -justify left -wraplength 520 -font RioUIFont \
 		-background [dict get $c ui.bg] -foreground [dict get $c gutter.fg]
 	frame $w.btns -background [dict get $c ui.bg]
@@ -390,22 +363,15 @@ proc repo_keys_fill {} {
 	set ::repo_keys_rows {}
 	set rows {}
 	dict for {src e} $::repo_keys {
-		# A keyless section trusts nothing, so it has no key to list. The one that
-		# matters — the withdrawn seed — gets its own row just below.
+		# A section without a key lists nothing. The withdrawn built-in key
+		# gets its row below.
 		if {[dict get $e key] eq ""} continue
 		lappend rows [dict create src $src key [dict get $e key] \
 			when [dict get $e trusted] builtin 0 withdrawn 0]
 	}
-	# rio's own key is trusted without ever being written down — it is the seed
-	# repo_key_of falls back to, so a scan of that repository finds a key already
-	# trusted and never asks. Left out, this window would be empty on a fresh install
-	# while rio does trust a key, which is the one thing it exists to show. Only while
-	# that repository is still in the sources list, though: a key for a source the user
-	# removed speaks for nothing.
-	#
-	# Withdrawn, it is still shown (D119) — rio would otherwise report nothing at all
-	# about the one key it made a decision about on the user's behalf, and the row is
-	# where that decision is visible and reversible.
+	# rio's own key is trusted without a stored entry, so it gets a row here,
+	# while its repository is in the sources list. Withdrawn, it is still
+	# shown (D119).
 	set seed [source_key $::default_repo]
 	set gone [expr {[dict exists $::repo_keys $seed]
 		&& [dict get $::repo_keys $seed key] eq ""}]
@@ -418,14 +384,11 @@ proc repo_keys_fill {} {
 		}
 	}
 	foreach row $rows {
-		# The fingerprint is the core's to compute, and the call pumps the event
-		# loop — the window may be gone by the time it answers.
+		# The call runs the event loop: the window may be gone afterwards.
 		set fp [sig_fingerprint [dict get $row key]]
 		if {![winfo exists .repokeys]} return
 		if {$fp eq ""} {
-			# No ssh-keygen on the core's host, so no fingerprint to show. The key
-			# itself still identifies the row; truncated, because its whole point
-			# here is to be compared, and 68 base64 characters are not.
+			# No fingerprint (no ssh-keygen): show the start of the key.
 			set k [dict get $row key]
 			set fp "[lindex $k 0] [string range [lindex $k 1] 0 15]…"
 		}
@@ -444,10 +407,7 @@ proc repo_keys_fill {} {
 	}
 }
 
-# What a selected row means, where that isn't the obvious thing. Said on selection
-# rather than only when the button is pressed: the built-in row is the one row whose
-# Forget does something a user would not predict, and reading about it first is worth
-# more than discovering it afterwards.
+# Explain the built-in row when it is selected: its Forget withdraws the key.
 proc repo_keys_sel {} {
 	if {![winfo exists .repokeys]} return
 	set sel [.repokeys.body.list curselection]
@@ -469,9 +429,8 @@ proc repo_keys_forget {} {
 	set row [lindex $::repo_keys_rows $sel]
 	if {[dict get $row builtin]} {
 		if {[dict get $row withdrawn]} { repo_keys_sel ; return }
-		# Nothing to delete — the seed is a fallback, not an entry — so withdrawing it
-		# is the one case that WRITES: a section with no key, which repo_key_of answers
-		# with "" instead of falling back (D119).
+		# The built-in key has no entry to delete. Withdrawing it writes a
+		# section without a key (D119).
 		dict set ::repo_keys [dict get $row src] [dict create key "" trusted "" \
 			forgotten [clock format [clock seconds] -format %Y-%m-%d]]
 		repo_keys_save

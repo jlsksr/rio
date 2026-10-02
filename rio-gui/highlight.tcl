@@ -2,55 +2,36 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# Syntax highlighting (D32). Highlighting is PRESENTATION, so the GUI
-# owns it: pure, swappable per-line scanner modules live in syntax/ (Tk-free — a
-# future TUI reuses them), and the GUI is the *applier*. It maps each token TYPE
-# onto the theme's syntax.* colour role as a text tag (apply_theme), and re-tokenises
-# the active buffer after edits.
+# Syntax highlighting (D32). The per-line scanners are in syntax/ and have no
+# Tk. The GUI applies them: each token type becomes a text tag `syn:<type>`,
+# coloured by the theme's syntax.* role.
 #
-# Re-highlighting is INCREMENTAL. After an edit (hl_edit) only the changed line's state
-# can differ, so hl_incremental re-scans from the first dirty line DOWNWARD and stops as
-# soon as a line's freshly-computed entry state matches the cached one (past the edit) —
-# the state has re-converged, so every line below is unchanged. Typing thus re-tags a
-# handful of lines, not the whole file, while multi-line context (open comments, script
-# bodies, quoted values that carry state across lines) stays correct. Edits are coalesced
-# on the idle handler so a burst of keystrokes paints once.
+# Per editor group:
 #
-# Highlighting is also VIEWPORT-SCOPED (D126). Painting the whole buffer on open cost
-# ~1.35 seconds per megabyte and was 81% of the price of opening a large file — the
-# reason D125 had to make an 8 MB file a question at all. Two pieces of state replace
-# the whole-buffer pass, and the trick is that the first one is the OLD cache, weakened:
+#   line 1 ┐
+#          │ scanned        hl_enter: the state entering each line, exact,
+#   hl_lo ┐│                index i-1 for line i, up to the frontier E
+#         ││ painted        hl_lo..hl_hi carry tags (0 0 = none)
+#   hl_hi ┘│
+#   E     ─┘ the frontier
+#          : not scanned    nothing is claimed below E
+#   last line
 #
-#   hl_enter      — the SCAN FRONTIER. Still the scan state entering each line, index
-#                   i-1 for line i, still exact; it just stops at some line E <= the
-#                   line count instead of covering the file. Below E nothing is claimed.
-#   hl_lo, hl_hi  — the PAINTED INTERVAL: the lines that actually carry syn:* tags.
-#                   0 0 means none. Always within the frontier (hl_hi <= E).
-#
-# Weakening "exact everywhere" to "exact up to E" is what makes this small: the splice
-# in hl_edit, the convergence early-out in hl_incremental and the cache's indexing all
-# work unchanged on a shorter list, and truncating the frontier is always a legal thing
-# to do because the frontier never promises anything below itself. On a file that fits
-# on screen the frontier IS the whole file and the painted interval IS every line, so
-# small files run exactly the code they ran before.
-#
-# hl_ensure is the one entry point: it grows the frontier toward the visible window (in
-# hl_chunk-sized pieces that yield to the event loop, so a jump to the end of a huge
-# file streams colour in rather than freezing) and paints only what is newly exposed,
-# never re-tagging a line that is already correct. Scrolling reaches it through
-# edscroll, i.e. through Tk's -yscrollcommand, which is also how the wheel, the
-# scrollbar, `see`, vi's jumps and find's step all arrive — one seam, not five.
-#
-# What stays whole-buffer on purpose: entry states are exact, never guessed from a
-# bounded back-scan, so reaching line N still means having scanned the N-1 lines above
-# it. That work is real but it is chunked, off the blocking path, and paid once.
+# - Only the visible window, plus a margin, is painted (D126). hl_ensure is
+#   the one entry point: it grows the frontier toward the window, in chunks
+#   that yield to the event loop, and paints what is newly exposed. Every
+#   scroll reaches it through edscroll.
+# - An edit re-scans from the first dirty line down and stops when a line's
+#   entry state matches the cached one: below that nothing changed
+#   (hl_edit, hl_incremental). A burst of keystrokes is one pass.
+# - Entry states are never guessed: reaching line N means having scanned the
+#   lines above it, once.
+# - The frontier may always be cut short, since nothing is claimed below it.
 # ---------------------------------------------------------------------------
 
-# Load the tokeniser modules: the registry (the contract) then every language
-# module. Shipped modules load first, then the user's own from
-# $XDG_CONFIG_HOME/rio/syntax/, so a drop-in file re-registering an extension
-# replaces the shipped highlighter (the same override idea as user themes, D24). A
-# broken module is reported, not fatal — it must never stop the editor from starting.
+# Load the registry, then every scanner: shipped first, then the user's from
+# $XDG_CONFIG_HOME/rio/syntax/, which may replace a shipped one. A broken
+# module is reported and skipped.
 proc hl_load {} {
 	set base [file join $::rio_dir .. syntax]
 	if {[catch {source [file join $base registry.tcl]} err]} {
@@ -78,17 +59,14 @@ proc hl_user_dir {} {
 }
 
 # ---------------------------------------------------------------------------
-# Editing modes (D38, D41): the core ships the Windows mode only; emacs
-# and vi install as extensions into the user drop-in dir. Loaded exactly like the
-# syntax highlighters — registry first, shipped modules, then user drop-ins that
-# shadow by re-registering. The active mode lives on the shared RioMode bind tag,
-# which make_editor_group slots between each text widget and Tk's Text class:
+# Editing modes (D38, D41). rio ships the Windows mode; emacs and vi are
+# extensions. Loaded like the scanners. The active mode's bindings are on the
+# RioMode bind tag, between each text widget and Tk's Text class:
 #
 #     .eg<g>.t   RioMode   Text   .   all
 #
-# so the precedence is fixed by construction: app keymap chords (on the widget
-# path, D23) always beat the mode; mode bindings that `break` beat Tk's Text
-# defaults; mode bindings that don't fall through to them.
+# So a keymap chord (on the widget, D23) beats the mode, and a mode binding
+# that `break`s beats Tk's default.
 # ---------------------------------------------------------------------------
 proc modes_load {} {
 	set base [file join $::rio_dir .. modes]
@@ -116,11 +94,9 @@ proc modes_user_dir {} {
 	return ""
 }
 
-# The one applier for ::edit_mode (the D31 pattern: menu radio and boot both land
-# here). Detach the outgoing mode, wipe the tag centrally — a mode can never leak
-# a binding — then attach the new one. A persisted mode that no longer exists
-# falls back to the default rather than erroring at startup (same spirit as the
-# theme fallback).
+# Apply ::edit_mode, for the menu and for boot: detach the old mode, clear the
+# tag so no binding leaks, attach the new one. A saved mode that is gone
+# falls back to windows.
 proc apply_editmode {} {
 	if {[info commands rio::modes::exists] eq ""} return
 	if {![rio::modes::exists $::edit_mode]} {
@@ -140,10 +116,8 @@ proc apply_editmode {} {
 	prefs_save
 }
 
-# Column editing rearranges text in a way that only the windows mode's caret model
-# makes sense of — vi and emacs carry their own block/rectangle notions — so the
-# Settings toggle is greyed out (whatever its stored value) unless windows mode is
-# active. apply_editmode calls this on every mode switch; boot calls it once.
+# Column editing belongs to the windows mode; vi and emacs have their own
+# block editing. So its toggle is greyed in any other mode.
 proc sync_column_edit_menu {} {
 	if {![winfo exists .m.settings]} return
 	set state [expr {$::edit_mode eq "windows" ? "normal" : "disabled"}]
@@ -162,12 +136,9 @@ proc modes_menu_fill {} {
 	}
 }
 
-# Pick the scanner for group `g`'s active buffer ("" = no highlighter, e.g. a scratch
-# buffer or a plain-text file). Runs on open / switch. A language the user picked by
-# hand (the buffer's `lang`, D112) wins; otherwise the file name decides. A picked
-# language that is no longer registered (its extension removed) falls back to the file
-# name rather than erroring. The scanner + language name live in the group's cache, one
-# per editor widget (D33).
+# Pick the scanner for group `g`'s active buffer; "" means none. A language
+# picked by hand (the buffer's `lang`, D112) wins, if it is still registered;
+# else the file name decides.
 proc hl_select {g} {
 	gset $g hl_scan "" ; gset $g hl_lang ""
 	if {[info procs rio::syntax::for_path] eq ""} return
@@ -204,10 +175,8 @@ proc set_buffer_lang {id lang} {
 	refresh_status
 }
 
-# View ▸ Language… (D112): pick the current buffer's highlighter by hand, for pasted
-# code in an untitled buffer or a file the name guesses wrong. The shared bounded picker,
-# not a cascade — the list grows with every installed syntax extension (D92). Payloads
-# are never "" because pick_dialog returns "" on Cancel.
+# View ▸ Language… (D112): pick the current buffer's highlighter by hand.
+# The shared picker (D92). No payload is "": pick_dialog returns "" on Cancel.
 proc language_pick_rows {} {
 	set p [bufget $::cur path]
 	set detected [expr {$p ne "" ? [rio::syntax::lang_for_path $p] : ""}]
@@ -235,11 +204,9 @@ proc hl_linecount {t} {
 	return [lindex [split [$t index "end-1c"] .] 0]
 }
 
-# Re-tag one line L of widget `t` with scanner `scan`, from its already-known entry
-# `state`/`param`: scan it, clear the old syntax tags on just that line, repaint, and
-# return the state ENTERING line L+1. `clear` is 0 when the caller has already cleared
-# a whole range in one go (hl_paint_range) — that per-line removal is 13 widget calls
-# and most of the cost of painting, so a range pass hoists it out of the loop.
+# Scan and re-tag line L of widget `t` from its entry `state`/`param`. Returns
+# the state entering line L+1. `clear` 0: the caller already removed the old
+# tags for a whole range, which is most of the cost of painting.
 proc hl_paint_line {t scan L state param {clear 1}} {
 	set line [$t get $L.0 "$L.0 lineend"]
 	lassign [rio::syntax::scan_line $scan $line $state $param] spans state param
@@ -250,12 +217,9 @@ proc hl_paint_line {t scan L state param {clear 1}} {
 	return [list $state $param]
 }
 
-# The lines group `g` wants highlighted: what is on screen, plus ::hl_margin above and
-# below so an ordinary scroll usually finds its new lines already painted. Asks the
-# WIDGET via @0,y rather than doing pixel arithmetic, exactly as gutter_redraw does —
-# so a wrapped logical line occupying several display rows is counted once and -wrap
-# word needs no special case. A group whose window has not been mapped yet reports a
-# height of 1; fall back to its configured -height rather than a degenerate window.
+# The lines group `g` wants highlighted: those on screen, plus ::hl_margin
+# above and below. Asks the widget (@0,y), so a wrapped line counts once. An
+# unmapped widget reports height 1: use its configured -height then.
 proc hl_window {g nlines} {
 	set t [gw $g]
 	set h [winfo height [gget $g path]]
@@ -272,10 +236,8 @@ proc hl_window {g nlines} {
 	return [list $w0 $w1]
 }
 
-# The cached entry state for a line, as ONE object shared by every line that enters in
-# the same state (see ::hl_states). hl_enter holds one entry per line and a 16 MB file is
-# 500,000 of them, so a freshly allocated two-element list per line is most of what the
-# frontier costs in memory — and it is the same two or three values over and over.
+# An entry state as one shared object (::hl_states). hl_enter has an entry
+# per line, and they are the same two or three values: sharing saves the RAM.
 proc hl_state {state param} {
 	set key [list $state $param]
 	if {[dict exists $::hl_states $key]} { return [dict get $::hl_states $key] }
@@ -283,25 +245,13 @@ proc hl_state {state param} {
 	return $key
 }
 
-# Grow group `g`'s scan frontier toward line `target`, at most ::hl_chunk lines per
-# call. This SCANS without painting — roughly 23 us a line against 56 for a painted
-# one — because all we need from the lines above the viewport is the state they hand
-# down. If the target is still out of reach the pass re-arms itself; the continuation
-# re-enters hl_ensure rather than this proc, so if the user scrolled somewhere else in
-# the meantime the next chunk aims at the new window instead of the stale one.
+# Grow group `g`'s frontier toward line `target`, at most ::hl_chunk lines
+# per call. Scans without painting: only the state is needed from lines above
+# the window. If the target is not reached, it re-arms hl_ensure, which aims
+# at wherever the window is by then.
 #
-# The chunk's text is pulled from the widget ONCE and split, rather than per line. Two Tk
-# index parses and a B-tree descent cost 1.7 us a line where the bulk fetch costs 0.1, and
-# this loop always walks its whole budget, so nothing is fetched that is not scanned.
-# (hl_incremental below keeps its per-line `get` for the opposite reason: it usually
-# re-converges within a line or two of the edit, so a chunk-sized fetch there would pull
-# a thousand lines to read three.)
-#
-# Worth stating plainly, because it bounds what is left: at 20.2 us a line the SCANNER is
-# 19.5 of them. The fetch was 8% and the entry-state allocation was inside the noise. No
-# further work on this loop can matter much — the next lever, if one is ever wanted, is a
-# per-line fast path inside the scanners themselves, and that is a change to D32's contract
-# across 33 of them. Measured and written down, deliberately not built (ROADMAP).
+# The chunk's text is fetched from the widget once and split. The scanner is
+# nearly all of this loop's cost (ROADMAP).
 proc hl_extend {g target nlines} {
 	set t [gw $g] ; set scan [gget $g hl_scan]
 	set enter [gget $g hl_enter]
@@ -317,9 +267,8 @@ proc hl_extend {g target nlines} {
 	set stop [expr {$E + $::hl_chunk - 1}]          ;# last line this pass may scan
 	if {$stop > $target - 1} { set stop [expr {$target - 1}] }
 	if {$stop >= $E} {
-		# `get` to a lineend keeps the newlines BETWEEN the lines and drops the one
-		# after the last, so this splits into exactly the lines E..stop — including the
-		# buffer's final line, which has no newline after it either way.
+		# `get` to a lineend omits the last newline, so the split is exactly
+		# the lines E..stop.
 		foreach line [split [$t get $E.0 "$stop.0 lineend"] "\n"] {
 			lassign [rio::syntax::scan_line $scan $line $state $param] _ state param
 			lappend enter [hl_state $state $param]  ;# state entering line E+1
@@ -330,9 +279,8 @@ proc hl_extend {g target nlines} {
 	if {$E < $target} { hl_vmark $g 0 }
 }
 
-# Paint lines a..b of group `g` from the entry states already cached for them. One tag
-# removal for the whole range instead of one per line; the caller guarantees a..b lies
-# within the frontier (hl_paint_range clamps rather than trusting that blindly).
+# Paint lines a..b of group `g` from their cached entry states. The range is
+# clamped to the frontier.
 proc hl_paint_range {g a b} {
 	set t [gw $g] ; set scan [gget $g hl_scan]
 	set enter [gget $g hl_enter]
@@ -346,16 +294,15 @@ proc hl_paint_range {g a b} {
 	}
 }
 
-# Make sure group `g`'s visible window is highlighted. Idempotent and cheap when there
-# is nothing to do, which is the common case — it runs on every scroll.
+# Make sure group `g`'s visible window is highlighted. Runs on every scroll,
+# so it is cheap when there is nothing to do.
 proc hl_ensure {g} {
 	gset $g hl_vpending 0
 	if {![dict exists $::grp $g]} return
 	if {![winfo exists [gget $g path]] || [info procs rio::syntax::tokens] eq ""} return
 	if {[gget $g hl_scan] eq ""} return
-	# An edit is queued: its incremental pass owns the frontier and may truncate it, so
-	# let that run first. Idle handlers fire in order, so re-arming on idle puts us
-	# behind the hl_schedule that hl_edit already queued.
+	# An edit is queued: its pass may cut the frontier, so it runs first.
+	# Idle handlers fire in order.
 	if {[gget $g hl_pending] || [gget $g hl_dirty] > 0} { hl_vmark $g ; return }
 	set t [gw $g]
 	set nlines [hl_linecount $t]
@@ -369,23 +316,19 @@ proc hl_ensure {g} {
 	set lo [gget $g hl_lo] ; set hi [gget $g hl_hi]
 	if {$hi > $nlines} { set hi $nlines }
 	if {$lo == 0 || $w1 < $lo - 1 || $w0 > $hi + 1} {
-		# A jump: the new window is disjoint from what is painted. Everything painted
-		# is off-screen by construction, so wiping it cannot flicker.
+		# A jump: what is painted is off-screen, so wiping it cannot flicker.
 		foreach tok [rio::syntax::tokens] { $t tag remove syn:$tok 1.0 end }
 		hl_paint_range $g $w0 $w1
 		gset $g hl_lo $w0 ; gset $g hl_hi $w1
 		return
 	}
-	# An ordinary scroll: paint only the strip that just came into range, so a line
-	# that is already correct is never re-tagged.
+	# A scroll: paint only the strip that came into range.
 	if {$w0 < $lo} { hl_paint_range $g $w0 [expr {$lo - 1}] ; gset $g hl_lo $w0 }
 	if {$w1 > $hi} { hl_paint_range $g [expr {$hi + 1}] $w1 ; gset $g hl_hi $w1 }
 }
 
-# Queue a coalesced hl_ensure on group `g`. `now` picks a timer over an idle handler,
-# which is what the chunked frontier scan wants: a self-re-registering IDLE handler can
-# be serviced again in the same event-loop pass and starve window events, while a timer
-# is unambiguously behind them, so the UI stays live while a long prefix builds.
+# Queue one hl_ensure on group `g`. `now` uses a timer instead of an idle
+# handler: an idle handler that re-registers itself can starve window events.
 proc hl_vmark {g {now 0}} {
 	if {[gget $g hl_vpending]} return
 	gset $g hl_vpending 1
@@ -396,14 +339,9 @@ proc hl_vmark {g {now 0}} {
 	}
 }
 
-# Drop group `g`'s highlight state and start again from the visible window: on open, on
-# a tab switch, and whenever the scanner itself changes (Save As, View ▸ Language…, a
-# reloaded syntax extension). Reads text from the widget, which already holds the
-# canonical content — no core call.
-#
-# The first paint is SYNCHRONOUS rather than deferred to the idle handler, so opening a
-# file never shows a frame of unhighlighted text and a caller that inspects tags right
-# away sees them.
+# Drop group `g`'s highlight state and start again from the visible window:
+# on open, on a tab switch, and when the scanner changes. The first paint is
+# synchronous, so no frame of plain text shows.
 proc hl_reset {g} {
 	gset $g hl_pending 0 ; gset $g hl_dirty 0 ; gset $g hl_lastchanged 0
 	gset $g hl_enter {} ; gset $g hl_lo 0 ; gset $g hl_hi 0
@@ -414,17 +352,14 @@ proc hl_reset {g} {
 	hl_ensure $g
 }
 
-# Record an edit in group `g` for its next incremental pass. The core echoes every
-# change as {start end text}; from that we know the first line touched (sl) and the net
-# change in line count (delta). We splice the group's hl_enter by delta so the cached
-# entry states BELOW the edit stay index-aligned with the widget — that alignment is
-# what lets hl_incremental trust the cache when testing for state convergence. Then we
-# widen the dirty range and queue a coalesced pass.
-#
-# The painted interval is spliced by the same delta, and that is load-bearing rather
-# than tidiness: Tk anchors tags to characters, so the correct tags below an edit ride
-# the text as it moves. Without the splice every keystroke would look like a jump and
-# repaint the whole window instead of a line or two.
+# Record an edit in group `g` for the next incremental pass. From the change
+# {start end text}: the first line touched (sl) and the change in line count
+# (delta).
+# - hl_enter is spliced by delta, so the cached states below the edit stay
+#   aligned with their lines.
+# - hl_lo and hl_hi are shifted by delta too: Tk's tags move with the text,
+#   so the lines below the edit are still painted.
+# - The dirty range grows and one pass is queued.
 proc hl_edit {g p} {
 	set scan [gget $g hl_scan] ; set enter [gget $g hl_enter]
 	if {$scan eq ""} return
@@ -434,8 +369,7 @@ proc hl_edit {g p} {
 	set added [expr {[llength [split [dict get $p text] "\n"]] - 1}]
 	set delta [expr {$added - ($el - $sl)}]
 	set n [llength $enter]
-	# Entirely below the frontier: nothing is cached or painted down there, and the
-	# frontier makes no claim about it. Let hl_ensure pick it up if it scrolls into view.
+	# Below the frontier: nothing is cached there.
 	if {$sl > $n} { hl_vmark $g ; return }
 	if {$delta > 0} {
 		set pad {} ; for {set i 0} {$i < $delta} {incr i} { lappend pad [list "\xEF\xBF\xBFdirty" ""] }
@@ -461,17 +395,12 @@ proc hl_edit {g p} {
 	hl_schedule $g
 }
 
-# Incremental re-highlight of group `g` (the idle handler). Re-scan from the first
-# dirty line down, repainting each line and updating its cached entry state, and stop
-# as soon as — past the edited region — a line's fresh entry state matches the one
-# already cached: the scan state has re-converged, so everything below is unaffected.
-#
-# The pass runs to the frontier, not to the end of the buffer, and only lines inside
-# the painted interval are actually re-tagged; outside it we scan for the state alone.
-# An edit that never re-converges (typing "<!--" at the top of a huge file) is capped
-# at ::hl_chunk lines: rather than carry resumable state, the frontier is TRUNCATED to
-# where the pass got to. That is always legal — the frontier promises nothing below
-# itself — and it is what keeps this proc free of continuation bookkeeping.
+# The incremental pass for group `g` (an idle handler). Re-scan from the first
+# dirty line down, and stop, once past the edit, when a line's new entry state
+# equals the cached one: nothing below changed.
+# - Runs to the frontier at most. Only painted lines are re-tagged.
+# - An edit that never converges (typing "<!--" at the top of a huge file)
+#   stops after ::hl_chunk lines, and the frontier is cut to that line.
 proc hl_incremental {g} {
 	gset $g hl_pending 0
 	set t [gw $g]
