@@ -8,7 +8,7 @@
 # This module is pure logic — no Tk, no I/O, no protocol — so it tests headless.
 
 namespace eval rio::doc {
-	variable buffers {}   ;# dict: id -> {lines <list-of-strings> name <string> meta <dict>}
+	variable buffers {}   ;# dict: id -> {lines name meta run seq undo undo_size redo redo_size}
 	variable nextid 0
 }
 
@@ -23,7 +23,8 @@ proc rio::doc::new {{text ""} {name untitled} {meta {}}} {
 	if {$lines eq ""} { set lines [list ""] }
 	set id [incr nextid]
 	dict set buffers $id \
-		[dict create lines $lines name $name meta $meta undo {} redo {} run 0 seq 0]
+		[dict create lines $lines name $name meta $meta run 0 seq 0 \
+			undo {} undo_size 0 redo {} redo_size 0]
 	return $id
 }
 
@@ -123,7 +124,7 @@ proc rio::doc::inventory {} {
 }
 
 # Replace [start, end) with text. Returns the text that was removed (so callers
-# can build change events and, later, undo). Mutates the buffer in place. This is
+# can build change events, and undo keeps it). Mutates the buffer in place. This is
 # the RAW primitive: it does not touch the undo history, so undo/redo can use it
 # to reverse an edit without themselves being recorded.
 #
@@ -145,17 +146,31 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 
 # --- undo/redo ---------------------------------------------------------------
 #
-# A recorded edit is a replace that remembers enough to reverse itself: the range
-# {start,end} and `text` it applied, plus the `removed` text it displaced. To
-# UNDO, replace [start, advance(start,text)) — the span the inserted text now
-# occupies — back with `removed`. To REDO, just replay the original replace, since
-# undo restored the pre-edit state exactly. Applying a fresh edit invalidates the
-# redo branch.
+# A step is a list {start end iend held}:
+#
+#   start end   the range the edit replaced
+#   iend        where the text it put in ends
+#   held        the half of the edit the document does NOT hold
+#
+#                the document has     the step holds
+#   undo stack   the inserted text    the removed text
+#   redo stack   the removed text     the inserted text
+#
+# Undo swaps the two halves and moves the step across; redo swaps them back. A text
+# is therefore stored once: a reload or a Replace All costs one copy of the file, not
+# two. A list, not a dict: 279 bytes a step against 985, measured (ADR-0146).
+# Applying a fresh edit invalidates the redo branch.
+#
+# --- the budget (ADR-0146) ---------------------------------------------------
+#
+# Each stack of each buffer may cost `undo_budget`: its held characters, plus
+# `step_cost` a step. Over that, the oldest steps go. The newest always stays, so
+# the last edit can be taken back whatever its size.
 #
 # --- coalescing (D90) ----------------------------------------------
 #
 # Typing must not cost one undo step per keystroke. A run of single-character
-# edits that continues where the previous one left off is MERGED into the record
+# edits that continues where the previous one left off is MERGED into the step
 # it extends, so one undo takes back the word just typed. The granularity is a
 # WORD: the run seals as soon as the character joining it is blank, so "the "
 # is one step and "quick " the next. A newline never joins a run at all — it is
@@ -166,8 +181,8 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 # typing forward, Backspace leftwards, or Delete repeatedly at one spot.
 # Everything else — a paste, a selection replaced, Replace All, an agent edit —
 # is its own step and closes the run behind it. `run` is the per-buffer flag for
-# "the record on top of the undo stack is still open"; undo and redo clear it,
-# since the record they moved is no longer the one being typed into.
+# "the step on top of the undo stack is still open"; undo and redo clear it,
+# since the step they moved is no longer the one being typed into.
 #
 # The core cannot tell the Delete key pressed twice from vi's `x` pressed twice:
 # both arrive as two one-character deletions at the same spot, yet vim undoes
@@ -178,26 +193,71 @@ proc rio::doc::replace {id start end text {clampedVar ""}} {
 # only: the step it begins still grows, so vi's `i` followed by typing a word is
 # one step, not a lone first character and then the rest.
 
+namespace eval rio::doc {
+	variable undo_budget 4194304   ;# per stack, per buffer: 4 MB of ASCII
+	variable step_cost   300       ;# a step's own weight, rounded up from 279
+}
+
+# What a step counts against the budget.
+proc rio::doc::_cost {step} {
+	variable step_cost
+	return [expr {$step_cost + [string length [lindex $step 3]]}]
+}
+
+# Put `step` on a buffer's `undo` or `redo` stack, then drop the oldest steps while
+# the stack is over budget. Never the one just pushed.
+proc rio::doc::_push {id stack step} {
+	variable buffers
+	variable undo_budget
+	dict update buffers $id b {
+		dict lappend b $stack $step
+		set size [expr {[dict get $b ${stack}_size] + [_cost $step]}]
+		set steps [dict get $b $stack]
+		set drop 0
+		while {$size > $undo_budget && $drop < [llength $steps] - 1} {
+			set size [expr {$size - [_cost [lindex $steps $drop]]}]
+			incr drop
+		}
+		if {$drop} { dict set b $stack [lrange $steps $drop end] }
+		dict set b ${stack}_size $size
+	}
+}
+
+# Take the newest step off a buffer's `undo` or `redo` stack. "" if it is empty.
+proc rio::doc::_pop {id stack} {
+	variable buffers
+	set steps [dict get $buffers $id $stack]
+	if {![llength $steps]} { return "" }
+	set step [lindex $steps end]
+	dict update buffers $id b {
+		dict set b $stack [lrange $steps 0 end-1]
+		dict incr b ${stack}_size -[_cost $step]
+	}
+	return $step
+}
+
 # A recording edit — what user-facing ops call. Returns the removed text.
-# The record keeps the CLAMPED start/end (see `replace`): a client may send a
+# The step keeps the CLAMPED start/end (see `replace`): a client may send a
 # column past the line's end, and undo must reverse where the edit landed.
 proc rio::doc::edit {id start end text {coalesce 1}} {
 	variable buffers
 	set removed [replace $id $start $end $text applied]
 	lassign $applied cstart cend
-	set rec [dict create start $cstart end $cend text $text removed $removed]
-	dict update buffers $id b {
-		set merged ""
-		if {$coalesce && [dict get $b run]} {
-			set merged [_coalesce [dict get $b undo] $rec]
-		}
+	set step [list $cstart $cend [_advance $cstart $text] $removed]
+	set ch [_solo $text $removed]
+	if {$coalesce && [dict get $buffers $id run]} {
+		set top [lindex [dict get $buffers $id undo] end]
+		set merged [_merge $top $step $ch]
 		if {$merged ne ""} {
-			dict set b undo $merged
-		} else {
-			dict lappend b undo $rec
+			_pop $id undo
+			set step $merged
 		}
-		dict set b run [_run_open $rec]
+	}
+	_push $id undo $step
+	dict update buffers $id b {
+		dict set b run [_run_open $ch]
 		dict set b redo {}
+		dict set b redo_size 0
 	}
 	return $removed
 }
@@ -215,59 +275,49 @@ proc rio::doc::settext {id text} {
 	return [dict create start 1.0 end $endpos text $text removed $removed]
 }
 
-# The undo stack with `rec` folded into the record on top, or "" when this edit
-# cannot extend that record and must become a step of its own.
-proc rio::doc::_coalesce {stack rec} {
-	if {![llength $stack]} { return "" }
-	set ch [_solo $rec]
-	if {$ch eq "" || $ch eq "\n"} { return "" }
-	set top [lindex $stack end]
-	set tstart [dict get $top start]
-	set ttext  [dict get $top text]
-	set start  [dict get $rec start]
-	if {[dict get $top removed] eq "" && [dict get $rec removed] eq ""} {
+# `step`, an edit of the one character `ch`, folded into `top`, the step before it.
+# "" when it cannot extend that step and must become a step of its own.
+proc rio::doc::_merge {top step ch} {
+	if {$top eq "" || $ch eq "" || $ch eq "\n"} { return "" }
+	lassign $top  tstart tend tiend theld
+	lassign $step start  end  iend  held
+	if {$theld eq "" && $held eq ""} {
 		# An insert run: the new character lands exactly where the last one ended.
-		# The record stays a pure insert (start == end), so redo replays it whole.
-		if {$start ne [_advance $tstart $ttext]} { return "" }
-		dict set top text "$ttext$ch"
-		return [lreplace $stack end end $top]
+		# The step stays a pure insert (start == end), so redo replays it whole.
+		if {$start ne $tiend} { return "" }
+		return [list $tstart $tend $iend ""]
 	}
-	if {$ttext eq "" && [dict get $rec text] eq ""} {
+	if {$tiend eq $tstart && $iend eq $start} {
 		# A delete run, either direction: Backspace removes the span ending where
-		# the record starts, the Delete key removes again at the very same spot.
-		set removed [dict get $top removed]
-		if {[dict get $rec end] eq $tstart} {
-			set removed "$ch$removed"
-			dict set top start $start
+		# the step starts, the Delete key removes again at the very same spot.
+		if {$end eq $tstart} {
+			set theld "$ch$theld"
+			set tstart $start
 		} elseif {$start eq $tstart} {
-			append removed $ch
+			append theld $ch
 		} else {
 			return ""
 		}
-		dict set top removed $removed
 		# `end` is what redo deletes again, so it must span the whole run.
-		dict set top end [_advance [dict get $top start] $removed]
-		return [lreplace $stack end end $top]
+		return [list $tstart [_advance $tstart $theld] $tstart $theld]
 	}
 	return ""
 }
 
-# May a following edit extend the record just recorded? Only while the run is
+# May a following edit extend the step just recorded? Only while the run is
 # mid-word: a blank (space, tab, newline) closes it, and so does anything that
-# is not a single character. Note this does not consult `coalesce`: that flag
-# breaks the run BEFORE this edit, it does not stop the new step from growing —
-# which is what makes vi's `i` followed by typing one step and not two.
-proc rio::doc::_run_open {rec} {
-	set ch [_solo $rec]
+# is not a single character (`ch` is "" then). Note this does not consult
+# `coalesce`: that flag breaks the run BEFORE this edit, it does not stop the new
+# step from growing — which is what makes vi's `i` followed by typing one step and
+# not two.
+proc rio::doc::_run_open {ch} {
 	return [expr {$ch ne "" && ![string is space -strict $ch]}]
 }
 
-# The single character a record inserts or deletes, or "" if it is neither a
+# The single character an edit inserts or deletes, or "" if it is neither a
 # one-character insert nor a one-character delete (a replacement that both
 # removes and inserts is neither, and never joins a run).
-proc rio::doc::_solo {rec} {
-	set text    [dict get $rec text]
-	set removed [dict get $rec removed]
+proc rio::doc::_solo {text removed} {
 	if {$removed eq "" && [string length $text] == 1}    { return $text }
 	if {$text eq ""    && [string length $removed] == 1} { return $removed }
 	return ""
@@ -278,35 +328,25 @@ proc rio::doc::_solo {rec} {
 # if there is nothing to undo.
 proc rio::doc::undo {id} {
 	variable buffers
-	set stack [dict get $buffers $id undo]
-	if {![llength $stack]} { return "" }
-	set rec [lindex $stack end]
-	dict set buffers $id undo [lrange $stack 0 end-1]
+	set step [_pop $id undo]
+	if {$step eq ""} { return "" }
 	dict set buffers $id run 0   ;# the run being typed into is gone (D90)
-	lassign [_recvals $rec] start end text removed
-	set iend [_advance $start $text]
-	replace $id $start $iend $removed
-	dict update buffers $id b { dict lappend b redo $rec }
-	return [dict create start $start end $iend text $removed removed $text]
+	lassign $step start end iend held
+	set text [replace $id $start $iend $held]
+	_push $id redo [list $start $end $iend $text]
+	return [dict create start $start end $iend text $held removed $text]
 }
 
 # Redo the most recently undone edit. Returns a change dict or "".
 proc rio::doc::redo {id} {
 	variable buffers
-	set stack [dict get $buffers $id redo]
-	if {![llength $stack]} { return "" }
-	set rec [lindex $stack end]
-	dict set buffers $id redo [lrange $stack 0 end-1]
-	dict set buffers $id run 0   ;# a redone record is closed: typing starts a new step
-	lassign [_recvals $rec] start end text removed
-	replace $id $start $end $text
-	dict update buffers $id b { dict lappend b undo $rec }
-	return [dict create start $start end $end text $text removed $removed]
-}
-
-proc rio::doc::_recvals {rec} {
-	return [list [dict get $rec start] [dict get $rec end] \
-		[dict get $rec text] [dict get $rec removed]]
+	set step [_pop $id redo]
+	if {$step eq ""} { return "" }
+	dict set buffers $id run 0   ;# a redone step is closed: typing starts a new step
+	lassign $step start end iend held
+	set removed [replace $id $start $end $held]
+	_push $id undo [list $start $end $iend $removed]
+	return [dict create start $start end $end text $held removed $removed]
 }
 
 # The index reached by inserting `text` starting at index `start` (D12 line.col).

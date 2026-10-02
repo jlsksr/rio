@@ -245,6 +245,85 @@ test undo-coalesce-replace-all {Replace All stays one step and closes the run} -
 	list $all $back [rio::doc::text $b]
 } -result {bbb aaa aa}
 
+# --- the budget: history is bounded, and a text is held once (ADR-0146) -------
+#
+# A step costs `step_cost` plus the characters it holds. Each test sets its own
+# budget and puts the real one back.
+
+# Run `body` with the undo budget set to `n`.
+proc with_budget {n body} {
+	set keep $rio::doc::undo_budget
+	set rio::doc::undo_budget $n
+	try { uplevel 1 $body } finally { set rio::doc::undo_budget $keep }
+}
+
+# Undo until nothing is left; the text after each step.
+proc undo_all {b} {
+	set seen {}
+	while {[rio::doc::undo $b] ne ""} { lappend seen [rio::doc::text $b] }
+	return $seen
+}
+
+test undo-budget-drops-oldest {over budget, the oldest steps go and the newest stay} -body {
+	with_budget [expr {3 * $rio::doc::step_cost}] {
+		set b [rio::doc::new ""]
+		foreach {at s} {1.0 aa 1.2 bb 1.4 cc 1.6 dd 1.8 ee} { rio::doc::edit $b $at $at $s }
+		undo_all $b
+	}
+} -result {aabbccdd aabbcc aabb}
+
+test undo-budget-keeps-newest {a step bigger than the whole budget can still be undone} -body {
+	with_budget 10 {
+		set b [rio::doc::new [string repeat x 500]]
+		rio::doc::settext $b "new"
+		rio::doc::undo $b
+		string length [rio::doc::text $b]
+	}
+} -result 500
+
+test undo-budget-holds-text-once {two reloads fit a budget of two texts: a step holds
+		the old text only, the new one is in the document} -body {
+	with_budget [expr {2 * (1000 + $rio::doc::step_cost)}] {
+		set b [rio::doc::new [string repeat a 1000]]
+		rio::doc::settext $b [string repeat b 1000]
+		rio::doc::settext $b [string repeat c 1000]
+		set seen {}
+		foreach t [undo_all $b] { lappend seen [string index $t 0] }
+		set seen
+	}
+} -result {b a}
+
+test undo-budget-counts-a-growing-run {a delete run is weighed as it grows} -body {
+	with_budget 1000 {
+		set b [rio::doc::new [string repeat x 900]]
+		rio::doc::edit $b 1.0 1.0 "paste "
+		backspace $b 1.906 800               ;# one step, holding 800 characters
+		llength [undo_all $b]
+	}
+} -result 1
+
+test undo-budget-bounds-redo {the redo stack has the same budget; it loses the far end} -body {
+	with_budget [expr {2 * (1000 + $rio::doc::step_cost)}] {
+		set b [rio::doc::new ""]
+		foreach ch {a b c} { rio::doc::edit $b 1.0 1.0 [string repeat $ch 1000] }
+		undo_all $b
+		set n 0
+		while {[rio::doc::redo $b] ne ""} { incr n }
+		list $n [string length [rio::doc::text $b]]
+	}
+} -result {2 2000}
+
+test undo-redo-after-swap {undo and redo keep swapping the same two texts} -body {
+	set b [rio::doc::new "one two"]
+	rio::doc::edit $b 1.0 1.3 "1"
+	set seen {}
+	foreach step {undo redo undo redo} {
+		set ch [rio::doc::$step $b]
+		lappend seen [rio::doc::text $b] [dict get $ch text] [dict get $ch removed]
+	}
+	set seen
+} -result {{one two} one 1 {1 two} 1 one {one two} one 1 {1 two} 1 one}
+
 # --- through the core / edit.* ops -------------------------------------------
 
 test undo-op-roundtrip {edit via buffer.replace, then edit.undo emits buffer.changed} -body {
