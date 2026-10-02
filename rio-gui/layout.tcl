@@ -2,26 +2,19 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# Tool-panel registry (D35, incremental path step (a)). The four tool
-# panes rio ships — files, git, the agent chat, and the Search results strip — are
-# *declared as data* here rather than hand-wired at their call sites: same idiom as
-# the core's highlighter/mode/rich-list registries. Each panel is {title, site,
-# body, refresh}: `site` is its preferred dock site (left|right|bottom — the eventual
-# D35 sites; the actual, user-movable placement becomes the persisted `layout` object
-# in step (b), not modelled here), `body` its body-widget path, `refresh` the proc
-# that repaints it ("" for the event-driven chat). The registry is the queryable
-# state seed (decision #6): smoke asserts a panel's identity/site without a mapped
-# window. Placement is untouched at this step — this only names the four panes and
-# routes their refresh through one dispatch; the sites/tab-strips/drag come in
-# steps (b)/(c). Files and git are two distinct panels that share one side site.
+# The tool-panel registry (D35). The four panes (files, git, chat, search)
+# are declared as data: {title site body refresh}.
+#   site     the preferred dock site: left | right | bottom
+#   body     the body widget's path
+#   refresh  the proc that repaints it; "" for the chat, which is event-driven
+# Where a panel is now is in ::layout, below.
 # ---------------------------------------------------------------------------
 namespace eval rio::panel {
 	variable order {}       ;# registered ids, in registration order
 	variable meta           ;# id -> {title site body refresh}
 	array set meta {}
 }
-# Declare a panel. Idempotent (re-registering the same id is a no-op) so a reloaded
-# GUI in one interp doesn't duplicate. `spec` fills in over the defaults.
+# Declare a panel. Registering an id twice is a no-op.
 proc rio::panel::register {id spec} {
 	variable order ; variable meta
 	if {[info exists meta($id)]} return
@@ -32,8 +25,7 @@ proc rio::panel::ids {}         { variable order ; return $order }
 proc rio::panel::exists {id}    { variable meta ; info exists meta($id) }
 proc rio::panel::get {id}       { variable meta ; return $meta($id) }
 proc rio::panel::field {id key} { variable meta ; dict get $meta($id) $key }
-# Repaint one panel through its declared refresh hook (a no-op when it has none, or
-# when the id is unknown). The single dispatch the pane call sites route through.
+# Repaint a panel through its refresh hook, if it has one.
 proc rio::panel::refresh {id} {
 	variable meta
 	if {![info exists meta($id)]} return
@@ -42,29 +34,29 @@ proc rio::panel::refresh {id} {
 }
 
 # ---------------------------------------------------------------------------
-# The dock layout (D35, incremental path step (b)). One persisted
-# `layout` object (::layout) is the single source of truth for all non-document
-# placement: three sites (left|right|bottom), each with an ordered `panels` list,
-# an `active` panel, `visible`, and `size` (width for the side sites, height for
-# the bottom). apply_layout DERIVES the pack from this state (decision #6 — state
-# is authoritative, pack is derived); the old ::dock_side / ::dock_pane /
-# ::chat_shown / ::search_shown globals live on only as read *mirrors* that
-# apply_layout keeps in sync, because the View-menu radio/checkbuttons bind them
-# as -variable and several call sites (on_fs_changed, refresh_dock) read them.
-# v1 invariants: files+git move together and are the only pair selected via a
-# site's `active`; chat is the right site's tenant; the Search strip is the
-# bottom site's, booting hidden (on-demand). Sizes are newly persisted.
+# The dock layout (D35). ::layout says where every panel is; apply_layout
+# packs the window from it.
+#
+#   ┌──────┬───────────────┬───────┐     ::layout = {sites {
+#   │ left │    editor     │ right │        left   {panels … hidden … active … visible … size …}
+#   │      │               │       │        right  {…}
+#   ├──────┴───────────────┴───────┤        bottom {…}}}
+#   │            bottom            │
+#   └──────────────────────────────┘
+#
+#   panels   the site's panels, in tab order
+#   hidden   those of them without a tab
+#   active   the panel in front
+#   visible  derived: is any panel shown?
+#   size     width (left, right) or height (bottom)
+#
+# ::dock_side, ::dock_pane, ::chat_shown and ::search_shown are copies that
+# apply_layout keeps current, for the View menu's -variable bindings.
 # ---------------------------------------------------------------------------
 namespace eval rio::layout {}
 
-# The seed layout — also the normalize/migrate base. Side widths (220 dock,
-# 340 chat), bottom height (160 search).
-# The first-run layout a brand-new user sees (no prefs yet): only the Files tab is
-# shown, on the left; Git lives there too but starts HIDDEN (no tab), and the Agent
-# (right) and Search (bottom) start hidden as well — so a fresh rio is just the editor
-# and the file tree. `hidden` lists the panels with no tab; `visible` is derived from
-# it (a site shows iff it has a non-hidden pane). Everything past this is the user's
-# own choice and persists (prefs.json).
+# The first-run layout: only Files is shown, on the left. Git, the Agent and
+# Search have no tab yet.
 proc rio::layout::default {} {
 	return [dict create sites [dict create \
 		left   [dict create panels {files git} hidden {git}    active files  visible 1 size 220] \
@@ -103,22 +95,18 @@ proc rio::layout::hide   {site id} {
 	if {$id ni $h} { lappend h $id }
 	put $site hidden $h
 }
-# Is panel `id` shown — i.e. does it have a tab (is it loaded), regardless of which
-# tab is foreground? "Hide" a pane means no tab at all, so the View-menu checkmark
-# tracks tab presence, not the active/foreground selection.
+# Has panel `id` a tab? In front or not.
 proc rio::layout::shown {id} {
 	set s [site_of $id]
 	if {$s eq ""} { return 0 }
 	return [expr {$id ni [hidden_of $s]}]
 }
 
-# Build a layout from the pre-step-(b) flat keys, over the default: dock_pane ->
-# the dock site's active; chat_shown -> whether the Agent has a tab; dock_side ->
-# which side holds files/git. dock_side=right unifies the dock into the right site
-# alongside chat (decision 1a). The pre-layout model showed a tab for EVERY dock
-# member (git was a background tab, not hidden), so an upgraded dock shows both files
-# and git — distinct from the new first-run default, which hides git. Search stays
-# on-demand (hidden). Sizes take defaults (were ephemeral before).
+# A layout from the older flat prefs keys:
+#   dock_side    which side holds files and git
+#   dock_pane    that site's active panel
+#   chat_shown   has the Agent a tab?
+# Files and git both get a tab, as they had. Search stays hidden.
 proc rio::layout::migrate {prefs} {
 	set L [default]
 	set side [expr {[dict exists $prefs dock_side] && [dict get $prefs dock_side] eq "right" ? "right" : "left"}]
@@ -136,14 +124,13 @@ proc rio::layout::migrate {prefs} {
 	return $L
 }
 
-# Repair a persisted or migrated layout into a well-formed one: fill missing keys
-# from the default, drop unknown sites, ensure each registered panel appears in
-# exactly one site (unclaimed panels land in their registry-preferred site), clamp
-# `hidden` to real members, DERIVE `visible` from what's shown (a site is on-screen
-# iff it has a non-hidden pane), and keep `active` a SHOWN member. Old persisted
-# layouts predate `hidden`; for a site without it we recover it from the stored
-# `visible` (a collapsed dock — visible 0 — becomes all-hidden, else all-shown).
-# Used at runtime after a relocation; the boot-only "Search starts hidden" is in boot.
+# Repair a layout:
+# - missing keys come from the default; unknown sites are dropped;
+# - every registered panel is in exactly one site (an unclaimed one goes to
+#   its preferred site);
+# - `hidden` holds only members; a layout without `hidden` gets it from
+#   `visible` (0: all hidden);
+# - `visible` is derived; `active` is a shown panel.
 proc rio::layout::normalize {L} {
 	set out [default]
 	set had_hidden {}   ;# sites whose source dict supplied an explicit `hidden`
@@ -156,8 +143,7 @@ proc rio::layout::normalize {L} {
 			if {[dict exists $d hidden]} { lappend had_hidden $s }
 		}
 	}
-	# Membership: each registered panel in exactly one site (first claim wins);
-	# unclaimed panels return to their registry-preferred site.
+	# Each panel in exactly one site; the first claim wins.
 	set seen {}
 	dict for {s d} [dict get $out sites] {
 		set keep {}
@@ -175,8 +161,7 @@ proc rio::layout::normalize {L} {
 	}
 	dict for {s d} [dict get $out sites] {
 		set ps [dict get $out sites $s panels]
-		# Recover `hidden` for an old layout that lacks it: visible 0 -> the dock was
-		# collapsed (all panels hidden), visible 1/absent -> all shown.
+		# No `hidden` in the source: visible 0 means all hidden.
 		if {$s ni $had_hidden} {
 			set vis [expr {[dict exists $d visible] ? [dict get $d visible] : 1}]
 			dict set out sites $s hidden [expr {$vis ? {} : $ps}]
@@ -194,11 +179,8 @@ proc rio::layout::normalize {L} {
 	}
 	return $out
 }
-# normalize + the boot-time policy: the Search strip is an on-demand surface, so the
-# bottom site starts hidden *when Search is its only tenant*. But once the user has
-# docked other panels there (e.g. dragged Git down), honour the persisted visibility
-# — otherwise those panels would be stranded in a site nothing reopens. Used only at
-# prefs_load; runtime relocations use normalize so a panel moved to the bottom shows.
+# normalize, plus at boot: Search starts hidden if it is alone in the bottom
+# site. With other panels docked there, the saved state stands.
 proc rio::layout::boot {L} {
 	set out [normalize $L]
 	if {[dict get $out sites bottom panels] eq "search"} {
@@ -206,10 +188,8 @@ proc rio::layout::boot {L} {
 	}
 	return [normalize $out]
 }
-# Encode ::layout as a JSON object fragment for prefs.json. `panels`/`hidden` are
-# string arrays, `visible` a JSON boolean (derived, kept for compat), `size` a bare
-# integer; the shape mirrors what normalize accepts on read (json2dict yields nested
-# dicts/lists). `hidden` is the authoritative per-pane tab-presence state.
+# ::layout as JSON for prefs.json:
+#   {"sites":{"left":{"panels":[…],"hidden":[…],"active":"…","visible":true,"size":220},…}}
 proc rio::layout::json {} {
 	set sites {}
 	dict for {s d} [dict get $::layout sites] {
@@ -229,9 +209,7 @@ proc bufget {id key} { dict get $::buffers $id $key }
 proc bufset {id key val} { dict set ::buffers $id $key $val }
 
 # ---------------------------------------------------------------------------
-# Editor-group accessors (D33). A group is a dict in ::grp; these keep the
-# editor procs terse — most take a group id defaulting to the focused one, resolve
-# its widget/cache through here, and never touch ::grp directly.
+# Editor-group accessors (D33). A group is a dict in ::grp.
 # ---------------------------------------------------------------------------
 proc fg {}         { return $::focus }                 ;# the focused group id
 proc gget {g k}    { dict get $::grp $g $k }
@@ -247,8 +225,7 @@ proc group_of {id} {
 	return ""
 }
 
-# A fresh group-state dict: no buffer yet, an empty tab order, a clean highlight cache.
-# `w`/`path`/`frame`/`tabs` are filled in by make_editor_group once the widgets exist.
+# A new group's state. make_editor_group fills in w, path, frame and tabs.
 proc new_group_state {} {
 	return [dict create w "" path "" frame "" tabs "" cur "" order {} taboff 0 \
 		hl_scan "" hl_lang "" hl_pending 0 hl_enter {} \
@@ -257,13 +234,10 @@ proc new_group_state {} {
 }
 
 # ---------------------------------------------------------------------------
-# The dock: which pane shows, and which edge it sits on. Both are runtime choices
-# driven from the View menu; apply_layout and show_pane are the two seams.
+# The dock: which panel shows, and on which edge.
 # ---------------------------------------------------------------------------
-# Reveal a panel wherever it currently lives: give it a tab (unhide) in its site and
-# make it the active/foreground one, then refresh. The robust "show me pane X" the
-# reveal keys (Ctrl+E/G) use — it works even when the panel was hidden or in another
-# site, so a panel can always be recovered (no pane ever becomes unreachable).
+# Reveal a panel where it is: give it a tab, bring it to the front, refresh
+# (Ctrl+E, Ctrl+G). So no panel is ever unreachable.
 proc panel_reveal {id} {
 	set s [rio::layout::site_of $id]
 	if {$s eq ""} return
@@ -273,15 +247,10 @@ proc panel_reveal {id} {
 	apply_layout
 	rio::panel::refresh $id
 }
-# Back-compat: "show the files/git pane" (Ctrl+E/G) is a reveal (idempotent "go to").
 proc show_pane {which} { panel_reveal $which }
 
-# Show/hide a pane — the View-menu checkbuttons' toggle. "Hide" means NO TAB at all
-# (not merely backgrounded): a shown pane loses its tab (added to the site's hidden
-# list); if it was the foreground tab, another shown pane takes over, and if it was
-# the site's last shown pane the whole dock collapses. A hidden pane is revealed (tab
-# back + foreground). normalize re-derives the site's visibility and active; apply_layout
-# resyncs the ::shown_* mirrors so the checkmarks track tab presence.
+# The View menu's toggle. Hiding takes the panel's tab away; the site's last
+# tab gone, the site collapses. Showing gives the tab back, in front.
 proc panel_toggle {id} {
 	set s [rio::layout::site_of $id]
 	if {$s eq ""} return
@@ -296,10 +265,8 @@ proc panel_toggle {id} {
 	rio::panel::refresh $id
 }
 
-# Draw site `site`'s host tab strip: one label per docked panel (its registry
-# title), the active one highlighted like a selected tab. Rebuilt from scratch each
-# layout pass (cheap — a handful of labels) so it always matches ::layout. Clicking
-# a tab activates that panel. This replaces the old bespoke Files/Git selector.
+# Draw a site's tab strip: one label per shown panel, the active one
+# highlighted. Rebuilt on every layout pass.
 proc render_tabs {site} {
 	set f .site$site.tabs
 	foreach w [winfo children $f] { destroy $w }
@@ -311,7 +278,7 @@ proc render_tabs {site} {
 			-foreground [dict get $c tab.fg] \
 			-background [expr {$id eq $active ? [dict get $c tab.active.bg] : [dict get $c tab.inactive.bg]}]
 		pack $t -side left -padx 1 -pady 1
-		# Press/motion/release drive click-vs-drag (D35 c3); right-click is Move to (c2).
+		# Press, motion, release: a click or a drag. Right-click: Move to.
 		bind $t <ButtonPress-1>   [list tab_press $site $id %X %Y]
 		bind $t <B1-Motion>       [list tab_motion %X %Y]
 		bind $t <ButtonRelease-1> [list tab_release $site $id %X %Y]
@@ -319,12 +286,8 @@ proc render_tabs {site} {
 	}
 }
 
-# Activate panel `id` in site `site` (a tab click). Only which body shows in THIS
-# site changes — sizes, edges and the other sites are untouched — so we swap in
-# place instead of calling apply_layout, which forgets and re-packs every site,
-# sash and the center editor area and makes the whole window flicker (D35 polish).
-# The outgoing body is forgotten, this site's tab strip + body re-rendered, the
-# dockside mirror kept correct (View menu radios read ::dock_pane), and prefs saved.
+# A tab click: bring panel `id` to the front of its site. Only this site is
+# repainted; apply_layout would re-pack the whole window and flicker.
 proc site_tab_click {site id} {
 	set prev [rio::layout::get $site active]
 	if {$prev eq $id} { rio::panel::refresh $id ; return }
@@ -340,9 +303,8 @@ proc site_tab_click {site id} {
 	rio::panel::refresh $id
 }
 
-# Pack site `site`'s active panel body into its .body area. Bodies are toplevel
-# children moved between sites via -in; a slave packed into a non-parent master must
-# be raised above it or it is obscured.
+# Pack a site's active panel body into its .body area. A body is a child of
+# the toplevel, packed with -in, so it must be raised above the site.
 proc render_site_body {site} {
 	set active [rio::layout::get $site active]
 	if {$active eq ""} return
@@ -351,15 +313,10 @@ proc render_site_body {site} {
 	raise $body .site$site.body
 }
 
-# Derive the whole non-document layout from ::layout (D35 step b/c) — the single
-# choke point that replaces the old place_dock/show_pane/search packing. Each site
-# (when visible and non-empty) renders its tab strip + active body and claims its
-# edge; the center is the editor groups (or the compare view in their place, D28).
-# The bottom site is packed first so it spans the full width and the side docks stop
-# above it (the old Search-strip behaviour). The legacy ::dock_* / ::chat_shown /
-# ::search_shown globals are refreshed from the sites so menus and read-only call
-# sites stay correct (::dock_pane is pinned to files|git — the dock's selection —
-# even when its site's active tab is another panel like chat).
+# Pack the window from ::layout (D35). Each visible site shows its tab strip
+# and its active body. The bottom site is packed first, so it spans the full
+# width. The centre is the editor groups, or the compare or plan view. Also
+# updates the ::dock_*, ::chat_shown, ::search_shown and ::shown_* copies.
 proc apply_layout {} {
 	set ds [rio::layout::dockside]                 ;# left|right — the files/git side
 	set da [rio::layout::get $ds active]
@@ -403,9 +360,8 @@ proc apply_layout {} {
 	prefs_save
 }
 
-# Move the files/git dock to `side` (View ▸ Dock Left/Right). Carries the active
-# files|git choice and the dock's size; the other side keeps its remaining tenants
-# (e.g. chat). normalize repairs membership/actives; moving there implies showing.
+# Move files and git to `side` (View ▸ Dock Left / Right), with their active
+# panel, their size and their tabs.
 proc dock_set_side {side} {
 	if {$side ni {left right}} return
 	set cur  [rio::layout::dockside]
@@ -425,10 +381,8 @@ proc dock_set_side {side} {
 	apply_layout
 }
 
-# Relocate one panel to another site (D35 c2 — the right-click "Move to" gesture).
-# The panel lands with a tab (shown) and becomes its new site's foreground pane; it
-# leaves its old site's membership AND hidden list. normalize repairs the site it
-# left (active/emptiness) and derives visibility. Refresh so it paints fresh.
+# Move one panel to another site (Move to, or a tab drag). It arrives with a
+# tab, in front.
 proc panel_move {id target} {
 	if {$target ni {left right bottom}} return
 	set from [rio::layout::site_of $id]
@@ -443,8 +397,7 @@ proc panel_move {id target} {
 	rio::panel::refresh $id
 }
 
-# Pop the tab's context menu: move this panel to a site it isn't already in. Built
-# fresh each time (like the nav/git menus), so the current site is greyed out.
+# A tab's context menu: Move to Left, Right or Bottom; its own site is greyed.
 proc site_tab_menu {site id X Y} {
 	catch {destroy .sitetabmenu}
 	menu .sitetabmenu -tearoff 0
@@ -458,11 +411,9 @@ proc site_tab_menu {site id X Y} {
 	tk_popup .sitetabmenu $X $Y
 }
 
-# Which dock site (left|right|bottom) the pointer at screen X,Y is over, or "" if
-# none — used as the drop target while dragging a tab (D35 c3). The pointer may be
-# over a site's chrome (.site$s.*) OR over a panel body, which is a toplevel child
-# packed -in the site (path .pfiles/.chat/.results, not under .site$s), so map that
-# body back to its panel and thence to the site it currently sits in.
+# The dock site under screen point X,Y, or "": a tab drag's drop target. The
+# pointer may be over the site's own widgets or over a panel body, which is
+# not a child of the site.
 proc site_under_pointer {X Y} {
 	set w [winfo containing $X $Y]
 	if {$w eq ""} return ""
@@ -476,8 +427,7 @@ proc site_under_pointer {X Y} {
 	return ""
 }
 
-# Tint each site's tab strip: the drop-target `site` gets the accent, the rest go
-# back to their normal bar colour. Called during a drag and cleared on drop.
+# Tint the drop target's tab strip with the accent; "" clears it.
 proc tabdrag_highlight {site} {
 	foreach s {left right bottom} {
 		if {![winfo exists .site$s.tabs]} continue
@@ -486,11 +436,9 @@ proc tabdrag_highlight {site} {
 	}
 }
 
-# Tab drag (D35 c3): the same relocation as the right-click menu, by dragging. Press
-# records the candidate without activating; a motion past a small threshold starts a
-# real drag and previews the drop target (the hovered site, if different, lit with
-# the accent); release relocates there, or — if it was really just a click, never
-# passing the threshold — activates the tab. An invalid/self drop snaps back.
+# Tab drag (D35): press records the tab; a move of 6 px or more starts a drag
+# and lights the site under the pointer; release moves the panel there. A
+# release without a drag is a click.
 proc tab_press {site id X Y} {
 	set ::tabdrag [dict create id $id from $site x0 $X y0 $Y active 0 over ""]
 }
@@ -518,10 +466,8 @@ proc tab_release {site id X Y} {
 	if {$over ne "" && $over ne $from} { panel_move $id $over }
 }
 
-# Lay the editor groups left-to-right inside the .groups panedwindow. In v1 there are
-# at most two; each pane -stretches so they share the width, and the panedwindow gives
-# a draggable divider between them. Called after a split/unsplit changes ::groups; with
-# one group it just fills the center.
+# Put the editor groups side by side in the .groups panedwindow, after a
+# split or an unsplit.
 proc relayout_groups {} {
 	foreach p [.groups panes] { .groups forget $p }
 	foreach g $::groups {
@@ -529,10 +475,8 @@ proc relayout_groups {} {
 	}
 }
 
-# Centre the sash so a fresh split opens 50/50 (Tk otherwise sizes the new pane from its
-# requested width, leaving it a sliver). Called only when a split is *created* (add_group)
-# — moving tabs between two existing panes never re-lays-out, so a user who has since
-# dragged the sash keeps their layout. Runs after idle so the panedwindow has its width.
+# Centre the sash, so a new split opens 50/50. Only when a split is created:
+# a sash the user dragged stays. After idle, when the width is known.
 proc even_split {} {
 	if {[llength [.groups panes]] != 2} return
 	set w [winfo width .groups]
@@ -540,12 +484,9 @@ proc even_split {} {
 	.groups sash place 0 [expr {$w / 2}] 0
 }
 
-# Drag the sash to resize the LEFT site (always on the left edge; D35 c1b). The site
-# keeps a fixed -width (propagate off), so we recompute it from the pointer measured
-# against the TOPLEVEL'S stable edge (not the site's own, which moves as we resize it
-# — referencing that fed back on itself and made the panes jump). The toplevel also
-# has propagation off (startup), so a wider site shrinks the editor instead of the
-# whole window. Clamped so neither side collapses.
+# Drag the sash: resize the left site. The width is the pointer's distance
+# from the toplevel's left edge, which does not move. Clamped, so neither
+# side collapses.
 proc sash_drag {} {
 	set total [winfo width .]
 	set min 120

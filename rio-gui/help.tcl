@@ -2,40 +2,35 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# The help viewer — Help ▸ Contents…, F1 (D99, D100). rio showing its own manual.
+# The help viewer: Help ▸ Contents…, F1 (D99, D100).
 #
-# The manual is `docs/`, one Markdown topic per file, and the filename IS the topic id
-# (D91) — which is why this needs no index of its own: index.md is the contents, and the
-# files are the topics. The window is the WinHelp shape: the contents on the left, the
-# selected topic on the right. D99 put the Markdown SOURCE in that right pane; D100
-# renders it — headings, tables, code, and links a reader can follow, with Back/Forward
-# behind them, which is what makes the manual's own cross-references work as doors
-# rather than as text describing a door. The Find box searches it (D100).
+#   ┌ Find: [      ] ───────────────────────────┐
+#   │ contents, or   │ the topic, rendered       │
+#   │ search results │                           │
+#   └ ◀ ▶  docs/git.md ──────────────── Close ──┘
 #
-# The GUI reads these files ITSELF, off its own tree, rather than through `file.open`.
-# Help is the GUI's own chrome, not project content: over a remote core (D29) the project
-# lives on another machine, so asking the core for a manual page would open the SERVER's
-# copy — a different rio's documentation — or nothing at all. The same reasoning that puts
-# syntax/ and themes/ beside the code puts docs/ there — and since rio is deployed by
-# cloning it, docs/ is already wherever the code is, with nothing to install separately.
+# - The manual is `docs/`: one Markdown file per topic, the filename is the
+#   topic id (D91), and index.md is the contents.
+# - Rendered: headings, tables, code, links with Back and Forward.
+# - The GUI reads the files itself, from its own tree, not through the core:
+#   a remote core's docs/ would be another rio's manual (D29).
 # ---------------------------------------------------------------------------
 
-# Where the shipped manual lives: beside the code, like syntax/ (hl_load) and themes/.
+# The manual's directory, beside the code.
 proc help_dir {} { return [file normalize [file join $::rio_dir .. docs]] }
 
-# Read one manual file as UTF-8 whatever the system encoding is — these pages are full of
-# the arrows and dashes a cp1252 read would mangle, and the manual is UTF-8 by rule (D21).
+# Read one manual file as UTF-8, whatever the system encoding (D21).
 proc help_slurp {path} {
 	set f [open $path r] ; fconfigure $f -encoding utf-8
 	set t [read $f] ; close $f
 	return $t
 }
 
-# The contents, read from index.md as {section title file} in document order. index.md's
-# shape is the contract — `### Section` headings and `- [Title](topic.md)` entries under
-# `## Contents` — the same shape docs.tcl already holds the page to, so the viewer and the
-# guard agree on what a contents entry is. Links that leave docs/ (`../README.md`) are not
-# topics: this window shows the manual, and the manual says where else to look.
+# The contents, from index.md, as {section title file} in document order.
+# Under `## Contents`:
+#   ### Section
+#   - [Title](topic.md)
+# docs.tcl holds index.md to this shape. A link out of docs/ is not a topic.
 proc help_contents {} {
 	set idx [file join [help_dir] index.md]
 	if {![file exists $idx]} { return {} }
@@ -56,9 +51,8 @@ proc help_contents {} {
 
 set ::help_topic ""   ;# the topic the viewer is showing, "" while it is closed
 
-# Open the viewer (or raise it) and show TOPIC, a docs/ filename. Non-modal and
-# single-instance, the Extensions window's idiom (D39) — which is also what makes a later
-# move into a dock site a re-host rather than a rewrite, if that is where help ends up.
+# Open the viewer, or raise it, and show `topic`, a docs/ filename. Not
+# modal; one instance.
 proc help_window {{topic ""}} {
 	set w .help
 	if {[winfo exists $w]} {
@@ -69,9 +63,7 @@ proc help_window {{topic ""}} {
 	toplevel $w
 	wm title $w "rio Help"
 
-	# Find: the Extensions window's header idiom — a filter entry that repaints the list
-	# below it as you type (D39). The contents list answers "what is in the manual"; this
-	# answers "where is the word", which is the other way a reader arrives at a page.
+	# Find: an entry that turns the list below into search results as you type.
 	frame $w.find
 	label $w.find.l -text "Find:" -font RioUIFont
 	entry $w.find.e -font RioUIFont -width 18
@@ -79,25 +71,21 @@ proc help_window {{topic ""}} {
 	pack $w.find.l -side left -padx {0 4}
 	pack $w.find.e -side left
 	bind $w.find.e <KeyRelease> help_find_changed
-	# Escape clears the search rather than closing the window — but only while there IS
-	# one, so a second Escape still leaves, which is what the key means everywhere else.
+	# Escape clears the search; a second Escape closes the window.
 	bind $w.find.e <Escape> {
 		if {[.help.find.e get] ne ""} { .help.find.e delete 0 end ; help_find_changed ; break }
 	}
 
-	# Contents: a rich list (D42) like the file and git panes, so it selects, hovers and
-	# arrows exactly as the rest of rio's lists do. Section headings are rows too — not
-	# selectable — because rl_* indexes rows by line, so every line must be one.
+	# Contents: a rich list (D42), like the file and git panes. A section
+	# heading is a row too, not selectable: rl_* indexes rows by line.
 	frame $w.nav -borderwidth 2 -relief sunken
 	text $w.nav.list -width 24 -height 26 -wrap none -state disabled -cursor arrow \
 		-insertwidth 0 -takefocus 1 -borderwidth 0 -highlightthickness 0 -padx 2 -pady 2
 	pack $w.nav.list -side left -fill both -expand 1
 	rl_init $w.nav.list help_pick {} {}
 
-	# The topic, rendered (D100). The pages are hand-wrapped for a text editor, but this
-	# window reflows them to whatever width it has — so it wraps by word, and the two block
-	# kinds that must NOT reflow (code and tables) opt out per tag. Those are also the only
-	# reason there is a horizontal bar at all, which is why it auto-hides.
+	# The topic, rendered (D100). Prose wraps to the window; code and tables
+	# do not, hence the horizontal bar, which hides when unused.
 	frame $w.page -borderwidth 2 -relief sunken
 	scrollbar $w.page.sb  -command {.help.page.text yview}
 	scrollbar $w.page.hsb -orient horizontal -command {.help.page.text xview}
@@ -113,9 +101,7 @@ proc help_window {{topic ""}} {
 	grid columnconfigure $w.page 0 -weight 1
 	help_link_binds $w.page.text
 
-	# Back/Forward: following a link is the one way to end up somewhere the contents list
-	# cannot bring you back from (an anchor inside a topic, or a document outside the
-	# manual), so the doors D100 opens come with the way back.
+	# Back and Forward, for links.
 	frame $w.foot
 	button $w.foot.back -text "◀" -font RioUIFont -command {help_history back}
 	button $w.foot.fwd  -text "▶" -font RioUIFont -command {help_history forward}
@@ -145,9 +131,7 @@ proc help_window {{topic ""}} {
 	focus $w.nav.list
 }
 
-# Paint the contents list. index.md leads it under its own title: it is a topic like any
-# other (the manual's front page), and the viewer would otherwise be the one reader who
-# can never see it.
+# Paint the contents list. index.md comes first, as "The rio manual".
 proc help_fill_contents {} {
 	set b .help.nav.list
 	rl_begin $b
@@ -164,24 +148,17 @@ proc help_fill_contents {} {
 	rl_end $b
 }
 
-# Selecting a row shows what it points at. A contents row's payload is a filename; a search
-# result's is {file slug} — lassign reads both, since a one-element payload leaves the anchor
-# empty, which is exactly "show this topic from the top".
+# A row was selected: show it. The payload is a filename (contents) or
+# {file slug} (a search result).
 proc help_pick {payload} {
 	lassign $payload file anchor
 	if {$file ne ""} { help_show $file $anchor }
 }
 
 # ---------------------------------------------------------------------------
-# Searching the manual. This runs HERE, in the GUI, over the same files the viewer reads —
-# not through the core's project.search. The core may be on another machine (D29), where
-# docs/ is a different rio's manual or absent entirely; the reasoning that makes the viewer
-# read its own tree makes the search read it too.
-#
-# It is deliberately small. The manual is fourteen files and about 50 KB, so a search is a
-# re-read of all of them — no index to build, and nothing that can go stale. Matching is
-# line by line rather than over help_blocks, because a result needs the HEADING a match sits
-# under, which the lines still know and the joined blocks no longer do.
+# Searching the manual, in the GUI, over the files the viewer reads. The
+# manual is small, so a search reads every file again: no index. Line by
+# line, because a result names the heading its match is under.
 # ---------------------------------------------------------------------------
 
 set ::help_needle ""   ;# the live search, "" when the contents list is showing
@@ -191,7 +168,7 @@ proc help_search {needle} {
 	set needle [string tolower [string trim $needle]]
 	if {$needle eq ""} { return {} }
 	set out {}
-	# index.md is a topic like any other here, and leads, exactly as it does in the contents.
+	# index.md first, as in the contents.
 	foreach e [linsert [help_contents] 0 [list "" "The rio manual" index.md]] {
 		lassign $e -> title file
 		set path [help_path $file]
@@ -202,8 +179,7 @@ proc help_search {needle} {
 				if {$hits} { lappend out [list $file $title $slug $sect $hits] }
 				set sect [help_plain $h] ; set slug [help_slug $h] ; set hits 0
 			}
-			# Matched against the STRIPPED line, so markup the reader never sees cannot hide a
-			# word from them: searching "wrap lines" finds `**Wrap Lines**`.
+			# Match the line without its markup: "wrap lines" finds `**Wrap Lines**`.
 			if {[string first $needle [string tolower [help_plain $line]]] >= 0} { incr hits }
 		}
 		if {$hits} { lappend out [list $file $title $slug $sect $hits] }
@@ -211,15 +187,14 @@ proc help_search {needle} {
 	return $out
 }
 
-# The results, in the contents list's own two-level shape: the topic's title as a heading
-# row, its matching sections under it. The pane is narrow, so a row names its section and
-# its count rather than quoting the line — the highlight on the page does that job.
+# The results, shaped like the contents: a topic's title as a heading row,
+# under it its matching sections with their hit counts.
 proc help_fill_results {needle} {
 	set b .help.nav.list
 	rl_begin $b
 	set hits [help_search $needle]
 	if {![llength $hits]} {
-		# Never a blank pane: a search that found nothing says so.
+		# Never a blank pane.
 		$b insert end "No matches\n" helpsect ; rl_row $b 0 ""
 		rl_end $b
 		return
@@ -236,9 +211,8 @@ proc help_fill_results {needle} {
 	rl_end $b
 }
 
-# The entry changed: swap the list between contents and results, and re-show the current
-# topic so its highlight follows the needle. Unchanged text is ignored, so arrowing around
-# inside the entry does not repaint anything.
+# The Find entry changed: show contents or results, and repaint the topic's
+# highlights. Unchanged text does nothing.
 proc help_find_changed {} {
 	if {![winfo exists .help]} return
 	set needle [string trim [.help.find.e get]]
@@ -248,8 +222,7 @@ proc help_find_changed {} {
 	if {$::help_topic ne ""} { help_show $::help_topic $::help_anchor_now 0 }
 }
 
-# Band every occurrence of the needle in the rendered page. Landing on the right heading is
-# only half an answer — this is the half that says where in it.
+# Highlight every occurrence of the needle in the rendered page.
 proc help_mark_hits {t needle} {
 	$t tag remove hit 1.0 end
 	if {$needle eq ""} return
@@ -261,30 +234,27 @@ proc help_mark_hits {t needle} {
 }
 
 # ---------------------------------------------------------------------------
-# The renderer (D100). Markdown in, a painted text widget out, in two halves that are
-# deliberately separate: help_blocks turns a page into a list of block descriptors with no
-# widget in sight (so it can be checked as a function, and so a later help search can walk
-# the same structure), and help_paint puts those blocks on screen.
+# The renderer (D100), in two halves:
 #
-# It reads the slice index.md commits the manual to — headings, paragraphs, lists, links,
-# bold/italic, inline code, fenced code, simple tables, blockquotes — and nothing else. A
-# construct outside that slice is not an error here; it simply renders as the text it is,
-# which is the honest failure for a viewer whose input is hand-written prose.
+#   Markdown ──help_blocks──► block list ──help_paint──► text widget
+#
+# help_blocks needs no widget, so it can be tested as a function. It reads
+# what the manual uses: headings, paragraphs, lists, links, bold, italic,
+# inline code, fenced code, simple tables, blockquotes. Anything else shows
+# as the text it is.
 # ---------------------------------------------------------------------------
 
-# A heading's anchor, GitHub's rule: lowercased, punctuation dropped, spaces hyphenated.
-# The manual links to headings by that slug (`preferences.md#where-everything-lives`), so
-# rio has to derive the same one the author typed — docs.tcl holds both ends to it.
+# A heading's anchor, by GitHub's rule: lowercase, no punctuation, hyphens
+# for spaces. "Where everything lives" -> where-everything-lives
 proc help_slug {s} {
 	set s [string tolower [help_plain $s]]
 	regsub -all {[^a-z0-9 -]} $s "" s
 	return [string map {" " -} [string trim $s]]
 }
 
-# Inline markup, as a list of {text style target} runs. style is "" | strong | em | strongem
-# | code | link; target carries a link's destination. One alternation finds the next marker
-# of any kind, so the scan is a handful of regexps per line rather than per character, and
-# leftmost-longest picks *** over ** over * without needing the order spelled out.
+# Inline markup, as {text style target} runs. style: "" | strong | em |
+# strongem | code | link; target is a link's destination.
+#   "a **b** [c](d.md)" -> {{a } {} {}} {b strong {}} {{ } {} {}} {c link d.md}
 proc help_inline {s} {
 	set re {`[^`]+`|\*\*\*[^*]+\*\*\*|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]*\]\([^)]*\)}
 	set out {}
@@ -292,8 +262,7 @@ proc help_inline {s} {
 		lassign $m a b
 		if {$a > 0} { lappend out [list [string range $s 0 $a-1] "" ""] }
 		set tok [string range $s $a $b]
-		# Matched by leading marker, with string compares rather than a glob: every `*` in a
-		# glob pattern is a wildcard, so "starts with ***" cannot be written as one.
+		# String compares, not a glob: `*` is a wildcard there.
 		if {[string index $tok 0] eq "`"} {
 			lappend out [list [string range $tok 1 end-1] code ""]
 		} elseif {[string index $tok 0] eq "\["} {
@@ -312,15 +281,14 @@ proc help_inline {s} {
 	return $out
 }
 
-# The same text with its markup taken off — what a reader sees. Column widths and anchor
-# slugs both need the visible length, not the source's.
+# The text without its markup, as a reader sees it.
 proc help_plain {s} {
 	set out ""
 	foreach run [help_inline $s] { append out [lindex $run 0] }
 	return $out
 }
 
-# Close whatever block is open. Tcl has no closures, so the accumulator travels by name.
+# Close the open block. The accumulator variables are passed by name.
 proc help_flush {outv textv kindv depthv markerv} {
 	upvar 1 $outv out $textv text $kindv kind $depthv depth $markerv marker
 	if {$text ne ""} {
@@ -333,11 +301,11 @@ proc help_flush {outv textv kindv depthv markerv} {
 	set text "" ; set kind "" ; set depth 0 ; set marker ""
 }
 
-# One page as a list of blocks: {heading LEVEL text} {para text} {quote text}
-# {item DEPTH MARKER text} {code text} {table ROWS} {rule}. Prose blocks arrive as ONE
-# string with their source line breaks joined out — the manual is hand-wrapped for an
-# 80-column editor and this window has its own width, so it re-wraps rather than inheriting
-# someone else's margin. Code and tables keep their lines, which is the whole point of them.
+# One page as a list of blocks:
+#   {heading LEVEL text} {para text} {quote text} {item DEPTH MARKER text}
+#   {code text} {table ROWS} {rule}
+# A prose block is one string, its line breaks joined: the window wraps it.
+# Code and tables keep their lines.
 proc help_blocks {md} {
 	set out {} ; set text "" ; set kind "" ; set depth 0 ; set marker ""
 	set lines [split [string map {\r ""} $md] \n]
@@ -394,8 +362,7 @@ proc help_blocks {md} {
 			set text $itext
 			continue
 		}
-		# Anything else continues the open block — which is how a hand-wrapped paragraph,
-		# or the second line of a list item, rejoins the sentence it belongs to.
+		# Anything else continues the open block.
 		if {$kind eq ""} { set kind para }
 		append text [expr {$text eq "" ? "" : " "}] [string trim $ln]
 	}
@@ -403,17 +370,15 @@ proc help_blocks {md} {
 	return $out
 }
 
-# Is this row a table's `| --- | --- |` rule? It carries alignment in Markdown; rio renders
-# every column left-aligned, so it carries nothing here and is dropped — wherever it sits,
-# since a row of nothing but dashes has no content to lose either way. A cell holding a
-# lone `-` as a value is safe: the row is only dropped if EVERY cell is dashes.
+# Is this row a table's `| --- | --- |` rule? Such a row is dropped. Only if
+# every cell is dashes.
 proc help_table_sep {cells} {
 	foreach c $cells { if {![regexp {^:?-+:?$} $c]} { return 0 } }
 	return [llength $cells]
 }
 
-# Paint one run of inline markup. `mono` picks the fixed-pitch variants, which a table needs
-# so that a bold cell still measures the same as a plain one and the columns stay lined up.
+# Paint a string's inline runs. `mono` picks the fixed-pitch tags: a table's
+# columns must stay aligned.
 proc help_spans {t s blocktags {mono 0}} {
 	foreach run [help_inline $s] {
 		lassign $run text style target
@@ -431,10 +396,9 @@ proc help_spans {t s blocktags {mono 0}} {
 	}
 }
 
-# Put a page on screen. Records where each heading landed (::help_anchor) so a `#slug` link
-# can scroll to it, and what each link points at (::help_link) so a click can follow it.
-# Both are keyed by WIDGET: the plan view (D101) paints with the same renderer, and painting
-# a plan must not cost an open manual page its anchors.
+# Paint the blocks. Records each heading's position (::help_anchor) and each
+# link's target (::help_link), keyed by widget: the plan view (D101) uses
+# this renderer too.
 proc help_paint {t blocks} {
 	array unset ::help_anchor "$t,*"
 	array unset ::help_link "$t,*"
@@ -464,8 +428,7 @@ proc help_paint {t blocks} {
 	}
 }
 
-# A table, padded into columns. Widths come from the VISIBLE text (help_plain), not the
-# source, or a cell of `code` would reserve room for its backticks.
+# A table, padded into columns. Widths are those of the visible text.
 proc help_paint_table {t rows} {
 	set w {}
 	foreach row $rows {
@@ -518,8 +481,7 @@ proc help_goto {target} {
 	help_show $file $anchor
 }
 
-# Scroll a heading to the top of the page. A slug rio cannot place is left alone rather than
-# guessed at — the reader is on the right page, just not moved.
+# Scroll a heading to the top. Returns 0 for an unknown slug.
 proc help_anchor_see {slug} {
 	set t .help.page.text
 	if {![info exists ::help_anchor($t,$slug)]} { return 0 }
@@ -556,10 +518,8 @@ proc help_history_buttons {} {
 
 # --- showing a topic ---------------------------------------------------------------------
 
-# Resolve a manual filename to a path on disk, refusing to leave the tree rio ships. The
-# manual's links are relative by rule (D91); the ones that leave docs/ (`../README.md`)
-# point at rio's OTHER documents, which are rio's own files too, so they are followed —
-# but nothing outside the rio directory is, whatever a page asks for.
+# A manual filename as a path, or "" if it leaves the rio directory. A link
+# out of docs/ (`../README.md`) is followed; nothing outside rio's tree is.
 proc help_path {file} {
 	if {$file eq "" || [file pathtype $file] ne "relative"} { return "" }
 	set root [file dirname [help_dir]]
@@ -568,8 +528,7 @@ proc help_path {file} {
 	return $path
 }
 
-# How the footer names a file: its path relative to the rio directory, so a reader can go
-# find it — `docs/git.md`, or `README.md` for the documents beside it.
+# The footer's name for a file: its path relative to the rio directory.
 proc help_label {file} {
 	set path [help_path $file]
 	if {$path eq ""} { return $file }
@@ -578,13 +537,9 @@ proc help_label {file} {
 	return $path
 }
 
-# Show one topic, optionally scrolled to one of its headings, and put the contents selection
-# on it so the two halves never disagree — including when the topic was reached any way
-# other than clicking its row. `push` is what separates a new destination from retracing
-# one: Back and Forward re-show a page without recording the move as another move.
-#
-# A file that cannot be read is reported IN the window: a partial install should say what is
-# missing, not break the one window that would explain it.
+# Show a topic, at `anchor` if given, and select its row in the list.
+# `push` 0: do not record the move (Back and Forward). A file that cannot be
+# read is reported in the page itself.
 proc help_show {file {anchor ""} {push 1}} {
 	set t .help.page.text
 	if {$push && $::help_topic ne "" && [list $file $anchor] ne [list $::help_topic $::help_anchor_now]} {
@@ -608,9 +563,8 @@ proc help_show {file {anchor ""} {push 1}} {
 	set ::help_anchor_now $anchor
 	if {$anchor ne ""} { help_anchor_see $anchor }
 	help_history_buttons
-	# Which row is this page? A search result names a file AND a heading, so the exact pair
-	# wins where it exists — otherwise the reader clicks one section and the list marks that
-	# topic's first. A contents row is the file alone, which the loose match covers.
+	# Which row is this page? An exact {file anchor} match (a search result)
+	# wins over the first row of that file.
 	set b .help.nav.list
 	set row -1 ; set loose -1
 	for {set i 0} {$i < [llength $::rl_rows($b)]} {incr i} {
@@ -619,25 +573,19 @@ proc help_show {file {anchor ""} {push 1}} {
 		if {$loose < 0 && [lindex $p 0] eq $file} { set loose $i }
 	}
 	if {$row < 0} { set row $loose }
-	# A document outside the contents (README.md, reached from index.md's own table) has no
-	# row — so nothing is current, rather than the last topic still looking current.
+	# A document outside the contents has no row: clear the selection.
 	if {$row >= 0} { rl_select $b $row 0 } else { rl_clear $b }
 }
 
-# A font size N points bigger than `base`, honouring Tk's sign convention: a negative size
-# is pixels, and "bigger" there means further from zero.
+# A font size `delta` bigger than `base`. A negative Tk size is pixels, and
+# bigger means further from zero.
 proc help_font_size {base delta} {
 	return [expr {$base < 0 ? $base - $delta : $base + $delta}]
 }
 
-# Colours and fonts: at open, and again from apply_theme while the window is up — help can
-# stay open across a theme change, unlike the modal dialogs that read the palette once. The
-# list is a rich-list well like the file/git panes; the page is rendered prose, so it reads
-# in the UI font with the editor's fixed-pitch font for the things that must not reflow.
-#
-# The render tags are configured HERE rather than at paint time for two reasons: a theme
-# switch then recolours a page already on screen, and tag priority falls out of the order
-# below (see the note at the end, where the headings are raised back over it).
+# Colours and fonts: at open, and from apply_theme while the window is up.
+# The tags are configured here, not at paint time, so a theme change
+# recolours the page on screen.
 proc help_restyle {} {
 	if {![winfo exists .help]} return
 	set c $::theme_colors
@@ -664,20 +612,15 @@ proc help_restyle {} {
 
 	help_style .help.page.text
 
-	# Search hits, last and raised: this one has to win -background over the block that
-	# happens to be under it (a match inside a code block or a table is still a match). The
-	# find bar's own role, falling back the way it does when a theme omits it. Help-only —
-	# the plan view has nothing to search.
+	# Search hits, raised over every block's background. The find bar's role.
 	set t .help.page.text
 	$t tag configure hit -background [expr {[dict exists $c editor.findmatch] \
 		? [dict get $c editor.findmatch] : [dict get $c editor.selection]}]
 	$t tag raise hit
 }
 
-# Dress a text widget to be painted by help_paint: every tag the renderer uses, from the
-# current theme and UI font. Separate from help_restyle because the renderer has a second
-# consumer — the plan view (D101) — and a plan should read exactly like a manual page; the
-# window's own chrome is what stays in help_restyle.
+# Configure every tag help_paint uses on widget `t`, from the theme and the
+# UI font. Its own proc: the plan view (D101) uses the renderer too.
 proc help_style {t} {
 	set c $::theme_colors
 	set bg [dict get $c editor.bg]
@@ -714,9 +657,7 @@ proc help_style {t} {
 	$t tag configure mstrongem  -font [list $mfam $sz bold italic]
 	$t tag configure tt         -font [list $mfam $sz] -foreground [blend_hex $fg [dict get $c accent] 35]
 	$t tag configure link -foreground [dict get $c accent] -underline 1
-	# Tag priority is per-option and follows configure order, so the inline tags above beat
-	# the block tags on -font — which is right inside a paragraph and wrong inside a heading,
-	# where the heading's size has to win. Raising the headings settles only -font; a link in
-	# one keeps its colour, since no heading sets a foreground.
+	# Inline tags beat block tags on -font, which is wrong in a heading: its
+	# size must win. So the headings are raised.
 	foreach h {h1 h2 h3} { $t tag raise $h }
 }
