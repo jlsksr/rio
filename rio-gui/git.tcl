@@ -2,19 +2,21 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# The git pane (D7 read layer in a view). Shares the dock with the
-# file pane — only one shows at a time. A dumb view of the core's git.* against
-# the open project (git.* now defaults its cwd to the project root): git.status
-# fills the branch + changed-file list, selecting a file fetches git.diff into a
-# read-only diff area. No file-watching, so a Refresh button re-reads on demand.
-# The change list is an rl_* rich-list too (D43) — same well/bands/nav as the file
-# pane — each row's payload being its change dict {x y path ...} (or "" for a
-# placeholder like "(clean)").
+# The git pane: a view of the core's git.* ops on the open project.
+#
+#   ┌ ⎇ main                 ↩  ⟳ ┐   ↩ only while there are changes
+#   │ M  src/main.tcl               │   the changes, a rich list (D43)
+#   │ ?? notes.txt                  │
+#   ├───────────────────────────────┤
+#   │ the selected change's diff    │   hidden until a change is selected
+#   ├───────────────────────────────┤
+#   │ [message          ] ＋ ✓ Commit│   only while something is staged
+#   └───────────────────────────────┘
+#
+# A row's payload is its change dict {x y path ?orig?}, or "" for a
+# placeholder such as "(clean)". No file-watching: ⟳ re-reads.
 # ---------------------------------------------------------------------------
-# The diff area is collapsible (D13): hidden until a file is picked, so the
-# default git pane is just a full-height change list — consistent with the file
-# pane — and the diff slides in below (sharing the height) only when there is one
-# to read, instead of sitting empty and looking like dead space.
+# Show the diff area with `text`.
 proc git_show_diff {text} {
 	.pgit.diff configure -state normal
 	.pgit.diff delete 1.0 end
@@ -35,8 +37,7 @@ proc refresh_git {} {
 	set b .pgit.well.body
 	rl_begin $b
 	git_hide_diff
-	# With no folder open, git.* would fall back to rio's OWN process cwd and show
-	# the wrong repo — so the pane is honest about needing a project first.
+	# Without a folder, git.* would use rio's own cwd: the wrong repo.
 	if {[dict get [rio_call project.get {}] result root] eq ""} {
 		.pgit.hdr.branch configure -text "git"
 		git_placeholder "(open a folder)"
@@ -66,8 +67,7 @@ proc refresh_git {} {
 		rl_end $b
 		return
 	}
-	# The commit bar shows only when the index has something to commit: a change whose
-	# X (staged column) is a real status char — not clean " " and not untracked "?".
+	# Something is staged when a change's X is neither " " nor "?".
 	set staged 0
 	foreach c $changes {
 		git_render_row $c
@@ -106,10 +106,9 @@ proc git_status_tag {ch} {
 	}
 }
 
-# Selecting a changed file (onselect) shows its diff. A path staged but not also
-# modified in the worktree (X set, Y blank) is shown via --cached; otherwise the
-# worktree diff. An untracked file has no textual diff — git returns empty, said
-# plainly. The payload is the change dict ("" for a placeholder row).
+# A change was selected: show its diff. Staged and not changed again in the
+# worktree: the staged diff; else the worktree diff. An untracked file has
+# no diff.
 proc git_pick {row} {
 	if {$row eq ""} { git_hide_diff ; return }
 	set x [dict get $row x] ; set y [dict get $row y]
@@ -123,11 +122,8 @@ proc git_pick {row} {
 	git_show_diff [expr {$d eq "" ? "(no textual diff)" : $d}]
 }
 
-# Right-click a change row (oncontext): Open the file (file rows only — see below), Copy
-# Path, and Stage/Unstage from its X/Y (D44). The porcelain path is repo-root-relative and
-# the project root is the repo root, so it doubles as git's cwd-relative path; Open needs
-# the abspath.
-# git_menu_build fills the menu (separated for headless inspection); the wrapper posts.
+# Right-click a change: Open, Copy Path, Stage, Unstage, Discard (D44).
+# git_menu_build fills the menu, so a headless test can read it.
 proc git_context_menu {payload X Y} {
 	catch {destroy .gitmenu}
 	menu .gitmenu -tearoff 0
@@ -136,11 +132,8 @@ proc git_context_menu {payload X Y} {
 }
 proc git_menu_build {m payload} {
 	set path [dict get $payload path]
-	# A wholly untracked DIRECTORY is one porcelain row, marked only by its trailing slash
-	# — which survives here, though `file join` strips it from the tree's map. It is a
-	# folder, so it has no text to open and staging it stages everything under it: drop
-	# Open, and say "folder" where the act is the folder's. Reaching one file inside it is
-	# the file tree's job (nav_menu_git), since only the tree lists them.
+	# An untracked directory is one row, with a trailing slash: no Open, and
+	# "Stage folder".
 	set isdir [string match "*/" $path]
 	set root [dict get [rio_call project.get {}] result root]
 	set abs  [file join $root $path]
@@ -155,17 +148,13 @@ proc git_menu_build {m payload} {
 	if {$x ne " " && $x ne "?"} {
 		$m add command -label "Unstage" -command [list do_git unstage $path]
 	}
-	# Discard is destructive, so it's confirm-gated (like file Delete, D48) and set apart
-	# by a separator. A NEW file — untracked ("?") or a staged addition ("A") — has no
-	# committed version, so discarding DELETES it; a tracked change reverts to the last
-	# commit. Word each for what it actually does (D80).
+	# Discard (D80), behind a confirmation. A new file ("?" or "A") is
+	# deleted, so the entry says Delete…; a tracked change is reverted.
 	$m add separator
 	if {$x eq "?" || $x eq "A"} {
 		$m add command -label "Delete…"          -command [list git_discard_confirm $path 1]
 	} elseif {$x eq "R"} {
-		# A rename discards back to the OLD name (D97), which is a different promise from
-		# "reverts its contents" — so hand the confirm the name it will reappear under.
-		# Only this door can: porcelain carries the original path, the file tree doesn't.
+		# A rename goes back to its old name (D97): pass that name on.
 		$m add command -label "Discard Changes…" \
 			-command [list git_discard_confirm $path 0 [dict get $payload orig]]
 	} else {
@@ -173,9 +162,8 @@ proc git_menu_build {m payload} {
 	}
 }
 
-# Run a git write op (add | unstage) on a path, then repaint the shown pane so the
-# new flag / change list appears. The path may be a file-pane abspath or a git-pane
-# repo-relative path — git resolves both against the project-root cwd.
+# Run git.add or git.unstage on a path and repaint. The path may be absolute
+# or relative to the repo.
 proc do_git {op path} {
 	set resp [rio_call git.$op [dict create path $path]]
 	if {![dict get $resp ok]} {
@@ -185,13 +173,9 @@ proc do_git {op path} {
 	refresh_dock
 }
 
-# Confirm, then discard a change row's local changes (git.discard, D80). `isnew` picks the
-# wording — a new file is DELETED (nothing committed to fall back to); a tracked file
-# REVERTS to the last commit. `orig` is a rename's original path (D97), where reverting
-# also moves the file back under that name — say so, because the file vanishing from the
-# tree under the name you right-clicked would otherwise read as a deletion. Both are
-# irreversible, so the default button is No (mirrors the file Delete confirm, D48). On
-# success the pane repaints and the header flashes the outcome.
+# Confirm, then discard one change (git.discard, D80). The question says what
+# will happen: a new file (`isnew`) is deleted, a tracked one reverted, a
+# rename (`orig`, D97) goes back to its old name. The default is No.
 proc git_discard_confirm {path isnew {orig ""}} {
 	if {$isnew} {
 		set q "Delete “$path”?\n\nThis is a new file, not in the last commit — deleting it can't be undone."
@@ -218,11 +202,8 @@ proc git_discard_confirm {path isnew {orig ""}} {
 	}
 }
 
-# Show or hide the header's ↩ button — "discard all" (D93) — and stash the change count the
-# confirm will quote. refresh_git passes the number of changes, so the button is packed
-# exactly when there is something to discard: the commit bar's rule (D45, the D36 "only when
-# needed" bar) applied to the header, which also keeps a destructive control off the chrome
-# of a clean repo. Packed with -side right AFTER ⟳ was, so it sits to ⟳'s left.
+# Show the header's ↩ (discard all, D93) only while there are changes, and
+# keep the count for the confirmation.
 proc git_discard_all_button {n} {
 	set ::git_change_count $n
 	if {$n > 0} {
@@ -234,11 +215,9 @@ proc git_discard_all_button {n} {
 	}
 }
 
-# Confirm, then discard EVERY change in the project (git.discard_all, D93). One core call,
-# not one per file — the core does the whole sweep in git and returns how many changes it
-# found. This is the most destructive thing rio can do to a working tree, so the question
-# spells out both halves (changed files revert, never-committed files are deleted), says
-# what it does NOT touch, and defaults to No like every other irreversible action (D48, D80).
+# Confirm, then discard every change (git.discard_all, D93), in one core
+# call. The question says what is reverted, what is deleted and what is left
+# alone. The default is No.
 proc git_discard_all_confirm {} {
 	if {$::git_change_count <= 0} return
 	set q "Discard all $::git_change_count [git_plural $::git_change_count change] in this project?\n\nEvery changed file goes back to its last committed version, and files that were never committed are deleted. Files git ignores are left alone.\n\nThis can't be undone."
@@ -254,16 +233,13 @@ proc git_discard_all_confirm {} {
 	refresh_dock
 	git_flash "✓ discarded $n [git_plural $n change]"
 }
-# "1 change" / "2 changes" — the count is real data (it says how much is about to go), so
-# it can be 1, and "1 changes" in a warning dialog reads as a bug.
+# "1 change", "2 changes".
 proc git_plural {n word} {
 	return [expr {$n == 1 ? $word : "${word}s"}]
 }
 
-# Show or hide the commit bar (D45). refresh_git calls this with 1 when the index has a
-# staged change to commit, 0 otherwise — so the bar is present exactly when committing is
-# meaningful. Packed at the very bottom of the git pane (below the change list and any
-# diff). Hiding clears the entry so a stale message never lingers into the next repo.
+# Show the commit bar (D45) only while something is staged. Hiding it clears
+# the message.
 proc git_commit_bar {show} {
 	if {$show} {
 		if {[lsearch -exact [pack slaves .pgit] .pgit.commit] < 0} {
@@ -277,12 +253,8 @@ proc git_commit_bar {show} {
 	}
 }
 
-# Show/hide the optional multi-line description below the summary (D80). Re-packs the
-# whole bar each time so the row order is deterministic: body (when shown) claims the
-# bottom, then Commit + ＋ on the right, the summary filling the left. `＋`/`−` on the
-# toggle says which way it goes. Collapsed is the default — most commits are one line,
-# so the bar stays a single row until the user asks for more (the D36 "only when needed"
-# quality bar, applied within the bar).
+# Show or hide the description below the summary (D80). The bar is packed
+# again each time, so the order is fixed. Hidden by default.
 proc git_commit_body_set {show} {
 	foreach w {.pgit.commit.body .pgit.commit.msg .pgit.commit.go .pgit.commit.more} {
 		catch {pack forget $w}
@@ -297,9 +269,7 @@ proc git_commit_body_set {show} {
 }
 proc git_commit_body_toggle {} { git_commit_body_set [expr {!$::git_commit_body_shown}] }
 
-# The body's greyed placeholder, shown only while the description is empty (the same
-# device as the summary hint — a child label placed over the text widget, never part of
-# `.body get`, so the commit assembly stays honest).
+# The description's placeholder, shown while it is empty.
 proc git_commit_body_hint {args} {
 	if {[string trim [.pgit.commit.body get 1.0 end]] eq ""} {
 		place .pgit.commit.body.ph -x 4 -y 3 -anchor nw
@@ -308,9 +278,8 @@ proc git_commit_body_hint {args} {
 	}
 }
 
-# Show the greyed "message" hint exactly while the commit entry is empty; hide it once
-# the user has typed anything. Driven by the git_commit_msg textvariable trace, so it
-# tracks typing, clearing, and refresh-driven resets alike.
+# The summary's placeholder, shown while it is empty. Run by a trace on
+# git_commit_msg.
 proc git_commit_hint {args} {
 	global git_commit_msg
 	if {$git_commit_msg eq ""} {
@@ -320,12 +289,9 @@ proc git_commit_hint {args} {
 	}
 }
 
-# Commit the staged index with the bar's summary line, plus the optional description
-# body joined as "summary\n\nbody" — git's own convention (subject, blank line, body),
-# which `git commit -m` records verbatim, so the core op is unchanged. An empty (or
-# whitespace) SUMMARY is refused quietly — a flash, focus kept, no core call — rather than
-# letting git abort; an empty body just adds nothing. On success the staged changes vanish,
-# so refresh_dock auto-hides the bar; the header then flashes the new short hash.
+# Commit what is staged. The message is the summary, or
+# "summary\n\ndescription". An empty summary is refused with a flash. On
+# success the header shows the new short hash.
 proc git_commit {} {
 	set summary [string trim [.pgit.commit.msg get]]
 	if {$summary eq ""} { git_flash "enter a commit message" ; focus .pgit.commit.msg ; return }
@@ -344,16 +310,12 @@ proc git_commit {} {
 	git_flash "✓ committed [dict get $resp result hash]"
 }
 
-# Briefly show a message in the git header's branch label, then restore it. Reuses the
-# header rather than adding a status widget; the scheduled refresh_git repaints the real
-# branch line. Runs after refresh_dock, so the flash survives that repaint.
+# Show a message in the git header for 2.5 s, then repaint.
 proc git_flash {text} {
 	.pgit.hdr.branch configure -text $text
-	# The op that flashed here has usually just announced fs.changed as well (D94), and
-	# that idle repaint would wipe the message before anyone read it. Drop it while the
-	# git pane is the one showing — the scheduled refresh_git below repaints all the same,
-	# once the flash has had its 2.5s. With another pane shown the settle is left alone:
-	# it is repainting the file tree, which the flash has no claim on.
+	# The op usually announced fs.changed too (D94), and that repaint would
+	# wipe the message. Cancel it while the git pane shows; the refresh_git
+	# scheduled below repaints anyway.
 	if {$::dock_pane eq "git" && $::fs_changed_after ne ""} {
 		after cancel $::fs_changed_after
 		set ::fs_changed_after "" ; set ::fs_changed_paths {}

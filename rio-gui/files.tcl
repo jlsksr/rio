@@ -2,15 +2,17 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# The file pane. A
-# lazy tree over the core's project root (D87): it lists ONE directory per fs.list
-# call, and unfolds a directory in place on demand rather than the core walking a
-# whole repo. The core owns "which folder is open" (project.*); this pane is a dumb
-# view of it — opening a folder goes through project.open and the pane repaints
-# from the project.opened event (D3), the same event-driven path as buffer edits.
-# ::nav_root is the open project root (absolute); ::nav_expanded is the set (a dict
-# used as a set) of absolute dir paths currently unfolded. The pane is an rl_* rich-list
-# whose per-row payload is {type abspath}, so a click knows what it hit.
+# The file pane: a tree from the project root (D87), listed one directory per
+# fs.list call; a directory unfolds in place. The core owns which folder is
+# open: project.open, and the pane repaints on project.opened (D3).
+#   ::nav_root       the project root (absolute)
+#   ::nav_expanded   the unfolded directories, a dict used as a set
+# A row's payload is {type abspath}.
+#
+#     ▾ src/
+#   M     ▪ main.tcl
+#     ▸ docs/
+#   ?   ▪ notes.txt
 # ---------------------------------------------------------------------------
 proc open_folder {path} {
 	set resp [rio_call project.open [dict create path $path]]
@@ -25,36 +27,29 @@ proc open_folder {path} {
 proc on_project_opened {p} {
 	set ::nav_root [dict get $p root]
 	set ::nav_expanded [dict create]   ;# a fresh project shows the collapsed root (D87)
-	# Remember this folder so the next launch reopens it (D88). Local cores only: a remote
-	# root is a path on the SERVER, meaningless to reopen against a local core (and it must
-	# not clobber the remembered local project). prefs_save self-gates on ::rio_started, so
-	# this no-ops during the boot reopen and persists once the user opens a folder live.
+	# Remember the folder for the next launch (D88). Local cores only: a
+	# remote root is a path on the server.
 	if {!$::core_remote} { set ::last_project $::nav_root ; prefs_save }
 	refresh_dock
 }
 
-# Repaint whichever dock pane is showing (the other repaints when next shown). rio
-# does no file-watching, so the panes' state is refreshed at the moments rio knows
-# something might have changed — opening a folder, saving a file, an fs.changed from the
-# core (D47), or regaining OS focus (app_focus_event) — rather than live.
+# Repaint the dock pane that is showing. rio does not watch the filesystem:
+# it repaints when a folder opens, a file is saved, fs.changed arrives (D47),
+# or rio regains OS focus.
 proc refresh_dock {} {
 	rio::panel::refresh $::dock_pane
 }
 
-# Repaint the files pane as a tree from the project root (D87): dirs then files at each
-# level (each group dictionary-sorted by the core already), an unfolded dir's children
-# rendered indented right below it. Each row is one line: a 2-char git-status gutter
-# (blank when clean, D43), one indent step (two spaces) per depth, a mono glyph icon
-# (▸ folded dir · ▾ unfolded dir · ▪ file, all U+25xx so they render monochrome, never
-# emoji), then the name. The body is an rl_* rich-list.
+# Repaint the files pane: at each level directories, then files; an unfolded
+# directory's children indented below it. A row:
+#   2 chars of git status (D43), two spaces per depth, a glyph (▸ folded,
+#   ▾ unfolded, ▪ file), the name.
 proc populate_nav {} {
 	set b .pfiles.well.body
 	rl_begin $b
 	set ::nav_row_depth [dict create]   ;# path -> tree depth, for the arrow-click hit test (D87)
-	# Probe the root once. Its own folder can vanish under us (deleted on disk mid-run); the
-	# core's fs.list is the stat that also works in remote mode (the GUI can't see a server
-	# path). A gone root is not an error worth a dialog — it CLOSES the project: forget it as
-	# the reopen target if it was the remembered one (D88), and fall through to the placeholder.
+	# List the root once. If the folder is gone, the project closes: forget
+	# it (D88) and show the placeholder. No dialog.
 	set entries {}
 	if {$::nav_root ne ""} {
 		set probe [rio_call fs.list [dict create path $::nav_root]]
@@ -81,11 +76,8 @@ proc populate_nav {} {
 	rl_end $b
 }
 
-# Render one directory level and recurse into whichever of its subdirs are unfolded
-# (::nav_expanded). A folded dir shows ▸, an unfolded one ▾ with its children indented one
-# step deeper. An fs.list error is reported once but leaves the siblings already drawn.
-# (A vanished subdir raises no error here: its parent's listing simply omits it, so this is
-# never called for it — only a live race or a permission fault reaches the report.)
+# List one directory and draw its level. An fs.list error is reported; the
+# rows already drawn stay.
 proc nav_render_level {dir depth git} {
 	set resp [rio_call fs.list [dict create path $dir]]
 	if {![dict get $resp ok]} {
@@ -95,9 +87,8 @@ proc nav_render_level {dir depth git} {
 	nav_render_entries $dir $depth $git [dict get $resp result entries]
 }
 
-# Draw one already-listed level's rows (dirs then files, core-sorted), recursing into each
-# unfolded subdir. Split from nav_render_level so the root's listing — fetched once in
-# populate_nav to probe for a vanished project — is not fetched a second time.
+# Draw one listed level, directories first, and recurse into each unfolded
+# directory. Its own proc, so the root's listing is not fetched twice.
 proc nav_render_entries {dir depth git entries} {
 	foreach grp {dir file} {
 		foreach e $entries {
@@ -117,28 +108,20 @@ proc nav_render_entries {dir depth git entries} {
 	}
 }
 
-# Is directory $d currently on screen in the pane? True for the root and any unfolded dir
-# — those are the levels whose children are drawn, so a change under one is worth a repaint
-# (the fs.changed / focus-return refresh guards, D47). A folded dir's contents aren't shown.
+# Are directory $d's children on screen? The root's and an unfolded
+# directory's are. A change under one is worth a repaint (D47).
 proc nav_dir_visible {d} {
 	return [expr {$d eq $::nav_root || [dict exists $::nav_expanded $d]}]
 }
 
-# Toggle: show or hide dotfile / hidden entries in the Files pane, then repaint and persist.
-# Off by default, so a fresh pane hides `.git/` and other dotfiles the way `ls` does; on
-# reveals them. populate_nav does the filtering (a name-starts-with-"." skip), so this just
-# re-lists the shown directory. Three doors drive the same ::show_hidden global through this
-# one applier — the View menu, the Preferences window, and the pane-header glyph button — so
-# all three (and the header glyph) stay in sync for free.
+# Apply ::show_hidden (dotfiles; off by default): repaint and save. The View
+# menu, Preferences and the header glyph all come through here.
 proc apply_show_hidden {} {
 	nav_hidden_glyph
 	populate_nav
 	prefs_save
 }
-# The pane-header glyph reflects the current state (a filled ◉ dot when hidden files show,
-# a faint dotted ◌ when they are hidden) — a bare glyph, no tooltip, like the ⟳ refresh
-# beside it. Kept in sync by apply_show_hidden, so every door updates it. No-op before the
-# header exists (called from the boot applier once the pane is built).
+# The header glyph: ◉ when hidden files show, ◌ when not.
 proc nav_hidden_glyph {} {
 	if {![winfo exists .pfiles.hdr.hidden]} return
 	.pfiles.hdr.hidden configure -text [expr {$::show_hidden ? "◉" : "◌"}]
@@ -150,10 +133,9 @@ proc nav_toggle_hidden {} {
 	apply_show_hidden
 }
 
-# The git status for the open project, as an abspath -> XY-status dict (the two
-# porcelain chars). Empty when there is no repo — a plain file pane, no gutter. The
-# porcelain paths are repo-root-relative and rio opens the repo root as the project,
-# so we anchor them at $root. (D43)
+# The project's git status as a dict abspath -> XY (the two porcelain chars).
+# Empty without a repo. git's paths are relative to the repo root, which is
+# the project root (D43).
 proc nav_git_map {root} {
 	set map [dict create]
 	set r [rio_call git.status {}]
@@ -164,18 +146,14 @@ proc nav_git_map {root} {
 	}
 	return $map
 }
-# A file's one-letter flag: the worktree char if any, else the staged one (so a bare
-# stage still shows). "" when the path is clean / untracked-parent.
+# A file's flag: the worktree char, else the staged one; "" when clean.
 proc nav_file_status {git path} {
 	if {![dict exists $git $path]} { return "" }
 	set xy [dict get $git $path]
 	set y [string index $xy 1]
 	return [expr {$y ne " " ? $y : [string index $xy 0]}]
 }
-# A directory's rollup flag: "·" when it contains (or is) a change, else "". Lets the
-# flat one-dir navigator hint where changes hide without walking into them. An
-# untracked directory is reported by porcelain as the directory itself, so we match
-# both the dir's own path and anything beneath it.
+# A directory's flag: "·" when it is or contains a change, else "".
 proc nav_dir_status {git path} {
 	if {[dict exists $git $path]} { return "·" }
 	foreach p [dict keys $git] {
@@ -183,10 +161,8 @@ proc nav_dir_status {git path} {
 	}
 	return ""
 }
-# Does PATH sit inside a directory git reports as untracked? Porcelain names such a
-# directory once and nothing below it, so its files never appear in the status map and
-# the row menu has to ask this instead of a lookup. Walks up to the project root: the
-# untracked directory can be any ancestor, not just the immediate parent.
+# Is `path` inside a directory git reports as untracked? git names such a
+# directory once and nothing below it. Any ancestor up to the root counts.
 proc nav_untracked_parent {git path} {
 	for {set d [file dirname $path]} {$d ne [file dirname $d]} {set d [file dirname $d]} {
 		if {[dict exists $git $d] && [string index [dict get $git $d] 0] eq "?"} { return 1 }
@@ -195,10 +171,8 @@ proc nav_untracked_parent {git path} {
 	return 0
 }
 
-# Append one navigator row: a 2-char status gutter (the flag glyph + a space, or two
-# spaces when clean) — kept in a fixed left column so flags stay aligned across depths —
-# then one indent step (two spaces) per tree depth, then the type glyph (tagged navicon)
-# and the label. Records {type abspath} as the row payload. Caller has the body -state normal.
+# Append one row: the status gutter (2 chars, in a fixed column), the indent,
+# the glyph, the label. The payload is {type abspath}.
 proc nav_render_row {type path label glyph depth status} {
 	set b .pfiles.well.body
 	if {$status eq ""} {
@@ -221,9 +195,7 @@ proc nav_status_tag {s} {
 	}
 }
 
-# Double-click / Enter on a row (onactivate): unfold/fold a directory in place, or open
-# a file in a tab. The payload is the row's {type abspath}. (D87 — the tree replaced the
-# old descend-into-a-dir navigation; single-click and arrows just move the selection.)
+# Double-click or Enter on a row: fold or unfold a directory, open a file.
 proc nav_open {payload} {
 	lassign $payload type path
 	switch -- $type {
@@ -231,8 +203,8 @@ proc nav_open {payload} {
 		file { do_open $path }
 	}
 }
-# Flip a directory between folded and unfolded, then repaint. Folding keeps any descendant
-# expand-state in ::nav_expanded, so re-opening the dir restores the sub-shape it had.
+# Fold or unfold a directory and repaint. Folding keeps the state of the
+# directories below it.
 proc nav_toggle_expand {path} {
 	if {[dict exists $::nav_expanded $path]} {
 		dict unset ::nav_expanded $path
@@ -243,14 +215,12 @@ proc nav_toggle_expand {path} {
 	session_save   ;# the unfolded set changed — record it so the next launch resumes it (D89)
 }
 
-# Click routing for the files pane (D87). A folder unfolds on a SINGLE click of its arrow —
-# the twisty and the indent/gutter left of the name — while its NAME is reserved for
-# double-click (dirs toggle, files open). This splits the plain rl_* click, so it is wired
-# only on the files body (the git pane keeps the default select-on-click).
+# Clicks in the files pane (D87): a single click on a folder's arrow unfolds
+# it; a double-click on a name activates.
 #
-# nav_col_is_arrow is the pure decision (kept separate so it is testable without pixels):
-# a dir row's name begins at char column 2 (git gutter) + 2·depth (indent) + 2 (glyph +
-# space); a click left of that is on the arrow. A file row has no arrow.
+# Is column `col` on a directory row's arrow? The name starts at column
+# 2 (gutter) + 2·depth (indent) + 2 (glyph and space); left of that is the
+# arrow. No pixels, so it can be tested.
 proc nav_col_is_arrow {type depth col} {
 	return [expr {$type eq "dir" && $col < 2 * $depth + 4}]
 }
@@ -269,8 +239,8 @@ proc nav_b1 {w x y} {
 	rl_select $w $row
 	if {[nav_hit_arrow $w $row $x $y]} { nav_open [rl_payload $w $row] }
 }
-# Double click: activate (dir toggles, file opens) UNLESS it fell on the arrow — there the
-# first click's single-click handler already toggled, so the second must not toggle back.
+# Double click: activate, unless it is on the arrow: the first click already
+# toggled it.
 proc nav_b1_double {w x y} {
 	if {![llength $::rl_rows($w)]} return
 	set row [rl_row_at $w $x $y]
@@ -278,12 +248,9 @@ proc nav_b1_double {w x y} {
 	if {![nav_hit_arrow $w $row $x $y]} { rl_activate $w }
 }
 
-# Right-click a file/dir row (oncontext): a menu of actions ABOUT THIS ROW (the
-# UI-design bar — scoped to what was clicked, like the tab menu). Rebuilt each popup
-# so the git items reflect the row's current status (read from the ::nav_git stash).
-# Open + Copy Path always; git stage/unstage/track appear only when they apply (D44).
-# nav_menu_build fills a menu (separated so a headless test can inspect entries
-# without posting); nav_context_menu wraps it in the popup.
+# Right-click a row: a menu of actions about that row. Rebuilt each time, so
+# the git items match the row's status (D44). nav_menu_build fills the menu,
+# so a headless test can read it without posting.
 proc nav_context_menu {payload X Y} {
 	catch {destroy .navmenu}
 	menu .navmenu -tearoff 0
@@ -299,12 +266,8 @@ proc nav_menu_build {m payload} {
 	nav_menu_fs $m $type $path
 	nav_menu_git $m $type $path
 }
-# Append the file-management verbs (D48). New File/New Folder create in the row's own
-# directory (D87): a folder row → inside that folder (and it auto-unfolds so the new entry
-# shows); a file row → alongside it; they appear whenever a folder is open. Rename/Delete
-# act on the clicked row — any real file/dir row now (the tree has no ".." placeholder to
-# exclude), never the no-folder placeholder. Names come from a modal prompt; Delete confirms
-# first (nav_delete).
+# The file-management entries (D48). New File and New Folder create inside a
+# folder row's folder, or beside a file row. Rename and Delete act on the row.
 proc nav_menu_fs {m type path} {
 	if {$::nav_root eq ""} return
 	set target [expr {$type eq "dir" ? $path : \
@@ -317,9 +280,8 @@ proc nav_menu_fs {m type path} {
 		$m add command -label "Delete…" -command [list nav_delete $path]
 	}
 }
-# Append the git items for a row, given its type and abspath. A file uses its XY from
-# the stash (untracked -> Track; worktree-dirty -> Stage; staged -> Unstage); a dir
-# that contains changes offers "Stage folder" (git add on the directory).
+# The git entries for a row. A file: Track if untracked, Stage if changed,
+# Unstage if staged. A directory with changes: Stage folder.
 proc nav_menu_git {m type path} {
 	if {![info exists ::nav_git]} return
 	if {$type eq "dir"} {
@@ -330,12 +292,8 @@ proc nav_menu_git {m type path} {
 		return
 	}
 	if {![dict exists $::nav_git $path]} {
-		# Not a change of its own — but git collapses a WHOLLY untracked directory into a
-		# single `dir/` entry and reports nothing beneath it, so every file inside one is
-		# invisible to status: the git pane has no row for it, and this menu would have no
-		# item. The tree is the only place those files are named, and `git add` takes one
-		# happily (git then de-collapses the folder and lists the rest individually), so
-		# the file's own door belongs here.
+		# A file inside an untracked directory has no status entry of its
+		# own; the tree is the only place to track it from.
 		if {[nav_untracked_parent $::nav_git $path]} {
 			$m add separator
 			$m add command -label "Track (git add)" -command [list do_git add $path]
@@ -351,33 +309,24 @@ proc nav_menu_git {m type path} {
 	}
 	if {$y ne " "} { $m add command -label "Stage"   -command [list do_git add $path] }
 	if {$x ne " "} { $m add command -label "Unstage" -command [list do_git unstage $path] }
-	# Discard, the same confirm-gated entry the git pane carries — this door too (D93), so
-	# "undo my edits to this file" is reachable from wherever you are looking at the file.
-	# TRACKED changes only: a new file (untracked "?", returned above, or a staged addition
-	# "A") is removed rather than reverted, and this menu's own fs "Delete…" already removes
-	# it — two "Delete…" entries in one menu would be the worse UI.
+	# Discard Changes…, as in the git pane (D93). For tracked changes only: a
+	# new file is removed by this menu's own Delete….
 	if {$x ne "A"} {
 		$m add separator
 		$m add command -label "Discard Changes…" \
 			-command [list git_discard_confirm [nav_repo_rel $path] 0]
 	}
 }
-# A tree row's abspath as git names it: repo-root-relative. The project root IS the repo
-# root (D43), so this is the path porcelain would have printed — which keeps the discard
-# confirm reading the same from both doors, instead of quoting a long absolute path.
+# A row's path as git names it: relative to the project root (D43).
 proc nav_repo_rel {path} {
 	set parts [lrange [file split $path] [llength [file split $::nav_root]] end]
 	return [expr {[llength $parts] ? [file join {*}$parts] : [file tail $path]}]
 }
 
 # ---------------------------------------------------------------------------
-# File-management actions (D48). The menu-facing procs (nav_new/nav_rename/
-# nav_delete) collect the name via a modal prompt / confirm; the fs_apply_* procs
-# do the core call, retarget any open buffers, and repaint — split out so the
-# headless smoke can drive the effect without a real dialog (as note_app_focus was
-# for D47). Each fs.* op resolves its path against the project root and emits
-# fs.changed, but we refresh_dock directly too: the acting GUI shouldn't wait on the
-# round-trip event to see its own change.
+# File-management actions (D48). nav_new, nav_rename and nav_delete ask for a
+# name or a confirmation. The fs_apply_* procs call the core, fix the open
+# buffers and repaint; a test calls those directly.
 # ---------------------------------------------------------------------------
 proc nav_new {dir type} {
 	set what [expr {$type eq "dir" ? "folder" : "file"}]
@@ -400,15 +349,12 @@ proc nav_delete {path} {
 	fs_apply_delete $path
 }
 
-# A single-line component name is required: non-empty, no path separator, not . or ..
-# — so a prompt can only ever create/rename WITHIN the target directory (nested paths
-# are a deliberate non-goal). Rejected names flash the header and change nothing.
+# Is `name` one path component? Not empty, no separator, not . or ..
 proc nav_name_ok {name} {
 	return [expr {$name ne "" && [llength [file split $name]] == 1 && $name ni {. ..}}]
 }
 
-# Create $name (a file or dir) inside $dir, then unfold $dir so the new entry is on screen
-# before the repaint (a no-op when $dir is the root, which is always shown).
+# Create $name inside $dir and unfold $dir, so the new entry shows.
 proc fs_apply_create {dir type name} {
 	if {![nav_name_ok $name]} { nav_flash "invalid name" ; return }
 	set resp [rio_call fs.create \
@@ -441,9 +387,8 @@ proc fs_apply_delete {path} {
 	refresh_dock
 }
 
-# After a rename, repoint every open buffer at the old path (or under it, for a dir
-# rename) to the new path — client-side (so the tab retitles via tab_name) AND in the
-# core via buffer.setpath (so the buffer's next Save writes the NEW name, not the old).
+# After a rename: point every open buffer at or under the old path to the new
+# one, here (the tab's title) and in the core (buffer.setpath: the next Save).
 proc retarget_buffers {old new} {
 	set touched 0
 	foreach id [dict keys $::buffers] {
@@ -464,9 +409,8 @@ proc retarget_buffers {old new} {
 	if {$touched} refresh_all
 }
 
-# After a delete, close every open buffer at that path (or under it, for a dir). We
-# clear the modified flag first so close_tab's discard prompt doesn't offer to save a
-# file that no longer exists; close_tab reuses do_close's reactivation / group-collapse.
+# After a delete: close every open buffer at or under the path. `modified` is
+# cleared first, so nothing asks to save a file that is gone.
 proc close_buffers_under {path} {
 	foreach id [dict keys $::buffers] {
 		set p [bufget $id path]
@@ -478,18 +422,14 @@ proc close_buffers_under {path} {
 	}
 }
 
-# Briefly show a message in the files-pane header, then restore the real header.
-# The files sibling of git_flash — reuses the header rather than adding a status
-# widget; the scheduled populate_nav repaints the true directory line.
+# Show a message in the pane's header for two seconds.
 proc nav_flash {text} {
 	.pfiles.hdr.head configure -text $text
 	after cancel populate_nav
 	after 2000 populate_nav
 }
 
-# A modal single-line name prompt (New / Rename). rio's first custom modal input —
-# existing dialogs are tk_messageBox / tk_chooseDirectory. Returns the entered string,
-# or "" on Cancel/Escape/empty. Grab + tkwait make it synchronous like those helpers.
+# A modal one-line prompt. Returns the text, or "" on Cancel, Escape or empty.
 proc name_prompt {title label prefill} {
 	set w .nameprompt
 	catch {destroy $w}

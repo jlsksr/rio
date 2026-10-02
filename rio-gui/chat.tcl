@@ -2,15 +2,12 @@
 # A part of the GUI, sourced by rio-gui.tcl; not run on its own.
 
 # ---------------------------------------------------------------------------
-# The agent chat pane (D14 `chat` column; D20/D26/D30). A dumb view (D3)
-# over the agent.* event stream: a read-only transcript, a composer, and Send.
-# agent.send is a STREAMING op — its reply is an ack, and the turn's content arrives
-# as agent.delta events the core broadcasts over the channel (D30), routed here by
-# dispatch_event and appended live (chat_event), so the answer builds in view;
-# agent.message closes the turn, agent.error shows a classified failure (D26). The
-# core owns the conversation (D3): chat_clear is agent.reset. Right side; toggleable.
+# The agent's chat pane (D20, D26): a view of the agent.* events. A read-only
+# transcript, an input, Send. agent.send answers with an ack; the turn's
+# content arrives as events (chat_event). The core owns the conversation:
+# Clear is agent.reset.
 # ---------------------------------------------------------------------------
-# Insert into the read-only transcript (briefly enabled), scrolling to the end.
+# Append to the transcript and scroll to the end.
 proc chat_log {text {tag ""}} {
 	.chat.log configure -state normal
 	if {$tag eq ""} { .chat.log insert end $text } else { .chat.log insert end $text $tag }
@@ -23,9 +20,7 @@ proc chat_label {tag label} {
 	chat_log "$label\n" $tag
 }
 
-# Send the composer's text as a turn (D26). agent.send is a streaming op: its reply
-# is just an ack — the turn's content streams back afterward as agent.* events the
-# core broadcasts over the channel, landing in chat_event via dispatch_event (D30).
+# Send the input's text as a turn.
 proc chat_send {} {
 	set text [string trim [.chat.input get 1.0 end]]
 	if {$text eq ""} return
@@ -33,12 +28,11 @@ proc chat_send {} {
 	chat_send_text $text
 }
 
-# The one path a turn leaves the GUI by — the composer above, and Change with Agent…
-# (D113), which passes the selection's `scope` {buffer start end} and a `note` saying
-# what the request is about, shown muted under the user's words.
+# Send a turn: from the input, or from Change with Agent… (D113), which
+# passes the selection's `scope` {buffer start end} and a `note` shown under
+# the user's words.
 proc chat_send_text {text {scope {}} {note ""}} {
-	# Sending a new message abandons any proposal still awaiting a decision; the core
-	# seals the dangling tool call, so dismiss its review UI here to match (D28).
+	# A new message abandons a pending proposal: take its review UI down (D28).
 	if {$::pending_turn ne ""} { approve_bar 0 ; compare_close ; plan_close }
 	chat_label you-label "You"
 	chat_log "$text\n"
@@ -58,8 +52,7 @@ proc chat_send_text {text {scope {}} {note ""}} {
 # Apply one streamed agent.* event to the transcript.
 proc chat_event {ev} {
 	set name [dict get $ev event]
-	# Anything that is not more reasoning ends the run of it — one place, rather than a
-	# close in every other arm, and the rule is exactly "the model moved on".
+	# Any other event ends a run of reasoning.
 	if {$name ne "agent.thinking" && $::chat_thinking_open} {
 		chat_log "\n" ; set ::chat_thinking_open 0
 	}
@@ -69,16 +62,8 @@ proc chat_event {ev} {
 			chat_log [dict get $ev params text]
 		}
 		agent.thinking {
-			# The model's reasoning (provider-api 4): shown muted and indented, because
-			# it is not the answer — the core never records it, so it is not re-sent on a
-			# later step either. A local thinking model can spend a whole short turn
-			# here, and the alternative to showing it is an empty reply.
-			#
-			# It stays in the transcript once the answer starts. Everything else written
-			# to this log is append-only, a mid-stream delete would take any selection
-			# the user made while reading with it, and a multi-step turn interleaves
-			# several of these with tool calls — there is no principled rule for which to
-			# erase. The way not to see it is the provider's own setting.
+			# The model's reasoning (provider-api 4): muted and indented. It
+			# stays in the transcript; the log is append-only.
 			if {!$::chat_turn_open} { chat_label agent-label "Agent" ; set ::chat_turn_open 1 }
 			if {!$::chat_thinking_open} {
 				chat_log "· thinking\n" tool
@@ -104,34 +89,28 @@ proc chat_event {ev} {
 			chat_log "[dict get $ev params message] ([dict get $ev params code])\n"
 		}
 		agent.stopped {
-			# The user stopped the turn (D104) — here or in another frontend attached to
-			# the same core. Not an error: it did what it was told, so it gets the muted
-			# tool styling rather than the red error label. Any review UI the turn had put
-			# up is asking about a decision nothing waits for now.
+			# The turn was stopped (D104), here or from another frontend. Not an
+			# error. Its review UI goes too.
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
 			chat_busy_stop
 			approve_bar 0 ; compare_close ; plan_close
 			chat_log "· stopped\n" tool
 		}
 		agent.tool {
-			# A read-only tool the agent is running (D26 slice 4) — auto-executed, so
-			# this is transparency, not a prompt. Shown on its own line, mid-turn.
+			# A read tool is running. Shown for information.
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
 			set args [dict get $ev params args]
 			chat_log "· [dict get $ev params name][expr {$args eq "" ? "" : " $args"}]\n" tool
 		}
 		agent.propose {
-			# A proposed action awaiting the user's decision. Two kinds (D26 s5, D83):
-			# an EDIT carries a diff (auto-accept may skip the gate); a run_command
-			# carries the argv and is ALWAYS gated (never auto-run, even under
-			# auto-accept edits — running a command is the more dangerous act).
+			# A proposal waits for the user: an edit (a diff; auto-accept may
+			# skip the wait), a command (always asks, D83) or a plan (D101).
 			if {$::chat_turn_open} { chat_log "\n" ; set ::chat_turn_open 0 }
 			set turn [dict get $ev params turn]
 			set kind [expr {[dict exists $ev params kind] ? [dict get $ev params kind] : "edit"}]
 			if {$kind eq "plan"} {
-				# A plan (D101): always gated, and always opened — a plan the user has to
-				# go looking for is a plan they will approve unread. The chat keeps the
-				# one-line trace and the decision; the plan itself gets the center.
+				# A plan is always opened, in the centre; the chat keeps one line
+				# and the decision.
 				chat_log "· presents a plan: [dict get $ev params title]\n" tool
 				if {[dict get $ev params path] ne ""} {
 					chat_log "  saved as [dict get $ev params path]\n" tool
@@ -146,8 +125,7 @@ proc chat_event {ev} {
 				set disp [dict get $ev params display]
 				set auto [expr {[dict exists $ev params auto] ? [dict get $ev params auto] : 0}]
 				if {$auto} {
-					# Covered by an allow-list rule (D84): it runs without a bar. Show
-					# what ran and keep the busy indicator — the turn is still working.
+					# Allowed by a rule (D84): it runs without asking.
 					chat_log "· runs run_command (allowed)\n" tool
 					chat_command_preview $disp [dict get $ev params cwd]
 				} else {
@@ -160,9 +138,8 @@ proc chat_event {ev} {
 					chat_busy_stop   ;# now waiting on the user, not the model (D82)
 				}
 			} else {
-				# A *complex* edit (more than ::compare_threshold diff lines) opens in the
-				# side-by-side compare view instead of dumping the whole diff inline —
-				# unless the user turned that off (Settings ▸ Compare complex edits) (D28).
+				# An edit of more than ::compare_threshold diff lines opens in the
+				# compare view (D28), unless the user turned that off.
 				set diff [dict get $ev params diff]
 				chat_log "· proposes [dict get $ev params name]: [dict get $ev params path]\n" tool
 				set complex [expr {[llength [split $diff "\n"]] > $::compare_threshold}]
@@ -180,20 +157,16 @@ proc chat_event {ev} {
 			}
 		}
 		agent.mode {
-			# The core changed the mode itself — approving a plan turns plan mode off
-			# (D101). Mirror it, or the control would go on claiming the agent is planning
-			# while it edits.
+			# The core changed the mode: approving a plan ends plan mode (D101).
 			set ::agent_plan_mode [expr {[dict get $ev params mode] eq "plan"}]
 			agent_mode_sync
 		}
 		agent.options {
-			# A provider's options changed — here, in another window (D3/D30), or because
-			# a refresh has just come back from the network. The event says only THAT they
-			# changed, so re-read: the list we then render is the list as it is now.
+			# A provider's options changed: read them again.
 			set who [dict get $ev params provider]
 			set err [expr {[dict exists $ev params error] ? [dict get $ev params error] : ""}]
-			# A failure belongs where the user is looking. The settings window has a
-			# status line of its own; the strip has nowhere but a dialog.
+			# A failure goes to the settings window's status line if it is
+			# open, else to a dialog.
 			if {$err ne ""} {
 				if {[provider_settings_showing $who]} {
 					after idle [list provider_settings_status $err 1]
@@ -201,13 +174,9 @@ proc chat_event {ev} {
 					report_error $err
 				}
 			}
-			# Re-read from the IDLE loop, not from here: this handler runs inside the
-			# channel reader, and an op call from there would nest one vwait inside
-			# another. The repaint is not urgent — nothing is waiting on it.
-			#
-			# Two surfaces, guarded separately. The strip shows the ACTIVE provider, so
-			# it repaints only for that one — but the settings window can be open on any
-			# provider, and with only the first test a ⟳ Refresh there did nothing at all.
+			# From the idle loop: this runs inside the channel reader, where an
+			# op call would nest. The strip shows the active provider only; the
+			# settings window may show any.
 			if {$who eq $::agent_provider} { after idle agent_options_refresh }
 			provider_settings_repaint $who
 		}
@@ -220,10 +189,9 @@ proc chat_event {ev} {
 	}
 }
 
-# Render a proposed command for review (D83): the shell-style command line (no tag,
-# so it reads in the plain foreground — the human must read it before approving) and,
-# when it isn't the project root, the directory it runs in. Display only: the core
-# runs the argument vector directly, never through a shell.
+# Show a proposed command (D83): the command line in the plain text colour,
+# and its directory if not the project root. Display only: the core runs the
+# argv, never a shell.
 proc chat_command_preview {display cwd} {
 	chat_log "  \$ $display\n"
 	if {$cwd ne ""} { chat_log "  in $cwd/\n" tool }
@@ -238,13 +206,11 @@ proc chat_diff {diff} {
 	}
 }
 
-# Show/hide the Approve/Reject bar for a pending proposal. `prompt` is the bar's
-# question (an edit vs. a command vs. a plan each ask differently); `compare` shows the
-# edit-only Compare button (a command has no diff to compare, D83); `always` shows the
-# command-only "Always allow" menubutton (standing approval, D84 — an edit has no
-# allow-list); `plan` shows the plan-only Plan button, which reopens a plan the user
-# closed while thinking about it (D101). The extra buttons default off, so an edit shows
-# just Approve/Reject.
+# Show or hide the approval bar.
+#   prompt   the bar's question
+#   compare  the Compare button (edits)
+#   always   the "Always allow" menu (commands, D84)
+#   plan     the plan's buttons (D101, D102)
 proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0} {plan 0}} {
 	if {!$show} {
 		catch {pack forget .chat.approve}
@@ -254,8 +220,8 @@ proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0} {plan 
 	.chat.approve.lbl configure -text $prompt
 	foreach w {yes appr edit no cmp always plan} { catch {pack forget .chat.approve.$w} }
 	if {$plan} {
-		# Approve ▾ | Edit plan | Reject | Plan, right to left (D102). A plan with no
-		# project behind it was filed nowhere, so there is no file to edit.
+		# Right to left: Approve ▾, Edit plan (if the plan is a file),
+		# Reject, Plan (D102).
 		pack .chat.approve.appr -side right
 		if {$::plan_path ne ""} { pack .chat.approve.edit -side right }
 		pack .chat.approve.no   -side right
@@ -269,13 +235,13 @@ proc approve_bar {show {prompt "Apply this edit?"} {compare 1} {always 0} {plan 
 	pack .chat.approve -side bottom -fill x -before .chat.input
 }
 
-# Rebuild the "Always allow" menu for the currently proposed command (D84). Two
-# granularities as cascades — the program (argv[0], the recommended default: trust every
-# invocation) first, the exact command line (trust only this identical argv) second —
-# and each opens a submenu picking the SCOPE the rule is saved in: all projects (global),
-# this project, or the active provider only. A long exact command is truncated in the
-# label only. Each leaf remembers the rule (agent.allow.add) and approves the command in
-# front of the user (agent_allow_always).
+# Rebuild the "Always allow" menu for the proposed command (D84):
+#
+#   Always allow: git                        ▸ For all projects
+#   Always allow this exact command: git …   ▸ For this project only
+#                                              While <provider> is the provider
+#
+# A leaf adds the rule and approves this command.
 proc chat_allow_menu_populate {argv display} {
 	set m .chat.approve.always.m
 	$m delete 0 end
@@ -308,22 +274,15 @@ proc chat_allow_menu_populate {argv display} {
 	}
 }
 
-# Persist a trust rule in a scope, then approve the command now in front of the user
-# (D84). "Always allow" = remember + run this one. Add first (so a failed write still
-# leaves the command awaiting the plain decision), then decide.
+# Add an allow rule, then approve the pending command (D84).
 proc agent_allow_always {rule scope name} {
 	if {$::pending_turn eq ""} return
 	catch {rio_call agent.allow.add [dict create rule $rule scope $scope name $name]}
 	agent_decide approve
 }
 
-# The user's decision on the pending edit → agent.approve resumes the turn, whose
-# remaining events stream back as broadcast agent.* events (dispatch_event → chat).
-# Approve a plan, saying how the work it starts should go (D102). The policy is decided
-# HERE, on the plan, rather than inherited from a flag set before the user knew what would
-# be proposed — which is what let auto-accept sit armed behind "plan mode". Set the flag
-# first, so a failed write leaves the plan still awaiting a decision instead of starting
-# work under a policy the core never accepted.
+# Approve a plan with a mode for the work it starts (D102): `review` or
+# `auto`. The flag is set first: if that fails, the plan still waits.
 proc agent_decide_plan {policy} {
 	if {$::pending_turn eq ""} return
 	set on [expr {$policy eq "auto"}]
@@ -337,6 +296,7 @@ proc agent_decide_plan {policy} {
 	agent_decide approve
 }
 
+# The user's decision on the pending proposal: agent.approve resumes the turn.
 proc agent_decide {decision} {
 	if {$::pending_turn eq ""} return
 	set t $::pending_turn
@@ -351,9 +311,7 @@ proc agent_decide {decision} {
 proc chat_clear {} {
 	rio_call agent.reset {}
 	chat_busy_stop   ;# abort any working animation (D82)
-	# agent.reset aborts any turn suspended at the approval gate, so the review UI is now
-	# asking about a decision nothing is waiting for — take it down with the conversation
-	# it belonged to. Most visible with a plan (D101), which holds the whole center.
+	# agent.reset aborts a turn waiting for approval: take its review UI down.
 	approve_bar 0 ; compare_close ; plan_close
 	.chat.log configure -state normal
 	.chat.log delete 1.0 end
@@ -361,9 +319,8 @@ proc chat_clear {} {
 	set ::chat_turn_open 0 ; set ::chat_thinking_open 0
 }
 
-# Show/hide the chat pane by tab presence (kept for callers that flip the ::chat_shown
-# mirror directly, e.g. tests). Give chat a tab (foreground) or take it away, re-derive,
-# then apply_layout syncs the mirror back so the two never drift.
+# Apply ::chat_shown: give the chat a tab, in front, or take it away. For
+# callers that set the variable directly, e.g. tests.
 proc apply_chat_visibility {} {
 	set s [rio::layout::site_of chat]
 	if {$::chat_shown} { rio::layout::unhide $s chat ; rio::layout::put $s active chat } else { rio::layout::hide $s chat }
@@ -372,9 +329,8 @@ proc apply_chat_visibility {} {
 	if {$::chat_shown} { focus .chat.input }
 }
 
-# Drag the csash to resize the RIGHT site (always on the right edge; D35 c1b). Its
-# width is the toplevel's right edge minus the pointer — measured against the
-# toplevel's STABLE edge like sash_drag. Clamped so neither side collapses.
+# Drag .csash: resize the right site. Its width is the toplevel's right edge
+# minus the pointer. Clamped.
 proc csash_drag {} {
 	set total [winfo width .]
 	set min 200
@@ -385,9 +341,8 @@ proc csash_drag {} {
 	.siteright configure -width $w
 }
 
-# Drag the bsash to resize the BOTTOM site's height (D35). Its bottom edge is fixed
-# just above the status bar, so the height is the window's bottom minus the status
-# bar minus the pointer — measured against the toplevel's STABLE edge like sash_drag.
+# Drag .bsash: resize the bottom site. Its height is the window's bottom,
+# minus the status bar, minus the pointer. Clamped.
 proc bsash_drag {} {
 	set total [winfo height .]
 	set min 60
@@ -398,10 +353,8 @@ proc bsash_drag {} {
 	.sitebottom configure -height $h
 }
 
-# Drag the composer sash to resize the input box. Its height is in text lines, so we
-# anchor on the press (start height + pointer y) and convert the vertical drag to a
-# line delta via the font's line height — dragging up grows the input, down shrinks
-# it. Clamped so it can't vanish or eat the whole transcript.
+# Drag .chat.isash: resize the input. Its height is in lines, so the drag in
+# pixels is divided by the font's line height. Up grows it. Clamped.
 proc isash_press {y} {
 	set ::isash_y0 $y
 	set ::isash_h0 [.chat.input cget -height]
@@ -415,8 +368,8 @@ proc isash_drag {y} {
 	if {$h > $max} { set h $max }
 	.chat.input configure -height $h
 }
-# The most lines the input may take while leaving the sash and a few transcript
-# lines on screen — otherwise a maxed input squeezes the divider out of reach.
+# The most lines the input may take: the sash and three transcript lines
+# must stay on screen.
 proc chat_input_max {} {
 	set lh [font metrics [.chat.input cget -font] -linespace]
 	if {$lh < 1} { set lh 1 }
@@ -427,16 +380,14 @@ proc chat_input_max {} {
 	if {$m < 1} { set m 1 }
 	return $m
 }
-# Re-clamp on layout changes (chat shown, window resized) so the input never hides
-# the sash — and a previously over-tall input shrinks back into reach on its own.
+# Clamp again when the layout changes.
 proc clamp_input_height {} {
 	set m [chat_input_max]
 	if {[.chat.input cget -height] > $m} { .chat.input configure -height $m }
 }
 
 # --- the agent "working" indicator (D82) -------------------------------------
-# Begin animating: a turn is now being worked. Idempotent — cancels any pending tick
-# first, so a fresh send (or a resumed turn) just restarts the cycle from a new phrase.
+# Start the animation: a turn is running. A second call restarts it.
 proc chat_busy_start {} {
 	after cancel $::chat_busy_after
 	set ::chat_busy 1
@@ -447,8 +398,7 @@ proc chat_busy_start {} {
 	chat_send_button
 	set ::chat_busy_after [after 400 chat_busy_tick]
 }
-# One animation frame: advance the dots every tick and the phrase every ~2.4 s, then
-# reschedule. A stray tick after a stop is a no-op (guarded on ::chat_busy).
+# One frame: new dots every tick (400 ms), a new phrase every sixth.
 proc chat_busy_tick {} {
 	if {!$::chat_busy} return
 	incr ::chat_busy_frame
@@ -459,14 +409,12 @@ proc chat_busy_tick {} {
 	chat_busy_render
 	set ::chat_busy_after [after 400 chat_busy_tick]
 }
-# Paint the current phrase with a 1→2→3 "Please wait…" dot cycle. ASCII dots only, so no
-# UI font can drop a glyph (the D54 Windows / Alpine / OpenBSD matrix).
+# Paint the phrase with one to three dots. ASCII dots: every font has them.
 proc chat_busy_render {} {
 	set dots [string repeat "." [expr {$::chat_busy_frame % 3 + 1}]]
 	catch {.chat.status.busy configure -text "$::chat_busy_word$dots"}
 }
-# Stop animating and clear the indicator's half of the strip (the agent selector beside
-# it never went anywhere).
+# Stop the animation and clear the indicator.
 proc chat_busy_stop {} {
 	after cancel $::chat_busy_after
 	set ::chat_busy_after ""
@@ -476,11 +424,8 @@ proc chat_busy_stop {} {
 	chat_status_update
 }
 
-# The composer's button follows the turn (D104): ▶ Send while it is yours to type into,
-# ■ Stop while the agent is working. One button, because the two are never both available —
-# and because a turn now runs until it is finished or stopped, so Stop must never be more
-# than one click away. At the approval gate the animation stops and the button goes back to
-# Send: the turn is parked, waiting on the bar, and there is nothing running to stop.
+# The button follows the turn (D104): ▶ Send, or ■ Stop while the agent is
+# working. At the approval bar it is Send: nothing is running.
 proc chat_send_button {} {
 	if {![winfo exists .chat.send]} return
 	if {$::chat_busy} {
@@ -492,25 +437,20 @@ proc chat_send_button {} {
 	}
 }
 
-# Stop the turn in flight. The core kills it and announces agent.stopped, which every
-# attached frontend adopts (D3/D30) — including this one, so the transcript line and the
-# indicator are written by the event, not here, and a stop from another window looks the
-# same as a stop from this one.
+# Stop the running turn. The core announces agent.stopped; that event
+# writes the transcript line, here and in every other frontend.
 proc chat_stop {} {
 	set r [rio_call agent.stop {}]
 	if {![dict get $r ok]} {
 		report_error [dict get $r error message] [dict get $r error code]
 		return
 	}
-	# Nothing was running: the click raced the turn's last event. Put the button back.
+	# Nothing was running: put the button back.
 	if {[dict get $r result stopped] == 0} { chat_busy_stop }
 }
 
-# The status strip names the live agent, and nothing else: the mode is stated once, by the
-# header control that sets it (D102). Two places saying it was how the old strip came to lie
-# — it showed "plan mode" over an armed auto-accept flag it had no room for. Since D106 the
-# strip is a control, and it keeps answering while a turn runs: the working indicator has
-# its own half.
+# The status strip names the provider and model. The mode is shown once, by
+# the header's control (D102).
 proc chat_status_update {} {
 	agent_options_sync
 }
