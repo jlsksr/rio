@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the Preferences window (AGENTS.md D58). The window owns no state:
+# Headless test for the Preferences window (D58). The window owns no state:
 # each control drives the SAME global its menu twin binds and calls the SAME applier, so
 # it is live-apply and the two doors stay in sync for free. Checks that the window opens
 # with its six categories, that toggling a control there flips the global AND matches

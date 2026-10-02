@@ -1,4 +1,4 @@
-# rio — an INI / properties syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O,
+# rio — an INI / properties syntax highlighter (D32). PURE Tcl: no Tk, no I/O,
 # no external packages — a per-line scanner (see rio::syntax for the contract). INI has no
 # multi-line constructs, so it carries no state: every line stands alone.
 #

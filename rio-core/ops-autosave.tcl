@@ -1,4 +1,4 @@
-# rio-core — the autosave.* op namespace (AGENTS.md D132).
+# rio-core — the autosave.* op namespace (D132).
 #
 # The core keeps a recovery copy of every changed buffer (rio::autosave). These two ops are
 # how a frontend reads that policy and sets it. The policy is the CORE's, not a client's:

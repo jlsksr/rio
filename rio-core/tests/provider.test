@@ -1,4 +1,4 @@
-# Tests for the installable-provider store + loader (rio::provider, AGENTS.md D66)
+# Tests for the installable-provider store + loader (rio::provider, D66)
 # and the provider.* ops. A `provider` is executable Tcl the core SOURCES, so the
 # store's job is to decide WHETHER to source (kind=provider, a supported
 # provider-api, a safe entry file) and to activate only on the next start
@@ -6,7 +6,7 @@
 # sandboxed store dir, never fetched.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

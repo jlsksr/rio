@@ -1,4 +1,4 @@
-# rio-core — the session.* op namespace (AGENTS.md D11, O2).
+# rio-core — the session.* op namespace (D11, O2).
 #
 # Capability / version negotiation. The protocol's in-process default path needs
 # none of this (one process, both halves the same code), but a SEPARATE client —

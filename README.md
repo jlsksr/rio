@@ -182,8 +182,8 @@ attach without the core changing.
 - **3 runtime dependencies** — Tcl/Tk, tcllib, tcltls. No build step, no
   `node_modules`, no native blobs. (`tkdnd` is optional, and only for dropping a
   file onto the window from your file manager.)
-- **132 design decisions**, each written up in [AGENTS.md](AGENTS.md) with its
-  reasoning and mirrored as an [architecture decision record](adr/README.md).
+- **132 design decisions**, each written up with its reasoning as an
+  [architecture decision record](adr/README.md).
 - **587 commits** between 2026-06-24 and 2026-09-26, all of it agent-assisted.
   Whether that worked is something you can check rather than take on trust: the
   suite runs on your machine, and the decision log records the reasoning behind
@@ -199,8 +199,8 @@ attach without the core changing.
 | [CAVEATS.md](CAVEATS.md) | Known rough edges, platform differences, deliberate trade-offs |
 | [ROADMAP.md](ROADMAP.md) | Planned features, known gaps, deferred refinements |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Hacking on rio: toolchain, layout, running the tests |
-| [AGENTS.md](AGENTS.md) | The design log — *why* rio works the way it does |
-| [adr/](adr/README.md) | The same decisions as individual records |
+| [adr/](adr/README.md) | The decisions — *why* rio works the way it does |
+| [AGENTS.md](AGENTS.md) | Instructions for coding agents |
 | [WINDOWS.md](WINDOWS.md) | Running rio on Windows 11 |
 | [RELEASING.md](RELEASING.md) | The gates that must be true before a release |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | What is expected of everyone taking part |

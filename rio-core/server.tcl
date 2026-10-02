@@ -1,4 +1,4 @@
-# rio-core — out-of-process transports / server mode (AGENTS.md D2, D11, D30).
+# rio-core — out-of-process transports / server mode (D2, D11, D30).
 #
 # Server mode is NOT a second codebase: it is the same dispatch (D2) behind a pipe
 # or socket. A request line is parsed to a dict and handed to rio::dispatch::handle;
@@ -96,7 +96,7 @@ proc rio::server::accept {chan addr port} {
 	fileevent $chan readable [list rio::server::on_readable $chan]
 }
 
-# --- stdio transport (AGENTS.md D30) ----------------------------------------
+# --- stdio transport (D30) ----------------------------------------
 #
 # The same dispatch over a single pipe: the "client" is stdin (requests) + stdout
 # (responses and broadcast events). Used when a frontend spawns the core as a child
@@ -132,7 +132,7 @@ proc rio::server::serve_stdio {} {
 #
 # Start listening; returns the actual port (so callers can use 0 for ephemeral).
 # Binds LOOPBACK by default: the core has no auth or encryption (the SSH-tunnel
-# model, AGENTS.md D29), so it must not face the public interface unasked. Pass
+# model, D29), so it must not face the public interface unasked. Pass
 # `addr` "any" (or "") to bind all interfaces — an explicit, opt-in exposure.
 proc rio::server::listen {{port 7711} {addr 127.0.0.1}} {
 	if {$addr eq "" || $addr eq "any"} {

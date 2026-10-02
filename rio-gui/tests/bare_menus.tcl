@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the menus Tk leaves bare (AGENTS.md D115) — the half D108 named and
+# Headless test for the menus Tk leaves bare (D115) — the half D108 named and
 # deferred: the read-only views (agent log, compare panes, git diff, the manual, a plan)
 # and every entry/text widget outside the editor. Ctrl+C already worked in all of them
 # through Tk's own class bindings; only the door was missing.

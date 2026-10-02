@@ -1,4 +1,4 @@
-# rio-core — the project / workspace root (AGENTS.md D11, the project.* namespace).
+# rio-core — the project / workspace root (D11, the project.* namespace).
 #
 # rio is "the editor with a project open": one canonical root folder the core
 # holds, which anchors everything that is otherwise relative — git operations
@@ -64,7 +64,7 @@ proc rio::project::close {} {
 	set root ""
 }
 
-# --- project-wide text search (Find in Files, AGENTS.md D51) -----------------
+# --- project-wide text search (Find in Files, D51) -----------------
 # Walk the open project's tree and return every LINE that contains `needle`,
 # grouped by file. Pure logic over rio::fs (listdir + read), so it tests headless
 # and — the load-bearing reason — runs core-side: in remote mode only the core

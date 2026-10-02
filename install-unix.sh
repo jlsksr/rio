@@ -32,7 +32,7 @@
 #   --verify-only    check the toolchain loads; change nothing
 #   --dry-run        print every step without doing any of it
 #   --with-ck        also build Ck (curses Tk) from source. FOR CONTRIBUTORS: it is
-#                    the deferred terminal-frontend path (AGENTS.md O1), not needed
+#                    the deferred terminal-frontend path (ADR-0112), not needed
 #                    to run rio
 #   -h, --help       this text
 #
@@ -41,7 +41,7 @@
 #
 # Supported: Debian/Ubuntu (apt), Alpine (apk), OpenBSD (pkg_add). macOS has its
 # own script, install-macos.sh: it shares no package manager, fallback or launcher
-# format with these (AGENTS.md D134).
+# format with these (D134).
 
 set -eu
 

@@ -1,4 +1,4 @@
-# Tests for the OpenAI inference core (rio::openai, AGENTS.md D8/D26): request
+# Tests for the OpenAI inference core (rio::openai, D8/D26): request
 # shaping (system-as-message, tool_calls with string arguments, role:tool results,
 # the config-as-data token-cap key), the streaming SSE -> agent-event mapping
 # (deltas, index-accumulated tool calls, finish_reason), and HTTP-status error
@@ -6,7 +6,7 @@
 # is deterministic and offline.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

@@ -1,4 +1,4 @@
-# rio-core — the error taxonomy (AGENTS.md D11, O2).
+# rio-core — the error taxonomy (D11, O2).
 #
 # An op signals failure by raising a Tcl error whose -errorcode carries a stable,
 # machine-readable code: `rio::error::raise no_buffer "no such buffer: 7"`. The

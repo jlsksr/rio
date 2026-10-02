@@ -61,7 +61,7 @@ network connection is needed.
 | [CAVEATS.md](../CAVEATS.md) | Known rough edges and platform differences |
 | [README.md](../README.md) | What is rio, and what works today? |
 | [WINDOWS.md](../WINDOWS.md) | Running rio on Windows 11 |
-| [AGENTS.md](../AGENTS.md) | The design log — why rio works the way it does |
+| [adr/](../adr/README.md) | The decisions — why rio works the way it does |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Hacking on rio itself |
 | [LICENSE](../LICENSE) | May I use, change and pass rio on? |
 

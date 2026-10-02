@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless smoke for the DEFAULT transport (AGENTS.md D30): with no --connect, the
+# Headless smoke for the DEFAULT transport (D30): with no --connect, the
 # GUI spawns a private core as a child and talks over its stdio pipe. The core is a
 # SEPARATE process, so this is a black-box check — we verify through the channel
 # (buf_text), the widget, and the bytes the child writes to disk, never by peeking at

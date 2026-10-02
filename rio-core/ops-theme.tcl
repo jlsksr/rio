@@ -1,4 +1,4 @@
-# rio-core — the theme.* op namespace (AGENTS.md D24, D11).
+# rio-core — the theme.* op namespace (D24, D11).
 #
 # Serves the theme role table as data so the GUI applier (and a future TUI) need
 # no theme-loading logic of their own — the core owns the vocabulary, the default,

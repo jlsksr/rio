@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless plan-view test for rio-gui (AGENTS.md D101). In plan mode the agent may read and
+# Headless plan-view test for rio-gui (D101). In plan mode the agent may read and
 # then say what it WOULD do, through the core's present_plan tool; the plan arrives as an
 # agent.propose of kind `plan` carrying Markdown, and takes the center — where the compare
 # view goes (D28) — rendered with the manual's renderer (D100), while the decision stays on

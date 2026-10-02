@@ -1,4 +1,4 @@
-# rio — a Windows Batch / cmd syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no
+# rio — a Windows Batch / cmd syntax highlighter (D32). PURE Tcl: no Tk, no
 # I/O, no external packages — a per-line scanner (see rio::syntax for the contract). Batch
 # is line-oriented (no multi-line strings), so this carries no scan state. Batch is
 # case-INSENSITIVE, so keyword lookups lower-case the word first.

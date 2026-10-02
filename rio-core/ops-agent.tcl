@@ -1,4 +1,4 @@
-# rio-core — the agent.* op namespace (AGENTS.md D20, D26).
+# rio-core — the agent.* op namespace (D20, D26).
 #
 # Thin handlers over rio::agent. agent.send is the core's first STREAMING op
 # (register_stream): it receives the live `emit` and returns only an ack, while

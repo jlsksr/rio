@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless current-line-highlight test for rio-gui (AGENTS.md D60). The editor tints the
+# Headless current-line-highlight test for rio-gui (D60). The editor tints the
 # LOGICAL line the insert caret sits on with a `curline` background band — on by default,
 # a toggle in the View menu and the Preferences window. Checks: the tag is coloured from
 # the theme, the band tracks the caret and spans the full width (its range reaches the

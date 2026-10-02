@@ -1,4 +1,4 @@
-# rio-core — JSON wire encoding for the socket transport (AGENTS.md D11).
+# rio-core — JSON wire encoding for the socket transport (D11).
 #
 # The canonical internal form is plain Tcl dicts (D11: the in-process path uses
 # them with no serialization). JSON exists only at the socket boundary, and a

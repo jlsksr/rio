@@ -1,4 +1,4 @@
-# rio — a Swift syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no external
+# rio — a Swift syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no external
 # packages — a linear, per-line state machine (see rio::syntax for the contract). It
 # carries scan state across lines, so a `/* … */` block comment (which NESTS in Swift)
 # and a `"""…"""` multi-line string each colour as one unit.

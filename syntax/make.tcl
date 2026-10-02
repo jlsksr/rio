@@ -1,4 +1,4 @@
-# rio — a Makefile syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
+# rio — a Makefile syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a per-line scanner (see rio::syntax for the contract). Make is
 # line-oriented and largely stateless, so this carries no scan state: every line stands
 # alone. It is registered both by whole basename (`Makefile`, `GNUmakefile`) and by

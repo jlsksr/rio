@@ -11,7 +11,7 @@ A running list of rio's **rough edges worth remembering** — split into two kin
 
 Each entry records the **symptom**, the **cause**, **where it's fine**, rio's current
 **mitigation**, and any **planned** work (with a pointer to [ROADMAP.md](ROADMAP.md) /
-[AGENTS.md](AGENTS.md)). When you hit a new "works here, not there" quirk, or notice a
+[adr/](adr/README.md)). When you hit a new "works here, not there" quirk, or notice a
 design limit that surprises, append it to the matching section.
 
 ---
@@ -31,9 +31,8 @@ design limit that surprises, append it to the matching section.
   **native OS menu**, and the OS scrolls tall menus correctly — so this class of glitch
   never appears off X11. (That is exactly why it is X11-only.)
 - **Mitigation in rio.** Keep menus **short enough to fit** by grouping less-used items
-  into submenus (AGENTS.md **D64** — the View menu dropped from ~30 rows to ~18). We do
-  **not** patch Tk's menu grab/post/scroll internals: an earlier attempt to (AGENTS.md
-  **D59**) caused its own intermittent click misfires and was reverted.
+  into submenus (**D64** — the View menu dropped from ~30 rows to ~18). We do
+  **not** patch Tk's menu grab/post/scroll internals: an earlier attempt to (**D59**) caused its own intermittent click misfires and was reverted.
 - **At scale — settled.** Grouping bounds the *fixed* menus; the two menus that were
   **data-driven and unbounded** (they grew with your data, so no amount of grouping could
   cap them) are both gone. Each became a bounded **picker dialog** — a listbox that scrolls
@@ -98,7 +97,7 @@ design limit that surprises, append it to the matching section.
   `rio.app` stops starting or still runs the old `wish`. The `rio` command is unaffected.
 - **Cause.** The app's executable is a **copy** of `wish`, not a link to it. A script or a
   symlink leaves macOS taking the app's identity from `wish`'s own directory, so the menu
-  bar would read *Wish* (AGENTS.md D134). A copy doesn't follow the toolchain it came from.
+  bar would read *Wish* (D134). A copy doesn't follow the toolchain it came from.
 - **Where it's fine.** Everywhere until the toolchain changes. A Homebrew upgrade within
   `tcl-tk@8` keeps its paths stable, so the copy usually keeps working.
 - **Mitigation.** Re-run `./install-macos.sh`. It finds the toolchain again and rewrites the
@@ -153,7 +152,7 @@ design limit that surprises, append it to the matching section.
   OS folder dialog** and single-click-then-Open works as expected. And **remote mode on every
   platform**: there the native choosers browse the wrong (client) disk, so rio substitutes its
   **own** `fs.list` browser (`remote_browse_dialog`), whose Open **does** open the highlighted
-  folder (AGENTS.md D29/D30).
+  folder (D29/D30).
 - **Mitigation in rio.** Keeping the **native** dialog locally is a deliberate choice (jka) for
   the native look and feel, accepting this wart as the trade. Every other way to open a project
   is unaffected — a folder on the command line, or double-clicking into it in the dialog.
@@ -242,7 +241,7 @@ design limit that surprises, append it to the matching section.
   **nothing** — no tab opens. Or: it works for a locally-launched rio but not when the GUI is
   attached to a remote core.
 - **Cause.** Two separate reasons. (1) **Plain Tk cannot receive an OS file drop at all** — that
-  capability lives only in the external **tkdnd** extension (AGENTS.md **D86**), which rio loads
+  capability lives only in the external **tkdnd** extension (**D86**), which rio loads
   *optionally* (`catch {package require tkdnd}`): where it isn't installed, there is simply
   nothing listening for the drop. (2) A dropped path is a path on the **GUI's own machine**, but
   the *core* performs the file open; with a **remote** core that path is meaningless, so rio
@@ -256,7 +255,7 @@ design limit that surprises, append it to the matching section.
   unaffected. Install tkdnd to turn drag-to-open on — see [INSTALL.md](INSTALL.md) /
   [WINDOWS.md](WINDOWS.md).
 - **Planned.** Uploading a dropped *local* file's bytes to a **remote** core (so drag-to-open
-  works over the wire too) is a deliberate follow-up, noted out-of-scope in AGENTS.md **D86**,
+  works over the wire too) is a deliberate follow-up, noted out-of-scope in **D86**,
   not yet scheduled.
 
 ### Two no-project windows share one anonymous session
@@ -265,7 +264,7 @@ design limit that surprises, append it to the matching section.
   workspace" case) and their open-tab sets **overwrite each other**: whichever saves last
   wins, so a later launch resumes only one of the two sets rather than both.
 - **Cause.** The resume session for the **no-project** state is a *single* file
-  (`sessions/anonymous.json`, AGENTS.md **D72**): with no project root there is nothing to
+  (`sessions/anonymous.json`, **D72**): with no project root there is nothing to
   key it by, so every no-project instance shares the one file, and `session_save` (fired on
   each tab change and on quit) rewrites it.
 - **Where it's fine.** The intended **one-daily-instance** workflow — a single always-open
@@ -276,12 +275,12 @@ design limit that surprises, append it to the matching section.
   **open a folder** in one of the windows (even a throwaway root) so it gets its own
   per-root session instead of the shared anonymous one.
 - **Planned.** A per-instance or last-folder resume pointer would let several no-project
-  windows resume independently; noted as the deferred follow-up in AGENTS.md **D72**, not
+  windows resume independently; noted as the deferred follow-up in **D72**, not
   yet scheduled.
 
 ### Colour arrives late at the bottom of a very large file, and "binary" is judged from the first 8 KB
 
-- **Symptom.** Two halves of the same trade (AGENTS.md **D125**, **D126**). (1) Jump
+- **Symptom.** Two halves of the same trade (**D125**, **D126**). (1) Jump
   straight to the end of a very large file and the text arrives immediately but
   *uncoloured*, filling in over the next several seconds — about 9 s at 16 MB, and
   most of a minute at the 64 MB limit. The editor stays responsive throughout; you can
@@ -324,7 +323,7 @@ design limit that surprises, append it to the matching section.
   narrow case it is not: the rewrite lands **within the same second** as the version rio last
   read **and** leaves the file **exactly the same length**. The tab keeps showing the old text.
 - **Cause.** rio identifies a file's on-disk version by its **modification time plus its size**
-  (AGENTS.md **D94**). Size alone misses a length-preserving edit; mtime alone is coarse —
+  (**D94**). Size alone misses a length-preserving edit; mtime alone is coarse —
   some filesystems (and network mounts) record whole seconds only, so two writes a few
   milliseconds apart are indistinguishable by time. Together they miss only the intersection:
   same second *and* same length.
@@ -339,7 +338,7 @@ design limit that surprises, append it to the matching section.
 
 ### A recovery copy can be skipped on Windows, and one can outlive its file
 
-- **Symptom.** Two small gaps in autosave (AGENTS.md **D132**, and *Keeping your unsaved
+- **Symptom.** Two small gaps in autosave (**D132**, and *Keeping your unsaved
   changes* in [docs/editor.md](docs/editor.md)). On **Windows**, a file deep inside a deeply
   nested project may get no recovery copy at all. And on every platform, a copy belonging to
   a file you never open in rio again stays on disk.

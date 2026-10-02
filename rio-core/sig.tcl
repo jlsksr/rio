@@ -1,4 +1,4 @@
-# rio-core — verifying an OpenSSH detached signature (AGENTS.md D118).
+# rio-core — verifying an OpenSSH detached signature (D118).
 #
 # The primitive behind signed extension repositories: a publisher signs one root
 # SHA256SUMS with an ed25519 SSH key, as git does, and rio checks it by running

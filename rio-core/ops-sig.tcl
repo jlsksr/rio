@@ -1,4 +1,4 @@
-# rio-core — the sig.* op namespace (AGENTS.md D118, D11).
+# rio-core — the sig.* op namespace (D118, D11).
 #
 # One op: verify a detached OpenSSH signature over some text. It is the repository
 # signature check (D39's trust model), but nothing here knows about repositories —

@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless editing-modes test for rio-gui (AGENTS.md D38): the RioMode bind-tag
+# Headless editing-modes test for rio-gui (D38): the RioMode bind-tag
 # layer, the registry + loader (drop-ins, later-wins, broken module skipped), the
 # Windows mode's clipboard/word-delete behaviour flowing through the core, the
 # Emacs mode's added motions, the Ctrl-V regression (paste vs page-scroll), the

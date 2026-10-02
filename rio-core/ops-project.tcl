@@ -1,4 +1,4 @@
-# rio-core — the project.* op namespace (AGENTS.md D11).
+# rio-core — the project.* op namespace (D11).
 #
 # Thin handlers over rio::project's root state. Opening a project is a state
 # change every view cares about (the git pane should refresh, the file tree

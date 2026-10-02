@@ -1,4 +1,4 @@
-# rio-core — the per-project workspace store (AGENTS.md D31).
+# rio-core — the per-project workspace store (D31).
 #
 # "Resume my working space": which files were open in a project, and which tab was
 # active. Persisted PER PROJECT, keyed by the project root, OUT OF TREE under the

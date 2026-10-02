@@ -1,4 +1,4 @@
-# rio-core — the diff.* op namespace (AGENTS.md D28).
+# rio-core — the diff.* op namespace (D28).
 #
 # Thin handler over rio::diff. The compare/diff view (GUI now, TUI later) is a
 # dumb view (D3): it sends two texts and renders the returned alignment, holding

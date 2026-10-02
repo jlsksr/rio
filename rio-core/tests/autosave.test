@@ -1,10 +1,10 @@
-# Tests for automatic recovery files (AGENTS.md D132): rio::autosave — where a copy goes,
+# Tests for automatic recovery files (D132): rio::autosave — where a copy goes,
 # when one is written, when it is dropped, and what a file has waiting for it — plus the
 # autosave.* settings ops and buffers.recover, driven through the in-process core so the
 # events (and the deliberate ABSENCE of events) are asserted too.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

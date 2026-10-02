@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless keymap test for rio-gui (AGENTS.md D23): the shortcut table is data, one
+# Headless keymap test for rio-gui (D23): the shortcut table is data, one
 # stop for all hotkey config. Checks that the defaults resolve, that a chord renders
 # to the right menu-accelerator label, that a user keys.json overrides / unbinds a
 # command, that garbage is skipped (not fatal) and recorded, and that the resolved map

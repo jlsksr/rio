@@ -1,4 +1,4 @@
-# rio-core — the command-execution primitive (AGENTS.md D15).
+# rio-core — the command-execution primitive (D15).
 #
 # Run an external command to completion and capture its stdout, stderr, and exit
 # code. This is the headless plumbing git (D7) and the agent (D20) build on. rio
@@ -79,7 +79,7 @@ proc rio::exec::run {argv {cwd ""} {stdin ""}} {
 	return [dict create exitcode $exitcode stdout $out stderr $err]
 }
 
-# --- async spawn (AGENTS.md D83) --------------------------------------------
+# --- async spawn (D83) --------------------------------------------
 #
 # rio::exec::start {argv cwd stdin timeout_ms donecmd} -> token
 #

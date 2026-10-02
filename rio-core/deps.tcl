@@ -1,4 +1,4 @@
-# rio-core -- the hard-dependency gate (AGENTS.md D116).
+# rio-core -- the hard-dependency gate (D116).
 #
 # rio has three dependencies (Tcl/Tk, tcllib, tcltls) and INSTALL.md section 1 names
 # them, but a missing one used to arrive as a Tcl STACK TRACE from a bare

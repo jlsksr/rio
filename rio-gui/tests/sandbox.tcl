@@ -1,4 +1,4 @@
-# rio-gui test sandbox (AGENTS.md D31).
+# rio-gui test sandbox (D31).
 #
 # Booting rio-gui.tcl now READS and WRITES the user's real preferences
 # ($XDG_CONFIG_HOME/rio/prefs.json) and per-project workspaces
@@ -38,7 +38,7 @@ proc sandbox_install_mode {name} {
 	file copy -force $src [file join $dst $name.tcl]
 }
 
-# Focused-group handles for the editor split (AGENTS.md D33). The pre-split editor was
+# Focused-group handles for the editor split (D33). The pre-split editor was
 # a single widget: tests drove edits through the .ed.t proxy and introspected the real
 # widget as ::rio_real_t. Both now resolve to whichever editor group has focus — the
 # same concept, one level of indirection. Defined here (bodies run at call time, after

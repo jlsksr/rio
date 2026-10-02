@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless gutter-line-select test for rio-gui (AGENTS.md D61). Clicking a number in the
+# Headless gutter-line-select test for rio-gui (D61). Clicking a number in the
 # line-number gutter selects that whole LOGICAL line; dragging extends the selection
 # line-by-line, up or down. The gutter is a canvas whose y-space equals the text widget's
 # (gutter_redraw draws each number at the text's own dlineinfo y), so a click y inverts

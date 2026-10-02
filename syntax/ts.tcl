@@ -1,4 +1,4 @@
-# rio — a TypeScript syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no I/O, no
+# rio — a TypeScript syntax highlighter (D32). PURE Tcl: no Tk, no I/O, no
 # external packages — a linear, per-line state machine (see rio::syntax for the
 # contract). A superset of the JavaScript scanner: it carries scan state across lines, so
 # `/* … */` block comments and backtick `template` literals colour across line breaks.

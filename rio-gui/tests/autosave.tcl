@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the frontend half of autosave (AGENTS.md D132). The engine, the policy
+# Headless test for the frontend half of autosave (D132). The engine, the policy
 # and the copies are the core's — rio-core/tests/autosave.test covers those. What is here is
 # what a frontend owns: the one door onto the core's setting, and the question a recovery
 # copy raises (D125 — the core states the fact, the frontend owns the question).

@@ -1,4 +1,4 @@
-# rio — a POSIX shell / Bash syntax highlighter (AGENTS.md D32). PURE Tcl: no Tk, no
+# rio — a POSIX shell / Bash syntax highlighter (D32). PURE Tcl: no Tk, no
 # I/O, no external packages — a linear, per-line state machine (see rio::syntax for
 # the contract). It carries its scan state across lines, so quoted strings that span
 # lines colour correctly. (This is the highlighter for rio's own *.sh deploy scripts.)

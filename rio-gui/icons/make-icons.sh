@@ -1,5 +1,5 @@
 #!/bin/sh
-# Re-cut rio's window/taskbar icon (AGENTS.md D117).
+# Re-cut rio's window/taskbar icon (D117).
 #
 # NOT a build step: the PNGs this produces are committed, and rio never runs this at
 # start-up or install time. It exists so trying a different icon -- or going back to

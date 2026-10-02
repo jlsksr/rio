@@ -1,4 +1,4 @@
-# rio-core — the theme role table (AGENTS.md D24).
+# rio-core — the theme role table (D24).
 #
 # A theme is DATA: a table of semantic ROLES — colours by role, fonts by named
 # font — never widget paths, never code. The core owns the role vocabulary and

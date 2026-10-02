@@ -13,7 +13,7 @@ you're here.
 > undo/redo — and there's a minimal but real Tk editor (`rio-gui`) wired on top of
 > it. It's far from a finished IDE, but you can open a file, edit it, undo, and
 > save. The architecture is settled and there are real tests to run (below). The
-> full reasoning behind how rio is put together is in [AGENTS.md](AGENTS.md).
+> reasoning behind each decision is in [adr/](adr/README.md).
 
 ## What rio cares about
 
@@ -105,7 +105,7 @@ failing exactly that on light title bars.
   them too.
 - **Match the style of the code around you.**
 
-The *why* behind all of these is in [AGENTS.md](AGENTS.md) if you're curious.
+The *why* behind all of these is in [adr/](adr/README.md).
 
 ## Extending rio
 
@@ -115,12 +115,12 @@ in-process. LLM providers and extra agent tools are built this way.
 
 The plugin interface is still being designed and *will* change, so it's not the
 place to start contributing yet. If you want to follow or shape that design, it's
-covered in [AGENTS.md](AGENTS.md).
+covered in [adr/](adr/README.md) and [ROADMAP.md](ROADMAP.md).
 
 **Syntax highlighters, though, are a stable extension point you can use today.** A
 highlighter is a small, self-contained file in `syntax/` — pure Tcl, no Tk, no
 external packages — that turns text into coloured spans; the frontend paints them
-with the active theme's colours (design: [AGENTS.md](AGENTS.md) D32). To add a
+with the active theme's colours (design: D32). To add a
 language, copy `syntax/html.tcl` as a template: write a per-line **scanner**,
 `scan {line state param}`, that returns `{spans nextstate nextparam}` — the coloured
 column ranges for that one line (a flat `c0 c1 type …` list, `type` from the fixed
@@ -137,7 +137,7 @@ Themes colour the token types through their `syntax.*` roles, so nothing is hard
 to a palette.
 
 **Editing modes are the second stable extension point** (design:
-[AGENTS.md](AGENTS.md) D38). A mode decides what the keyboard does inside the text
+D38). A mode decides what the keyboard does inside the text
 area — the core ships only `windows` in `modes/`; `emacs` and `vi` ride the same
 contract as **installable extensions** (D41, `extensions/`), which is the proof that
 the seam holds. Yours works the way all three do: one self-registering Tcl file.
@@ -226,7 +226,7 @@ URL *are* the repository.
 
 ### The formats, precisely
 
-All three files use rio's conf format (AGENTS.md D21): `key = value` lines,
+All three files use rio's conf format (D21): `key = value` lines,
 `[section]` headers, `#` comments, UTF-8 — **data, parsed and never executed**.
 
 `rio-repository.conf`: `name` is required (shown as the repository's name);
@@ -384,7 +384,7 @@ rio asks each of your users to confirm it once, and the only way they can answer
 by comparing it against something of yours that is not the repository itself. Signing
 without publishing the fingerprint leaves them clicking yes on faith.
 
-What rio does with it (AGENTS.md D118, D119), so you can predict what your users see:
+What rio does with it (D118, D119), so you can predict what your users see:
 
 - The **first** scan that verifies your signature does **not** record your key — it
   refuses your repository and shows the user your fingerprint, the way `ssh` does on
@@ -432,7 +432,7 @@ Two guarantees make a repository you publish today durable:
 
 - **Unknown keys are ignored.** rio reads the keys it knows and skips the
   rest. A future rio adding manifest fields (entry points, declared
-  permissions — AGENTS.md D19) won't break the manifest you wrote today, and
+  permissions — D19) won't break the manifest you wrote today, and
   you may carry extra keys of your own without harming older rios.
 - **Unknown kinds are listed, never errors.** The `kind` vocabulary is open on
   purpose: the extension system has to carry future, community-contributed
@@ -493,8 +493,8 @@ its entry in the same commit** — under the current release's `### Added`, `###
     - **What changed** — a sentence or two on what it means for the reader. — *D124 ·
       `0ffca02` · 2026-09-20*
 
-The essay belongs in your AGENTS.md decision, not here. You do not have to guess whether
-you forgot: `rio-core/tests/changelog.test` holds every decision in AGENTS.md against the
+The essay belongs in your decision record, not here. You do not have to guess whether
+you forgot: `rio-core/tests/changelog.test` holds every decision in `adr/` against the
 changelog **both ways**, checks that each commit id resolves, and checks that each date is
 the one its commit actually carries. A change genuinely invisible to a user — an internal
 refactor, a policy, a revert — goes in that file's exemption table with its reason, which
@@ -582,7 +582,7 @@ hook for an official-approval marking after that. Publishing it today costs
 one static file and makes your repository ready for both.
 
 (The design rationale for all of this — and why it is emphatically *not* a
-marketplace — is AGENTS.md D39.)
+marketplace — is D39.)
 
 ## Getting started
 
@@ -709,8 +709,8 @@ cannot pass merely because the window recognised a familiar name.
 ## Sending a change
 
 - **Keep it focused.** One concern per change, small enough to review comfortably.
-- **Keep the docs honest.** If your change shifts a design decision, note it in
-  [AGENTS.md](AGENTS.md); if it changes what a *user* does or sees, update the
+- **Keep the docs honest.** If your change makes or shifts a design decision, write a record in
+  [adr/](adr/README.md); if it changes what a *user* does or sees, update the
   matching topic in [docs/](docs/index.md) — the user manual — in the same commit,
   so the feature and its page never drift apart. The README stays the overview: a
   one-line entry there, the how-to in `docs/`. The manual has rules of its own —
@@ -718,7 +718,7 @@ cannot pass merely because the window recognised a familiar name.
   rio that documentation routinely gets wrong — collected in [DOCS.md](DOCS.md).
 - **A doc that restates the code needs a guard.** If your change makes a page repeat
   something the code decides — a list of keys, of paths, of commands — add a check to
-  `rio-gui/tests/docs.tcl` and a row to AGENTS.md §7's *derived-facts register*. Every
+  `rio-gui/tests/docs.tcl` and a row to the *derived-facts register* in [AGENTS.md](AGENTS.md). Every
   copy that nothing tests has drifted eventually; assert against what the code *does*,
   and check both directions, so an invented entry fails too.
 - **Write menu paths in emphasis** — `***View ▸ Theme…***`, with ` ▸ ` between the
@@ -754,5 +754,4 @@ recognises what it asks without having to read it closely — and reports go to
 ---
 
 Want the deep design rationale — why rio is built the way it is, and the
-trade-offs behind each decision? That's all in [AGENTS.md](AGENTS.md). Start
-there.
+trade-offs behind each decision? That's all in [adr/](adr/README.md).

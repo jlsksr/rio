@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# End-to-end REMOTE smoke for rio-gui (AGENTS.md D29): a real socket between the GUI
+# End-to-end REMOTE smoke for rio-gui (D29): a real socket between the GUI
 # (remote mode, transport seam routing every op over the wire) and an in-process
 # rio-core server (the same dispatch a headless VPS would run). It proves open /
 # edit / save / compare all work GUI -> remote-core over the socket — the widget only

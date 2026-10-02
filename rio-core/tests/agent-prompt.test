@@ -1,4 +1,4 @@
-# Tests for the agent system-prompt composer (rio::agent::prompt, AGENTS.md D34/D70/D101):
+# Tests for the agent system-prompt composer (rio::agent::prompt, D34/D70/D101):
 # the layers (shipped base + XDG override, the user's `system.md`, the per-provider file,
 # the per-project `.rio/agent.md`, and the plan layer while planning), how compose() joins
 # them in order, and the path/ensure
@@ -6,7 +6,7 @@
 # — no network, no event loop.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

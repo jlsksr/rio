@@ -1,4 +1,4 @@
-# rio-core — the edit.* op namespace: undo/redo (AGENTS.md O3).
+# rio-core — the edit.* op namespace: undo/redo.
 #
 # Thin handlers over the document model's undo/redo. Each, when it changes
 # anything, emits the SAME buffer.changed event a normal edit would (D3/D11) so

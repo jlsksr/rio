@@ -1,4 +1,4 @@
-# rio — XML syntax highlighting (AGENTS.md D32). XML and (X)HTML share one grammar of
+# rio — XML syntax highlighting (D32). XML and (X)HTML share one grammar of
 # tags, attributes, quoted values, entities, comments (<!-- -->), and processing
 # instructions / declarations (<?…?>, <!…>) — so rather than duplicate a second scanner,
 # XML REUSES the (X)HTML scanner (rio::syntax::html::scan, in html.tcl) and simply claims

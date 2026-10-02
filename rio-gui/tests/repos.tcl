@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless extension-repositories test for rio-gui (AGENTS.md D39): the format
+# Headless extension-repositories test for rio-gui (D39): the format
 # parsers (index, autoindex listings, manifests), source scanning with dead and
 # malformed sources, the consent flow, install/replace/remove end-to-end for
 # all three v1 kinds (syntax through the real registry, mode through the modes
@@ -498,7 +498,7 @@ ok "sources dialog: remove removes" $::src_after {https://e.example/tls}
 destroy .extw
 
 # ===================================================================================
-# Versions, and updates (AGENTS.md D107)
+# Versions, and updates (D107)
 #
 # D39 said a version was an opaque string rio never compares; D107 makes it semver
 # and compares it. Everything below is the consequence: what "installed" means, what
@@ -845,7 +845,7 @@ ok "window: Update All goes dead at zero" [.extw.hdr.upall cget -state] disabled
 destroy .extw
 
 # ===================================================================================
-# A certificate that doesn't verify (AGENTS.md D111)
+# A certificate that doesn't verify (D111)
 #
 # The browser model: the source lists as "certificate not trusted"; Review certificate…
 # shows what is wrong and the certificate itself; Go Back is the default and stores
@@ -1024,7 +1024,7 @@ ok "certs: the accepted one is listed" [lindex $::certs_seen 0] 1
 ok "certs: by host:port and subject"   [string match "t.example:443  —  CN=t.example  —  SHA-256 1A:1A:*" [lindex $::certs_seen 1]] 1
 ok "certs: Remove takes it back"       [list $::certs_after [accepted_now]] {0 {}}
 
-# --- signed repositories (AGENTS.md D118) --------------------------------------------
+# --- signed repositories (D118) --------------------------------------------
 #
 # Source S publishes a key and a signature over its files. Everything below runs on
 # the stubbed verify seam (above): what is under test here is rio's POLICY — which

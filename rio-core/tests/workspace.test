@@ -1,11 +1,11 @@
 # Tests for the per-project workspace store (rio::workspace) and the workspace.*
-# ops (AGENTS.md D31): "resume my working space" — which files were open in a
+# ops (D31): "resume my working space" — which files were open in a
 # project and which tab was active, kept out of tree under the data dir, keyed by
 # the open project root, pruned to paths that still exist. Local only. The empty
 # root is the anonymous (no-project) session (D72).
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]

@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless hidden-files test for rio-gui (AGENTS.md D62). The Files pane hides dotfile /
+# Headless hidden-files test for rio-gui (D62). The Files pane hides dotfile /
 # hidden entries by default (like `ls`), with a View ▸ Show Hidden Files toggle (also in the
 # Preferences window) to reveal them. Checks: dotfiles absent by default while regular
 # entries show; the toggle reveals `.git/` and `.hidden` and hiding restores; the setting

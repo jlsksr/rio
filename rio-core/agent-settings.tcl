@@ -1,4 +1,4 @@
-# rio-core — a provider's own durable settings (AGENTS.md D106, D21/D24).
+# rio-core — a provider's own durable settings (D106, D21/D24).
 #
 # Where a provider's runtime CHOICES live between runs: which model it talks to,
 # how much effort it asks for, whatever else that provider declares as an option.

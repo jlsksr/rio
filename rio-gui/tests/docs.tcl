@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless docs test for the user manual (AGENTS.md D91): docs/ is one Markdown topic
+# Headless docs test for the user manual (D91): docs/ is one Markdown topic
 # per file, and the filename IS the topic id — so a page nobody links to, a contents
 # entry pointing at nothing, or a dead relative link are all bugs a help viewer would
 # hit later. This is also the check that would have caught the stale INSTALL shortcut
@@ -126,7 +126,7 @@ ok "keyboard.md invents no command" $invented {}
 
 # --- 4. preferences.md's key table matches what prefs_save actually writes ----
 #
-# Second row of AGENTS.md §7's derived-facts register. The source of truth is the
+# Second row of AGENTS.md's derived-facts register. The source of truth is the
 # behaviour, not the source text: write a real prefs.json into the sandbox and read
 # its keys back. That is why the register's other unguarded rows matter — this table
 # had already lost seven keys (font, tab layout, the last project) by the time it was
@@ -1517,7 +1517,7 @@ foreach s $shipped {
 }
 ok "every install script rio ships is documented" $undocumented {}
 
-# INSTALL.md is the canonical home (§7 of AGENTS.md), so it alone must name them all.
+# INSTALL.md is the canonical home (AGENTS.md, Documents), so it alone must name them all.
 set install_md [slurp [file join $::root INSTALL.md]]
 set unnamed {}
 foreach s $shipped {

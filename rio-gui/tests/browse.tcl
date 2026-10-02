@@ -1,6 +1,6 @@
 #!/usr/bin/env wish
 #
-# Headless test for the remote file browser (AGENTS.md D29/D30). remote_browse_dialog
+# Headless test for the remote file browser (D29/D30). remote_browse_dialog
 # is what replaces the native tk_get*File choosers when the core is remote: it walks
 # the CORE's filesystem over fs.list — the same op the docked file pane uses — so Open
 # / Save As / Open Folder point-and-click on the server's disk instead of the client's.

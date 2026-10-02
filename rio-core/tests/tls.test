@@ -1,5 +1,5 @@
 # Tests for rio::tls (rio-core/tls.tcl) and https through the repository fetch
-# (rio::http), AGENTS.md D109.
+# (rio::http), D109.
 #
 # Two halves. The pure half — where the CA certificates come from, and how a refused
 # certificate is explained — runs everywhere. The loopback half makes REAL TLS
@@ -10,7 +10,7 @@
 # not failed.
 
 # The D54 source guard: Tcl 8.6 decodes this file with the SYSTEM encoding, and tcltest
-# runs it as a script of its own, so it re-reads itself as UTF-8. See AGENTS.md D54.
+# runs it as a script of its own, so it re-reads itself as UTF-8. See D54.
 if {[encoding system] ne "utf-8"} {
 	encoding system utf-8
 	source -encoding utf-8 [info script]
@@ -90,7 +90,7 @@ test tls-ca-env-beats-windows-store {the override wins on Windows as well} -body
 	rio::tls::ca_opts windows {SSL_CERT_FILE C:/ca.pem} 1.8.0 "OpenSSL 3.4.1"
 } -cleanup { set ::rio::tls::bundles $::real_bundles } -result {-cafile C:/ca.pem}
 
-# --- the derived fact: INSTALL.md names the same locations (AGENTS §7) ----------------
+# --- the derived fact: INSTALL.md names the same locations (ADR-0117) ----------------
 test tls-install-md-names-the-bundles {INSTALL.md's trusted-locations list and the bundles
 		rio tries agree, both directions — a path added to one and not the other fails} -body {
 	set f [open [file join [file dirname [info script]] .. .. INSTALL.md]]
