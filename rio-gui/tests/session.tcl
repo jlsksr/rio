@@ -1,7 +1,7 @@
 #!/usr/bin/env wish
 #
 # Headless test for sessions & preferences (D31). Two halves, split by
-# owner (see the "Sessions & preferences" block in rio-gui.tcl):
+# owner (see the "Sessions & preferences" block in prefs.tcl):
 #
 #   * PREFERENCES — theme/wrap/dock/chat — are GUI-owned, in a plain JSON file under
 #     $XDG_CONFIG_HOME/rio. We drive the appliers and check the file, then reload.

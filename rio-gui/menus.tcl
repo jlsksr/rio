@@ -24,7 +24,7 @@
 #   view   read-only  — Copy, Select All
 #   input  editable   — Cut, Copy, Paste, Select All
 # Both are applied at the widget's CREATION SITE via ctx_bind_view / ctx_bind_input,
-# the way every other binding in this file is, and both follow the D44 popup idiom:
+# the way every other binding in the GUI is, and both follow the D44 popup idiom:
 # a builder split from the popup so a headless test can read the entries without a
 # global grab nobody is there to dismiss.
 #

@@ -617,7 +617,7 @@ proc ext_startup_check {} {
 #
 # NO grab and no tkwait: this reports, it does not ask. Boot must not block on
 # it, and a modal a headless run can reach is exactly the hazard the dialog
-# guard at the foot of this file exists to prevent.
+# guard at the foot of rio-gui.tcl exists to prevent.
 proc ext_update_dialog {} {
 	set w .extupd
 	destroy $w

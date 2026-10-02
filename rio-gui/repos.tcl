@@ -28,7 +28,7 @@ set ::provider_api_max 4 ;# highest provider-api the core loads (provider.list; 
 # Highest mode-api THIS GUI implements (D123, modes/registry.tcl). A literal, not a
 # core round-trip like provider_api_max above: a provider is sourced into the core, so
 # the core is the party that knows its ceiling, but a mode is sourced into the FRONTEND
-# — this file is the one that knows.
+# — the GUI is the one that knows.
 set ::mode_api_max 1
 set ::repo_variants {}  ;# every installable variant found by the last scan
 set ::repo_dead {}      ;# {url error code} per unreachable/non-repository source
