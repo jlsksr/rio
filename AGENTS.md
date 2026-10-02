@@ -6,6 +6,29 @@
 > Keep it current. When a decision changes, edit the decision and note the
 > change — don't silently overwrite history.
 
+## Instructions for agents
+
+*(jka, 2026-10-02. These outrank everything below.)*
+
+- **Few words.** Anything a human reads (comment, commit message, reply, document):
+  as few words as possible, each one chosen. To the point. No agent prose.
+- **Comment the block.** A small comment saying *what* it does and *why*. Examples
+  where possible. ASCII drawings for complex systems.
+- **Don't waste RAM.** KISS/UNIX/POSIX. rio must run on small systems: a Raspberry
+  Pi, a cheap VPS, old Linux hardware.
+- **Code for humans.** Readable over clever.
+- **Maintain these files:**
+  - `adr/` — architecture decision records
+  - `AGENTS.md`
+  - `CAVEATS.md`
+  - `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/))
+  - `CONTRIBUTING.md` — for humans first
+  - `DOCS.md` — not too early; let concepts grow first. Later elaborated into `docs/`.
+  - `README.md` — no prose; first presence, overview for humans
+  - `ROADMAP.md`
+- **Idempotent scripts.** Every administration, deployment or install script.
+- **[Semantic versioning](https://semver.org/).**
+
 > **Orientation for a new agent — read this first.**
 >
 > - **The load-bearing decisions**, if you read only a few: three layers —
@@ -9681,8 +9704,8 @@ c1b, c2, c3 for the same reason.
 - **"Done" means verified done.** If a suite fails, say so with the output. If a step
   was skipped, say which. No hedging in either direction, and no green-washing — read
   the skip count, not only the failure count (CONTRIBUTING, *Tests*).
-- **Concise in chat, thorough in the docs.** The project's documents earn their
-  length; a reply does not. Don't shorten a document to be brief.
+- **Few words, everywhere** — chat, comments, commits and documents alike (see
+  *Instructions for agents*). *(Until 2026-10-02 this read "thorough in the docs".)*
 - **Ask only for genuine decisions** — the ones the maintainer owns and that cannot
   be settled from the code, the request, or a sensible default. Lead with a
   recommendation and say why. Surface a contradiction when you find one rather than
