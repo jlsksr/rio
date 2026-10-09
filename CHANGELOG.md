@@ -18,6 +18,9 @@ gets its own entry and says so, rather than editing the history it changed.
   the directory rio was started from. Save As now starts in the file's own folder, with
   its name filled in; an untitled file starts in the open folder. — *D29 · `be56dd7` ·
   2026-10-09*
+- **Pane chords toggle** — `Ctrl+Shift+E`, `G` and `A` hide their pane when it is in
+  front, and work with focus inside a pane. Before, a second press did nothing. — *D23 ·
+  `b460e3e` · 2026-10-09*
 
 ## [0.4.0] — 2026-10-02
 
