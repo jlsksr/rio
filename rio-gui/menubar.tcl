@@ -33,7 +33,7 @@ menu .m.view -tearoff 0
 	-variable ::shown_git    -command {panel_toggle git}
 .m.view add checkbutton -label "Agent"  -accelerator [key_accel toggle-chat] \
 	-variable ::shown_chat   -command {panel_toggle chat}
-.m.view add checkbutton -label "Search" \
+.m.view add checkbutton -label "Search" -accelerator [key_accel search] \
 	-variable ::shown_search -command {panel_toggle search}
 .m.view add separator
 .m.view add checkbutton -label "Wrap Lines" -accelerator [key_accel toggle-wrap] \

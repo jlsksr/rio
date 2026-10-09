@@ -266,6 +266,7 @@ proc keymap_refresh_menus {} {
 	.m.view entryconfigure "Files"        -accelerator [key_accel show-files]
 	.m.view entryconfigure "Git"          -accelerator [key_accel show-git]
 	.m.view entryconfigure "Agent"        -accelerator [key_accel toggle-chat]
+	.m.view entryconfigure "Search"       -accelerator [key_accel search]
 	.m.view entryconfigure "Wrap Lines"   -accelerator [key_accel toggle-wrap]
 	.m.view.layout entryconfigure "Split Editor" -accelerator [key_accel split-editor]
 	.m.view.layout entryconfigure "Move Tab to Other Group" -accelerator [key_accel move-tab-other]

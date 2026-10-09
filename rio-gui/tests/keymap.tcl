@@ -155,6 +155,13 @@ keymap_apply_live
 ok "live: default re-bound"   [string match *do_close* [bind $w <$P-w>]] 1
 ok "live: override cleared"   [bind $w <Control-k>] ""
 ok "live: menu label restored" [.m.file entrycget "Close Tab" -accelerator] $PL+W
+# View ▸ Search names the chord that opens its pane, and follows a remap.
+ok "view search: chord shown" [.m.view entrycget "Search" -accelerator] $PL+Shift+F
+write_keys {{"search": "Control-k"}}
+keymap_apply_live
+ok "view search: label moved" [.m.view entrycget "Search" -accelerator] Ctrl+K
+write_keys {{}}
+keymap_apply_live
 
 # --- the shortcuts editor, driven end to end ---------------------------------
 # Open the real modal, then (once it's up, via the event loop tkwait runs) record a
