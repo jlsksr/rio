@@ -10,6 +10,15 @@ decision behind it — *Dnn* or *ADR-NNNN*, a record in [adr/](adr/README.md) �
 An entry is a change **as it landed**. Where a later decision amends an earlier one, it
 gets its own entry and says so, rather than editing the history it changed.
 
+## [0.4.1] — unreleased
+
+### Fixed
+
+- **Open and Save As start in your project folder** — on a local core they opened in
+  the directory rio was started from. Save As now starts in the file's own folder, with
+  its name filled in; an untitled file starts in the open folder. — *D29 · `be56dd7` ·
+  2026-10-09*
+
 ## [0.4.0] — 2026-10-02
 
 Verified on Linux at the tag. macOS last ran on 2026-09-29, Windows on 2026-09-17.

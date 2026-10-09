@@ -18,5 +18,5 @@
 # To bump: edit the line below, commit, tag `v<version>` (RELEASING.md).
 
 namespace eval rio {
-	variable version 0.4.0
+	variable version 0.4.1
 }
