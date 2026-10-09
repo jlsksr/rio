@@ -33,11 +33,11 @@ set ::keymap_base {
 	search         {Control-F            search_open                                                   "Search…"}
 	next-tab       {Control-Tab          {cycle 1}                                                     "Next tab"}
 	prev-tab       {Control-Shift-Tab    {cycle -1}                                                    "Previous tab"}
-	show-files     {Control-E            {show_pane files}                                             "Show files pane"}
-	show-git       {Control-G            {show_pane git}                                               "Show git pane"}
+	show-files     {Control-E            {panel_key files}                                             "Toggle files pane"}
+	show-git       {Control-G            {panel_key git}                                               "Toggle git pane"}
 	toggle-wrap    {Control-W            {set ::wrap_lines [expr {!$::wrap_lines}] ; apply_wrap}        "Toggle line wrap"}
 	toggle-linenums {Control-l           {set ::line_numbers [expr {!$::line_numbers}] ; apply_line_numbers} "Toggle line numbers"}
-	toggle-chat    {Control-A            {panel_toggle chat}                                           "Toggle agent pane"}
+	toggle-chat    {Control-A            {panel_key chat}                                              "Toggle agent pane"}
 	split-editor   {Control-backslash    toggle_split                                                  "Toggle editor split"}
 	move-tab-other {Control-bracketright move_tab_other                                                "Move tab to other group"}
 	preferences    {{}                   preferences_window                                            "Preferences…"}
@@ -75,6 +75,10 @@ set ::keymap_default [keymap_for_platform $::keymap_base [tk windowingsystem]] ;
 set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); keymap_resolve fills it
 set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
 set ::keymap_live_chords {}        ;# chords currently bound on the group widgets (to clear on a live remap)
+# Commands bound on the main window too, so they fire wherever focus is: a
+# pane's chord must also close it from inside that pane.
+set ::keymap_window {show-files show-git toggle-chat}
+set ::keymap_window_chords {}      ;# their chords bound on `.` now
 
 proc keys_path {} {
 	if {[info exists ::env(XDG_CONFIG_HOME)] && $::env(XDG_CONFIG_HOME) ne ""} {
@@ -228,6 +232,19 @@ proc keymap_rebind_all {} {
 		editor_bindings $w
 	}
 	set ::keymap_live_chords [keymap_chords]
+	window_bindings
+}
+
+# Bind ::keymap_window's chords on `.`, the tag every widget in the main
+# window carries. The editor's own binding breaks first, so no double fire.
+proc window_bindings {} {
+	foreach c $::keymap_window_chords { catch {bind . <$c> ""} }
+	set ::keymap_window_chords {}
+	foreach cmd $::keymap_window {
+		lassign [dict get $::keymap $cmd] chord action
+		if {$chord eq ""} continue
+		if {![catch {bind . <$chord> $action}]} { lappend ::keymap_window_chords $chord }
+	}
 }
 
 # Set every menu accelerator from the keymap. Entries are found by label.

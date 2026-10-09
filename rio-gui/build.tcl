@@ -158,6 +158,7 @@ panedwindow .groups -orient horizontal -borderwidth 0 \
 # Resolve the keymap (defaults and keys.json) before any binding or menu.
 keymap_resolve
 set ::keymap_live_chords [keymap_chords] ;# what the first group's editor_bindings will bind
+window_bindings                          ;# the pane chords, on the main window
 
 # The first editor group; a split adds the second.
 make_editor_group 0

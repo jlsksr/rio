@@ -237,7 +237,7 @@ proc new_group_state {} {
 # The dock: which panel shows, and on which edge.
 # ---------------------------------------------------------------------------
 # Reveal a panel where it is: give it a tab, bring it to the front, refresh
-# (Ctrl+E, Ctrl+G). So no panel is ever unreachable.
+# (panel_key, a dock move). So no panel is ever unreachable.
 proc panel_reveal {id} {
 	set s [rio::layout::site_of $id]
 	if {$s eq ""} return
@@ -256,6 +256,9 @@ proc panel_toggle {id} {
 	if {$s eq ""} return
 	if {[rio::layout::shown $id]} {
 		rio::layout::hide $s $id
+		# Focus inside the panel would be stranded: give it to the editor.
+		set f [focus] ; set b [rio::panel::field $id body]
+		if {$f eq $b || [string match $b.* $f]} { focus [gget [fg] path] }
 	} else {
 		rio::layout::unhide $s $id
 		rio::layout::put $s active $id
@@ -263,6 +266,18 @@ proc panel_toggle {id} {
 	set ::layout [rio::layout::normalize $::layout]
 	apply_layout
 	rio::panel::refresh $id
+}
+
+# A panel's chord (Ctrl+Shift+E, G, A): in front, it hides; otherwise it
+# comes to the front. Files behind Git: Ctrl+Shift+E shows Files first.
+proc panel_key {id} {
+	set s [rio::layout::site_of $id]
+	if {$s eq ""} return
+	if {[rio::layout::shown $id] && [rio::layout::get $s active] eq $id} {
+		panel_toggle $id
+	} else {
+		panel_reveal $id
+	}
 }
 
 # Draw a site's tab strip: one label per shown panel, the active one

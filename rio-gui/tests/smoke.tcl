@@ -649,6 +649,33 @@ site_tab_click left git
 ok "dock: tab click activates"    $::dock_pane git
 site_tab_click left files
 
+# A pane's chord toggles it, pressed from anywhere. `.` is withdrawn and takes
+# no key events, so `press` walks the widget's bindtags as Tk would.
+proc press {w cmd} {
+	set chord [key_chord $cmd]
+	foreach tag [bindtags $w] {
+		set s [bind $tag <$chord>]
+		if {$s eq ""} continue
+		if {[catch {uplevel #0 $s} r] == 3} break   ;# 3: the script said break
+	}
+}
+set ed [gget [fg] path]
+press $ed show-files
+ok "chord: from the editor, files hides"     [rio::layout::shown files] 0
+press $ed show-files
+ok "chord: again, files is back in front"    [list [rio::layout::shown files] [rio::layout::get left active]] {1 files}
+press .pfiles.well.body show-files
+ok "chord: from inside the files pane too"   [rio::layout::shown files] 0
+press $ed show-files
+press $ed show-git
+ok "chord: git behind comes to the front"    [rio::layout::get left active] git
+press .pgit show-files
+ok "chord: files behind comes to the front"  [list [rio::layout::shown git] [rio::layout::get left active]] {1 files}
+press $ed toggle-chat
+ok "chord: agent shown"                      [rio::layout::shown chat] 1
+press .chat.input toggle-chat
+ok "chord: agent hides from its own input"   [rio::layout::shown chat] 0
+
 ok "dock: left site on left"      [dict get [pack info .siteleft] -side] left
 dock_set_side right
 ok "dock: dock moved to right"    [expr {[site_shows right .pfiles] && [dict get [pack info .siteright] -side] eq "right"}] 1

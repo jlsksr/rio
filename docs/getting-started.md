@@ -35,7 +35,7 @@ way is a *project*.
 | Part | What it is |
 | ---- | ---------- |
 | Menu bar | *File*, *Edit*, *View*, *Find*, *Compare*, *Settings*, *Extensions*, *Help*. Each item shows its keyboard shortcut, and relabels itself if you remap it. *Settings* is what rio itself does; *Extensions* installs what you add, and opens the settings of anything you have added. |
-| Side panel | The **Files** tree and the **Git** pane share one column. `Ctrl+Shift+E` shows Files, `Ctrl+Shift+G` shows Git. Dock it left or right from ***View ▸ Dock Side***, or drag its edge to resize it. |
+| Side panel | The **Files** tree and the **Git** pane share one column. `Ctrl+Shift+E` toggles Files, `Ctrl+Shift+G` toggles Git. Dock it left or right from ***View ▸ Dock Side***, or drag its edge to resize it. |
 | Editor | Your open files, as tabs. `Ctrl+\` splits it into two groups side by side, each with its own tabs. |
 | Agent column | The chat pane on the right. `Ctrl+Shift+A` shows and hides it. See [the agent](agent.md). |
 | Status bar | The bottom strip. It describes the file you are in: path, text encoding, line endings (`lf` or `crlf`), whether it has unsaved changes, its language, the caret position as `Ln 12, Col 5`, and how many files you have open. In vi or emacs mode it also shows that mode's indicator, such as `-- INSERT --`. |

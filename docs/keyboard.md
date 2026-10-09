@@ -72,8 +72,8 @@ menus show.
 | `search` | `Ctrl+Shift+F` | Search… (the project-wide Search panel) |
 | `next-tab` | `Ctrl+Tab` | Next tab |
 | `prev-tab` | `Ctrl+Shift+Tab` | Previous tab |
-| `show-files` | `Ctrl+Shift+E` | Show the files pane |
-| `show-git` | `Ctrl+Shift+G` | Show the git pane |
+| `show-files` | `Ctrl+Shift+E` | Toggle the files pane |
+| `show-git` | `Ctrl+Shift+G` | Toggle the git pane |
 | `toggle-wrap` | `Ctrl+Shift+W` | Toggle line wrap |
 | `toggle-linenums` | `Ctrl+L` | Toggle the line-number gutter |
 | `toggle-chat` | `Ctrl+Shift+A` | Toggle the agent pane |
@@ -84,6 +84,9 @@ menus show.
 
 `preferences` ships with no chord. The command exists and sits on the *Settings*
 menu; give it one like any other.
+
+A pane's chord (`show-files`, `show-git`, `toggle-chat`) works with focus anywhere
+in the window. A pane in front hides; one behind or hidden comes to the front.
 
 ## On a Mac
 
