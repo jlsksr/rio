@@ -76,8 +76,9 @@ set ::keymap     $::keymap_default ;# resolved map (defaults + user overrides); 
 set ::keymap_bad {}                ;# entries keys.json got wrong, for one post-startup notice
 set ::keymap_live_chords {}        ;# chords currently bound on the group widgets (to clear on a live remap)
 # Commands bound on the main window too, so they fire wherever focus is: a
-# pane's chord must also close it from inside that pane.
-set ::keymap_window {show-files show-git toggle-chat}
+# pane's chord must also close it from inside that pane; Search opens from
+# any pane.
+set ::keymap_window {show-files show-git toggle-chat search}
 set ::keymap_window_chords {}      ;# their chords bound on `.` now
 
 proc keys_path {} {

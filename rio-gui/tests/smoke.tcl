@@ -675,6 +675,10 @@ press $ed toggle-chat
 ok "chord: agent shown"                      [rio::layout::shown chat] 1
 press .chat.input toggle-chat
 ok "chord: agent hides from its own input"   [rio::layout::shown chat] 0
+if {[rio::layout::shown search]} { panel_toggle search }
+press .pfiles.well.body search
+ok "chord: search opens from a pane"         [rio::layout::shown search] 1
+panel_toggle search
 
 ok "dock: left site on left"      [dict get [pack info .siteleft] -side] left
 dock_set_side right

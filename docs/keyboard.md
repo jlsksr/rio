@@ -87,6 +87,7 @@ menu; give it one like any other.
 
 A pane's chord (`show-files`, `show-git`, `toggle-chat`) works with focus anywhere
 in the window. A pane in front hides; one behind or hidden comes to the front.
+`search` works anywhere too; it always opens the Search pane.
 
 ## On a Mac
 
