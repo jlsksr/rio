@@ -245,6 +245,14 @@ proc rbrowse_start {seed} {
 	return [expr {$root ne "" ? $root : $::core_fsroot}]
 }
 
+# Where a local Tk chooser opens, by the same rule. With neither a seed nor
+# a project: no option, so Tk opens in the working directory.
+proc chooser_dir {seed} {
+	set d [rbrowse_start $seed]
+	if {$seed eq "" && $d eq $::core_fsroot} { return {} }
+	return [list -initialdir $d]
+}
+
 # List $dir in the browser. In dir mode files are left out. A bad path beeps
 # and the old listing stays.
 proc rbrowse_go {dir} {
@@ -388,7 +396,7 @@ proc open_dialog {} {
 		return
 	}
 	# -multiple 1: several files may be chosen; the last one ends up focused.
-	foreach p [tk_getOpenFile -title "Open file" -multiple 1] {
+	foreach p [tk_getOpenFile -title "Open file" -multiple 1 {*}[chooser_dir ""]] {
 		if {$p ne ""} { do_open $p }
 	}
 }
@@ -396,7 +404,10 @@ proc save_as_dialog {} {
 	if {$::core_remote} {
 		set p [remote_browse_dialog "Save as (remote)" save [bufget $::cur path]]
 	} else {
-		set p [tk_getSaveFile -title "Save as"]
+		set seed [bufget $::cur path]
+		set opts [chooser_dir $seed]
+		if {$seed ne ""} { lappend opts -initialfile [file tail $seed] }
+		set p [tk_getSaveFile -title "Save as" {*}$opts]
 	}
 	if {$p eq ""} { return 0 }
 	return [do_save_as $p]

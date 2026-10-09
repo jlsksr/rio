@@ -94,6 +94,8 @@ ok "start: file seed -> its dir" [rbrowse_start [file join $T a.txt]] $T
 # for a POSIX core and an unlistable path on a Windows one, where the root is "C:/".
 ok "start: fsroot came from the core" $::core_fsroot [file normalize /]
 ok "start: no anchor -> core fsroot"  [rbrowse_start ""] $::core_fsroot
+ok "chooser: no anchor -> Tk's default" [chooser_dir ""] {}
+ok "chooser: file seed -> its dir" [chooser_dir [file join $T a.txt]] [list -initialdir $T]
 ok "start: fsroot is listable"        [dict get [rbrowse_rows_for $::core_fsroot] ok] 1
 
 # `fsroot` is additive, so a core older than it simply omits the key. The GUI must keep
@@ -125,6 +127,30 @@ set ::core_fsroot $::saved_fsroot
 set ::core_version $::saved_corever
 open_folder $T
 ok "start: project open -> root" [rbrowse_start ""] $T
+
+# --- the local Tk choosers start where the browser does ----------------------
+# Stubbed: headless can't drive them. Each records what it was asked.
+rename ::tk_getSaveFile ::_real_getSaveFile
+rename ::tk_getOpenFile ::_real_getOpenFile
+proc ::tk_getSaveFile {args} { set ::chooser_args $args ; return "" }
+proc ::tk_getOpenFile {args} { set ::chooser_args $args ; return "" }
+proc chooser_arg {k} {
+	expr {[dict exists $::chooser_args $k] ? [dict get $::chooser_args $k] : ""}
+}
+set _was_remote $::core_remote ; set ::core_remote 0
+do_new
+save_as_dialog
+ok "chooser: save as, untitled -> project root" [chooser_arg -initialdir] $T
+ok "chooser: save as, untitled -> no name" [chooser_arg -initialfile] ""
+do_open [file join $T sub1 deep.txt]
+save_as_dialog
+ok "chooser: save as, a file -> its dir" [chooser_arg -initialdir] [file join $T sub1]
+ok "chooser: save as, a file -> its name" [chooser_arg -initialfile] deep.txt
+open_dialog
+ok "chooser: open -> project root" [chooser_arg -initialdir] $T
+set ::core_remote $_was_remote
+rename ::tk_getSaveFile {} ; rename ::_real_getSaveFile ::tk_getSaveFile
+rename ::tk_getOpenFile {} ; rename ::_real_getOpenFile ::tk_getOpenFile
 
 # --- navigation + choose, driven through the widget skeleton -----------------
 # OPEN mode: files are listed; picking a file yields its path.
