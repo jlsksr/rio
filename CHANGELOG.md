@@ -23,6 +23,8 @@ gets its own entry and says so, rather than editing the history it changed.
   `b460e3e` · 2026-10-09*
 - **View ▸ Search shows `Ctrl+Shift+F`**, the chord that opens its pane. — *D23 ·
   `ab2d62d` · 2026-10-09*
+- **`Ctrl+Shift+F` works with focus in any pane**, not only the editor. — *D23 ·
+  `3abc80b` · 2026-10-09*
 
 ## [0.4.0] — 2026-10-02
 
