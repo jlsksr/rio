@@ -21,6 +21,8 @@ gets its own entry and says so, rather than editing the history it changed.
 - **Pane chords toggle** — `Ctrl+Shift+E`, `G` and `A` hide their pane when it is in
   front, and work with focus inside a pane. Before, a second press did nothing. — *D23 ·
   `b460e3e` · 2026-10-09*
+- **View ▸ Search shows `Ctrl+Shift+F`**, the chord that opens its pane. — *D23 ·
+  `ab2d62d` · 2026-10-09*
 
 ## [0.4.0] — 2026-10-02
 
